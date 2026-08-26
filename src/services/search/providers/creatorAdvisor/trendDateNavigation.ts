@@ -13,6 +13,7 @@
 // 보고 CreatorAdvisorDataUnavailableError를 던진다.
 
 import type { ElementHandle, Page } from "playwright";
+import { waitForTopicCardRowsSettled } from "./trendsPageReadiness.js";
 import { CREATOR_ADVISOR_TREND_SELECTORS } from "./parseTrendHtml.js";
 
 /** 오늘 날짜에서 최대 이만큼 이전까지 되돌아가며 유효한 날짜를 찾는다. */
@@ -136,12 +137,14 @@ export async function checkCurrentDateStatus(page: Page): Promise<DateCheckResul
     return { trendDate, topicCardCount, keywordRowCount: 0, dataStatus: "unknown" };
   }
 
-  await page
-    .waitForSelector(CREATOR_ADVISOR_TREND_SELECTORS.keywordRow, { timeout: KEYWORD_ROW_SETTLE_WAIT_MS })
-    .catch(() => {});
+  // 전역 .u_ni_trend_item 개수로 판정하면 안 된다(2026-08-26 실측): 성별·연령별(demographic) card가
+  // topic card보다 먼저 채워지기 때문에, topic card가 아직 전부 비어 있는 시점에도 전역 개수는
+  // 이미 60개가 넘어 "available"로 오판한다. 그 상태로 캡처한 HTML은 topic row가 0개다.
+  // 그래서 비-demographic topic card 안의 row가 채워지고 안정될 때까지 기다려 판정한다.
+  const readiness = await waitForTopicCardRowsSettled(page, { timeoutMs: KEYWORD_ROW_SETTLE_WAIT_MS });
 
-  const keywordRowCount = await page.locator(CREATOR_ADVISOR_TREND_SELECTORS.keywordRow).count();
-  const dataStatus: CreatorAdvisorDataStatus = keywordRowCount > 0 ? "available" : "not_ready";
+  const keywordRowCount = readiness.topicRowCount;
+  const dataStatus: CreatorAdvisorDataStatus = readiness.loadedTopicCardCount > 0 ? "available" : "not_ready";
 
   return { trendDate, topicCardCount, keywordRowCount, dataStatus };
 }

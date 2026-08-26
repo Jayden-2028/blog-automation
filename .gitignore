@@ -14,3 +14,9 @@ npm-debug.log*
 
 # Supabase CLI 생성물
 supabase/.temp/
+
+# Claude -> Codex 일회성 위임 작업지시서/결과
+.claude/delegations/
+
+# Creator Advisor DOM 조사용 스냅샷 (페이지 원문 - 커밋하지 않는다)
+.local/dom-snapshots/

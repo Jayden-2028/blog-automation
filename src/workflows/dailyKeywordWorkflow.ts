@@ -13,6 +13,7 @@
 // 기록한 뒤 이후 단계를 "skipped" 처리하고 즉시 반환한다 — 그래서 호출자는 stageLog만 보면 정확히
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
+import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
@@ -26,6 +27,10 @@ import { saveRankingHistory as saveRankingHistoryStage } from "./keyword-ranking
 import { scoreKeyword } from "./keyword-ranking/scoreKeyword.js";
 import { selectDiverseTopN } from "./keyword-ranking/selectDiverseTopN.js";
 import { sendKeywordNotification } from "./keyword-notification/sendKeywordNotification.js";
+import type {
+  RunCreatorAdvisorCollectionOptions,
+  RunCreatorAdvisorCollectionResult,
+} from "./creator-advisor/runCreatorAdvisorCollection.js";
 import type { BuildDailyQueryPoolResult } from "./keyword-discovery/buildDailyQueryPool.js";
 import type {
   CollectNaverCandidatesOptions,
@@ -175,6 +180,7 @@ export async function sendTelegramNotification(
 // ---------- 전체 orchestration ----------
 
 export type DailyKeywordStageName =
+  | "trendCollect"
   | "seed"
   | "collect"
   | "relevance"
@@ -193,6 +199,8 @@ export type DailyKeywordStageLogEntry = {
 export type DailyKeywordWorkflowOptions = {
   /** 대상 seed 검색어. 생략하면 SeedQueryRepository.getActiveSeeds()로 조회한 active seed 전체를 쓴다. */
   queries?: string[];
+  /** Creator Advisor 수집 단계(trendCollect)에 그대로 전달된다. */
+  trendCollectOptions?: RunCreatorAdvisorCollectionOptions;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -203,6 +211,8 @@ export type DailyKeywordWorkflowOptions = {
 
 export type DailyKeywordWorkflowResult = {
   stageLog: DailyKeywordStageLogEntry[];
+  /** Creator Advisor 수집 결과. options.queries를 명시적으로 넘긴 경우 null(수집 단계를 건너뜀). */
+  trendCollection: RunCreatorAdvisorCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
   queryPool: BuildDailyQueryPoolResult | null;
   collected: CollectNaverCandidatesResult | null;
@@ -245,6 +255,7 @@ export async function runDailyKeywordWorkflow(
 
   const result: DailyKeywordWorkflowResult = {
     stageLog,
+    trendCollection: null,
     queryPool: null,
     collected: null,
     relevance: null,
@@ -259,6 +270,29 @@ export async function runDailyKeywordWorkflow(
   let seedPriorityByQuery: Record<string, number> | undefined;
 
   if (!queries) {
+    // Creator Advisor를 먼저 수집해 trend_candidates를 최신화한 뒤 query pool을 조립한다.
+    // 순서가 중요하다: buildDailyQueryPool()은 trend_candidates를 "읽기"만 하므로, 이 수집이
+    // 먼저 돌지 않으면 어제 이전 데이터(또는 아무것도 없는 상태)로 pool이 만들어진다.
+    //
+    // 이 단계는 실패해도 파이프라인을 멈추지 않는다(runStage의 조기 반환을 쓰지 않는 이유).
+    // Creator Advisor는 seed_queries를 보강하는 enrichment source일 뿐 필수 의존성이 아니며,
+    // runCreatorAdvisorCollection() 자체가 예외를 던지지 않고 status로 실패를 알린다.
+    const trendStartedAt = Date.now();
+    const trendCollection = await runCreatorAdvisorCollection(options.trendCollectOptions);
+    result.trendCollection = trendCollection;
+    stageLog.push({
+      stage: "trendCollect",
+      status: trendCollection.status === "failed" ? "failed" : trendCollection.status === "skipped" ? "skipped" : "success",
+      durationMs: Date.now() - trendStartedAt,
+      error: trendCollection.error,
+    });
+    if (trendCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] Creator Advisor 수집: ${trendCollection.fetchedCount}건 조회 → ` +
+          `${trendCollection.upsertedCount}건 저장 (trendDate: ${trendCollection.trendDate ?? "N/A"}, 만료 ${trendCollection.expiredCount}건)`
+      );
+    }
+
     // seed_queries(static) + trend_candidates(dynamic, Creator Advisor)를 합친 daily query pool.
     // Creator Advisor가 disabled이거나 실패해도 buildDailyQueryPool()은 예외를 던지지 않고
     // seed_queries만으로 구성된 결과를 반환한다 - 그래서 이 "seed" 단계의 성공/실패 여부는
