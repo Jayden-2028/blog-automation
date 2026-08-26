@@ -127,6 +127,7 @@ Supabase(PostgrestError)는 `Error` 인스턴스가 아니라 평범한 객체�
 
 ```
 npm run build
+npm run test:score-keyword               # 신규 - freshness 불변식
 npm run test:keyword-category            # 신규 - 실제 수집 키워드 24건
 npm run test:creator-advisor-parser
 npm run test:creator-advisor-pipeline
@@ -167,13 +168,17 @@ npm run debug:ca-snapshots               # 신규, DOM 스냅샷 -> .local/dom-s
 
 ## 알려진 문제 / 미해결
 
-1. **6-factor 중 2개가 거의 죽어 있다.** seed-only일 때 `news`/`cross`가 10개 전부 0점이었다
-   (배점 100 중 30). Creator Advisor를 켜면 부분적으로 살아난다(news 3/10, cross 2/10).
-   뉴스와 블로그 클러스터가 잘 병합되지 않는 것이 원인으로 보인다. **scoring 영역이라 승인 필요.**
-2. **freshness 계산이 뒤집혀 있다.** 발행일이 없으면 `neutralScoreRatio 0.5` → 15 × 0.5 = **8점**,
-   오늘 발행한 글은 15 × 0.5^(12/12) = **7점**. "날짜 모름"이 "오늘 발행"을 이긴다.
-   seed-only run #14에서 나무위키·보건복지부 랜딩·2023년 글이 Top 10에 오른 직접 원인.
-   **scoring 영역이라 승인 필요.**
+1. **~~6-factor 중 2개가 죽어 있다~~ — 오진단이었음(2026-08-26 정정).**
+   `news`/`cross`가 88% 0점인 것은 결함이 아니라 희소 발화 보너스로 설계된 대로 동작하는 것이다.
+   run 15/16/17 데이터로 확인: 발화한 8건은 평균 3.6위/56.6점, 발화 안 한 22건은 6.2위/51.5점.
+   발화 항목이 전부 실제로 가장 뉴스성 높은 것들이었다(양준모 재혼, 민음사 빵, 장동윤 결혼).
+   **손대지 말 것 - 건드리면 변별력이 사라진다.**
+2. **~~freshness 계산이 뒤집혀 있다~~ — 해결됨(2026-08-26).**
+   `neutralScoreRatio`를 0.5 → 0.2로 낮춰 발행일 없음이 8점 → 3점이 되었다.
+   이제 `발행일 없음(3) < 당일 발행(7)`. `test:score-keyword`가 이 불변식을 고정하며, 0.5로
+   되돌리면 실제로 실패하는 것까지 확인했다.
+   `TREND_MOMENTUM_CONFIG.neutralScoreRatio: 0.4`도 같은 패턴이라 확인했으나, `unknown`(12점)이
+   관측된 모든 값(17~30)보다 낮아 실제 역전이 없어 손대지 않았다.
 3. **Top 10에 같은 주제가 2번씩 들어간다.** `DIVERSITY_CONFIG.maxPerSeedQuery = 2` 설정대로 동작
    중이다. 1로 낮추면 10개 주제가 되지만, 후보가 얕은 날 품질 낮은 키워드가 밀려 들어올 수 있어
    며칠 운영 후 판단하기로 했다.
