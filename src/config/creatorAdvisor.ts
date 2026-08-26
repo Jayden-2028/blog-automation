@@ -20,11 +20,21 @@ export type CreatorAdvisorConfig = {
   /**
    * trends 페이지에서 수집할 최대 topic card 개수(Swiper 슬라이드 = topic 1개).
    * topic은 더 이상 이름으로 지정하지 않는다 - 페이지가 주는 순서대로 앞에서부터 이 개수만큼 수집한다.
+   *
+   * 기본값 11의 근거(2026-08-26 실측): 계정의 topic swiper 슬라이드가 11개이고, Swiper 순회
+   * (traverseTopicSwiper)를 붙인 뒤로는 11개 전체를 약 5초에 수집한다. 4로 두면 앞 4개
+   * (육아·결혼/방송/스타·연예인/드라마)만 잡혀 영화·일상·생각 같은 주요 분야가 통째로 빠진다.
+   * 후보가 많아도 selectTopCreatorAdvisorCandidates가 maxDailyCandidates/maxCandidatesPerTopic로
+   * 다시 줄이므로, 여기서는 넓게 모아 diversity를 확보하는 편이 낫다.
    */
   maxTopics: number;
   /** topic 하나당 저장할 최대 키워드 개수. */
   maxKeywordsPerTopic: number;
-  /** (다음 단계용, 현재 미사용) Swiper 순회 구현 시 슬라이드 전환 사이에 둘 지연 시간(ms). */
+  /**
+   * 현재 미사용. Swiper 순회(traverseTopicSwiper)는 고정 지연 대신 카드별 row 시그니처가
+   * 안정될 때까지 폴링하는 방식이라 이 값을 참조하지 않는다 - 네트워크 상황에 따라 고정 지연이
+   * 모자라거나 과할 수 있기 때문이다. 남겨둔 이유는 향후 요청 간 rate limit이 필요해질 때를 위해서다.
+   */
   requestDelayMs: number;
   /** trend_candidates row의 기본 유효 기간(시간). 수집 시 expires_at = collected_at + candidateTtlHours. */
   candidateTtlHours: number;
@@ -56,7 +66,7 @@ function parseIntEnv(value: string | undefined, defaultValue: number): number {
 export const CREATOR_ADVISOR_CONFIG: CreatorAdvisorConfig = {
   enabled: parseBooleanEnv(process.env.CREATOR_ADVISOR_ENABLED, false),
   blogId: process.env.CREATOR_ADVISOR_BLOG_ID ?? "",
-  maxTopics: parseIntEnv(process.env.CREATOR_ADVISOR_MAX_TOPICS, 4),
+  maxTopics: parseIntEnv(process.env.CREATOR_ADVISOR_MAX_TOPICS, 11),
   maxKeywordsPerTopic: parseIntEnv(process.env.CREATOR_ADVISOR_MAX_KEYWORDS_PER_TOPIC, 20),
   requestDelayMs: parseIntEnv(process.env.CREATOR_ADVISOR_REQUEST_DELAY_MS, 2000),
   candidateTtlHours: parseIntEnv(process.env.CREATOR_ADVISOR_CANDIDATE_TTL_HOURS, 24),

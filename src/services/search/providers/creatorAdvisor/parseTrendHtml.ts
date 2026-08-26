@@ -33,7 +33,9 @@ export const CREATOR_ADVISOR_TREND_SELECTORS = {
 // "N-N세 남자/여자" 형식인지로 구분한다. topic 개수를 하드코딩하지 않는다 - 사용자가 Creator
 // Advisor "주제 설정"을 바꾸면 topic card 개수가 달라질 수 있다.
 // 공백/하이픈 표기 변형 허용: "30-34세 여자", "30 - 34 세 남자", "60세- 여자"(상한 없는 구간) 등.
-const DEMOGRAPHIC_TITLE_PATTERN = /\d+\s*-?\s*\d*\s*세\s*-?\s*(남자|여자)/;
+// 브라우저 컨텍스트(trendsPageReadiness.ts의 대기 probe)에서도 같은 판정을 써야 하므로
+// export한다 - 두 곳에 정규식을 복제하면 한쪽만 고쳐질 때 topic/demographic 분류가 어긋난다.
+export const DEMOGRAPHIC_TITLE_PATTERN = /\d+\s*-?\s*\d*\s*세\s*-?\s*(남자|여자)/;
 
 export function isDemographicTopicTitle(title: string): boolean {
   return DEMOGRAPHIC_TITLE_PATTERN.test(title.trim());
