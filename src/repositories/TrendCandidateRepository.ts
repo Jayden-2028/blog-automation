@@ -101,15 +101,39 @@ export class TrendCandidateRepository {
     return { trendDate, candidates };
   }
 
-  /** expires_at이 지난 active row를 status='expired'로 전환한다. 삭제하지 않는다(이력 보존). */
-  static async expireOldCandidates(): Promise<number> {
+  /**
+   * expires_at이 지난 active row를 status='expired'로 전환한다. 삭제하지 않는다(이력 보존).
+   * options.source를 넘기면 해당 source row만 대상으로 한다(생략 시 기존과 동일하게 전체 source
+   * 대상 - 테스트 등에서 source를 좁혀 운영 row에 영향을 주지 않게 하는 용도).
+   */
+  static async expireOldCandidates(options: { source?: string } = {}): Promise<number> {
     const nowIso = new Date().toISOString();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("trend_candidates")
       .update({ status: "expired" satisfies TrendCandidateStatus, updated_at: nowIso })
       .eq("status", "active")
-      .lt("expires_at", nowIso)
+      .lt("expires_at", nowIso);
+
+    if (options.source) {
+      query = query.eq("source", options.source);
+    }
+
+    const { data, error } = await query.select("id");
+
+    if (error) throw error;
+    return data?.length ?? 0;
+  }
+
+  /** 전달된 id만 삭제한다. 중복 id는 제거하고, 삭제 대상이 없으면 no-op. 테스트 데이터 cleanup 등 명시적으로 id를 아는 row만 지울 때 사용한다. */
+  static async deleteCandidatesByIds(ids: string[]): Promise<number> {
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length === 0) return 0;
+
+    const { data, error } = await supabase
+      .from("trend_candidates")
+      .delete()
+      .in("id", uniqueIds)
       .select("id");
 
     if (error) throw error;
