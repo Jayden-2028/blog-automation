@@ -1,0 +1,106 @@
+<!--
+  parseTrendPage() 검증용 mock fixture.
+  실제 Creator Advisor trends 페이지에서 실측 확인한 class(.u_ni_trend_list_box 등)를 그대로 쓴다.
+  - 성별·연령별(demographic) card 3개를 topic card 사이에 섞어 넣었다("30-34세 여자" 표준 표기,
+    "35 - 39 세 남자" 공백 변형, "60세- 여자" 상한 없는 구간 표기) - keyword row가 있는 상태로 넣어서
+    "row가 있어도 제목 패턴만으로 제외되는지"를 검증한다(실제로는 row가 없는 경우가 실측됐지만,
+    필터가 row 유무와 무관하게 제목만으로 동작해야 한다).
+  - 마지막 card는 topic 제목이 없는 깨진 카드로, "card 하나 실패해도 나머지는 계속 파싱"을 검증하기
+    위해 의도적으로 넣었다.
+-->
+<html>
+  <body>
+    <div class="u_ni_header">
+      <span class="u_ni_date">2026. 08. 24.</span>
+    </div>
+    <div class="swiper-wrapper">
+      <div class="u_ni_trend_list_box">
+        <h3 class="u_ni_trend_title">스타·연예인</h3>
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%EC%9A%B0%EC%84%9C%EC%9C%A4">
+              <span class="u_ni_trend_text">우서윤</span>
+              <span class="u_ni_data">0</span>
+            </a>
+          </li>
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%EC%9A%B0%EC%A7%80%EC%9B%90">
+              <span class="u_ni_trend_text">우지원 딸 우서윤 미스코리아 진 당선</span>
+              <span class="u_ni_data up">47</span>
+            </a>
+          </li>
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%EC%96%91%EC%A4%80%EB%AA%A8">
+              <span class="u_ni_trend_text">양준모</span>
+              <span class="u_ni_data new">new</span>
+            </a>
+          </li>
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%EB%B0%95%ED%9C%98">
+              <span class="u_ni_trend_text">박휘 다친 이유</span>
+              <span class="u_ni_data down">1</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="u_ni_trend_list_box">
+        <h3 class="u_ni_trend_title">드라마</h3>
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%ED%8F%AD%EC%8B%B8">
+              <span class="u_ni_trend_text">폭싹속았수다</span>
+              <span class="u_ni_data up">2</span>
+            </a>
+          </li>
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=%EB%AF%B8%EC%A7%80%EC%9D%98">
+              <span class="u_ni_trend_text">미지의 섬</span>
+              <span class="u_ni_data">0</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="u_ni_trend_list_box">
+        <h3 class="u_ni_trend_title">30-34세 여자</h3>
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=demo1">
+              <span class="u_ni_trend_text">demographic 키워드1</span>
+              <span class="u_ni_data up">5</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="u_ni_trend_list_box">
+        <h3 class="u_ni_trend_title">35 - 39 세 남자</h3>
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=demo2">
+              <span class="u_ni_trend_text">demographic 키워드2</span>
+              <span class="u_ni_data down">2</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="u_ni_trend_list_box">
+        <h3 class="u_ni_trend_title">60세- 여자</h3>
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <a class="u_ni_trend_link" href="/keyword?q=demo3">
+              <span class="u_ni_trend_text">demographic 키워드3</span>
+              <span class="u_ni_data">0</span>
+            </a>
+          </li>
+        </ul>
+      </div>
+      <div class="u_ni_trend_list_box">
+        <!-- 제목(.u_ni_trend_title)이 없는 깨진 카드 - 이 card만 topicErrors로 격리되어야 한다 -->
+        <ul class="u_ni_item_list">
+          <li class="u_ni_trend_item">
+            <span class="u_ni_trend_text">깨진 카드</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </body>
+</html>
