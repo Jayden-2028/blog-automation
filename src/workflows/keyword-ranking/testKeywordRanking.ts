@@ -1,4 +1,4 @@
-// 이 워크플로우는 Supabase를 사용하지 않으므로(client.ts의 dotenv 로딩에 편승할 수 없음) 직접 .env를 로드한다.
+// NAVER API credential을 위해 .env를 로드한다. 이 테스트는 saveHistory=false로 Supabase 쓰기를 막는다.
 import "dotenv/config";
 
 import { runKeywordRanking } from "./runKeywordRanking.js";
@@ -15,7 +15,12 @@ async function main() {
     displayPerQuery: DISPLAY_PER_QUERY,
     requestDelayMs: 300,
     topN: 10,
+    saveHistory: false,
   });
+
+  if (result.summary.historySaved || result.runId !== null) {
+    throw new Error("테스트에서 ranking history가 Supabase에 저장되었습니다.");
+  }
 
   console.log("\n▶ 오류 (NAVER API)");
   const errorEntries = Object.entries(result.summary.apiErrors);
@@ -28,8 +33,7 @@ async function main() {
   }
 
   console.log("\n▶ Ranking history 저장");
-  console.log(`runId: ${result.runId ?? "N/A"}`);
-  console.log(`persisted: ${result.summary.historySaved}`);
+  console.log("Supabase persistence: skipped");
   if (result.summary.historyError) {
     console.log(`error: ${result.summary.historyError}`);
   }

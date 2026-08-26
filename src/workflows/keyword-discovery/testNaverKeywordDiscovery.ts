@@ -1,6 +1,6 @@
 import { runNaverKeywordDiscovery } from "./runNaverKeywordDiscovery.js";
 
-// 실제 NAVER API를 호출하는 테스트이므로 검색어/결과 수를 소량으로 제한한다.
+// 실제 NAVER API를 호출하되 Supabase에는 저장하지 않는다. 검색어/결과 수도 소량으로 제한한다.
 const TEST_QUERIES = ["넷플릭스", "육아지원금"];
 const DISPLAY_PER_QUERY = 5;
 
@@ -11,7 +11,12 @@ async function main() {
   const summary = await runNaverKeywordDiscovery(TEST_QUERIES, {
     displayPerQuery: DISPLAY_PER_QUERY,
     requestDelayMs: 300,
+    persistCandidates: false,
   });
+
+  if (!summary.persistenceSkipped) {
+    throw new Error("테스트에서 Supabase 저장이 비활성화되지 않았습니다.");
+  }
 
   console.log("\n▶ 호출 성공한 API");
   console.log(
@@ -32,17 +37,7 @@ async function main() {
   console.log(`검색어: ${summary.queries.join(", ")}`);
   console.log(`수집 건수: ${summary.fetched}`);
   console.log(`중복 제거 건수: ${summary.duplicateInBatch}`);
-  console.log(`DB 기존 존재(24시간 내): ${summary.existingInDb}`);
-  console.log(`DB 신규 저장 건수: ${summary.inserted}`);
-
-  if (summary.insertedKeywords.length > 0) {
-    console.log("\n▶ 신규 저장된 keyword");
-    for (const row of summary.insertedKeywords) {
-      console.log(
-        `- [${row.id}] ${row.keyword} (source: ${row.source}, category: ${row.category}, score: ${row.trend_score})`
-      );
-    }
-  }
+  console.log("Supabase persistence: skipped");
 
   console.log("\n✅ Naver Keyword Discovery 실제 API 테스트 완료");
 }

@@ -223,3 +223,10 @@ create index if not exists idx_trend_candidates_topic_normalized
 
 create index if not exists idx_trend_candidates_candidate_score
   on trend_candidates (candidate_score desc);
+
+-- Repository의 핵심 조회 패턴:
+-- status='active' + source 동등 조건 + 최신 trend_date 1건 조회,
+-- 이어서 같은 source/trend_date 후보를 candidate_score 내림차순으로 조회한다.
+create index if not exists idx_trend_candidates_active_source_date_score
+  on trend_candidates (source, trend_date desc, candidate_score desc)
+  where status = 'active';

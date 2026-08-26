@@ -23,6 +23,8 @@ export type RunNaverKeywordDiscoveryOptions = {
   trendRangeDays?: number;
   trendTimeUnit?: "date" | "week" | "month";
   categoryByQuery?: Record<string, string>;
+  /** 기본 true. 실제 API 결과만 검증할 때 false로 두면 Supabase 조회/저장을 건너뛴다. */
+  persistCandidates?: boolean;
 };
 
 export type NaverKeywordDiscoverySummary = {
@@ -34,6 +36,8 @@ export type NaverKeywordDiscoverySummary = {
   existingInDb: number;
   inserted: number;
   insertedKeywords: KeywordRow[];
+  /** true면 API 수집/점수 계산까지만 수행하고 Supabase 조회/저장을 건너뛰었다. */
+  persistenceSkipped: boolean;
 };
 
 function toDateString(date: Date): string {
@@ -144,9 +148,10 @@ export async function runNaverKeywordDiscovery(
   }
 
   const scoredCandidates = applyTrendScores(collected.candidates, scoreByQuery);
-  const { existingInDb, inserted, insertedKeywords } = await saveKeywordCandidates(
-    scoredCandidates
-  );
+  const persistCandidates = options.persistCandidates ?? true;
+  const { existingInDb, inserted, insertedKeywords } = persistCandidates
+    ? await saveKeywordCandidates(scoredCandidates)
+    : { existingInDb: 0, inserted: 0, insertedKeywords: [] };
 
   const apiCallsSucceeded: NaverApiSource[] = [];
   for (const source of NAVER_SEARCH_SOURCES) {
@@ -163,5 +168,6 @@ export async function runNaverKeywordDiscovery(
     existingInDb,
     inserted,
     insertedKeywords,
+    persistenceSkipped: !persistCandidates,
   };
 }

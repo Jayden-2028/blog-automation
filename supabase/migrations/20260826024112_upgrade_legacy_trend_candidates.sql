@@ -144,6 +144,9 @@ create index if not exists idx_trend_candidates_topic_normalized
   on public.trend_candidates (topic_normalized);
 create index if not exists idx_trend_candidates_candidate_score
   on public.trend_candidates (candidate_score desc);
+create index if not exists idx_trend_candidates_active_source_date_score
+  on public.trend_candidates (source, trend_date desc, candidate_score desc)
+  where status = 'active';
 
 alter table public.trend_candidates enable row level security;
 revoke all on table public.trend_candidates from anon, authenticated;
