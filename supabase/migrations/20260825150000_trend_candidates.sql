@@ -18,6 +18,12 @@
 --
 -- 주의: 이 migration은 파일만 최종 확정한 것이며, 이 단계에서 실제 Supabase 프로젝트에 아직
 -- 적용하지 않는다.
+--
+-- 호환성 주의:
+-- 원격 프로젝트에는 이 파일의 최종 스키마보다 앞선 legacy trend_candidates가 존재할 수 있다.
+-- create table if not exists만으로는 기존 table을 바꾸지 않으므로, 아래 create 뒤에 add/backfill/
+-- constraint/index 정규화 절차를 함께 둔다. 이 version이 이미 원격 migration history에 기록된 경우는
+-- 후속 20260826024112_upgrade_legacy_trend_candidates.sql이 같은 최종 상태를 보장한다.
 
 create extension if not exists pgcrypto;
 
@@ -76,6 +82,104 @@ create table if not exists trend_candidates (
     check (movement_type in ('new', 'up', 'down', 'flat'))
 );
 
+-- Legacy table upgrade path. 새 table에서는 모두 no-op에 가깝고, 구 table에서는 누락된 컬럼을 먼저
+-- nullable로 추가한 뒤 기존 값을 보존해 backfill하고 마지막에 NOT NULL을 적용한다.
+alter table public.trend_candidates
+  add column if not exists trend_date date,
+  add column if not exists movement_type text,
+  add column if not exists candidate_score numeric;
+
+-- collected_date는 fresh schema에는 없으므로 정적 SQL로 참조하지 않는다. legacy column이 실제로
+-- 존재할 때만 dynamic SQL로 우선 사용하고, 그 외에는 collected_at의 날짜로 채운다.
+do $$
+begin
+  if exists (
+    select 1
+    from pg_attribute
+    where attrelid = 'public.trend_candidates'::regclass
+      and attname = 'collected_date'
+      and not attisdropped
+  ) then
+    execute $sql$
+      update public.trend_candidates
+      set trend_date = coalesce(trend_date, collected_date, collected_at::date, current_date)
+      where trend_date is null
+    $sql$;
+  else
+    update public.trend_candidates
+    set trend_date = coalesce(trend_date, collected_at::date, current_date)
+    where trend_date is null;
+  end if;
+end
+$$;
+
+update public.trend_candidates
+set
+  topic = coalesce(nullif(btrim(topic), ''), 'unknown'),
+  rank = coalesce(rank, 1),
+  movement_type = case
+    when movement_type in ('new', 'up', 'down', 'flat') then movement_type
+    when rank_change is null then 'new'
+    when rank_change > 0 then 'up'
+    when rank_change < 0 then 'down'
+    else 'flat'
+  end;
+
+-- src/config/creatorAdvisorCandidateScore.ts와 동일한 pre-score 공식으로 legacy row만 채운다.
+update public.trend_candidates
+set candidate_score =
+  case
+    when rank <= 3 then 20
+    when rank <= 6 then 15
+    when rank <= 10 then 10
+    when rank <= 20 then 5
+    else 2
+  end
+  + case movement_type
+      when 'new' then 15
+      when 'up' then 5
+      when 'flat' then 5
+      else 0
+    end
+  + case
+      when movement_type = 'up' and coalesce(rank_change, 0) >= 50 then 10
+      when movement_type = 'up' and coalesce(rank_change, 0) >= 20 then 7
+      when movement_type = 'up' and coalesce(rank_change, 0) >= 5 then 3
+      else 0
+    end
+where candidate_score is null;
+
+alter table public.trend_candidates
+  alter column topic set not null,
+  alter column rank set not null,
+  alter column trend_date set not null,
+  alter column movement_type set not null,
+  alter column source set default 'creator_advisor',
+  alter column collected_at set default now(),
+  alter column status set default 'active',
+  alter column metadata set default '{}'::jsonb,
+  alter column created_at set default now(),
+  alter column updated_at set default now();
+
+-- 새 스키마에서 유도 가능한 legacy 컬럼은 backfill이 끝난 뒤 제거한다. 컬럼에 의존하던 legacy
+-- index/constraint는 PostgreSQL이 함께 정리한다.
+alter table public.trend_candidates
+  drop column if exists previous_rank,
+  drop column if exists collected_date;
+
+drop index if exists public.uq_trend_candidates_keyword_topic_collected_date_source;
+
+-- create table if not exists가 legacy table에서 constraint를 만들지 않으므로 최종 정의를 다시 보장한다.
+alter table public.trend_candidates
+  drop constraint if exists trend_candidates_status_check,
+  drop constraint if exists trend_candidates_movement_type_check;
+
+alter table public.trend_candidates
+  add constraint trend_candidates_status_check
+    check (status in ('active', 'expired', 'archived')),
+  add constraint trend_candidates_movement_type_check
+    check (movement_type in ('new', 'up', 'down', 'flat'));
+
 -- 이 파이프라인은 서버의 service_role client만 사용한다. public Data API를 통해 anon/authenticated가
 -- 접근할 이유가 없으므로 RLS를 켜고 두 client role의 기본 권한을 제거한다. service_role은 서버 전용이며
 -- RLS를 우회하지만, Data API 기본 권한 설정과 무관하게 동작하도록 필요한 table 권한을 명시한다.
@@ -98,7 +202,8 @@ comment on column trend_candidates.status is 'active | expired | archived. listC
 -- dedupe 기준: 같은 (keyword_normalized, topic_normalized, trend_date, source) 조합은 한 row만
 -- 허용한다. upsertCandidates()는 on conflict (이 4개 컬럼) do update로 같은 트렌드 기준일에 대해
 -- 재수집한 rank/movement_type/candidate_score 등을 최신 값으로 안전하게 갱신한다.
-create unique index if not exists uq_trend_candidates_keyword_topic_date_source
+drop index if exists public.uq_trend_candidates_keyword_topic_date_source;
+create unique index uq_trend_candidates_keyword_topic_date_source
   on trend_candidates (keyword_normalized, topic_normalized, trend_date, source);
 
 comment on index uq_trend_candidates_keyword_topic_date_source is
