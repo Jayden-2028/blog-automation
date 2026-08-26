@@ -119,6 +119,14 @@ function mergeEntries(
 
     if (existing?.origin === "seed" || existing?.origin === "merged") {
       mergedCount++;
+
+      // 같은 seed keyword가 여러 Creator Advisor topic에 동시에 등장할 수 있다. 이때 순회 순서에
+      // 따라 마지막 신호로 덮어쓰지 않고 candidateScore가 가장 높은 신호를 보존한다.
+      const currentSignal = existing.metadata.creatorAdvisor as Record<string, unknown> | undefined;
+      const currentScore = Number(currentSignal?.candidateScore ?? Number.NEGATIVE_INFINITY);
+      const nextScore = Number(caEntry.metadata.candidateScore ?? 0);
+      if (existing.origin === "merged" && nextScore <= currentScore) continue;
+
       byKeyword.set(key, {
         ...existing,
         origin: "merged",

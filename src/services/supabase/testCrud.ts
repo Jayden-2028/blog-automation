@@ -67,6 +67,14 @@ async function main() {
   console.log("\n✅ Supabase CRUD 테스트 완료");
 }
 
+if (process.env.ALLOW_SUPABASE_WRITE_TEST !== "1") {
+  console.error(
+    "❌ 이 스크립트는 실제 Supabase 프로젝트에 쓰기를 수행합니다. " +
+      "ALLOW_SUPABASE_WRITE_TEST=1인 경우에만 실행됩니다."
+  );
+  process.exit(1);
+}
+
 main().catch((error) => {
   console.error("❌ CRUD 테스트 실패:", error.message ?? error);
   process.exit(1);

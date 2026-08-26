@@ -132,6 +132,28 @@ async function testCreatorAdvisorFailureFallsBackToSeeds(): Promise<void> {
   });
 }
 
+async function testSeedMergeKeepsHighestCreatorAdvisorSignal(): Promise<void> {
+  const result = await buildDailyQueryPool({
+    creatorAdvisorEnabled: true,
+    loadActiveSeeds: async () => [makeSeed()],
+    loadLatestCreatorAdvisorCandidates: async () => ({
+      trendDate: "2026-08-24",
+      candidates: [
+        makeTrend({ id: "trend-high", candidate_score: 32, topic: "드라마", rank: 2 }),
+        makeTrend({ id: "trend-low", candidate_score: 10, topic: "방송", rank: 9 }),
+      ],
+    }),
+  });
+
+  assert(result.entries.length === 1, "같은 seed keyword와 겹친 CA 후보들은 query 1개로 병합되어야 합니다");
+  assert(result.trendMergedCount === 2, "seed와 겹친 CA 후보 2개가 모두 merge count에 반영되어야 합니다");
+
+  const signal = result.entries[0]!.metadata.creatorAdvisor as Record<string, unknown>;
+  assert(signal.candidateScore === 32, "여러 CA 신호 중 candidateScore가 가장 높은 신호를 보존해야 합니다");
+  assert(signal.topic === "드라마" && signal.rank === 2, "최고 점수 CA 신호의 metadata가 함께 보존되어야 합니다");
+  console.log("✅ seed + 복수 Creator Advisor 중복 merge -> 최고 pre-score 신호 보존");
+}
+
 async function testCreatorAdvisorDisabledUsesSeedsOnly(): Promise<void> {
   let trendLookupCalled = false;
   const result = await buildDailyQueryPool({
@@ -152,6 +174,7 @@ async function testCreatorAdvisorDisabledUsesSeedsOnly(): Promise<void> {
 async function main(): Promise<void> {
   console.log("▶ Daily Query Pool merge/fallback 테스트 시작");
   await testSeedAndCreatorAdvisorMerge();
+  await testSeedMergeKeepsHighestCreatorAdvisorSignal();
   await testCreatorAdvisorFailureFallsBackToSeeds();
   await testCreatorAdvisorDisabledUsesSeedsOnly();
   console.log("\n✅ Daily Query Pool 테스트 완료");
