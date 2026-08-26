@@ -13,6 +13,7 @@
     "test:naver": "tsx src/workflows/keyword-discovery/testNaverKeywordDiscovery.ts",
     "test:ranking": "tsx src/workflows/keyword-ranking/testKeywordRanking.ts",
     "test:seed-query": "tsx src/repositories/testSeedQueryRepository.ts",
+    "test:trend-candidate-repository": "tsx src/repositories/testTrendCandidateRepository.ts",
     "test:creator-advisor-parser": "tsx src/services/search/providers/creatorAdvisor/testParseTrendPage.ts",
     "test:creator-advisor-pipeline": "tsx src/workflows/creator-advisor/testCreatorAdvisorPipeline.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
