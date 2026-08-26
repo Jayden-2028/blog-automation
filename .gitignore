@@ -1,0 +1,16 @@
+node_modules/
+dist/
+
+.env
+.env.*.local
+
+*.log
+npm-debug.log*
+
+.DS_Store
+
+# Creator Advisor 전용 Playwright persistent profile (쿠키/로그인 세션 포함, 절대 커밋하지 않는다)
+.local/creator-advisor-profile/
+
+# Supabase CLI 생성물
+supabase/.temp/

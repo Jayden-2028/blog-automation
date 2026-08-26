@@ -1,0 +1,39 @@
+{
+  "name": "blog-automation",
+  "version": "0.1.0",
+  "description": "AI-powered blog automation system",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx",
+    "test:supabase": "tsx src/services/supabase/testConnection.ts",
+    "test:crud": "tsx src/services/supabase/testCrud.ts",
+    "test:keywords": "tsx src/workflows/keyword-discovery/testKeywordDiscovery.ts",
+    "test:naver": "tsx src/workflows/keyword-discovery/testNaverKeywordDiscovery.ts",
+    "test:ranking": "tsx src/workflows/keyword-ranking/testKeywordRanking.ts",
+    "test:seed-query": "tsx src/repositories/testSeedQueryRepository.ts",
+    "test:creator-advisor-parser": "tsx src/services/search/providers/creatorAdvisor/testParseTrendPage.ts",
+    "test:creator-advisor-pipeline": "tsx src/workflows/creator-advisor/testCreatorAdvisorPipeline.ts",
+    "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
+    "debug:creator-advisor": "tsx src/services/search/providers/creatorAdvisor/debugCreatorAdvisor.ts",
+    "debug:trend": "tsx src/workflows/keyword-ranking/debug/trendMomentumDebug.ts",
+    "debug:pipeline": "tsx src/workflows/keyword-ranking/debug/pipelineTrace.ts",
+    "debug:compare-display": "tsx src/workflows/keyword-ranking/debug/compareDisplayCounts.ts",
+    "notify:keywords": "tsx src/workflows/keyword-notification/runKeywordNotification.ts",
+    "test:notification": "tsx src/workflows/keyword-notification/testKeywordNotification.ts",
+    "job:daily-keyword": "tsx src/jobs/dailyKeywordJob.ts",
+    "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "node-html-parser": "^9.0.1",
+    "playwright": "^1.62.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}
