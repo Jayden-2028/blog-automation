@@ -25,6 +25,7 @@
     "test:collect-sources": "tsx src/workflows/research/testCollectSourcesForJob.ts",
     "test:official-content": "tsx src/workflows/research/testFetchOfficialSourceContent.ts",
     "test:research-preview": "tsx src/workflows/research/testNotifyResearchReady.ts",
+    "test:summarize-research": "tsx src/workflows/research/testSummarizeResearchForReview.ts",
     "test:telegraph-nodes": "tsx src/services/telegraph/testMarkdownToTelegraphNodes.ts",
     "test:fact-card": "tsx src/workflows/research/testBuildFactCard.ts",
     "test:article-review-callback": "tsx src/notifications/testArticleReviewCallbackData.ts",
