@@ -48,7 +48,13 @@ function formatItemBlock(item: NotificationKeywordItem): string {
   return lines.join("\n");
 }
 
-export function formatNotificationMessage(payload: KeywordNotificationPayload): string[] {
+export type NotificationMessageChunk = {
+  text: string;
+  /** 이 chunk에 실제로 실린 항목의 rank 목록(본문에 나온 순서). */
+  ranks: number[];
+};
+
+export function formatNotificationMessage(payload: KeywordNotificationPayload): NotificationMessageChunk[] {
   const { run } = payload;
   const header =
     `📊 <b>오늘의 키워드 랭킹 TOP ${payload.items.length}</b>\n` +
@@ -56,21 +62,24 @@ export function formatNotificationMessage(payload: KeywordNotificationPayload): 
     `Seed ${run.activeSeedsCount}개 · 후보 ${run.candidatesCount}건 · 클러스터 ${run.clustersCount}개 · ` +
     `${run.categories.length}개 카테고리`;
 
-  const itemBlocks = payload.items.map(formatItemBlock);
+  const itemBlocks = payload.items.map((item) => ({ rank: item.rank, text: formatItemBlock(item) }));
 
-  const chunks: string[] = [];
+  const chunks: NotificationMessageChunk[] = [];
   let current = header;
+  let currentRanks: number[] = [];
 
   for (const block of itemBlocks) {
-    const candidate = `${current}\n\n${block}`;
+    const candidate = `${current}\n\n${block.text}`;
     if (candidate.length > TELEGRAM_MESSAGE_CHAR_LIMIT) {
-      chunks.push(current);
-      current = block;
+      chunks.push({ text: current, ranks: currentRanks });
+      current = block.text;
+      currentRanks = [block.rank];
     } else {
       current = candidate;
+      currentRanks.push(block.rank);
     }
   }
-  chunks.push(current);
+  chunks.push({ text: current, ranks: currentRanks });
 
   return chunks;
 }

@@ -315,6 +315,132 @@ export type TrendCandidateUpdate = Partial<TrendCandidateInsert> & {
   updated_at?: string;
 };
 
+// ---------- article_jobs ----------
+// Telegram에서 선택된 키워드의 출처 스냅샷과 원고 생성 상태를 보관한다.
+// supabase/migrations/20260827014817_article_jobs_and_telegram_offsets.sql 참고.
+
+export const ARTICLE_JOB_STATUSES = [
+  "selected",
+  "researching",
+  "writing",
+  "review",
+  "approved",
+  "published",
+  "rejected",
+] as const;
+export type ArticleJobStatus = (typeof ARTICLE_JOB_STATUSES)[number];
+
+export const ARTICLE_JOB_SELECTED_VIA = ["telegram", "manual", "dashboard"] as const;
+export type ArticleJobSelectedVia = (typeof ARTICLE_JOB_SELECTED_VIA)[number];
+
+export type ArticleJobRow = {
+  id: string;
+  source_run_id: number;
+  source_rank: number;
+  keyword: string;
+  headline: string | null;
+  seed_query: string | null;
+  category: string | null;
+  total_score: number | null;
+  score_breakdown: KeywordRankingScoreBreakdownJson | null;
+  status: ArticleJobStatus;
+  selected_at: string;
+  selected_via: ArticleJobSelectedVia;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ArticleJobInsert = {
+  id?: string;
+  source_run_id: number;
+  source_rank: number;
+  keyword: string;
+  headline?: string | null;
+  seed_query?: string | null;
+  category?: string | null;
+  total_score?: number | null;
+  score_breakdown?: KeywordRankingScoreBreakdownJson | null;
+  status?: ArticleJobStatus;
+  selected_at?: string;
+  selected_via?: ArticleJobSelectedVia;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ArticleJobUpdate = Partial<ArticleJobInsert>;
+
+// ---------- telegram_offsets ----------
+// 짧게 반복 실행되는 Telegram 수신기의 getUpdates 커서를 보관한다.
+// supabase/migrations/20260827014817_article_jobs_and_telegram_offsets.sql 참고.
+
+export type TelegramOffsetRow = {
+  id: string;
+  last_update_id: number;
+  updated_at: string;
+};
+
+export type TelegramOffsetInsert = {
+  id: string;
+  last_update_id: number;
+  updated_at?: string;
+};
+
+export type TelegramOffsetUpdate = Partial<TelegramOffsetInsert>;
+
+// ---------- images ----------
+// 원고에 연결된 이미지와 출처·저작권·대체 텍스트 정보를 보관한다.
+
+export type ImageRow = {
+  id: number;
+  article_id: number | null;
+  image_url: string | null;
+  source: string | null;
+  copyright_status: string | null;
+  alt_text: string | null;
+  created_at: string | null;
+};
+
+// id를 생략하는 이유: 같은 시점에 대시보드로 만들어진 형제 테이블(keywords/articles)이 전부
+// auto-increment PK이고 그쪽 Insert 타입도 id를 받지 않는다(testCrud가 id 없이 insert한 실적 있음).
+// PostgREST의 OpenAPI는 identity 컬럼도 required로 표시해서 default 유무를 구분해주지 못하므로,
+// 형제 테이블 관례를 근거로 삼았다. images에 처음 insert하는 시점(Sprint 3)에 실제로 확인할 것.
+export type ImageInsert = {
+  article_id?: number | null;
+  image_url?: string | null;
+  source?: string | null;
+  copyright_status?: string | null;
+  alt_text?: string | null;
+  created_at?: string | null;
+};
+
+export type ImageUpdate = Partial<ImageInsert>;
+
+// ---------- analytics ----------
+// 발행 결과에 연결된 조회·반응 지표와 수집 시각을 보관한다.
+
+export type AnalyticsRow = {
+  id: number;
+  publication_id: number | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  collected_at: string | null;
+};
+
+// id 생략 근거는 ImageInsert 주석 참고(형제 테이블 관례). analytics에 처음 insert하는
+// 시점(Sprint 5 통계 수집)에 실제 default 유무를 확인할 것.
+export type AnalyticsInsert = {
+  publication_id?: number | null;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  collected_at?: string | null;
+};
+
+export type AnalyticsUpdate = Partial<AnalyticsInsert>;
+
 // ---------- Supabase client generic ----------
 
 export type Database = {
@@ -366,6 +492,30 @@ export type Database = {
         Row: TrendCandidateRow;
         Insert: TrendCandidateInsert;
         Update: TrendCandidateUpdate;
+        Relationships: [];
+      };
+      article_jobs: {
+        Row: ArticleJobRow;
+        Insert: ArticleJobInsert;
+        Update: ArticleJobUpdate;
+        Relationships: [];
+      };
+      telegram_offsets: {
+        Row: TelegramOffsetRow;
+        Insert: TelegramOffsetInsert;
+        Update: TelegramOffsetUpdate;
+        Relationships: [];
+      };
+      images: {
+        Row: ImageRow;
+        Insert: ImageInsert;
+        Update: ImageUpdate;
+        Relationships: [];
+      };
+      analytics: {
+        Row: AnalyticsRow;
+        Insert: AnalyticsInsert;
+        Update: AnalyticsUpdate;
         Relationships: [];
       };
     };
