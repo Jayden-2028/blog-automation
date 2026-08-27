@@ -24,7 +24,11 @@ export const ARTICLE_OUTPUT_MARKERS = {
   title: "### TITLE",
   body: "### BODY",
   seoDescription: "### SEO_DESCRIPTION",
+  hashtags: "### HASHTAGS",
 } as const;
+
+/** 해시태그 생성 개수(사용자 요청, 2026-08-28). 네이버 블로그 관례상 본문 끝에 붙인다. */
+export const HASHTAG_COUNT = 15;
 
 const COMMON_RULES = [
   "제공된 근거(팩트 카드)를 벗어난 구체적인 수치·날짜·인용을 절대 지어내지 않는다. 근거에 없는" +
@@ -38,6 +42,29 @@ const COMMON_RULES = [
   "충격/경악/소름 같은 과장된 낚시 표현을 쓰지 않는다.",
   "본문 끝에 '참고 자료' 섹션을 두고 팩트 카드의 출처를 제목 + 링크 형태로 나열한다.",
 ] as const;
+
+// 의학 주제 + 저신뢰 출처일 때 붙는 법적 고지(면책) 문구. 프롬프트 규칙이 아니라 코드로 결정적으로
+// 붙이는 이유(2026-08-28, 사용자 요청): "아기 셔더링어택" 원고 검수 중 사용자가 "출처가 커뮤니티/
+// 개인 블로그뿐이고 의학적으로 사실 확인된 정보가 아니라는 점을 맨 마지막에 작은 글씨로 명시해
+// 달라"고 요청했다. 모델이 매번 정확한 문구로 이걸 빠뜨리지 않고 쓴다고 보장할 수 없으므로(§7의
+// "정확한 진단은 전문의와 상담하세요" 규칙도 매번 정확히 지켜지는지 검증되지 않았다), 실제 출처
+// 구성(sources)을 코드에서 직접 보고 결정적으로 문구를 붙인다 - 모델의 재량에 맡기지 않는다.
+export function buildMedicalDisclaimer(
+  isMedical: boolean,
+  sources: Pick<SourceRow, "authority">[]
+): string | null {
+  if (!isMedical) return null;
+
+  const hasAuthoritativeSource = sources.some((s) => s.authority === "official" || s.authority === "medical");
+
+  // Telegraph는 글자 크기를 지정하는 태그가 없다(<i>/<b>만 지원) - "작은 글씨" 요청은 이탤릭체로
+  // 근사한다. 별표(*)로 감싸면 markdownToTelegraphNodes가 <i>로 변환한다.
+  const text = hasAuthoritativeSource
+    ? "이 글은 공식·의료기관 자료를 참고했지만 증상은 사람마다 다를 수 있습니다. 정확한 진단은 반드시 전문의와 상담하세요."
+    : "이 글은 커뮤니티·개인 블로그에서 공유된 경험을 정리한 것이며, 의학적으로 사실 확인을 거친 정보가 아닙니다. 증상이 우려되면 반드시 소아과 등 전문의와 상담하세요.";
+
+  return `*${text}*`;
+}
 
 const MEDICAL_RULES = [
   "이 주제는 의학 정보를 다룬다. 진단이나 처방으로 읽힐 수 있는 단정적 표현(\"~이면 ~입니다\"," +
@@ -90,10 +117,14 @@ export function buildArticlePrompt(input: BuildArticlePromptInput): string {
     "(제목 한 줄)",
     "",
     ARTICLE_OUTPUT_MARKERS.body,
-    "(마크다운 본문 전체)",
+    "(마크다운 본문 전체 - '참고 자료' 섹션까지 포함, 해시태그는 여기 넣지 않는다)",
     "",
     ARTICLE_OUTPUT_MARKERS.seoDescription,
     "(검색 결과에 노출될 요약, 공백 포함 160자 이내 한 줄)",
+    "",
+    ARTICLE_OUTPUT_MARKERS.hashtags,
+    `(이 키워드로 검색될 만한 해시태그 정확히 ${HASHTAG_COUNT}개. 각 태그는 #으로 시작하고 공백 없이` +
+      " 붙여 쓰며(예: #근로장려금), 태그끼리는 공백으로 구분해 한 줄로 출력한다. 번호나 설명을 붙이지 않는다)",
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
@@ -103,7 +134,23 @@ export type ParsedArticleOutput = {
   title: string;
   body: string;
   seoDescription: string | null;
+  /** "#태그" 형태만 남긴다. 모델이 형식을 안 지키거나 마커가 없으면 빈 배열(원고 자체는 살린다). */
+  hashtags: string[];
 };
+
+/** HASHTAGS 마커 뒤 텍스트에서 "#"으로 시작하는 토큰만 남기고 순서를 유지한 채 중복을 제거한다. */
+function parseHashtags(rawOutput: string): string[] {
+  const hashtagsIndex = rawOutput.indexOf(ARTICLE_OUTPUT_MARKERS.hashtags);
+  if (hashtagsIndex === -1) return [];
+
+  const raw = rawOutput.slice(hashtagsIndex + ARTICLE_OUTPUT_MARKERS.hashtags.length);
+  const tags = raw
+    .split(/\s+/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 1 && tag.startsWith("#"));
+
+  return [...new Set(tags)];
+}
 
 /**
  * buildArticlePrompt가 지정한 마커로 모델 출력을 나눈다. 마커가 없으면(모델이 형식을 안 지킨 경우)
@@ -113,9 +160,10 @@ export function parseArticleOutput(rawOutput: string, fallbackTitle: string): Pa
   const titleIndex = rawOutput.indexOf(ARTICLE_OUTPUT_MARKERS.title);
   const bodyIndex = rawOutput.indexOf(ARTICLE_OUTPUT_MARKERS.body);
   const seoIndex = rawOutput.indexOf(ARTICLE_OUTPUT_MARKERS.seoDescription);
+  const hashtagsIndex = rawOutput.indexOf(ARTICLE_OUTPUT_MARKERS.hashtags);
 
   if (titleIndex === -1 || bodyIndex === -1) {
-    return { title: fallbackTitle, body: rawOutput.trim(), seoDescription: null };
+    return { title: fallbackTitle, body: rawOutput.trim(), seoDescription: null, hashtags: [] };
   }
 
   const title = rawOutput
@@ -124,7 +172,10 @@ export function parseArticleOutput(rawOutput: string, fallbackTitle: string): Pa
     .split("\n")[0]
     ?.trim();
 
-  const bodyEnd = seoIndex === -1 ? rawOutput.length : seoIndex;
+  // body는 SEO_DESCRIPTION과 HASHTAGS 마커 중 먼저 나오는 지점에서 끊는다(정해진 순서와 다르게
+  // 모델이 출력해도 안전하도록 둘 다 확인한다). 둘 다 없으면 끝까지가 body다.
+  const followingMarkerIndexes = [seoIndex, hashtagsIndex].filter((i) => i !== -1);
+  const bodyEnd = followingMarkerIndexes.length > 0 ? Math.min(...followingMarkerIndexes) : rawOutput.length;
   const body = rawOutput.slice(bodyIndex + ARTICLE_OUTPUT_MARKERS.body.length, bodyEnd).trim();
 
   const seoDescription =
@@ -132,5 +183,7 @@ export function parseArticleOutput(rawOutput: string, fallbackTitle: string): Pa
       ? null
       : rawOutput.slice(seoIndex + ARTICLE_OUTPUT_MARKERS.seoDescription.length).trim().split("\n")[0]?.trim() || null;
 
-  return { title: title || fallbackTitle, body: body || rawOutput.trim(), seoDescription };
+  const hashtags = parseHashtags(rawOutput);
+
+  return { title: title || fallbackTitle, body: body || rawOutput.trim(), seoDescription, hashtags };
 }

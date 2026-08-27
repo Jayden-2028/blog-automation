@@ -30,7 +30,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
-import { buildArticlePrompt, parseArticleOutput } from "./buildArticlePrompt.js";
+import { buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
 
 /** 원고 생성은 제목 생성(25초 실측)보다 훨씬 길다. 첫 실측(185초)의 3배 이상 여유를 둔다. */
@@ -176,10 +176,19 @@ export async function runWritingStage(
 
   const parsed = parseArticleOutput(generated.output, job.keyword);
 
+  // 최종 본문 = 모델이 쓴 body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
+  // 해시태그/고지를 body에 직접 섞지 않고 여기서 결정적으로 붙이는 이유(2026-08-28, 사용자 요청):
+  // 둘 다 "매번 정확히 지켜져야 하는" 항목이라 모델 출력에만 맡기면 빠뜨릴 수 있다.
+  // buildMedicalDisclaimer()는 실제 sources 등급을 보고 문구를 정하므로 모델이 지어낼 수 없다.
+  const disclaimer = buildMedicalDisclaimer(isMedical, sources);
+  const content = [parsed.body, parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null, disclaimer]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+
   const article = await createArticleForJob({
     job_id: jobId,
     title: parsed.title,
-    content: parsed.body,
+    content,
     status: "review",
     ai_model: "claude-headless(content-blog+korean-humanize)",
   });
@@ -189,7 +198,7 @@ export async function runWritingStage(
   // ⚠️ Telegraph 페이지는 URL을 아는 누구나 볼 수 있는 공개 페이지다. 검수 전 원고가 이 URL로
   // 노출된다는 뜻이라, 사람 확인 전에 발행하는 지금 방식은 트레이드오프를 감수한 것이다
   // (2026-08-27 사용자 승인).
-  const telegraphResult = await publishArticleToTelegraph(article.title ?? job.keyword, parsed.body);
+  const telegraphResult = await publishArticleToTelegraph(article.title ?? job.keyword, content);
   const telegraphUrl = telegraphResult.ok ? telegraphResult.url : null;
   if (!telegraphResult.ok) {
     console.error(`⚠️ Telegraph 발행 실패 (Telegram 본문 dump로 폴백) -`, telegraphResult.error);
@@ -197,6 +206,7 @@ export async function runWritingStage(
 
   await ArticleJobRepository.mergeMetadata(jobId, {
     seoDescription: parsed.seoDescription,
+    hashtags: parsed.hashtags,
     isMedical,
     requiresMedicalReview: isMedical,
     telegraphUrl,
