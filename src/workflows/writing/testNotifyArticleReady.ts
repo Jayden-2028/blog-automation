@@ -77,7 +77,8 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     sources: [makeSource("official"), makeSource("official"), makeSource("community")],
     isMedical: false,
     requiresMedicalReview: false,
-    durationMs: { research: 2000, writing: 185000 },
+    durationMs: 185000,
+    telegraphUrl: null,
     ...overrides,
   };
 }
@@ -98,11 +99,52 @@ function main(): void {
   assert(!normalHeader.replyMarkup, "일반 원고 헤더에는 버튼이 없어야 한다");
   console.log("✅ 일반 원고 헤더: 의학 경고 없음, 버튼 없음");
 
-  // 3) 의학 원고: 헤더에 경고 + 확인 안내가 있어야 한다.
-  const medicalHeader = buildHeaderMessage(makeResult({ requiresMedicalReview: true, isMedical: true }));
+  // 3) 의학 원고 + telegraphUrl 있음: 헤더에 경고 + "출처까지 직접 확인" 안내가 있어야 한다.
+  // (telegraphUrl이 없으면 "Telegraph 발행 실패" 폴백 안내로 바뀐다 - 3-3에서 별도 검증)
+  const medicalHeader = buildHeaderMessage(
+    makeResult({ requiresMedicalReview: true, isMedical: true, telegraphUrl: "https://telegra.ph/test-08-27" })
+  );
   assert(medicalHeader.text.includes("의학 주제"), "의학 원고 헤더에는 경고가 있어야 한다");
-  assert(medicalHeader.text.includes("참고 자료"), "출처 확인 안내가 있어야 한다");
+  assert(medicalHeader.text.includes("출처까지 직접 확인"), "출처 확인 안내가 있어야 한다");
   console.log("✅ 의학 원고 헤더: 경고 + 안내 포함");
+
+  // 3-1) telegraphUrl이 있으면 "원고 보기" URL 버튼이 1행으로 붙어야 한다(일반 주제).
+  const telegraphHeader = buildHeaderMessage(makeResult({ telegraphUrl: "https://telegra.ph/test-08-27" }));
+  assert(!telegraphHeader.text.includes("본문 전문을 대신 보냅니다"), "telegraphUrl이 있으면 폴백 안내 문구가 없어야 한다");
+  const telegraphRows = telegraphHeader.replyMarkup?.inline_keyboard ?? [];
+  assert(telegraphRows.length === 1, `telegraphUrl만 있으면 버튼 행은 1개여야 한다 (실제: ${telegraphRows.length})`);
+  assert(
+    telegraphRows[0]?.some((b) => "url" in b && b.url === "https://telegra.ph/test-08-27"),
+    "원고 보기 버튼의 url이 telegraphUrl과 정확히 일치해야 한다"
+  );
+  console.log("✅ telegraphUrl 있음(일반) -> 원고 보기 URL 버튼 1행");
+
+  // 3-2) telegraphUrl + 의학 주제: 원고 보기 버튼 행 + 결정 버튼 행, 총 2행이 한 메시지에 붙어야 한다.
+  const telegraphMedicalHeader = buildHeaderMessage(
+    makeResult({ telegraphUrl: "https://telegra.ph/test-08-27", requiresMedicalReview: true, isMedical: true })
+  );
+  const telegraphMedicalRows = telegraphMedicalHeader.replyMarkup?.inline_keyboard ?? [];
+  assert(
+    telegraphMedicalRows.length === 2,
+    `telegraphUrl + 의학이면 버튼 행은 2개(원고 보기 + 결정)여야 한다 (실제: ${telegraphMedicalRows.length})`
+  );
+  assert(
+    telegraphMedicalRows[0]?.some((b) => "url" in b && b.url === "https://telegra.ph/test-08-27"),
+    "첫 행은 원고 보기 URL 버튼이어야 한다"
+  );
+  assert(
+    telegraphMedicalRows[1]?.some((b) => "callback_data" in b && b.callback_data?.startsWith("review:confirm:")),
+    "둘째 행은 확인/수정/폐기 결정 버튼이어야 한다"
+  );
+  console.log("✅ telegraphUrl + 의학 -> 원고 보기 버튼 + 결정 버튼, 한 메시지에 2행");
+
+  // 3-3) telegraphUrl이 null이면(발행 실패 폴백) 헤더에는 버튼을 붙이지 않는다 - 결정 버튼은
+  // notifyArticleReady()가 본문 dump 뒤에 buildMedicalDecisionMessage()로 별도 발송해야 하며,
+  // 헤더에도 붙이면 중복 발송이 된다(2026-08-27 발견 후 수정한 버그의 회귀 방지).
+  const fallbackMedicalHeader = buildHeaderMessage(makeResult({ requiresMedicalReview: true, isMedical: true, telegraphUrl: null }));
+  assert(fallbackMedicalHeader.text.includes("본문 전문을 대신 보냅니다"), "telegraphUrl이 없으면 폴백 안내 문구가 있어야 한다");
+  assert(!fallbackMedicalHeader.replyMarkup, "telegraphUrl이 없으면 헤더에는 결정 버튼을 붙이면 안 된다(중복 방지)");
+  console.log("✅ telegraphUrl 없음 + 의학 -> 헤더에는 버튼 없음(중복 결정 버튼 방지)");
 
   // 4) 핵심 회귀: 본문이 실제로 메시지에 담겨야 한다("원고를 어떻게 확인해?" 질문의 원인).
   const bodyMessages = buildArticleBodyMessages(makeArticle());
@@ -137,11 +179,11 @@ function main(): void {
   const buttons = decision.replyMarkup?.inline_keyboard[0] ?? [];
   assert(buttons.length === 3, `결정 버튼은 3개여야 한다 (실제: ${buttons.length})`);
   assert(
-    buttons.some((b) => b.callback_data === "review:confirm:48472dba-9763-4c26-9c31-86b233a04161"),
+    buttons.some((b) => "callback_data" in b && b.callback_data === "review:confirm:48472dba-9763-4c26-9c31-86b233a04161"),
     "confirm 버튼의 callback_data가 정확해야 한다"
   );
   assert(
-    buttons.some((b) => b.callback_data.startsWith("review:discard:")),
+    buttons.some((b) => "callback_data" in b && b.callback_data?.startsWith("review:discard:")),
     "discard 버튼이 있어야 한다"
   );
   console.log("✅ 의학 결정 메시지: confirm/edit/discard 버튼 정확히 부착");

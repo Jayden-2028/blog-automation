@@ -60,7 +60,12 @@ export type TelegramNotifierCredentials = {
   chatId: string;
 };
 
-export type TelegramInlineKeyboardButton = { text: string; callback_data: string };
+// Telegram Bot API의 InlineKeyboardButton은 callback_data(봇이 받는 콜백)와 url(외부 링크를
+// 여는 버튼) 중 정확히 하나만 가진다. url 버튼을 추가한 이유(2026-08-27): 원고를 Telegraph
+// 페이지로 발행해 "원고 보기" 버튼으로 서식 있는 화면을 열어주기 위해서다(services/telegraph/).
+export type TelegramInlineKeyboardButton =
+  | { text: string; callback_data: string; url?: never }
+  | { text: string; url: string; callback_data?: never };
 export type TelegramReplyMarkup = { inline_keyboard: TelegramInlineKeyboardButton[][] };
 export type TelegramOutgoingMessage = { text: string; replyMarkup?: TelegramReplyMarkup };
 
