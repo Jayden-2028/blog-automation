@@ -71,8 +71,16 @@ export async function runArticleJob(
     return { status: "failed", stage: "research", error };
   }
 
-  const enriched =
-    options.fetchOfficialContent === false ? research.sources : await enrichOfficialSources(research.sources);
+  let enriched = research.sources;
+  if (options.fetchOfficialContent !== false) {
+    const result = await enrichOfficialSources(research.sources);
+    enriched = result.sources;
+    if (result.enrichedCount > 0 || result.rejectedCount > 0) {
+      console.log(
+        `ℹ️ [research] official 본문 fetch: 교체 ${result.enrichedCount}건, 산문 아님(스니펫 유지) ${result.rejectedCount}건`
+      );
+    }
+  }
   const savedSources = await createSources(enriched);
   const researchDurationMs = Date.now() - researchStartedAt;
 
