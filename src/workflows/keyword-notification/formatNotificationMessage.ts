@@ -40,10 +40,6 @@ function formatItemBlock(item: NotificationKeywordItem): string {
         `fresh ${breakdown.freshness} · cross ${breakdown.crossSourceSignal} · click ${breakdown.clickPotential}`
     );
   }
-  // titleSuggestions는 아직 generateTitleSuggestions.ts의 규칙 기반 placeholder("[placeholder] ...")라
-  // 실제로 쓸 만한 제목이 아니므로, 운영 Telegram 메시지에는 placeholder 대신 안내 문구 1줄만 노출한다.
-  // 실제 LLM 제목 생성이 연결되면 이 줄을 다시 titleSuggestions 목록으로 교체한다.
-  lines.push("   추천 제목: AI 제목 생성 연결 예정");
 
   return lines.join("\n");
 }

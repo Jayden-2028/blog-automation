@@ -1,5 +1,7 @@
 // Telegram keyword notification 워크플로우 전용 타입.
-// keyword_rankings row + score breakdown + (placeholder) 추천 제목을 묶어 알림 메시지로 변환하는 데 쓴다.
+// keyword_rankings row + score breakdown을 묶어 알림 메시지로 변환하는 데 쓴다.
+// 추천 제목은 이 payload에 없다 - 알림 시점이 아니라 사용자가 버튼으로 키워드를 고른 뒤
+// 그 1건에 대해서만 생성하기 때문이다(SPRINT_1_DESIGN.md 7절, TelegramBot이 담당).
 
 import type { KeywordRankingScoreBreakdownJson } from "./database.js";
 
@@ -12,12 +14,6 @@ export type NotificationKeywordItem = {
   totalScore: number;
   scoreBreakdown: KeywordRankingScoreBreakdownJson | null;
   trendDirection: string | null;
-  /**
-   * 이 키워드에 대한 추천 블로그 제목 3개.
-   * 지금은 generateTitleSuggestions.ts의 규칙 기반 placeholder이며, 실제로 쓸 만한 제목이 아니라
-   * "여기에 나중에 LLM 등으로 생성한 제목이 들어간다"는 자리표시자임을 명확히 한다.
-   */
-  titleSuggestions: string[];
 };
 
 export type NotificationSourceRun = {
