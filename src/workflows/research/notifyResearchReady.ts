@@ -12,7 +12,8 @@
 // 나열은 요약 생성이 실패했을 때만 폴백으로 보여준다.
 
 import { escapeTelegramHtml, splitIntoChunks, TELEGRAM_MESSAGE_CHAR_LIMIT, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
-import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
+import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
+import { buildResearchDecisionCallbackData } from "../../notifications/researchDecisionCallbackData.js";
 import { summarizeResearchForReview } from "./summarizeResearchForReview.js";
 import type { SummarizeResearchOptions, SummarizeResearchResult } from "./summarizeResearchForReview.js";
 import type { ArticleJobRow, SourceAuthorityLevel, SourceRow } from "../../types/database.js";
@@ -88,7 +89,20 @@ export function buildResearchPreviewMessages(
   }
 
   const full = [...header, ...body, ...footer].join("\n");
-  return splitIntoChunks(full, TELEGRAM_MESSAGE_CHAR_LIMIT).map((text) => ({ text }));
+  const chunks = splitIntoChunks(full, TELEGRAM_MESSAGE_CHAR_LIMIT);
+  const messages: TelegramOutgoingMessage[] = chunks.map((text) => ({ text }));
+
+  // 버튼은 마지막 chunk에만 붙인다 - "진행하려면.../중단하려면..." 안내 텍스트가 항상 마지막
+  // chunk에 있고(join 순서상), 버튼은 메시지당 하나씩만 붙는 Telegram의 제약 때문에 여러 메시지에
+  // 나눠 붙일 수 없다. 텍스트 안내는 그대로 남겨둔다(폰 대신 터미널로 하고 싶을 때의 폴백).
+  const buttons: TelegramInlineKeyboardButton[] = [
+    { text: "✍️ 원고 작성", callback_data: buildResearchDecisionCallbackData("write", job.id) },
+    { text: "🗑 중단", callback_data: buildResearchDecisionCallbackData("reject", job.id) },
+  ];
+  const last = messages[messages.length - 1];
+  if (last) last.replyMarkup = { inline_keyboard: [buttons] };
+
+  return messages;
 }
 
 /**
