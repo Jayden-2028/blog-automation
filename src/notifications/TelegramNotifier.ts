@@ -13,14 +13,35 @@ export function escapeTelegramHtml(text: string): string {
 }
 
 // 줄바꿈 단위로 잘라 charLimit을 넘지 않는 chunk 배열을 만든다(단어/태그 중간을 끊지 않기 위함).
-function splitIntoChunks(text: string, charLimit: number): string[] {
+// export하는 이유: notifyArticleReady.ts가 원고 본문을 Telegram 메시지로 보낼 때 같은 분할
+// 규칙을 재사용한다 - 원고 길이 제한(1500~2500자)은 대부분 한 메시지 안에 들어가지만, 넘는
+// 경우를 대비해 정확히 같은 chunk 로직을 쓴다(로직이 두 곳에서 갈리면 한쪽만 고쳐질 수 있다).
+export function splitIntoChunks(text: string, charLimit: number): string[] {
   if (text.length <= charLimit) return [text];
 
   const lines = text.split("\n");
   const chunks: string[] = [];
   let current = "";
 
+  const flush = (): void => {
+    if (current) {
+      chunks.push(current);
+      current = "";
+    }
+  };
+
   for (const line of lines) {
+    // 줄 하나가 그 자체로 charLimit을 넘으면(개행 없는 긴 URL·문단 등) 줄 단위 로직으로는 절대
+    // 못 자른다 - current가 비어 있으면 아래 join 분기의 길이 조건이 항상 거짓이 되기 때문이다.
+    // 이런 줄은 강제로 charLimit 길이씩 잘라 별도 chunk로 만든다.
+    if (line.length > charLimit) {
+      flush();
+      for (let i = 0; i < line.length; i += charLimit) {
+        chunks.push(line.slice(i, i + charLimit));
+      }
+      continue;
+    }
+
     const candidate = current ? `${current}\n${line}` : line;
     if (candidate.length > charLimit && current) {
       chunks.push(current);
@@ -29,7 +50,7 @@ function splitIntoChunks(text: string, charLimit: number): string[] {
       current = candidate;
     }
   }
-  if (current) chunks.push(current);
+  flush();
 
   return chunks;
 }
