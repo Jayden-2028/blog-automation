@@ -37,6 +37,34 @@ function main(): void {
   assert((boldChild as { children?: TelegraphNode[] }).children?.[0] === "2026 경복궁 별빛야행은 언제 하나요?", "b 태그 내용이 정확해야 한다");
   console.log("✅ **굵게** -> <b> 변환");
 
+  // 3-1) *이탤릭* -> i (2026-08-28, 의학 원고 하단 고지를 "작은 글씨"로 근사하기 위해 추가).
+  // 별표 뒤에 공백 없이 붙는 형태(buildMedicalDisclaimer가 만드는 형태)를 검증한다 - 공백이 있으면
+  // "- 목록" 마커와 혼동될 수 있어 프롬프트/코드 양쪽이 공백 없는 형태로 맞춘다.
+  const withItalic = markdownToTelegraphNodes("*의학적으로 사실 확인을 거친 정보가 아닙니다.*");
+  const italicP = withItalic[0];
+  assert(isTag(italicP, "p"), "이탤릭이 섞인 줄도 p 블록이어야 한다");
+  const italicChild = italicP.children?.find((c) => isTag(c, "i"));
+  assert(italicChild !== undefined, "*텍스트*가 i 태그로 변환돼야 한다");
+  assert(
+    (italicChild as { children?: TelegraphNode[] }).children?.[0] === "의학적으로 사실 확인을 거친 정보가 아닙니다.",
+    "i 태그 내용이 정확해야 한다"
+  );
+  console.log("✅ *이탤릭* -> <i> 변환");
+
+  // 3-2) **굵게**와 *이탤릭*이 같은 줄에 섞여도 굵게가 이탤릭으로 잘못 쪼개지지 않아야 한다.
+  const mixedEmphasis = markdownToTelegraphNodes("**굵은 텍스트**와 *기울인 텍스트*가 섞여 있다.");
+  const mixedP = mixedEmphasis[0];
+  assert(isTag(mixedP, "p"), "혼합된 줄도 p 블록이어야 한다");
+  const boldInMixed = mixedP.children?.find((c) => isTag(c, "b"));
+  const italicInMixed = mixedP.children?.find((c) => isTag(c, "i"));
+  assert(boldInMixed !== undefined, "**굵게**가 여전히 b로 인식돼야 한다");
+  assert(italicInMixed !== undefined, "*이탤릭*이 i로 인식돼야 한다");
+  assert(
+    (boldInMixed as { children?: TelegraphNode[] }).children?.[0] === "굵은 텍스트",
+    "굵게 태그 내용이 이탤릭 패턴에 오염되면 안 된다"
+  );
+  console.log("✅ **굵게**와 *이탤릭* 혼용 -> 서로 침범하지 않고 각각 b/i로 변환");
+
   // 4) [텍스트](URL) -> a href.
   const withLink = markdownToTelegraphNodes("- [국가유산진흥원](https://www.kh.or.kr/)");
   const ul = withLink[0];

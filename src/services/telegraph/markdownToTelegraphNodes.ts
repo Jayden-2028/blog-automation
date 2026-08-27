@@ -11,11 +11,18 @@
 
 export type TelegraphNode = string | { tag: string; attrs?: Record<string, string>; children?: TelegraphNode[] };
 
-/** 굵게(**text**)와 링크([text](url))가 섞인 한 줄을 인라인 Node[]로 변환한다. */
+/**
+ * 굵게(**text**), 이탤릭(*text*), 링크([text](url))가 섞인 한 줄을 인라인 Node[]로 변환한다.
+ *
+ * 이탤릭 추가 이유(2026-08-28, 사용자 요청): buildArticlePrompt.ts의 buildMedicalDisclaimer()가
+ * 의학 원고 맨 끝에 "이 정보는 사실 확인을 거치지 않았습니다" 류의 고지를 붙이는데, 사용자는
+ * 이걸 "작은 글씨"로 구분해달라고 했다. Telegraph는 글자 크기를 지정하는 태그가 없어(<i>/<b>만
+ * 지원) 이탤릭으로 근사한다.
+ */
 function parseInline(text: string): TelegraphNode[] {
-  // **굵게**와 [텍스트](URL)를 한 번에 찾는다. 두 패턴이 겹치지 않는다는 전제(우리 프롬프트가
-  // 그렇게 쓰도록 강제한다) 하에 순차적으로 스캔한다.
-  const pattern = /\*\*(.+?)\*\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  // **굵게**를 *이탤릭*보다 먼저 시도해야 한다 - 알고리즘이 왼쪽 alternative부터 순서대로 매칭을
+  // 시도하므로, 이탤릭이 먼저면 "**text**"의 첫 "*"만 보고 무의미한 매칭을 시도하게 된다.
+  const pattern = /\*\*(.+?)\*\*|\*(.+?)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
   const nodes: TelegraphNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -25,8 +32,10 @@ function parseInline(text: string): TelegraphNode[] {
 
     if (match[1] !== undefined) {
       nodes.push({ tag: "b", children: [match[1]] });
+    } else if (match[2] !== undefined) {
+      nodes.push({ tag: "i", children: [match[2]] });
     } else {
-      nodes.push({ tag: "a", attrs: { href: match[3] }, children: [match[2]] });
+      nodes.push({ tag: "a", attrs: { href: match[4] }, children: [match[3]] });
     }
     lastIndex = pattern.lastIndex;
   }

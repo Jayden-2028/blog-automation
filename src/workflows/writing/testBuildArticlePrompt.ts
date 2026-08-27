@@ -1,7 +1,7 @@
 // buildArticlePrompt / parseArticleOutput 테스트.
 // 외부 호출(LLM/DB) 없이 순수 함수만 검증한다.
 
-import { ARTICLE_OUTPUT_MARKERS, buildArticlePrompt, parseArticleOutput } from "./buildArticlePrompt.js";
+import { ARTICLE_OUTPUT_MARKERS, buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
 import type { ArticleJobRow, SourceRow } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -54,7 +54,9 @@ function main(): void {
   assert(normalPrompt.includes("korean-humanize"), "korean-humanize 스킬 사용 지시가 있어야 한다");
   assert(!normalPrompt.includes("전문의와 상담"), "일반 원고에는 의학 안내 규칙이 없어야 한다");
   assert(normalPrompt.includes("hometax.go.kr"), "팩트 카드의 출처 URL이 포함돼야 한다");
-  console.log("✅ 일반 프롬프트: 스킬 지시 + 팩트 카드 포함, 의학 규칙 없음");
+  assert(normalPrompt.includes(ARTICLE_OUTPUT_MARKERS.hashtags), "해시태그 마커 지시가 프롬프트에 있어야 한다");
+  assert(normalPrompt.includes("정확히 15개"), "해시태그 개수(15개) 지시가 프롬프트에 있어야 한다");
+  console.log("✅ 일반 프롬프트: 스킬 지시 + 팩트 카드 + 해시태그 지시 포함, 의학 규칙 없음");
 
   // 2) 의학 주제는 의학 전용 규칙이 추가돼야 한다.
   const medicalPrompt = buildArticlePrompt({
@@ -71,7 +73,7 @@ function main(): void {
   assert(emptyPrompt.includes("절대 단정하지"), "근거 없음 경고가 포함돼야 한다");
   console.log("✅ 근거 없음 -> 단정 금지 경고 포함");
 
-  // 4) 정상 출력 파싱.
+  // 4) 정상 출력 파싱(해시태그 포함).
   const wellFormed = [
     ARTICLE_OUTPUT_MARKERS.title,
     "2026 근로장려금 지급일, 놓치면 안 되는 이유",
@@ -81,13 +83,39 @@ function main(): void {
     "",
     ARTICLE_OUTPUT_MARKERS.seoDescription,
     "2026 근로장려금 지급일과 신청 방법을 정리했습니다.",
+    "",
+    ARTICLE_OUTPUT_MARKERS.hashtags,
+    "#근로장려금 #지급일 #신청방법",
   ].join("\n");
 
   const parsed = parseArticleOutput(wellFormed, "폴백 제목");
   assert(parsed.title === "2026 근로장려금 지급일, 놓치면 안 되는 이유", `제목 파싱 실패: ${parsed.title}`);
   assert(parsed.body.includes("## 개요") && parsed.body.includes("## 신청 방법"), "본문 파싱이 마커 사이 전체를 담아야 한다");
+  assert(!parsed.body.includes("HASHTAGS") && !parsed.body.includes("#근로장려금"), "body에는 SEO/해시태그 마커 이후 내용이 섞이면 안 된다");
   assert(parsed.seoDescription === "2026 근로장려금 지급일과 신청 방법을 정리했습니다.", `SEO 설명 파싱 실패: ${parsed.seoDescription}`);
-  console.log("✅ 정상 출력 파싱 성공 (title/body/seoDescription)");
+  assert(
+    JSON.stringify(parsed.hashtags) === JSON.stringify(["#근로장려금", "#지급일", "#신청방법"]),
+    `해시태그 파싱 실패: ${JSON.stringify(parsed.hashtags)}`
+  );
+  console.log("✅ 정상 출력 파싱 성공 (title/body/seoDescription/hashtags)");
+
+  // 4-1) 해시태그에 "#" 없는 토큰이나 중복이 섞여도 안전하게 정리한다.
+  const messyHashtags = [
+    ARTICLE_OUTPUT_MARKERS.title,
+    "제목",
+    "",
+    ARTICLE_OUTPUT_MARKERS.body,
+    "본문",
+    "",
+    ARTICLE_OUTPUT_MARKERS.hashtags,
+    "#태그1 태그없음 #태그1 #태그2",
+  ].join("\n");
+  const parsedMessy = parseArticleOutput(messyHashtags, "폴백");
+  assert(
+    JSON.stringify(parsedMessy.hashtags) === JSON.stringify(["#태그1", "#태그2"]),
+    `"#" 없는 토큰 제거 + 중복 제거 실패: ${JSON.stringify(parsedMessy.hashtags)}`
+  );
+  console.log("✅ 해시태그: '#' 없는 토큰 제거 + 중복 제거");
 
   // 5) 마커가 없는 출력(모델이 형식을 안 지킨 경우)은 전체를 body로, title은 폴백을 쓴다.
   const noMarkers = "그냥 자유 형식으로 쓴 글입니다. 마커가 없습니다.";
@@ -95,14 +123,42 @@ function main(): void {
   assert(fallback.title === "키워드 폴백 제목", "마커 없으면 폴백 제목을 써야 한다");
   assert(fallback.body === noMarkers, "마커 없으면 전체를 body로 보존해야 한다(원고를 버리지 않는다)");
   assert(fallback.seoDescription === null, "마커 없으면 seoDescription은 null이어야 한다");
+  assert(fallback.hashtags.length === 0, "마커 없으면 hashtags는 빈 배열이어야 한다");
   console.log("✅ 마커 없는 출력 -> 폴백 title + 전체 보존 (원고 유실 없음)");
 
-  // 6) SEO_DESCRIPTION 마커가 없어도(title/body만 있어도) 파싱은 성공해야 한다.
+  // 6) SEO_DESCRIPTION/HASHTAGS 마커가 없어도(title/body만 있어도) 파싱은 성공해야 한다.
   const noSeo = [ARTICLE_OUTPUT_MARKERS.title, "제목만", "", ARTICLE_OUTPUT_MARKERS.body, "본문 내용"].join("\n");
   const parsedNoSeo = parseArticleOutput(noSeo, "폴백");
   assert(parsedNoSeo.title === "제목만" && parsedNoSeo.body === "본문 내용", "SEO 마커 없이도 title/body는 정상 파싱돼야 한다");
   assert(parsedNoSeo.seoDescription === null, "SEO 마커가 없으면 null이어야 한다");
-  console.log("✅ SEO_DESCRIPTION 없어도 title/body 정상 파싱");
+  assert(parsedNoSeo.hashtags.length === 0, "HASHTAGS 마커가 없으면 빈 배열이어야 한다");
+  console.log("✅ SEO_DESCRIPTION/HASHTAGS 없어도 title/body 정상 파싱");
+
+  // 7) buildMedicalDisclaimer: 의학 주제가 아니면 null(고지를 붙이지 않는다).
+  assert(buildMedicalDisclaimer(false, [makeSource()]) === null, "비의학 주제는 고지가 없어야 한다");
+  console.log("✅ 비의학 주제 -> 고지 없음(null)");
+
+  // 8) buildMedicalDisclaimer: 공공/의료 출처가 하나도 없으면(커뮤니티뿐) 강한 문구를 쓴다.
+  // 2026-08-28 사용자 요청 회귀: "아기 셔더링어택" 원고가 커뮤니티 출처뿐이었는데 "의학적으로
+  // 사실 확인을 거친 정보가 아니"라는 고지가 없었다는 피드백을 고정한다.
+  const communityOnlyDisclaimer = buildMedicalDisclaimer(true, [
+    makeSource({ authority: "community" }),
+    makeSource({ authority: "community" }),
+  ]);
+  assert(communityOnlyDisclaimer !== null, "커뮤니티뿐이면 고지가 있어야 한다");
+  assert(communityOnlyDisclaimer!.includes("사실 확인을 거친 정보가 아닙니다"), "저신뢰 출처 고지 문구가 정확해야 한다");
+  assert(communityOnlyDisclaimer!.startsWith("*") && communityOnlyDisclaimer!.endsWith("*"), "이탤릭 마크다운(*...*)으로 감싸야 한다(Telegraph에 작은 글씨가 없어 이탤릭으로 근사)");
+  console.log("✅ 커뮤니티뿐인 의학 원고 -> 저신뢰 출처 고지(이탤릭)");
+
+  // 9) buildMedicalDisclaimer: 공공/의료 출처가 하나라도 있으면 더 완화된 문구를 쓴다.
+  const officialBackedDisclaimer = buildMedicalDisclaimer(true, [
+    makeSource({ authority: "official" }),
+    makeSource({ authority: "community" }),
+  ]);
+  assert(officialBackedDisclaimer !== null, "의학 주제면 출처와 무관하게 고지는 항상 있어야 한다");
+  assert(!officialBackedDisclaimer!.includes("사실 확인을 거친 정보가 아닙니다"), "공식 출처가 있으면 저신뢰 문구를 쓰면 안 된다");
+  assert(officialBackedDisclaimer!.includes("전문의와 상담"), "공식 출처가 있어도 상담 권유는 유지해야 한다");
+  console.log("✅ 공식/의료 출처 있는 의학 원고 -> 완화된 고지");
 
   console.log("\n✅ buildArticlePrompt / parseArticleOutput 테스트 완료");
 }
