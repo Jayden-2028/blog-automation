@@ -23,6 +23,7 @@
     "test:medical-topic": "tsx src/config/testMedicalTopicRules.ts",
     "test:article-prompt": "tsx src/workflows/writing/testBuildArticlePrompt.ts",
     "test:collect-sources": "tsx src/workflows/research/testCollectSourcesForJob.ts",
+    "test:official-content": "tsx src/workflows/research/testFetchOfficialSourceContent.ts",
     "test:fact-card": "tsx src/workflows/research/testBuildFactCard.ts",
     "test:article-review-callback": "tsx src/notifications/testArticleReviewCallbackData.ts",
     "job:write": "tsx src/workflows/writing/runArticleJobCli.ts",
