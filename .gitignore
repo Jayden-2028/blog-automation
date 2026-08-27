@@ -20,3 +20,9 @@ supabase/.temp/
 
 # Creator Advisor DOM 조사용 스냅샷 (페이지 원문 - 커밋하지 않는다)
 .local/dom-snapshots/
+
+# Codex 데스크톱 앱([desktop] external-agent-import-sync-enabled)이 .claude/skills를
+# 자동 동기화하며 만드는 생성물. CLI(codex exec)로 하는 위임과는 무관하다.
+# Claude -> Codex 기계 치환 때문에 역할이 뒤집혀 있어(예: "Codex remains project lead")
+# 커밋하면 안 된다. 원본은 .claude/skills/ 이다.
+.agents/
