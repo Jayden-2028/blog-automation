@@ -39,6 +39,10 @@ export type TelegramNotifierCredentials = {
   chatId: string;
 };
 
+export type TelegramInlineKeyboardButton = { text: string; callback_data: string };
+export type TelegramReplyMarkup = { inline_keyboard: TelegramInlineKeyboardButton[][] };
+export type TelegramOutgoingMessage = { text: string; replyMarkup?: TelegramReplyMarkup };
+
 export class TelegramNotifier {
   private readonly botToken: string;
   private readonly chatId: string;
@@ -77,18 +81,36 @@ export class TelegramNotifier {
     }
   }
 
-  private async postSendMessage(text: string): Promise<void> {
+  // 본문과 선택 버튼을 함께 순차 발송한다. 메시지 순서는 keyword rank 표시 순서이므로 병렬화하지 않는다.
+  async sendMessages(messages: TelegramOutgoingMessage[]): Promise<void> {
+    for (const message of messages) {
+      await this.postSendMessage(message.text, message.replyMarkup);
+    }
+  }
+
+  private async postSendMessage(text: string, replyMarkup?: TelegramReplyMarkup): Promise<void> {
     const url = `${TELEGRAM_API_BASE_URL}/bot${this.botToken}/sendMessage`;
+
+    const body: {
+      chat_id: string;
+      text: string;
+      parse_mode: "HTML";
+      disable_web_page_preview: true;
+      reply_markup?: TelegramReplyMarkup;
+    } = {
+      chat_id: this.chatId,
+      text,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+    };
+    if (replyMarkup) {
+      body.reply_markup = replyMarkup;
+    }
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: this.chatId,
-        text,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

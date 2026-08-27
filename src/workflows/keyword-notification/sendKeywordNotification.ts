@@ -6,7 +6,12 @@
 import { fetchTopKeywordsForNotification } from "./fetchTopKeywordsForNotification.js";
 import { formatNotificationMessage } from "./formatNotificationMessage.js";
 import { generateTitleSuggestions } from "./generateTitleSuggestions.js";
-import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import {
+  TelegramNotifier,
+  type TelegramInlineKeyboardButton,
+  type TelegramOutgoingMessage,
+} from "../../notifications/TelegramNotifier.js";
+import { buildKeywordSelectionCallbackData } from "../../notifications/telegramCallbackData.js";
 import type {
   KeywordNotificationPayload,
   SendKeywordNotificationOptions,
@@ -32,12 +37,32 @@ export async function sendKeywordNotification(
     })),
   };
 
-  const messages = formatNotificationMessage(payload);
+  const chunks = formatNotificationMessage(payload);
+  const messages = chunks.map((chunk) => chunk.text);
+  const outgoingMessages: TelegramOutgoingMessage[] = chunks.map((chunk) => {
+    if (chunk.ranks.length === 0) {
+      return { text: chunk.text };
+    }
+
+    const buttons = chunk.ranks.map<TelegramInlineKeyboardButton>((rank) => ({
+      text: String(rank),
+      callback_data: buildKeywordSelectionCallbackData(payload.run.id, rank),
+    }));
+    const inlineKeyboard: TelegramInlineKeyboardButton[][] = [];
+    for (let index = 0; index < buttons.length; index += 5) {
+      inlineKeyboard.push(buttons.slice(index, index + 5));
+    }
+
+    return {
+      text: chunk.text,
+      replyMarkup: { inline_keyboard: inlineKeyboard },
+    };
+  });
 
   if (dryRun) {
     return { sent: false, reason: "dry_run", payload, messages };
   }
 
-  await TelegramNotifier.fromEnv().sendMany(messages);
+  await TelegramNotifier.fromEnv().sendMessages(outgoingMessages);
   return { sent: true, payload, messages };
 }
