@@ -4,7 +4,7 @@
 // 양쪽이 이 모듈 하나만 참조하게 한다. 문자열을 각자 조립하면 한쪽만 바뀌었을 때 버튼이 조용히
 // 동작하지 않는다.
 //
-// 형식: sel:<run_id>:<rank>   예) sel:18:3
+// 형식: <action>:<run_id>:<rank>   예) go:18:3, pass:18:3
 //
 // 키워드를 넣지 않는 이유가 두 가지다.
 // 1. Telegram의 callback_data는 UTF-8 기준 64바이트 제한이다. 한글 키워드는 글자당 3바이트라
@@ -15,15 +15,38 @@
 /** Telegram callback_data 최대 길이(UTF-8 바이트). Bot API 규격. */
 export const CALLBACK_DATA_MAX_BYTES = 64;
 
-const SELECT_PREFIX = "sel";
+/** go = 이 키워드로 원고를 쓴다, pass = 쓰지 않는다(거부 이력으로 남긴다). */
+export type KeywordSelectionAction = "go" | "pass";
+
+const ACTION_PREFIX: Record<KeywordSelectionAction, string> = {
+  go: "go",
+  pass: "pass",
+};
+
+/**
+ * 초기 버전에서 쓰던 접두사. 그때 발송된 메시지의 버튼이 아직 대화에 남아 있으므로 계속 받아준다 -
+ * 이미 보낸 메시지는 되돌릴 수 없고, 사용자가 스크롤하다 예전 버튼을 누를 수 있다.
+ */
+const LEGACY_SELECT_PREFIX = "sel";
+
+const PREFIX_TO_ACTION: Record<string, KeywordSelectionAction> = {
+  go: "go",
+  pass: "pass",
+  [LEGACY_SELECT_PREFIX]: "go",
+};
 
 export type KeywordSelectionCallback = {
+  action: KeywordSelectionAction;
   runId: number;
   rank: number;
 };
 
-/** `sel:<run_id>:<rank>` 문자열을 만든다. 64바이트를 넘으면 던진다(설계상 넘을 수 없다). */
-export function buildKeywordSelectionCallbackData(runId: number, rank: number): string {
+/** `<action>:<run_id>:<rank>` 문자열을 만든다. 64바이트를 넘으면 던진다(설계상 넘을 수 없다). */
+export function buildKeywordSelectionCallbackData(
+  action: KeywordSelectionAction,
+  runId: number,
+  rank: number
+): string {
   if (!Number.isInteger(runId) || runId < 0) {
     throw new Error(`runId는 0 이상의 정수여야 합니다 (받은 값: ${runId})`);
   }
@@ -31,7 +54,7 @@ export function buildKeywordSelectionCallbackData(runId: number, rank: number): 
     throw new Error(`rank는 1 이상의 정수여야 합니다 (받은 값: ${rank})`);
   }
 
-  const data = `${SELECT_PREFIX}:${runId}:${rank}`;
+  const data = `${ACTION_PREFIX[action]}:${runId}:${rank}`;
 
   // 숫자만 담으므로 현실적으로 넘을 수 없지만, 형식을 바꿀 때 조용히 깨지지 않도록 확인한다.
   const bytes = Buffer.byteLength(data, "utf8");
@@ -54,7 +77,9 @@ export function parseKeywordSelectionCallbackData(data: string | undefined | nul
 
   const parts = data.split(":");
   if (parts.length !== 3) return null;
-  if (parts[0] !== SELECT_PREFIX) return null;
+
+  const action = PREFIX_TO_ACTION[parts[0]];
+  if (!action) return null;
 
   // Number()는 "" 와 " 1 " 을 통과시키므로 정수 형태인지 먼저 정규식으로 확인한다.
   if (!/^\d+$/.test(parts[1]) || !/^\d+$/.test(parts[2])) return null;
@@ -64,5 +89,5 @@ export function parseKeywordSelectionCallbackData(data: string | undefined | nul
   if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(rank)) return null;
   if (rank < 1) return null;
 
-  return { runId, rank };
+  return { action, runId, rank };
 }

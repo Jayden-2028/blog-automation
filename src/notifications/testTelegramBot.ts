@@ -1,12 +1,15 @@
 // TelegramBot callback 핸들러 테스트.
 //
 // 실제 Telegram API와 Supabase를 호출하지 않는다. TelegramBot이 제공하는 주입 지점
-// (loadRanking/createJob/saveTitles/generateTitles)으로 DB·LLM 접근을 대체해 분기만 검증한다.
+// (loadRanking/createJob/saveTitles/updateJobStatus/generateTitles)으로 DB·LLM 접근을 대체해 분기만 검증한다.
 //
-// 여기서 지켜야 할 성질은 셋이다:
+// 여기서 지켜야 할 성질:
 // 1. 우리 버튼이 아닌 update를 조용히 무시한다(봇이 들어 있는 대화에는 별게 다 온다)
 // 2. 다른 chat에서 온 callback을 거부한다
 // 3. 중복 클릭이 job을 두 개 만들지 않고, 비싼 제목 생성도 다시 하지 않는다
+// 4. Pass는 거부 이력만 남기고 LLM을 쓰지 않는다
+// 5. 잘못 눌렀을 때 Pass <-> Go로 되돌릴 수 있다
+// 6. 이미 진행 중인 job은 버튼으로 되돌려지지 않는다
 
 import { TelegramBot } from "./TelegramBot.js";
 import type { ArticleJobRow, KeywordRankingRow } from "../types/database.js";
@@ -78,14 +81,16 @@ function makeQuery(data: string | undefined, chatId: string | number = CHAT_ID):
 
 // ---------- 주입 헬퍼 ----------
 // ESM 네임스페이스는 재정의할 수 없으므로 모듈을 패칭하지 않는다. TelegramBot이 제공하는
-// 주입 지점(loadRanking/createJob/saveTitles)으로 DB 접근을 대체한다 -
+// 주입 지점(loadRanking/createJob/saveTitles/updateJobStatus)으로 DB 접근을 대체한다 -
 // buildDailyQueryPool의 loadActiveSeeds, runCreatorAdvisorCollection의 fetchCandidates와 같은 방식.
 
-type Calls = { create: number; saveTitles: number; titles: number; loadRanking: number };
+type Calls = { create: number; saveTitles: number; titles: number; loadRanking: number; updateStatus: number };
 
 function makeBot(opts: {
   ranking: KeywordRankingRow | null;
   created?: boolean;
+  /** created:false일 때 이미 존재하는 job의 상태. */
+  existingStatus?: ArticleJobRow["status"];
   calls: Calls;
   failTitles?: boolean;
 }): TelegramBot {
@@ -96,12 +101,20 @@ function makeBot(opts: {
       opts.calls.loadRanking++;
       return opts.ranking;
     },
-    createJob: async () => {
+    createJob: async (_ranking, status) => {
       opts.calls.create++;
-      return { job: makeJob(), created: opts.created ?? true };
+      const created = opts.created ?? true;
+      return {
+        job: makeJob({ status: created ? status : (opts.existingStatus ?? "selected") }),
+        created,
+      };
     },
     saveTitles: async () => {
       opts.calls.saveTitles++;
+    },
+    updateJobStatus: async (_id, status) => {
+      opts.calls.updateStatus++;
+      return makeJob({ status });
     },
     generateTitles: async () => {
       opts.calls.titles++;
@@ -112,7 +125,7 @@ function makeBot(opts: {
 }
 
 function newCalls(): Calls {
-  return { create: 0, saveTitles: 0, titles: 0, loadRanking: 0 };
+  return { create: 0, saveTitles: 0, titles: 0, loadRanking: 0, updateStatus: 0 };
 }
 
 async function main(): Promise<void> {
@@ -122,7 +135,7 @@ async function main(): Promise<void> {
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls });
-    for (const data of [undefined, "", "other:1:2", "sel:abc:1"]) {
+    for (const data of [undefined, "", "other:1:2", "go:abc:1"]) {
       const result = await bot.handleCallbackQuery(makeQuery(data));
       assert(
         result.outcome.status === "ignored" && result.outcome.reason === "not_a_selection",
@@ -137,7 +150,7 @@ async function main(): Promise<void> {
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls });
-    const result = await bot.handleCallbackQuery(makeQuery(`sel:${RUN_ID}:${RANK}`, "999999"));
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`, "999999"));
     assert(
       result.outcome.status === "ignored" && result.outcome.reason === "wrong_chat",
       `다른 chat은 거부해야 한다 (실제: ${JSON.stringify(result.outcome)})`
@@ -150,7 +163,7 @@ async function main(): Promise<void> {
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: null, calls });
-    const result = await bot.handleCallbackQuery(makeQuery(`sel:${RUN_ID}:${RANK}`));
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
     assert(result.outcome.status === "expired", `조회 실패는 expired여야 한다 (실제: ${result.outcome.status})`);
     assert(result.message.includes("만료"), "사용자에게 만료 안내를 해야 한다");
     assert(calls.create === 0, "존재하지 않는 ranking으로 job을 만들면 안 된다");
@@ -161,7 +174,7 @@ async function main(): Promise<void> {
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls });
-    const result = await bot.handleCallbackQuery(makeQuery(`sel:${RUN_ID}:${RANK}`));
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
     assert(result.outcome.status === "created", `정상 선택은 created여야 한다 (실제: ${result.outcome.status})`);
     assert(calls.create === 1, `job 생성은 1회여야 한다 (실제: ${calls.create})`);
     assert(calls.titles === 1, `제목 생성은 1회여야 한다 (실제: ${calls.titles})`);
@@ -171,25 +184,64 @@ async function main(): Promise<void> {
     console.log("✅ 정상 선택 -> job 생성 + 제목 3개 + 확인 메시지");
   }
 
-  // 5) 중복 클릭: job을 다시 만들지 않고, 비싼 제목 생성도 하지 않는다.
+  // 5) 같은 결정 중복 클릭: job을 다시 만들지 않고, 비싼 제목 생성도 하지 않는다.
   {
     const calls = newCalls();
-    const bot = makeBot({ ranking: makeRanking(), created: false, calls });
-    const result = await bot.handleCallbackQuery(makeQuery(`sel:${RUN_ID}:${RANK}`));
+    const bot = makeBot({ ranking: makeRanking(), created: false, existingStatus: "selected", calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
     assert(
-      result.outcome.status === "already_selected",
-      `중복 클릭은 already_selected여야 한다 (실제: ${result.outcome.status})`
+      result.outcome.status === "unchanged",
+      `같은 결정 중복은 unchanged여야 한다 (실제: ${result.outcome.status})`
     );
     assert(calls.titles === 0, "중복 클릭에서 제목을 다시 생성하면 안 된다(토큰 낭비)");
-    assert(calls.saveTitles === 0, "중복 클릭에서 metadata를 다시 쓰면 안 된다");
-    console.log("✅ 중복 클릭 -> 기존 job 반환, 제목 재생성 없음");
+    assert(calls.updateStatus === 0, "상태가 같으면 갱신하지 않아야 한다");
+    console.log("✅ 같은 결정 중복 클릭 -> unchanged, 제목 재생성 없음");
+  }
+
+  // 5-1) Pass: 거부 이력만 남기고 LLM을 쓰지 않는다.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`pass:${RUN_ID}:${RANK}`));
+    assert(result.outcome.status === "passed", `Pass는 passed여야 한다 (실제: ${result.outcome.status})`);
+    assert(
+      result.outcome.status === "passed" && result.outcome.job.status === "rejected",
+      "Pass로 만든 job은 rejected 상태여야 한다"
+    );
+    assert(calls.titles === 0, "Pass에서 제목을 만들면 안 된다 - 쓰지 않을 키워드다");
+    console.log("✅ Pass -> rejected 기록, LLM 호출 없음");
+  }
+
+  // 5-2) Pass 후 Go: 마음을 바꿀 수 있어야 한다. 잘못 눌렀을 때 되돌릴 방법이 없으면 안 된다.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), created: false, existingStatus: "rejected", calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
+    assert(result.outcome.status === "changed", `Pass -> Go는 changed여야 한다 (실제: ${result.outcome.status})`);
+    assert(
+      result.outcome.status === "changed" && result.outcome.from === "rejected",
+      "이전 상태가 rejected로 기록돼야 한다"
+    );
+    assert(calls.updateStatus === 1, "상태를 selected로 갱신해야 한다");
+    assert(calls.titles === 1, "Go로 되돌렸으면 이제 제목이 필요하다");
+    console.log("✅ Pass -> Go 전환 -> 상태 갱신 + 제목 생성");
+  }
+
+  // 5-3) 이미 진행 중인 job은 되돌리지 않는다. 작업이 버튼 한 번에 사라지면 안 된다.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), created: false, existingStatus: "writing", calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`pass:${RUN_ID}:${RANK}`));
+    assert(result.outcome.status === "locked", `진행 중 job은 locked여야 한다 (실제: ${result.outcome.status})`);
+    assert(calls.updateStatus === 0, "진행 중 job의 상태를 바꾸면 안 된다");
+    console.log("✅ 진행 중(writing) job -> locked, 상태 변경 없음");
   }
 
   // 6) 제목 생성이 실패해도 선택 자체는 성공해야 한다.
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls, failTitles: true });
-    const result = await bot.handleCallbackQuery(makeQuery(`sel:${RUN_ID}:${RANK}`));
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
     assert(
       result.outcome.status === "created",
       `제목 생성 실패가 선택을 무효로 만들면 안 된다 (실제: ${result.outcome.status})`

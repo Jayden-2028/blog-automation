@@ -35,7 +35,12 @@ export class ArticleJobRepository {
    */
   static async createFromRanking(
     ranking: KeywordRankingRow,
-    options: { selectedVia?: ArticleJobInsert["selected_via"]; metadata?: Record<string, unknown> } = {}
+    options: {
+      selectedVia?: ArticleJobInsert["selected_via"];
+      metadata?: Record<string, unknown>;
+      /** 기본 'selected'. Pass 버튼은 'rejected'로 만들어 거부 이력을 남긴다. */
+      status?: ArticleJobStatus;
+    } = {}
   ): Promise<CreateArticleJobResult> {
     const row: ArticleJobInsert = {
       source_run_id: ranking.run_id,
@@ -46,7 +51,7 @@ export class ArticleJobRepository {
       category: ranking.category,
       total_score: ranking.total_score,
       score_breakdown: ranking.score_breakdown,
-      status: "selected",
+      status: options.status ?? "selected",
       selected_via: options.selectedVia ?? "telegram",
       metadata: options.metadata ?? {},
     };

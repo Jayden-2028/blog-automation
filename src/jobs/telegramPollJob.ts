@@ -27,8 +27,17 @@ async function main(): Promise<void> {
       case "created":
         console.log(`   ✅ 선택 -> job ${outcome.job.id} (${outcome.job.keyword})`);
         break;
-      case "already_selected":
-        console.log(`   ↩︎ 이미 선택됨 -> job ${outcome.job.id} (상태: ${outcome.job.status})`);
+      case "passed":
+        console.log(`   ⏭ 넘김 -> job ${outcome.job.id} (${outcome.job.keyword})`);
+        break;
+      case "changed":
+        console.log(`   ↔︎ 변경 ${outcome.from} -> ${outcome.job.status} (job ${outcome.job.id})`);
+        break;
+      case "unchanged":
+        console.log(`   ↩︎ 이미 같은 결정 -> job ${outcome.job.id} (상태: ${outcome.job.status})`);
+        break;
+      case "locked":
+        console.log(`   🔒 진행 중이라 변경 불가 -> job ${outcome.job.id} (상태: ${outcome.job.status})`);
         break;
       case "expired":
         console.log(`   ⌛ 만료된 항목`);
