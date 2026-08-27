@@ -34,19 +34,17 @@ export async function sendKeywordNotification(
 
   const chunks = formatNotificationMessage(payload);
   const messages = chunks.map((chunk) => chunk.text);
+  // 항목마다 메시지가 따로 가므로(formatNotificationMessage 참고) 각 메시지에 그 항목의
+  // Go/Pass 버튼만 붙인다. 헤더는 ranks가 비어 있어 버튼 없이 나간다.
   const outgoingMessages: TelegramOutgoingMessage[] = chunks.map((chunk) => {
     if (chunk.ranks.length === 0) {
       return { text: chunk.text };
     }
 
-    const buttons = chunk.ranks.map<TelegramInlineKeyboardButton>((rank) => ({
-      text: String(rank),
-      callback_data: buildKeywordSelectionCallbackData(payload.run.id, rank),
-    }));
-    const inlineKeyboard: TelegramInlineKeyboardButton[][] = [];
-    for (let index = 0; index < buttons.length; index += 5) {
-      inlineKeyboard.push(buttons.slice(index, index + 5));
-    }
+    const inlineKeyboard: TelegramInlineKeyboardButton[][] = chunk.ranks.map((rank) => [
+      { text: "✍️ Go", callback_data: buildKeywordSelectionCallbackData("go", payload.run.id, rank) },
+      { text: "⏭ Pass", callback_data: buildKeywordSelectionCallbackData("pass", payload.run.id, rank) },
+    ] satisfies TelegramInlineKeyboardButton[]);
 
     return {
       text: chunk.text,

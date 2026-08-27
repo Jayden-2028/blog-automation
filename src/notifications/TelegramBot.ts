@@ -12,7 +12,7 @@ import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repos
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
-import type { ArticleJobRow, KeywordRankingRow } from "../types/database.js";
+import type { ArticleJobRow, ArticleJobStatus, KeywordRankingRow } from "../types/database.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
@@ -40,8 +40,16 @@ export type TelegramUpdate = {
 export type HandleCallbackOutcome =
   | { status: "ignored"; reason: "not_a_selection" | "wrong_chat" }
   | { status: "expired" }
+  /** Go로 새 job을 만들었다. 제목 생성은 이때만 한다. */
   | { status: "created"; job: ArticleJobRow }
-  | { status: "already_selected"; job: ArticleJobRow };
+  /** Pass로 거부 이력을 남겼다. */
+  | { status: "passed"; job: ArticleJobRow }
+  /** 이미 같은 결정이 기록돼 있다(중복 클릭). */
+  | { status: "unchanged"; job: ArticleJobRow }
+  /** Pass -> Go 또는 Go -> Pass로 마음을 바꿨다. */
+  | { status: "changed"; job: ArticleJobRow; from: ArticleJobStatus }
+  /** 이미 작업이 진행돼 되돌릴 수 없다. */
+  | { status: "locked"; job: ArticleJobRow };
 
 export type HandleCallbackResult = {
   outcome: HandleCallbackOutcome;
@@ -64,8 +72,9 @@ export type TelegramBotOptions = {
   // 운영 호출은 전부 생략하고 기본 구현(실제 repository)을 쓴다.
   // buildDailyQueryPool의 loadActiveSeeds, runCreatorAdvisorCollection의 fetchCandidates와 같은 패턴.
   loadRanking?: (runId: number, rank: number) => Promise<KeywordRankingRow | null>;
-  createJob?: (ranking: KeywordRankingRow) => Promise<CreateArticleJobResult>;
+  createJob?: (ranking: KeywordRankingRow, status: ArticleJobStatus) => Promise<CreateArticleJobResult>;
   saveTitles?: (jobId: string, titles: string[]) => Promise<void>;
+  updateJobStatus?: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
 };
 
 export class TelegramBot {
@@ -74,8 +83,9 @@ export class TelegramBot {
   private readonly receiverId: string;
   private readonly generateTitles?: (job: ArticleJobRow) => Promise<string[]>;
   private readonly loadRanking: (runId: number, rank: number) => Promise<KeywordRankingRow | null>;
-  private readonly createJob: (ranking: KeywordRankingRow) => Promise<CreateArticleJobResult>;
+  private readonly createJob: (ranking: KeywordRankingRow, status: ArticleJobStatus) => Promise<CreateArticleJobResult>;
   private readonly saveTitles: (jobId: string, titles: string[]) => Promise<void>;
+  private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
 
   constructor(options: TelegramBotOptions) {
     this.botToken = options.botToken;
@@ -83,12 +93,15 @@ export class TelegramBot {
     this.receiverId = options.receiverId ?? DEFAULT_TELEGRAM_RECEIVER_ID;
     this.generateTitles = options.generateTitles;
     this.loadRanking = options.loadRanking ?? getKeywordRankingByRunAndRank;
-    this.createJob = options.createJob ?? ((ranking) => ArticleJobRepository.createFromRanking(ranking));
+    this.createJob =
+      options.createJob ?? ((ranking, status) => ArticleJobRepository.createFromRanking(ranking, { status }));
     this.saveTitles =
       options.saveTitles ??
       (async (jobId, titles) => {
         await ArticleJobRepository.mergeMetadata(jobId, { titleSuggestions: titles });
       });
+    this.updateJobStatus =
+      options.updateJobStatus ?? ((jobId, status) => ArticleJobRepository.updateStatus(jobId, status));
   }
 
   static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
@@ -135,17 +148,50 @@ export class TelegramBot {
       };
     }
 
-    const { job, created } = await this.createJob(ranking);
+    const desiredStatus: ArticleJobStatus = parsed.action === "go" ? "selected" : "rejected";
+    const { job, created } = await this.createJob(ranking, desiredStatus);
 
-    if (!created) {
+    if (created) {
+      // Pass는 거부 이력만 남기면 끝이다 - 원고를 쓰지 않을 키워드에 LLM을 쓸 이유가 없다.
+      if (parsed.action === "pass") {
+        return { outcome: { status: "passed", job }, message: this.buildPassMessage(job) };
+      }
+      return this.completeGo(job);
+    }
+
+    // 여기부터는 이미 같은 (run, rank)에 결정이 기록돼 있는 경우다.
+    if (job.status === desiredStatus) {
       return {
-        outcome: { status: "already_selected", job },
-        message: `이미 선택한 키워드입니다 (상태: ${job.status})`,
+        outcome: { status: "unchanged", job },
+        message: parsed.action === "go" ? `이미 선택한 키워드입니다.` : `이미 넘긴 키워드입니다.`,
       };
     }
 
-    // 제목 생성은 job이 새로 생겼을 때만 한다 - 중복 클릭으로 LLM 호출을 반복하지 않기 위해서다.
+    // 이미 조사/집필이 시작된 job은 되돌리지 않는다. 진행 중인 작업이 버튼 한 번에 사라지면 안 된다.
+    if (job.status !== "selected" && job.status !== "rejected") {
+      return {
+        outcome: { status: "locked", job },
+        message: `이미 진행 중이라 변경할 수 없습니다 (상태: ${job.status})`,
+      };
+    }
+
+    // selected <-> rejected는 서로 바꿀 수 있다. 잘못 눌렀을 때 되돌릴 방법이 없으면 안 된다.
+    const from = job.status;
+    const updated = (await this.updateJobStatus(job.id, desiredStatus)) ?? job;
+
+    if (parsed.action === "pass") {
+      return { outcome: { status: "changed", job: updated, from }, message: this.buildPassMessage(updated) };
+    }
+
+    // rejected -> selected로 되돌렸으면 이제 제목이 필요하다.
+    const result = await this.completeGo(updated);
+    return { outcome: { status: "changed", job: updated, from }, message: result.message };
+  }
+
+  /** Go 확정 처리: 제목을 만들어 저장하고 확인 메시지를 만든다. */
+  private async completeGo(job: ArticleJobRow): Promise<HandleCallbackResult> {
     let titleSuggestions: string[] = [];
+
     if (this.generateTitles) {
       try {
         titleSuggestions = await this.generateTitles(job);
@@ -161,6 +207,10 @@ export class TelegramBot {
     }
 
     return { outcome: { status: "created", job }, message: this.buildConfirmationMessage(job, titleSuggestions) };
+  }
+
+  private buildPassMessage(job: ArticleJobRow): string {
+    return `⏭ <b>넘김</b>\n${escapeTelegramHtml(job.keyword)}`;
   }
 
   private buildConfirmationMessage(job: ArticleJobRow, titleSuggestions: string[]): string {
@@ -235,8 +285,14 @@ export class TelegramBot {
 
     await this.answerCallbackQuery(query.id, result.message.slice(0, 200)).catch(() => {});
 
-    if (result.outcome.status === "created" || result.outcome.status === "already_selected") {
-      await this.markButtonSelected(query, result.outcome.job.source_rank).catch(() => {});
+    const decided = result.outcome;
+    if (
+      decided.status === "created" ||
+      decided.status === "passed" ||
+      decided.status === "unchanged" ||
+      decided.status === "changed"
+    ) {
+      await this.markButtonDecided(query, decided.job.status).catch(() => {});
     }
 
     if (result.message) {
@@ -244,17 +300,29 @@ export class TelegramBot {
     }
   }
 
-  /** 선택된 버튼만 체크 표시로 바꾼다. 하루에 여러 건 고를 수 있어야 하므로 나머지는 그대로 둔다. */
-  private async markButtonSelected(query: TelegramCallbackQuery, rank: number): Promise<void> {
+  /**
+   * 결정된 항목의 버튼을 상태 표시로 바꾼다. 항목마다 메시지가 따로 있으므로 그 메시지의
+   * 버튼 두 개(Go/Pass)만 갱신하면 된다.
+   *
+   * 버튼을 지우지 않고 남겨두는 이유: 잘못 눌렀을 때 반대쪽을 눌러 되돌릴 수 있어야 한다
+   * (handleCallbackQuery가 selected <-> rejected 전환을 지원한다).
+   */
+  private async markButtonDecided(query: TelegramCallbackQuery, status: ArticleJobStatus): Promise<void> {
     const keyboard = query.message?.reply_markup?.inline_keyboard;
     const messageId = query.message?.message_id;
     if (!keyboard || messageId === undefined) return;
 
-    const selectedLabel = String(rank);
+    const chosen = status === "rejected" ? "pass" : "go";
     const updated = keyboard.map((row) =>
-      row.map((button) =>
-        button.text === selectedLabel ? { ...button, text: `✅ ${selectedLabel}` } : button
-      )
+      row.map((button) => {
+        const isGo = button.callback_data?.startsWith("go:") || button.callback_data?.startsWith("sel:");
+        const isPass = button.callback_data?.startsWith("pass:");
+        if (!isGo && !isPass) return button;
+
+        const selected = (isGo && chosen === "go") || (isPass && chosen === "pass");
+        const label = isGo ? "Go" : "Pass";
+        return { ...button, text: selected ? `✅ ${label}` : isGo ? "✍️ Go" : "⏭ Pass" };
+      })
     );
 
     await this.post("editMessageReplyMarkup", {

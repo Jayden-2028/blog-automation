@@ -21,24 +21,42 @@ function main(): void {
 
   // 1) 형식 고정. 이 문자열이 바뀌면 이미 발송된 메시지의 버튼이 동작하지 않는다.
   assert(
-    buildKeywordSelectionCallbackData(18, 3) === "sel:18:3",
-    `형식은 sel:<run_id>:<rank>여야 한다 (실제: ${buildKeywordSelectionCallbackData(18, 3)})`
+    buildKeywordSelectionCallbackData("go", 18, 3) === "go:18:3",
+    `go 형식이 어긋났다 (실제: ${buildKeywordSelectionCallbackData("go", 18, 3)})`
   );
-  console.log("✅ 형식 고정: sel:18:3");
+  assert(
+    buildKeywordSelectionCallbackData("pass", 18, 3) === "pass:18:3",
+    `pass 형식이 어긋났다 (실제: ${buildKeywordSelectionCallbackData("pass", 18, 3)})`
+  );
+  console.log("✅ 형식 고정: go:18:3 / pass:18:3");
+
+  // 1-1) 구 접두사 sel:은 go로 받아준다. 이미 발송된 메시지의 버튼이 대화에 남아 있어서,
+  //      거부하면 사용자가 누른 뒤 아무 일도 일어나지 않는 것처럼 보인다.
+  const legacy = parseKeywordSelectionCallbackData("sel:18:3");
+  assert(
+    legacy?.action === "go" && legacy.runId === 18 && legacy.rank === 3,
+    `구 sel: 접두사를 go로 받아야 한다 (실제: ${JSON.stringify(legacy)})`
+  );
+  console.log("✅ 구 접두사 sel: -> go 별칭 유지");
 
   // 2) 왕복. build한 것을 parse하면 원래 값이 나와야 한다.
-  for (const [runId, rank] of [
-    [1, 1],
-    [18, 10],
-    [999999, 50],
-  ] as const) {
-    const parsed = parseKeywordSelectionCallbackData(buildKeywordSelectionCallbackData(runId, rank));
-    assert(parsed?.runId === runId && parsed?.rank === rank, `왕복 실패: ${runId}/${rank} -> ${JSON.stringify(parsed)}`);
+  for (const action of ["go", "pass"] as const) {
+    for (const [runId, rank] of [
+      [1, 1],
+      [18, 10],
+      [999999, 50],
+    ] as const) {
+      const parsed = parseKeywordSelectionCallbackData(buildKeywordSelectionCallbackData(action, runId, rank));
+      assert(
+        parsed?.action === action && parsed.runId === runId && parsed.rank === rank,
+        `왕복 실패: ${action}/${runId}/${rank} -> ${JSON.stringify(parsed)}`
+      );
+    }
   }
-  console.log("✅ build -> parse 왕복 일치");
+  console.log("✅ build -> parse 왕복 일치 (go/pass)");
 
   // 3) 64바이트 제한. 한글 키워드를 넣었다면 진작 넘었을 크기다.
-  const longest = buildKeywordSelectionCallbackData(Number.MAX_SAFE_INTEGER, 999);
+  const longest = buildKeywordSelectionCallbackData("pass", Number.MAX_SAFE_INTEGER, 999);
   assert(
     Buffer.byteLength(longest, "utf8") <= CALLBACK_DATA_MAX_BYTES,
     `최대 크기에서도 ${CALLBACK_DATA_MAX_BYTES}바이트 이하여야 한다 (실제: ${Buffer.byteLength(longest, "utf8")})`
@@ -50,18 +68,19 @@ function main(): void {
     undefined,
     null,
     "",
-    "sel",
-    "sel:18",
-    "sel:18:3:4",
+    "go",
+    "go:18",
+    "go:18:3:4",
     "other:18:3",
-    "sel:abc:3",
-    "sel:18:abc",
-    "sel::3",
-    "sel:18:",
-    "sel:18:0", // rank는 1부터
-    "sel: 18 : 3 ", // 공백 섞인 값
-    "sel:-1:3",
-    "SEL:18:3", // 대소문자 다름
+    "go:abc:3",
+    "go:18:abc",
+    "go::3",
+    "go:18:",
+    "go:18:0", // rank는 1부터
+    "go: 18 : 3 ", // 공백 섞인 값
+    "go:-1:3",
+    "GO:18:3", // 대소문자 다름
+    "pass:18:0",
     "'; drop table article_jobs; --",
   ];
   for (const input of rejected) {
@@ -79,7 +98,7 @@ function main(): void {
   ] as const) {
     let threw = false;
     try {
-      buildKeywordSelectionCallbackData(runId, rank);
+      buildKeywordSelectionCallbackData("go", runId, rank);
     } catch {
       threw = true;
     }
