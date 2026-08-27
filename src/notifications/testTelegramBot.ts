@@ -376,6 +376,172 @@ async function main(): Promise<void> {
     console.log("✅ review: 콜백이 키워드 선택 핸들러를 침범하지 않음");
   }
 
+  // ---------- 8) 자료조사 체크포인트(handleResearchDecisionCallback) ----------
+  // SPRINT_2_DESIGN.md 13-3절 ①, 2026-08-28 추가. write는 review의 confirm/edit/discard와 달리
+  // 실제로 무거운 작업(triggerWriting)을 호출하므로, 그 호출이 몇 번 일어났는지가 핵심 검증 대상이다.
+
+  const RESEARCH_JOB_ID = "0d35cd81-94e6-49b9-b6d2-4917b548f971";
+
+  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number };
+  function newResearchCalls(): ResearchCalls {
+    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0 };
+  }
+
+  function makeResearchJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
+    return makeJob({ id: RESEARCH_JOB_ID, status: "researching", ...overrides });
+  }
+
+  function makeResearchBot(opts: {
+    job: ArticleJobRow | null;
+    calls: ResearchCalls;
+    writeOutcome?: { status: "success" } | { status: "skipped"; reason: string } | { status: "failed"; error: string };
+  }): TelegramBot {
+    return new TelegramBot({
+      botToken: "test-token",
+      chatId: CHAT_ID,
+      loadJobById: async () => {
+        opts.calls.loadJobById++;
+        return opts.job;
+      },
+      triggerWriting: async () => {
+        opts.calls.triggerWriting++;
+        return opts.writeOutcome ?? { status: "success" };
+      },
+      rejectJob: async (_jobId, _reason) => {
+        opts.calls.rejectJob++;
+        return { status: "rejected", job: { ...(opts.job ?? makeResearchJob()), status: "rejected" } };
+      },
+    });
+  }
+
+  function researchQuery(data: string, chatId: string | number = CHAT_ID): TelegramCallbackQuery {
+    return { id: "cbq-research-1", data, message: { message_id: 88, chat: { id: chatId } } };
+  }
+
+  // 8-1) "research:" 형식이 아니면 조용히 무시한다(DB 접근 없음).
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob(), calls });
+    for (const data of ["go:18:1", "review:confirm:x", "not-a-research"]) {
+      const result = await bot.handleResearchDecisionCallback(researchQuery(data));
+      assert(
+        result.outcome.status === "ignored" && result.outcome.reason === "not_a_research_decision",
+        `research: 형식이 아니면 무시해야 한다: ${data} -> ${JSON.stringify(result.outcome)}`
+      );
+    }
+    assert(calls.loadJobById === 0, "무시된 데이터에서 job을 조회하면 안 된다");
+    console.log("✅ research: 형식이 아닌 콜백 -> 무시, DB 접근 없음");
+  }
+
+  // 8-2) 다른 chat에서 온 콜백은 거부한다.
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob(), calls });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`, "999999"));
+    assert(
+      result.outcome.status === "ignored" && result.outcome.reason === "wrong_chat",
+      `다른 chat은 거부해야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.loadJobById === 0, "거부된 chat에서 job을 조회하면 안 된다");
+    console.log("✅ 다른 chat에서 온 research 콜백 -> 거부");
+  }
+
+  // 8-3) job을 찾을 수 없으면 job_not_found.
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: null, calls });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(result.outcome.status === "job_not_found", `job 없으면 job_not_found여야 한다 (실제: ${result.outcome.status})`);
+    console.log("✅ 존재하지 않는 job -> job_not_found");
+  }
+
+  // 8-4) 이미 조사 체크포인트를 벗어난 job(예: 이미 review까지 간 경우)은 write/reject 둘 다
+  //      다시 실행하지 않는다 - 중복 클릭이나 CLI로 이미 처리된 뒤 눌린 버튼을 안전하게 막는다.
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob({ status: "review" }), calls });
+    const writeResult = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(writeResult.outcome.status === "already_final", `이미 review면 already_final이어야 한다 (실제: ${writeResult.outcome.status})`);
+    assert(calls.triggerWriting === 0, "체크포인트를 벗어난 job에서 triggerWriting을 호출하면 안 된다");
+
+    const rejectResult = await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(rejectResult.outcome.status === "already_final", `이미 review면 already_final이어야 한다 (실제: ${rejectResult.outcome.status})`);
+    assert(calls.rejectJob === 0, "체크포인트를 벗어난 job에서 rejectJob을 호출하면 안 된다");
+    console.log("✅ 체크포인트를 벗어난 job -> write/reject 모두 already_final, 재실행 없음");
+  }
+
+  // 8-5) reject: rejectJob을 호출하고 중단 메시지를 보낸다.
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob(), calls });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(result.outcome.status === "rejected", `reject는 rejected여야 한다 (실제: ${result.outcome.status})`);
+    assert(calls.rejectJob === 1, "reject는 rejectJob을 1회 호출해야 한다");
+    assert(calls.triggerWriting === 0, "reject에서 원고 작성을 호출하면 안 된다");
+    assert(result.message.includes("중단됨"), "중단 메시지가 있어야 한다");
+    console.log("✅ reject -> rejectJob 호출, 중단 메시지");
+  }
+
+  // 8-6) write 성공: triggerWriting을 호출하고, 실제 완료 알림은 triggerWriting 내부
+  //      (notifyArticleReady)에서 이미 나갔다는 전제로 여기서는 빈 메시지를 돌린다(중복 발송 방지).
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob(), calls, writeOutcome: { status: "success" } });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(result.outcome.status === "write_result", `write는 write_result여야 한다 (실제: ${result.outcome.status})`);
+    assert(calls.triggerWriting === 1, "write는 triggerWriting을 1회 호출해야 한다");
+    assert(result.message === "", "write 성공 시 중복 메시지를 보내면 안 된다(완료 알림은 triggerWriting 내부에서 나간다)");
+    console.log("✅ write 성공 -> triggerWriting 호출, 중복 메시지 없음");
+  }
+
+  // 8-7) write가 건너뜀(skipped)을 반환하면 그 사유를 그대로 안내한다.
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({
+      job: makeResearchJob(),
+      calls,
+      writeOutcome: { status: "skipped", reason: "이미 처리된 job입니다 (상태: review)" },
+    });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(result.message.includes("건너뜀"), "건너뜀 안내가 있어야 한다");
+    assert(result.message.includes("상태: review"), "건너뛴 사유가 그대로 보여야 한다");
+    console.log("✅ write skipped -> 사유 그대로 안내");
+  }
+
+  // 8-8) write가 실패하면 에러 내용을 그대로 안내한다(원고 자체는 만들어지지 않은 상태다).
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({
+      job: makeResearchJob(),
+      calls,
+      writeOutcome: { status: "failed", error: "claude가 종료 코드 1로 끝났습니다" },
+    });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(result.message.includes("원고 작성 실패"), "실패 안내가 있어야 한다");
+    assert(result.message.includes("종료 코드 1"), "실패 사유가 그대로 보여야 한다");
+    console.log("✅ write 실패 -> 실패 사유 그대로 안내");
+  }
+
+  // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), calls });
+    const selectionResult = await bot.handleCallbackQuery(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(
+      selectionResult.outcome.status === "ignored" && selectionResult.outcome.reason === "not_a_selection",
+      `research: 데이터는 키워드 선택 핸들러에서 무시돼야 한다 (실제: ${JSON.stringify(selectionResult.outcome)})`
+    );
+
+    const reviewCalls = newReviewCalls();
+    const reviewBot = makeReviewBot({ job: makeReviewJob(), calls: reviewCalls });
+    const reviewResult = await reviewBot.handleArticleReviewCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(
+      reviewResult.outcome.status === "ignored" && reviewResult.outcome.reason === "not_a_review",
+      `research: 데이터는 원고 검수 핸들러에서 무시돼야 한다 (실제: ${JSON.stringify(reviewResult.outcome)})`
+    );
+    console.log("✅ research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않음");
+  }
+
   console.log("\n✅ TelegramBot callback 핸들러 테스트 완료");
 }
 

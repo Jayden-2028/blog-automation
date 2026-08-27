@@ -29,6 +29,7 @@
     "test:telegraph-nodes": "tsx src/services/telegraph/testMarkdownToTelegraphNodes.ts",
     "test:fact-card": "tsx src/workflows/research/testBuildFactCard.ts",
     "test:article-review-callback": "tsx src/notifications/testArticleReviewCallbackData.ts",
+    "test:research-decision-callback": "tsx src/notifications/testResearchDecisionCallbackData.ts",
     "job:write": "tsx src/workflows/writing/runArticleJobCli.ts",
     "job:research": "tsx src/workflows/research/runResearchStageCli.ts",
     "job:reject": "tsx src/workflows/writing/rejectJobCli.ts",

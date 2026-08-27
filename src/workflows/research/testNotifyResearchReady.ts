@@ -132,6 +132,30 @@ function main(): void {
   );
   console.log(`✅ 출처 40건(요약 실패) -> ${manyMessages.length}개 메시지로 분할, 각각 제한 이내`);
 
+  // 8) 회귀(2026-08-28 사용자 피드백): "진행하려면 npm run job:write --"가 텍스트로만 안내돼
+  // 폰에서 터미널로 명령어를 옮겨 쳐야 했다 - 마지막 메시지에 원고 작성/중단 버튼이 붙어야 한다.
+  const buttonMessages = buildResearchPreviewMessages(makeJob(), sources, okSummary("- 요약"));
+  const lastMessage = buttonMessages[buttonMessages.length - 1];
+  const buttonRows = lastMessage.replyMarkup?.inline_keyboard ?? [];
+  assert(buttonRows.length === 1 && buttonRows[0].length === 2, `버튼은 한 행에 2개(작성/중단)여야 한다 (실제: ${JSON.stringify(buttonRows)})`);
+  assert(
+    buttonRows[0].some((b) => "callback_data" in b && b.callback_data === `research:write:${makeJob().id}`),
+    "원고 작성 버튼의 callback_data가 정확해야 한다"
+  );
+  assert(
+    buttonRows[0].some((b) => "callback_data" in b && b.callback_data === `research:reject:${makeJob().id}`),
+    "중단 버튼의 callback_data가 정확해야 한다"
+  );
+  console.log("✅ 마지막 메시지에 원고 작성/중단 버튼 부착(callback_data 정확)");
+
+  // 9) 다른 메시지들(마지막이 아닌)에는 버튼이 없어야 한다 - Telegram은 메시지당 버튼 세트가 하나다.
+  const earlierMessages = buttonMessages.slice(0, -1);
+  assert(
+    earlierMessages.every((m) => !m.replyMarkup),
+    "마지막이 아닌 메시지에는 버튼이 없어야 한다"
+  );
+  console.log("✅ 마지막 메시지에만 버튼 부착");
+
   console.log("\n✅ buildResearchPreviewMessages 테스트 완료");
 }
 

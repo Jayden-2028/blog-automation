@@ -9,11 +9,16 @@
 import { getKeywordRankingByRunAndRank } from "../services/supabase/repositories/keywordRankingRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
+import { runWritingStage } from "../workflows/writing/runArticleJob.js";
+import { notifyArticleReady } from "../workflows/writing/notifyArticleReady.js";
+import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
+import { parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
+import type { ResearchDecisionAction } from "./researchDecisionCallbackData.js";
 import type { ArticleJobRow, ArticleJobStatus, KeywordRankingRow } from "../types/database.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
@@ -73,6 +78,30 @@ export type HandleArticleReviewResult = {
   message: string;
 };
 
+// ---------- 자료조사 체크포인트(진행/중단) callback ----------
+// SPRINT_2_DESIGN.md 13-3절 ①, 2026-08-28 추가. review(위)와도 완전히 다른 액션 집합
+// (write/reject)이라 별도 outcome 타입으로 둔다. write는 review의 confirm/edit/discard와 달리
+// 가벼운 상태 변경이 아니라 실제로 runWritingStage(최대 수 분)를 호출한다 - Go 버튼이 제목 생성
+// (약 25초)을 콜백 처리 안에서 그대로 실행하는 것과 같은 패턴을 그대로 확장한 것이다.
+
+export type TriggerWritingOutcome =
+  | { status: "success" }
+  | { status: "skipped"; reason: string }
+  | { status: "failed"; error: string };
+
+export type HandleResearchDecisionOutcome =
+  | { status: "ignored"; reason: "not_a_research_decision" | "wrong_chat" }
+  | { status: "job_not_found" }
+  /** 이미 조사 단계를 벗어난 job(중복 클릭 등) - write/reject 둘 다 다시 실행하지 않는다. */
+  | { status: "already_final"; job: ArticleJobRow }
+  | { status: "rejected"; job: ArticleJobRow }
+  | { status: "write_result"; job: ArticleJobRow; result: TriggerWritingOutcome };
+
+export type HandleResearchDecisionResult = {
+  outcome: HandleResearchDecisionOutcome;
+  message: string;
+};
+
 export type TelegramBotOptions = {
   botToken: string;
   /** 이 chat에서 온 callback만 처리한다. */
@@ -94,6 +123,14 @@ export type TelegramBotOptions = {
   /** 의학 교차확인 처리에 쓴다. jobId로 job을 직접 조회한다(키워드 선택과 달리 run/rank가 없다). */
   loadJobById?: (jobId: string) => Promise<ArticleJobRow | null>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
+  /**
+   * research:write 콜백에서 호출한다. 기본 구현은 job:write CLI와 동일하게 runWritingStage 후
+   * 성공하면 notifyArticleReady로 알린다(원고 보기 버튼이 붙은 진짜 완료 메시지는 거기서 나간다).
+   * 테스트에서는 실제 LLM/Telegram 호출 없이 결과만 주입한다.
+   */
+  triggerWriting?: (jobId: string) => Promise<TriggerWritingOutcome>;
+  /** research:reject 콜백에서 호출한다. rejectJobCli.ts와 같은 함수를 쓴다. */
+  rejectJob?: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 };
 
 export class TelegramBot {
@@ -107,6 +144,8 @@ export class TelegramBot {
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
+  private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
+  private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
   constructor(options: TelegramBotOptions) {
     this.botToken = options.botToken;
@@ -126,6 +165,20 @@ export class TelegramBot {
     this.loadJobById = options.loadJobById ?? ((jobId) => ArticleJobRepository.findById(jobId));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
+    this.triggerWriting =
+      options.triggerWriting ??
+      (async (jobId) => {
+        const result = await runWritingStage(jobId);
+        if (result.status === "success") {
+          // 원고 보기 버튼이 붙은 진짜 완료 메시지는 여기서 나간다 - handleResearchDecisionCallback은
+          // 짧은 확인 문구만 추가로 보낸다(respondToResearchDecision 참고).
+          await notifyArticleReady(result);
+          return { status: "success" };
+        }
+        if (result.status === "skipped") return { status: "skipped", reason: result.reason };
+        return { status: "failed", error: result.error };
+      });
+    this.rejectJob = options.rejectJob ?? ((jobId, reason) => rejectArticleJob(jobId, reason, "telegram"));
   }
 
   static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
@@ -323,6 +376,80 @@ export class TelegramBot {
     };
   }
 
+  // ---------- 자료조사 체크포인트(진행/중단) ----------
+  // SPRINT_2_DESIGN.md 13-3절 ①, 2026-08-28 추가.
+
+  /** job이 아직 조사 단계에 머물러 있는지(write/reject 둘 다 아직 유효한지) 확인한다. */
+  private isStillAtResearchCheckpoint(job: ArticleJobRow): boolean {
+    return job.status === "researching" || job.status === "selected";
+  }
+
+  /**
+   * "research:<action>:<jobId>" callback을 처리한다. handleCallbackQuery/handleArticleReviewCallback과
+   * 완전히 다른 대상·액션 집합이라 별도 메서드로 둔다 - pollOnce가 둘 다 실패했을 때만 이걸 시도한다.
+   */
+  async handleResearchDecisionCallback(query: TelegramCallbackQuery): Promise<HandleResearchDecisionResult> {
+    const parsed = parseResearchDecisionCallbackData(query.data);
+    if (!parsed) {
+      return { outcome: { status: "ignored", reason: "not_a_research_decision" }, message: "" };
+    }
+
+    const fromChatId = query.message?.chat?.id;
+    if (fromChatId !== undefined && String(fromChatId) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+
+    const job = await this.loadJobById(parsed.jobId);
+    if (!job) {
+      return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
+    }
+
+    if (!this.isStillAtResearchCheckpoint(job)) {
+      // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
+      return {
+        outcome: { status: "already_final", job },
+        message: `⏭ 이미 처리된 job입니다 (상태: ${job.status})`,
+      };
+    }
+
+    if (parsed.action === "reject") {
+      const result = await this.rejectJob(job.id, "Telegram 버튼으로 중단");
+      // result.status는 위 isStillAtResearchCheckpoint 확인 직후라 사실상 항상 "rejected"이지만,
+      // 두 확인 사이에 다른 경로로 상태가 바뀌는 경합을 대비해 방어적으로 분기한다.
+      if (result.status !== "rejected") {
+        return {
+          outcome: { status: "already_final", job },
+          message: `⏭ 이미 처리된 job입니다 (상태: ${job.status})`,
+        };
+      }
+      return {
+        outcome: { status: "rejected", job: result.job },
+        message: `🗑 <b>중단됨</b>\n${escapeTelegramHtml(job.keyword)}`,
+      };
+    }
+
+    // write: runWritingStage(최대 수 분)를 실제로 실행한다. 완료/실패와 무관하게 예외를 밖으로
+    // 던지지 않는다(triggerWriting의 기본 구현이 이미 그렇게 되어 있다) - pollOnce가 이 update
+    // 하나 때문에 죽으면 이후 update가 전부 막힌다.
+    const writeResult = await this.triggerWriting(job.id);
+
+    if (writeResult.status === "success") {
+      // 원고 보기 버튼이 붙은 진짜 완료 메시지는 triggerWriting 안에서 이미 발송됐다(notifyArticleReady).
+      // 여기서 또 보내면 중복이라 빈 메시지를 돌린다 - respondToResearchDecision이 빈 메시지는 안 보낸다.
+      return { outcome: { status: "write_result", job, result: writeResult }, message: "" };
+    }
+    if (writeResult.status === "skipped") {
+      return {
+        outcome: { status: "write_result", job, result: writeResult },
+        message: `⏭ 건너뜀: ${escapeTelegramHtml(writeResult.reason)}`,
+      };
+    }
+    return {
+      outcome: { status: "write_result", job, result: writeResult },
+      message: `❌ <b>원고 작성 실패</b>\n${escapeTelegramHtml(job.keyword)}\n${escapeTelegramHtml(writeResult.error)}`,
+    };
+  }
+
   /**
    * confirm/edit/discard 버튼을 눌린 결과로 갱신한다. 세 버튼 모두 남기되(재확인 흐름을 위해)
    * 눌린 버튼만 체크 표시로 바꾼다.
@@ -355,6 +482,39 @@ export class TelegramBot {
     });
   }
 
+  /**
+   * 원고 작성/중단 버튼을 눌린 결과로 갱신한다. reject 실패 후 재시도가 막히는 것과 달리(위
+   * handleResearchDecisionCallback 주석 참고), write 실패 시 job.status가 "writing"으로 남아
+   * 버튼으로는 재시도할 수 없다(체크포인트 상태 확인을 벗어난다) - 그래도 버튼은 눌린 채로 표시해
+   * 사용자가 무엇을 눌렀는지 알 수 있게 한다. 재시도는 `npm run job:write -- <jobId>`로 한다.
+   */
+  private async markResearchButtonsDecided(query: TelegramCallbackQuery, action: ResearchDecisionAction): Promise<void> {
+    const keyboard = query.message?.reply_markup?.inline_keyboard;
+    const messageId = query.message?.message_id;
+    if (!keyboard || messageId === undefined) return;
+
+    const LABELS: Record<ResearchDecisionAction, string> = {
+      write: "원고 작성",
+      reject: "중단",
+    };
+
+    const updated = keyboard.map((row) =>
+      row.map((button) => {
+        const parsedButton = parseResearchDecisionCallbackData(button.callback_data);
+        if (!parsedButton) return button;
+
+        const selected = parsedButton.action === action;
+        return { ...button, text: selected ? `✅ ${LABELS[parsedButton.action]}` : LABELS[parsedButton.action] };
+      })
+    );
+
+    await this.post("editMessageReplyMarkup", {
+      chat_id: this.chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: updated },
+    });
+  }
+
   // ---------- 수신 루프 ----------
 
   /**
@@ -368,6 +528,7 @@ export class TelegramBot {
     processed: number;
     results: HandleCallbackResult[];
     reviewResults: HandleArticleReviewResult[];
+    researchDecisionResults: HandleResearchDecisionResult[];
     errors: string[];
   }> {
     const lastUpdateId = await TelegramOffsetRepository.getLastUpdateId(this.receiverId);
@@ -375,6 +536,7 @@ export class TelegramBot {
 
     const results: HandleCallbackResult[] = [];
     const reviewResults: HandleArticleReviewResult[] = [];
+    const researchDecisionResults: HandleResearchDecisionResult[] = [];
     const errors: string[] = [];
     let maxUpdateId = lastUpdateId ?? -1;
 
@@ -386,13 +548,20 @@ export class TelegramBot {
       try {
         const result = await this.handleCallbackQuery(update.callback_query);
 
-        // 키워드 선택 형식이 아니면(우리 버튼이 아니거나 "review:" 형식) 원고 검수 콜백을 시도한다.
-        // 두 파서는 서로 배타적이라(testArticleReviewCallbackData.ts로 확인) 이중 처리 위험이 없다.
+        // 키워드 선택 형식이 아니면(우리 버튼이 아니거나 "review:"/"research:" 형식) 다음 파서를
+        // 시도한다. 세 파서는 서로 배타적이라(각 test*CallbackData.ts로 확인) 이중 처리 위험이 없다.
         if (result.outcome.status === "ignored" && result.outcome.reason === "not_a_selection") {
           const reviewResult = await this.handleArticleReviewCallback(update.callback_query);
           if (reviewResult.outcome.status !== "ignored") {
             reviewResults.push(reviewResult);
             await this.respondToArticleReview(update.callback_query, reviewResult);
+            continue;
+          }
+
+          const researchResult = await this.handleResearchDecisionCallback(update.callback_query);
+          if (researchResult.outcome.status !== "ignored") {
+            researchDecisionResults.push(researchResult);
+            await this.respondToResearchDecision(update.callback_query, researchResult);
             continue;
           }
         }
@@ -410,7 +579,7 @@ export class TelegramBot {
       await TelegramOffsetRepository.setLastUpdateId(maxUpdateId, this.receiverId);
     }
 
-    return { processed: updates.length, results, reviewResults, errors };
+    return { processed: updates.length, results, reviewResults, researchDecisionResults, errors };
   }
 
   /** respondToCallback과 같은 원칙(§answerCallbackQuery 만료 무시)으로 검수 결과를 알린다. */
@@ -421,6 +590,29 @@ export class TelegramBot {
 
     if (result.outcome.status === "reviewed") {
       await this.markReviewButtonsDecided(query, result.outcome.action).catch(() => {});
+    }
+
+    if (result.message) {
+      await this.sendMessage(result.message);
+    }
+  }
+
+  /**
+   * respondToArticleReview와 같은 원칙(§answerCallbackQuery 만료 무시)으로 조사 체크포인트
+   * 결정을 알린다. write는 처리에 최대 수 분이 걸리므로 answerCallbackQuery는 거의 항상 만료돼
+   * 있다 - 로딩 표시만 사라질 뿐이고, 실제 완료 알림은 triggerWriting 내부(notifyArticleReady)에서
+   * 별도로 나간다.
+   */
+  private async respondToResearchDecision(query: TelegramCallbackQuery, result: HandleResearchDecisionResult): Promise<void> {
+    if (result.outcome.status === "ignored") return;
+
+    await this.answerCallbackQuery(query.id, result.message.replace(/<[^>]+>/g, "").slice(0, 200) || "처리 중...").catch(() => {});
+
+    if (result.outcome.status === "rejected") {
+      await this.markResearchButtonsDecided(query, "reject").catch(() => {});
+    }
+    if (result.outcome.status === "write_result") {
+      await this.markResearchButtonsDecided(query, "write").catch(() => {});
     }
 
     if (result.message) {

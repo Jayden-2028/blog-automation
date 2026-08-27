@@ -16,7 +16,7 @@ async function main(): Promise<void> {
       generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
   });
 
-  const { processed, results, errors } = await bot.pollOnce();
+  const { processed, results, reviewResults, researchDecisionResults, errors } = await bot.pollOnce();
 
   if (processed === 0) return;
 
@@ -45,6 +45,32 @@ async function main(): Promise<void> {
       case "ignored":
         console.log(`   · 무시 (${outcome.reason})`);
         break;
+    }
+  }
+
+  for (const result of reviewResults) {
+    const { outcome } = result;
+    if (outcome.status === "reviewed") {
+      console.log(`   ⚕️ 의학 교차확인 ${outcome.action} -> job ${outcome.job.id} (${outcome.job.keyword})`);
+    } else if (outcome.status === "job_not_found") {
+      console.log(`   · 의학 교차확인: job을 찾을 수 없음`);
+    }
+  }
+
+  for (const result of researchDecisionResults) {
+    const { outcome } = result;
+    if (outcome.status === "rejected") {
+      console.log(`   🗑 조사 후 중단 -> job ${outcome.job.id} (${outcome.job.keyword})`);
+    } else if (outcome.status === "write_result") {
+      // write는 이 for 루프가 끝나기 전에 이미 최대 수 분이 지났다는 뜻이다(동기 처리) - 정상이다.
+      console.log(
+        `   ✍️ 원고 작성(${outcome.result.status}) -> job ${outcome.job.id} (${outcome.job.keyword})` +
+          (outcome.result.status === "failed" ? ` - ${outcome.result.error}` : "")
+      );
+    } else if (outcome.status === "already_final") {
+      console.log(`   ↩︎ 조사 체크포인트: 이미 처리됨 -> job ${outcome.job.id} (상태: ${outcome.job.status})`);
+    } else if (outcome.status === "job_not_found") {
+      console.log(`   · 조사 체크포인트: job을 찾을 수 없음`);
     }
   }
 
