@@ -14,6 +14,34 @@
 //   있어야 하기 때문이다.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/**
+ * claude 실행 파일을 찾는다.
+ *
+ * 왜 "claude"만으로는 안 되는가(2026-08-27 실측): launchd로 띄운 job의 PATH는 로그인 셸과 다르다.
+ * 이 맥의 claude는 ~/.local/bin에 있는데 plist PATH에는 그 경로가 없어 `spawn claude ENOENT`로
+ * 제목 생성이 통째로 실패했다. plist PATH를 고치는 것만으로는 다른 호스트에서 또 깨지므로,
+ * 흔한 설치 위치를 직접 확인한다.
+ *
+ * CLAUDE_CLI_PATH 환경변수를 주면 그것을 최우선으로 쓴다.
+ */
+function resolveClaudeBinary(): string {
+  const fromEnv = process.env.CLAUDE_CLI_PATH;
+  if (fromEnv) return fromEnv;
+
+  const candidates = [
+    join(homedir(), ".local/bin/claude"),
+    "/opt/homebrew/bin/claude",
+    "/usr/local/bin/claude",
+  ];
+  const found = candidates.find((path) => existsSync(path));
+
+  // 못 찾으면 PATH 탐색에 맡긴다(대화형 셸에서 실행하는 경우 등).
+  return found ?? "claude";
+}
 
 /** 기본 타임아웃. 제목 3개 생성에는 충분하고, 원고 생성은 호출자가 늘려 쓴다. */
 export const DEFAULT_HEADLESS_TIMEOUT_MS = 120_000;
@@ -53,7 +81,8 @@ export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Prom
       resolve(result);
     };
 
-    const child = spawn("claude", args, {
+    const claudeBinary = resolveClaudeBinary();
+    const child = spawn(claudeBinary, args, {
       cwd: options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -80,7 +109,7 @@ export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Prom
       clearTimeout(timer);
       finish({
         ok: false,
-        error: `claude 실행 실패: ${error.message}`,
+        error: `claude 실행 실패(${claudeBinary}): ${error.message}`,
         durationMs: Date.now() - startedAt,
       });
     });
