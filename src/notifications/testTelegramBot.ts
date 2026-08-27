@@ -250,6 +250,132 @@ async function main(): Promise<void> {
     console.log("✅ 제목 생성 실패 -> 선택은 정상 완료");
   }
 
+  // ---------- 7) 의학 주제 교차확인(handleArticleReviewCallback) ----------
+  // SPRINT_2_DESIGN.md 5-2절. article_jobs.id(UUID)를 직접 가리키므로 (run_id, rank) 기반
+  // 키워드 선택과는 별도 주입 지점(loadJobById/mergeJobMetadata)으로 테스트한다.
+
+  const REVIEW_JOB_ID = "054bfe0b-5cf7-4386-941f-810146c25e12";
+
+  type ReviewCalls = { loadJobById: number; updateStatus: number; mergeJobMetadata: number };
+  function newReviewCalls(): ReviewCalls {
+    return { loadJobById: 0, updateStatus: 0, mergeJobMetadata: 0 };
+  }
+
+  function makeReviewJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
+    return makeJob({ id: REVIEW_JOB_ID, category: "parenting", metadata: { requiresMedicalReview: true }, ...overrides });
+  }
+
+  function makeReviewBot(opts: { job: ArticleJobRow | null; calls: ReviewCalls }): TelegramBot {
+    return new TelegramBot({
+      botToken: "test-token",
+      chatId: CHAT_ID,
+      loadJobById: async () => {
+        opts.calls.loadJobById++;
+        return opts.job;
+      },
+      updateJobStatus: async (_id, status) => {
+        opts.calls.updateStatus++;
+        return { ...(opts.job ?? makeReviewJob()), status };
+      },
+      mergeJobMetadata: async (_id, patch) => {
+        opts.calls.mergeJobMetadata++;
+        return { ...(opts.job ?? makeReviewJob()), metadata: { ...(opts.job?.metadata ?? {}), ...patch } };
+      },
+    });
+  }
+
+  function reviewQuery(data: string, chatId: string | number = CHAT_ID): TelegramCallbackQuery {
+    return { id: "cbq-review-1", data, message: { message_id: 77, chat: { id: chatId } } };
+  }
+
+  // 7-1) "review:" 형식이 아니면 조용히 무시한다(DB 접근 없음).
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls });
+    for (const data of ["go:18:1", "not-a-review", `sel:18:1`]) {
+      const result = await bot.handleArticleReviewCallback(reviewQuery(data));
+      assert(
+        result.outcome.status === "ignored" && result.outcome.reason === "not_a_review",
+        `review 형식이 아니면 무시해야 한다: ${data} -> ${JSON.stringify(result.outcome)}`
+      );
+    }
+    assert(calls.loadJobById === 0, "무시된 데이터에서 job을 조회하면 안 된다");
+    console.log("✅ review: 형식이 아닌 콜백 -> 무시, DB 접근 없음");
+  }
+
+  // 7-2) 다른 chat에서 온 콜백은 거부한다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`, "999999"));
+    assert(
+      result.outcome.status === "ignored" && result.outcome.reason === "wrong_chat",
+      `다른 chat은 거부해야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.loadJobById === 0, "거부된 chat에서 job을 조회하면 안 된다");
+    console.log("✅ 다른 chat에서 온 review 콜백 -> 거부");
+  }
+
+  // 7-3) job을 찾을 수 없으면 job_not_found.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: null, calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "job_not_found", `job 없으면 job_not_found여야 한다 (실제: ${result.outcome.status})`);
+    console.log("✅ 존재하지 않는 job -> job_not_found");
+  }
+
+  // 7-4) confirm: requiresMedicalReview를 false로 내리고, job 상태(selected/review 등)는 건드리지 않는다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "reviewed" && result.outcome.action === "confirm", "confirm은 reviewed/confirm이어야 한다");
+    assert(calls.mergeJobMetadata === 1, "confirm은 metadata를 갱신해야 한다");
+    assert(calls.updateStatus === 0, "confirm은 job.status를 바꾸면 안 된다(발행 승인이 아니다)");
+    assert(result.message.includes("교차확인 완료"), "확인 메시지가 있어야 한다");
+    console.log("✅ confirm -> metadata만 갱신, status 불변");
+  }
+
+  // 7-5) discard: status를 rejected로 바꾼다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:discard:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "reviewed" && result.outcome.action === "discard", "discard는 reviewed/discard여야 한다");
+    assert(
+      result.outcome.status === "reviewed" && result.outcome.job.status === "rejected",
+      "discard 후 job 상태는 rejected여야 한다"
+    );
+    assert(calls.updateStatus === 1, "discard는 status를 갱신해야 한다");
+    console.log("✅ discard -> status='rejected'");
+  }
+
+  // 7-6) edit: metadata만 남기고 requiresMedicalReview는 여전히 true로 남아야 한다(재확인 전까지 게이트 유지).
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:edit:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "reviewed" && result.outcome.action === "edit", "edit은 reviewed/edit이어야 한다");
+    assert(calls.updateStatus === 0, "edit은 job.status를 바꾸면 안 된다");
+    assert(result.message.includes("수정 필요"), "수정 필요 안내가 있어야 한다");
+    console.log("✅ edit -> metadata만 갱신(게이트는 계속 걸려 있음), status 불변");
+  }
+
+  // 7-7) 키워드 선택 콜백과 원고 검수 콜백이 같은 폴링 루프에서 서로를 침범하지 않는지 -
+  //      handleCallbackQuery가 review: 데이터를 not_a_selection으로 무시하는지 교차 확인.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(
+      result.outcome.status === "ignored" && result.outcome.reason === "not_a_selection",
+      `review: 데이터는 키워드 선택 핸들러에서 무시돼야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.loadRanking === 0, "review: 데이터로 키워드 랭킹을 조회하면 안 된다");
+    console.log("✅ review: 콜백이 키워드 선택 핸들러를 침범하지 않음");
+  }
+
   console.log("\n✅ TelegramBot callback 핸들러 테스트 완료");
 }
 

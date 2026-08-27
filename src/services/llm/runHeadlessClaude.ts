@@ -1,10 +1,16 @@
 // Claude Code를 헤드리스(`claude -p`)로 1회 실행하는 얇은 래퍼.
 //
-// Sprint 1에서는 추천 제목 생성에만 쓰지만, Sprint 2의 원고 생성도 같은 경로를 쓴다. 그래서
-// "무엇을 만들지"(프롬프트)는 호출자가 정하고, 이 모듈은 실행·타임아웃·출력 파싱만 담당한다.
+// Sprint 1에서는 추천 제목 생성에, Sprint 2에서는 원고 생성(workflows/writing/runArticleJob.ts)에
+// 쓴다. "무엇을 만들지"(프롬프트)는 호출자가 정하고, 이 모듈은 실행·타임아웃·출력 파싱만 담당한다.
 //
-// 왜 API가 아니라 CLI인가: 기존 블로그 작성 스킬(entertainment/parenting/trend-blog-writer)을
-// 그대로 재사용하려면 Claude Code 세션이 필요하다. 프롬프트로 이식하면 스킬이 두 벌이 된다.
+// 왜 API가 아니라 CLI인가: Claude Code의 Skill(플러그인) 생태계를 그대로 재사용하려면 Claude Code
+// 세션이 필요하다 - 프롬프트로 이식하면 스킬이 두 벌이 된다. 어느 스킬을 쓸지는 호출자의 프롬프트가
+// 정한다(이 모듈은 관여하지 않는다).
+//
+// 원래 계획은 entertainment/parenting/trend-blog-writer(anthropic-skills:*)를 그대로 쓰는
+// 것이었으나, 2026-08-27 실측 확인 결과 그 네임스페이스는 대화형 세션에만 있고 헤드리스
+// CLI(`claude -p`)에서는 로드되지 않았다. 대신 moai-marketer:content-blog + moai-writer:korean-humanize를
+// 쓴다(둘 다 헤드리스에서 사용 가능함을 확인함, SPRINT_2_DESIGN.md 2절).
 //
 // 안전 기본값:
 // - 도구 사용을 켜지 않는다(allowedTools 기본 없음). 제목 생성 같은 순수 텍스트 작업에 파일
