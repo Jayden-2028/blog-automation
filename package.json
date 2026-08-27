@@ -29,6 +29,7 @@
     "notify:keywords": "tsx src/workflows/keyword-notification/runKeywordNotification.ts",
     "test:notification": "tsx src/workflows/keyword-notification/testKeywordNotification.ts",
     "test:callback-data": "tsx src/notifications/testTelegramCallbackData.ts",
+    "test:telegram-bot": "tsx src/notifications/testTelegramBot.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "job:daily-keyword": "tsx src/jobs/dailyKeywordJob.ts",
     "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts"
