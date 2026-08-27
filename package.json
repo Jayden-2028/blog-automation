@@ -32,6 +32,7 @@
     "test:telegram-bot": "tsx src/notifications/testTelegramBot.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "job:daily-keyword": "tsx src/jobs/dailyKeywordJob.ts",
+    "job:telegram-poll": "tsx src/jobs/telegramPollJob.ts",
     "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts"
   },
   "dependencies": {
