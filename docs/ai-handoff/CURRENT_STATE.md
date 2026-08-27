@@ -4,13 +4,13 @@
 
 ## 한 줄 상태
 
-**Sprint 0 완주.** 매일 08:00 launchd가 키워드 TOP 10을 Telegram으로 보내는 파이프라인이 실제로
+**Sprint 0 완주.** 매일 09:00 launchd가 키워드 TOP 10을 Telegram으로 보내는 파이프라인이 실제로
 동작한다(무인 job 전 구간 검증 완료, run #17). 다음은 Sprint 1(Telegram 인라인 버튼 선택 루프).
 
 ## 지금 돌아가는 것
 
 ```
-launchd(매일 08:00) -> npm run job:daily-keyword
+pmset(08:55 자동 기상) -> launchd(09:00) -> caffeinate -i -> npm run job:daily-keyword
   [trendCollect] Creator Advisor 크롤링 -> trend_candidates upsert  (~5초, 220건)
   [seed]         seed_queries(44) + trend_candidates(40) = 84건
   [collect]      NAVER 검색 API -> 후보 ~2100건                      (~70초)
@@ -119,9 +119,80 @@ Supabase(PostgrestError)는 `Error` 인스턴스가 아니라 평범한 객체�
 ### 9. launchd 등록
 
 `~/Library/LaunchAgents/com.wooahpapa.blog-automation.daily-keyword.plist`
-매일 08:00, `RunAtLoad=false`, 로그는 `logs/daily-keyword.log`에 append.
+매일 09:00, `RunAtLoad=false`, 로그는 `logs/daily-keyword.log`에 append.
 
 해제: `launchctl bootout gui/$(id -u)/com.wooahpapa.blog-automation.daily-keyword`
+
+**최초 08:00 등록분은 실패했다 - 아래 "운영 노트: 잠자기로 인한 조용한 실패" 참고.**
+
+## 운영 노트: 잠자기로 인한 조용한 실패 (2026-08-27)
+
+첫 자동 실행(08-27 08:22)이 실패했다. 사용자는 "맥이 꺼져 있어서 발송이 안 됐다"고 판단했지만
+실제로는 **job이 실행됐다가 도중에 죽은 것**이었다. 로그를 직접 열어보고서야 알았다.
+
+### 무슨 일이 있었나
+
+```
+[trendCollect] 5초   성공  <- trend_candidates에 205행 실제로 저장됨
+[seed]         0.1초 성공
+[collect]      70초   ...  <- 여기서 프로세스가 통째로 사라짐
+(이후 로그 없음)
+```
+
+`discovery_runs`에 새 row가 없고, 로그에 `❌ ... 단계 실패`도 없었다. 예외였다면 `runStage`가
+잡아서 기록했을 것이므로, **예외가 아니라 강제 종료**였다.
+
+### 근본 원인
+
+```
+$ pmset -g custom
+ sleep  1      <- 유휴 1분 후 시스템 잠자기
+```
+
+이 맥은 유휴 1분이면 잠든다. 그런데 launchd로 띄운 백그라운드 job은 **전원 assertion을 잡지
+않는다.** 맥이 08:22에 (시스템 알람으로) 잠깐 깨어나 job을 시작했지만, 1분 뒤 다시 잠들면서
+70초짜리 collect 단계가 죽었다.
+
+### 해결
+
+plist의 `ProgramArguments`를 `caffeinate -i`로 감쌌다:
+
+```
+/usr/bin/caffeinate -i /opt/homebrew/bin/npm run job:daily-keyword
+```
+
+`-i`는 **이 job이 도는 동안에만** 유휴 잠자기를 막고 job이 끝나면 assertion이 사라진다.
+맥의 전역 전원 설정(`pmset sleep`)은 건드리지 않는다.
+
+추가로 실행 시각을 09:00으로 옮기고, 맥이 스스로 깨어나도록 예약 기상을 걸었다:
+
+```bash
+sudo pmset repeat wakeorpoweron MTWRFSU 08:55:00   # 해제: sudo pmset repeat cancel
+```
+
+전체 체인: `08:55 pmset 기상` -> `09:00 launchd 발화` -> `caffeinate -i`가 85초 실행 보호
+
+### 검증 방법 (다음에도 이렇게 하면 된다)
+
+내일 아침을 기다릴 필요 없다. `kickstart`는 launchd의 **실제 실행 환경**(PATH, cwd, 비대화형
+세션)으로 즉시 실행한다:
+
+```bash
+launchctl kickstart gui/$(id -u)/com.wooahpapa.blog-automation.daily-keyword
+launchctl print gui/$(id -u)/com.wooahpapa.blog-automation.daily-keyword | grep -E "runs|last exit"
+```
+
+이 방법으로 검증한 결과 8단계 전부 success, `last exit code = 0`, 85초, run #18 Telegram 발송
+완료였다. 이 과정에서 **Playwright가 비대화형 launchd 세션에서도 정상 동작한다**는 것도 확인됐다
+(가장 우려하던 위험이었다).
+
+### 여기서 배운 것
+
+**강제 종료된 프로세스는 실패 알림을 보낼 수 없다.** 어제 만든 알림(`notifyPipelineFailure`)은
+예외를 잡아서 보내는 구조라 이런 조용한 죽음을 못 잡는다. `caffeinate`가 이 시나리오를 크게
+줄여주지만 완전히 없애지는 못한다(전원 차단, 강제 재부팅 등). 근본 해결은 "오늘 성공한 run이
+없으면 알린다"는 외부 감시인데, 감시자가 같은 맥에 있으면 같은 문제를 겪는다 - 클라우드로
+나가야 하며 Sprint 1의 텔레그램 수신 서버 설계와 함께 다룬다.
 
 ## 검증된 명령 (2026-08-26 전부 green)
 
@@ -182,7 +253,9 @@ npm run debug:ca-snapshots               # 신규, DOM 스냅샷 -> .local/dom-s
 3. **Top 10에 같은 주제가 2번씩 들어간다.** `DIVERSITY_CONFIG.maxPerSeedQuery = 2` 설정대로 동작
    중이다. 1로 낮추면 10개 주제가 되지만, 후보가 얕은 날 품질 낮은 키워드가 밀려 들어올 수 있어
    며칠 운영 후 판단하기로 했다.
-4. **맥이 자거나 꺼져 있으면 08:00 실행이 건너뛰어진다.** launchd의 구조적 한계.
+4. **맥이 09:00에 완전히 꺼져 있으면 여전히 실행되지 않는다.** `caffeinate`는 "도는 중에 잠들지
+   않게" 할 뿐 "깨우지는" 못하고, `pmset repeat`도 전원이 차단된 상태에서는 한계가 있다.
+   더 큰 문제는 **강제 종료 시 실패 알림이 나가지 않는다**는 점이다(위 운영 노트 참고).
    Creator Advisor 크롤링이 로그인된 브라우저 프로필에 묶여 있어 클라우드 이전이 단순하지 않다.
 5. `images`/`analytics` 타입 정의 없음 (Codex 위임 적합).
 6. Supabase CLI 미설치. migration history와 로컬 파일이 계속 어긋나 있다.
