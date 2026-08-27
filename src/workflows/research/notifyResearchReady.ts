@@ -2,20 +2,23 @@
 //
 // 왜 필요한가(2026-08-27, 사용자 피드백): 첫 실제 원고("2026 경복궁 별빛야행")는 프롬프트 규칙대로
 // 정확했지만, 수집된 근거 안에 "예매가 이미 마감됐고 당첨자 발표까지 끝났다"는 정보가 있었는데도
-// 3분(185초) 분량의 LLM 비용을 쓴 뒤에야 그 사실을 알게 됐다. 검색량이 오른 이유도 신규 관심이
-// 아니라 기응모자들의 당첨 확인 트래픽으로 추정된다 - 검색 신호만으로는 이런 "이미 끝난 이벤트"를
-// 가려낼 수 없다.
+// 3분(185초) 분량의 LLM 비용을 쓴 뒤에야 그 사실을 알게 됐다. 그래서 조사(research)와 작성(writing)
+// 사이에 사람이 값싸게 판단할 수 있는 지점을 둔다.
 //
-// 그래서 조사(research)와 작성(writing) 사이에 사람이 값싸게(조사만 2초, LLM 비용 0) 판단할 수
-// 있는 지점을 둔다. buildFactCard(원고 프롬프트용, 출처당 최대 3,000자)를 그대로 보내면 읽기
-// 부담이 커서, 여기서는 출처당 제목+등급+짧은 발췌만 보이는 압축 미리보기를 따로 만든다.
+// 요약을 LLM에 맡기는 이유(2026-08-27, 두 번째 실측 피드백): 처음에는 출처별 제목+150자 발췌+URL을
+// 그대로 나열했는데, 실제로 받아보니 여러 출처가 네비게이션 메뉴 텍스트로 시작해 있어 링크를
+// 일일이 열어봐야 판단할 수 있었다 - "체크포인트에서 값싸게 판단한다"는 취지와 반대였다.
+// summarizeResearchForReview()가 만든 요약(핵심 사실 + 마감 여부 경고)을 본문으로 쓰고, 원문 발췌
+// 나열은 요약 생성이 실패했을 때만 폴백으로 보여준다.
 
 import { escapeTelegramHtml, splitIntoChunks, TELEGRAM_MESSAGE_CHAR_LIMIT, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
+import { summarizeResearchForReview } from "./summarizeResearchForReview.js";
+import type { SummarizeResearchOptions, SummarizeResearchResult } from "./summarizeResearchForReview.js";
 import type { ArticleJobRow, SourceAuthorityLevel, SourceRow } from "../../types/database.js";
 
-/** 미리보기에 보일 출처당 발췌 길이. 판단에 필요한 만큼만 - 전문은 작성 단계에서 팩트 카드로 쓴다. */
-const EXCERPT_LENGTH = 150;
+/** 요약 실패 시 폴백으로 보여줄 출처당 발췌 길이. */
+const FALLBACK_EXCERPT_LENGTH = 150;
 
 const AUTHORITY_TAG: Record<SourceAuthorityLevel, string> = {
   official: "공공",
@@ -24,43 +27,86 @@ const AUTHORITY_TAG: Record<SourceAuthorityLevel, string> = {
   community: "커뮤니티",
 };
 
-export function buildResearchPreviewMessages(job: ArticleJobRow, sources: SourceRow[]): TelegramOutgoingMessage[] {
+function buildSourceCountLine(sources: SourceRow[]): string {
   const counts = { official: 0, medical: 0, news: 0, community: 0 };
   for (const source of sources) {
     if (source.authority) counts[source.authority]++;
   }
+  return `근거 ${sources.length}건 — 공공 ${counts.official} · 의료 ${counts.medical} · 뉴스 ${counts.news} · 커뮤니티 ${counts.community}`;
+}
 
-  const header = [
+function buildHeaderLines(job: ArticleJobRow, sources: SourceRow[]): string[] {
+  return [
     "🔍 <b>자료조사 완료 — 원고를 쓸까요?</b>",
     "",
     `<b>${escapeTelegramHtml(job.keyword)}</b>`,
     `category: ${escapeTelegramHtml(job.category ?? "N/A")} · ${job.total_score ?? "?"}점`,
     "",
-    `근거 ${sources.length}건 — 공공 ${counts.official} · 의료 ${counts.medical} · 뉴스 ${counts.news} · 커뮤니티 ${counts.community}`,
-    "",
-    "아래 출처를 훑어보고 이 키워드가 원고로 쓸 가치가 있는지 판단해주세요.",
-    "특히 마감일·행사 기간처럼 이미 지난 정보가 있는지 확인해주세요.",
-    "",
-    "진행하려면: npm run job:write -- " + job.id,
-    "중단하려면: npm run job:reject -- " + job.id,
-  ].join("\n");
+    buildSourceCountLine(sources),
+  ];
+}
 
-  const sourceLines = sources.map((source, index) => {
+function buildFooterLines(job: ArticleJobRow): string[] {
+  return ["", "진행하려면: npm run job:write -- " + job.id, "중단하려면: npm run job:reject -- " + job.id];
+}
+
+/** 요약 생성이 실패했을 때만 쓰는 폴백 - 출처별 제목+짧은 발췌+URL을 그대로 나열한다. */
+function buildFallbackSourceLines(sources: SourceRow[]): string[] {
+  return sources.map((source, index) => {
     const tag = source.authority ? AUTHORITY_TAG[source.authority] : "미분류";
     const title = source.title ? escapeTelegramHtml(source.title) : "(제목 없음)";
-    const excerpt = source.content ? escapeTelegramHtml(source.content.slice(0, EXCERPT_LENGTH).trim()) : "";
+    const excerpt = source.content ? escapeTelegramHtml(source.content.slice(0, FALLBACK_EXCERPT_LENGTH).trim()) : "";
     const lines = [`${index + 1}. [${tag}] ${title}`];
-    if (excerpt) lines.push(`   ${excerpt}${source.content && source.content.length > EXCERPT_LENGTH ? "…" : ""}`);
+    if (excerpt) lines.push(`   ${excerpt}${source.content && source.content.length > FALLBACK_EXCERPT_LENGTH ? "…" : ""}`);
     if (source.url) lines.push(`   ${source.url}`);
     return lines.join("\n");
   });
+}
 
-  // 헤더와 출처 목록을 합쳐 4000자 단위로 자연스럽게 나눈다 - 출처가 많아도 메시지 발송이 실패하지 않는다.
-  const full = [header, ...sourceLines].join("\n\n");
+/**
+ * 요약 결과를 반영해 미리보기 메시지를 만든다. summary가 성공이면 AI 요약을 본문으로 쓰고,
+ * 실패했으면 출처 나열로 폴백한다(판단할 근거가 아예 없는 것보다는 낫다).
+ */
+export function buildResearchPreviewMessages(
+  job: ArticleJobRow,
+  sources: SourceRow[],
+  summary: SummarizeResearchResult
+): TelegramOutgoingMessage[] {
+  const header = buildHeaderLines(job, sources);
+  const footer = buildFooterLines(job);
+
+  let body: string[];
+  if (summary.ok) {
+    body = ["", escapeTelegramHtml(summary.summary)];
+  } else {
+    body = [
+      "",
+      `⚠️ 요약 생성 실패(${escapeTelegramHtml(summary.error)}) - 아래 원문 발췌를 참고해주세요.`,
+      "",
+      ...buildFallbackSourceLines(sources).flatMap((line) => [line, ""]),
+    ];
+  }
+
+  const full = [...header, ...body, ...footer].join("\n");
   return splitIntoChunks(full, TELEGRAM_MESSAGE_CHAR_LIMIT).map((text) => ({ text }));
 }
 
-export async function notifyResearchReady(job: ArticleJobRow, sources: SourceRow[]): Promise<void> {
-  const messages = buildResearchPreviewMessages(job, sources);
+/**
+ * 근거를 요약하고 Telegram으로 발송까지 한다. job:research CLI가 이 함수 하나만 호출하면 된다.
+ */
+export async function notifyResearchReady(
+  job: ArticleJobRow,
+  sources: SourceRow[],
+  options: SummarizeResearchOptions = {}
+): Promise<void> {
+  const summary = await summarizeResearchForReview(
+    { job: { keyword: job.keyword, headline: job.headline, category: job.category }, sources },
+    options
+  );
+  if (!summary.ok) {
+    console.error("⚠️ 조사 요약 생성 실패 (원문 발췌로 폴백) -", summary.error);
+  }
+
+  const messages = buildResearchPreviewMessages(job, sources, summary);
   await TelegramNotifier.fromEnv().sendMessages(messages);
 }
