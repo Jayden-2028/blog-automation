@@ -12,7 +12,7 @@
 // 6. 이미 진행 중인 job은 버튼으로 되돌려지지 않는다
 
 import { TelegramBot } from "./TelegramBot.js";
-import type { ArticleJobRow, KeywordRankingRow } from "../types/database.js";
+import type { ArticleJobRow, ArticleRow, KeywordRankingRow } from "../types/database.js";
 import type { TelegramCallbackQuery } from "./TelegramBot.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -256,16 +256,45 @@ async function main(): Promise<void> {
 
   const REVIEW_JOB_ID = "054bfe0b-5cf7-4386-941f-810146c25e12";
 
-  type ReviewCalls = { loadJobById: number; updateStatus: number; mergeJobMetadata: number };
+  type ReviewCalls = {
+    loadJobById: number;
+    updateStatus: number;
+    mergeJobMetadata: number;
+    findLatestArticle: number;
+    updateArticleStatus: number;
+  };
   function newReviewCalls(): ReviewCalls {
-    return { loadJobById: 0, updateStatus: 0, mergeJobMetadata: 0 };
+    return {
+      loadJobById: 0,
+      updateStatus: 0,
+      mergeJobMetadata: 0,
+      findLatestArticle: 0,
+      updateArticleStatus: 0,
+    };
   }
 
   function makeReviewJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
     return makeJob({ id: REVIEW_JOB_ID, category: "parenting", metadata: { requiresMedicalReview: true }, ...overrides });
   }
 
-  function makeReviewBot(opts: { job: ArticleJobRow | null; calls: ReviewCalls }): TelegramBot {
+  const REVIEW_ARTICLE_ID = 42;
+
+  function makeReviewBot(opts: { job: ArticleJobRow | null; calls: ReviewCalls; article?: ArticleRow | null }): TelegramBot {
+    const article: ArticleRow | null =
+      opts.article !== undefined
+        ? opts.article
+        : {
+            id: REVIEW_ARTICLE_ID,
+            keyword_id: null,
+            job_id: REVIEW_JOB_ID,
+            title: "제목",
+            content: "본문",
+            status: "review",
+            ai_model: "claude-headless",
+            created_at: "2026-08-28T00:00:00.000Z",
+            updated_at: "2026-08-28T00:00:00.000Z",
+          };
+
     return new TelegramBot({
       botToken: "test-token",
       chatId: CHAT_ID,
@@ -280,6 +309,14 @@ async function main(): Promise<void> {
       mergeJobMetadata: async (_id, patch) => {
         opts.calls.mergeJobMetadata++;
         return { ...(opts.job ?? makeReviewJob()), metadata: { ...(opts.job?.metadata ?? {}), ...patch } };
+      },
+      findLatestArticleByJobId: async () => {
+        opts.calls.findLatestArticle++;
+        return article;
+      },
+      updateArticleStatus: async (_id, status) => {
+        opts.calls.updateArticleStatus++;
+        return article ? { ...article, status } : null;
       },
     });
   }
@@ -325,19 +362,36 @@ async function main(): Promise<void> {
     console.log("✅ 존재하지 않는 job -> job_not_found");
   }
 
-  // 7-4) confirm: requiresMedicalReview를 false로 내리고, job 상태(selected/review 등)는 건드리지 않는다.
+  // 7-4) confirm: 이제 모든 원고 공통 승인이다(SPRINT_3_DESIGN.md 8절, 2026-08-28) - job.status와
+  // 최신 article.status를 approved로 바꾸고, 의학 주제였으면 requiresMedicalReview도 함께 내린다.
+  // ⚠️ 통합 전에는 confirm이 metadata만 갱신하고 status는 건드리지 않았다 - 의미가 바뀐 지점이다.
   {
     const calls = newReviewCalls();
     const bot = makeReviewBot({ job: makeReviewJob(), calls });
     const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
     assert(result.outcome.status === "reviewed" && result.outcome.action === "confirm", "confirm은 reviewed/confirm이어야 한다");
-    assert(calls.mergeJobMetadata === 1, "confirm은 metadata를 갱신해야 한다");
-    assert(calls.updateStatus === 0, "confirm은 job.status를 바꾸면 안 된다(발행 승인이 아니다)");
-    assert(result.message.includes("교차확인 완료"), "확인 메시지가 있어야 한다");
-    console.log("✅ confirm -> metadata만 갱신, status 불변");
+    assert(calls.mergeJobMetadata === 1, "confirm은 metadata를 갱신해야 한다(requiresMedicalReview 등)");
+    assert(calls.updateStatus === 1, "confirm은 job.status를 approved로 바꿔야 한다(이제 이게 발행 승인이다)");
+    assert(calls.findLatestArticle === 1, "confirm은 최신 article을 찾아야 한다");
+    assert(calls.updateArticleStatus === 1, "confirm은 article.status도 approved로 바꿔야 한다");
+    assert(result.message.includes("승인됨"), "승인 메시지가 있어야 한다");
+    assert(result.message.includes("교차확인도 함께 완료"), "의학 주제면 교차확인 완료 안내도 함께 있어야 한다");
+    console.log("✅ confirm(의학) -> job/article 모두 approved + 교차확인 완료 안내");
   }
 
-  // 7-5) discard: status를 rejected로 바꾼다.
+  // 7-4b) confirm: 비의학 원고도 동일하게 승인된다(공통 승인 흐름의 핵심) - 의학 전용 안내 문구는 없다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob({ metadata: { requiresMedicalReview: false } }), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(calls.updateStatus === 1, "비의학 원고도 confirm 시 job.status가 approved로 바뀌어야 한다");
+    assert(calls.updateArticleStatus === 1, "비의학 원고도 article.status가 approved로 바뀌어야 한다");
+    assert(!result.message.includes("교차확인"), "비의학 원고 승인 메시지에는 교차확인 문구가 없어야 한다");
+    console.log("✅ confirm(비의학) -> 동일하게 approved, 의학 전용 문구 없음");
+  }
+
+  // 7-5) discard: status를 rejected로 바꾼다. article 상태는 건드리지 않는다(반려된 원고는 애초에
+  // 발행 대상이 아니므로 article.status를 approved 경로와 대칭으로 바꿀 필요가 없다).
   {
     const calls = newReviewCalls();
     const bot = makeReviewBot({ job: makeReviewJob(), calls });
@@ -348,18 +402,34 @@ async function main(): Promise<void> {
       "discard 후 job 상태는 rejected여야 한다"
     );
     assert(calls.updateStatus === 1, "discard는 status를 갱신해야 한다");
-    console.log("✅ discard -> status='rejected'");
+    assert(calls.updateArticleStatus === 0, "discard는 article.status를 바꾸지 않는다");
+    assert(result.message.includes("반려됨"), "반려 문구여야 한다(구 '폐기됨'에서 변경)");
+    console.log("✅ discard -> status='rejected', article은 불변, '반려됨' 문구");
   }
 
-  // 7-6) edit: metadata만 남기고 requiresMedicalReview는 여전히 true로 남아야 한다(재확인 전까지 게이트 유지).
+  // 7-6) edit: metadata만 남기고 requiresMedicalReview는 여전히 true로 남아야 한다(재확인 전까지
+  // 게이트 유지). job.status도 approved로 넘어가지 않는다(승인 아님).
   {
     const calls = newReviewCalls();
     const bot = makeReviewBot({ job: makeReviewJob(), calls });
     const result = await bot.handleArticleReviewCallback(reviewQuery(`review:edit:${REVIEW_JOB_ID}`));
     assert(result.outcome.status === "reviewed" && result.outcome.action === "edit", "edit은 reviewed/edit이어야 한다");
     assert(calls.updateStatus === 0, "edit은 job.status를 바꾸면 안 된다");
+    assert(calls.updateArticleStatus === 0, "edit은 article.status를 바꾸면 안 된다");
     assert(result.message.includes("수정 필요"), "수정 필요 안내가 있어야 한다");
     console.log("✅ edit -> metadata만 갱신(게이트는 계속 걸려 있음), status 불변");
+  }
+
+  // 7-6b) confirm인데 원고가 아예 없으면(예외적 상황) article 갱신 없이 job만 approved로 바뀐다 -
+  // 죽지 않고 넘어가야 한다(findLatestArticleByJobId가 null을 돌려주는 경우).
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob(), calls, article: null });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "reviewed", "article이 없어도 confirm 자체는 성공해야 한다");
+    assert(calls.updateStatus === 1, "article이 없어도 job.status는 approved로 바뀌어야 한다");
+    assert(calls.updateArticleStatus === 0, "article이 없으면 article.status 갱신을 시도하면 안 된다");
+    console.log("✅ confirm(article 없음) -> job만 approved, 예외 없이 안전 처리");
   }
 
   // 7-7) 키워드 선택 콜백과 원고 검수 콜백이 같은 폴링 루프에서 서로를 침범하지 않는지 -

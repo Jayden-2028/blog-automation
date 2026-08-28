@@ -73,10 +73,11 @@ function main(): void {
   assert(combined.includes("커뮤니티 1"), "커뮤니티 1건이 요약에 있어야 한다");
   console.log("✅ 등급별 건수 요약 정확");
 
-  // 2) 진행/중단 명령어 안내에 jobId가 정확히 포함돼야 한다 - 사람이 복붙해서 쓸 값이다.
-  assert(combined.includes(`job:write -- ${makeJob().id}`), "진행 명령어에 jobId가 있어야 한다");
-  assert(combined.includes(`job:reject -- ${makeJob().id}`), "중단 명령어에 jobId가 있어야 한다");
-  console.log("✅ 진행/중단 명령어에 jobId 포함");
+  // 2) 회귀(2026-08-28 사용자 피드백): 진행/중단 명령어 안내 두 줄을 뺐다. 버튼이 붙기 전에는
+  // 유일한 진행 수단이라 필요했지만, 이제 같은 메시지에 버튼이 있어 긴 jobId 줄이 노출될 이유가 없다.
+  assert(!combined.includes("job:write --"), "진행 명령어 안내는 더 이상 없어야 한다(버튼으로 대체)");
+  assert(!combined.includes("job:reject --"), "중단 명령어 안내는 더 이상 없어야 한다(버튼으로 대체)");
+  console.log("✅ 명령어 안내 제거됨(버튼으로 대체)");
 
   // 3) 핵심 회귀: 요약이 성공하면 AI 요약 본문이 그대로 노출돼야 한다(출처 나열이 아니라).
   const summaryText = "- ⚠️ 예매권 추첨 응모(8/14~8/20)와 당첨자 발표(8/24)가 모두 지났습니다.\n- 도슭수라상 가격은 1인 6만 원입니다.";

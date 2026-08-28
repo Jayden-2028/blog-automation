@@ -414,7 +414,8 @@ export type ImageRow = {
 // id를 생략하는 이유: 같은 시점에 대시보드로 만들어진 형제 테이블(keywords/articles)이 전부
 // auto-increment PK이고 그쪽 Insert 타입도 id를 받지 않는다(testCrud가 id 없이 insert한 실적 있음).
 // PostgREST의 OpenAPI는 identity 컬럼도 required로 표시해서 default 유무를 구분해주지 못하므로,
-// 형제 테이블 관례를 근거로 삼았다. images에 처음 insert하는 시점(Sprint 3)에 실제로 확인할 것.
+// 형제 테이블 관례를 근거로 삼았다 - 2026-08-28 Sprint 3에서 recordArticleImage.ts의 첫 실제
+// insert로 identity(자동 증가)임을 확인했다(반환된 id=1, SPRINT_3_DESIGN.md 14절 참고).
 export type ImageInsert = {
   article_id?: number | null;
   image_url?: string | null;

@@ -4,13 +4,22 @@
 
 ## 한 줄 상태
 
-**Sprint 0·1 완주, Sprint 2(자료조사 + 원고 생성) 진행 중.** 매일 09:00 키워드 TOP 10이 Telegram으로
-오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생긴다. 거기서부터 조사 완료 알림의
-`[✍️ 원고 작성][🗑 중단]` 버튼(또는 동등한 CLI `job:research`/`job:write`/`job:reject`)으로
-원고 생성(Telegraph 발행 + "원고 보기" 버튼, 해시태그 15개, 저신뢰 출처 고지)까지 이어지는 흐름이
-경복궁·아기 셔더링어택·재혼 황후 3건으로 실측 검증 완료. 상세는
-`docs/ai-handoff/SPRINT_2_DESIGN.md` 14절. 다음은 이미지(Sprint 3 설계 예정) 또는 모든 원고
-공통 승인 게이트(현재는 의학 주제만 확인/수정/폐기 버튼이 있음).
+**Sprint 0·1·2 완료, Sprint 3(검수 게이트 + 이미지) 전 단계 완료.** 매일 09:00 키워드 TOP 10이
+Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생긴다. 거기서부터 조사 완료
+알림의 `[✍️ 원고 작성][🗑 중단]` 버튼으로 원고 생성까지 이어지고, 그 안에서 **검수 규칙 4종이
+자동으로 돌고**(차단은 아님, 결과만 알림에 표시) **AI 이미지 2~3장이 실사(photorealistic)
+스타일로 자동 생성돼 본문에 삽입된 채로**(OpenAI `gpt-image-1` 기본) Telegraph에 발행된다 -
+카테고리별 톤(entertainment/ott/parenting은 개인 블로그 톤, living은 편집자 톤, 실제 블로그
+샘플 분석 기반)도 적용된다. `[✅ 승인][✏️ 수정 필요][🗑 반려]` 버튼(모든 원고 공통)으로
+`job`/`article` status가 `approved`로 전이된다. 경복궁·아기 셔더링어택·재혼 황후·보조금24·
+맥도날드 감튀 홀더 5건으로 전 구간 실측 검증 완료(이미지 포함 최종 형태는 맥도날드 건으로
+확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
+13-1·14절.
+
+**다음 작업: Sprint 4(네이버 반자동 발행) 설계.** Sprint 3까지 완성된 산출물(승인된 원고 + 제목
++ 해시태그 + 본문 삽입 이미지)을 네이버 블로그 임시저장까지 넣는 Playwright 자동화가 다음이다.
+아직 설계 문서가 없다 - 로드맵(`/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`)
+Sprint 4 항목을 참고해 SPRINT_4_DESIGN.md부터 쓴다.
 
 ## 지금 돌아가는 것
 
@@ -409,9 +418,53 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
   버튼으로 연결한다. 발행 실패 시엔 본문 dump로 폴백(14-3절). ⚠️ Telegraph 페이지는 URL을 아는
   누구나 볼 수 있는 공개 페이지 — 검수 전 원고 노출 트레이드오프를 사용자가 승인했다.
 
-**남은 것**: 이미지 삽입(Sprint 3 설계로 이관), SPA 예매 페이지(ticketlink.co.kr 등) 자동 판독은
-미해결 — 체크포인트에서 사람이 원본 사이트를 직접 열어보는 것으로 당분간 대체. 승인 버튼
-(확인/수정/폐기)은 아직 의학 주제 전용이고, 비의학 원고 공통 승인 게이트는 Sprint 3 검수
-게이트와 함께 붙일 예정.
+**남은 것**: 이미지 삽입, SPA 예매 페이지(ticketlink.co.kr 등) 자동 판독은 미해결 —
+체크포인트에서 사람이 원본 사이트를 직접 열어보는 것으로 당분간 대체.
+
+## Sprint 3: 검수 게이트 + 이미지 (전 단계 완료)
+
+설계: `docs/ai-handoff/SPRINT_3_DESIGN.md`. 승인된 결정 5건은 §15에, 작업 순서/상태는 §14에 있다.
+
+**구현 완료(커밋 `83542f6`, `f249b66`, `39322c2`, `9e693fe` 외) + 실측 검증(2026-08-28,
+"보조금24"/"맥도날드 감튀 홀더" job)**:
+
+1. **검수 규칙 4종** (`src/workflows/review/`) - 팩트/법적/광고/품질. 팩트 검사가 가장 까다로웠다:
+   근거의 "2026. 9. 2."와 본문의 "9월 2일"을 같은 값으로 인식하도록 정규화해야 했고, 그래도 못
+   맞추는 표기가 남으므로 "틀렸다"가 아니라 **"근거에서 확인되지 않음"**으로만 표기한다. 저장된
+   실제 원고 3건에 돌려 캘리브레이션했고, 합성 테스트로는 못 볼 오탐 6가지(URL 인코딩에서 가짜
+   백분율, 참고 자료 링크 제목을 우리 표현으로 오인 등)를 찾아 고쳤다 - `normalizeFactTokens.ts`/
+   `articleReviewChecks.ts` 상단 주석에 전부 기록돼 있다.
+2. **검수 결과가 알림에 표시된다** - `job.metadata.reviewChecks`에 저장(새 테이블 대신, 결정 2번).
+   ⚠️ 차단이 아니라 참고다(결정 1번) - 원고는 검수 결과와 무관하게 항상 사람에게 간다.
+3. **승인 버튼이 모든 원고 공통이 됐다** - `[✅ 승인][✏️ 수정 필요][🗑 반려]`가 이제 비의학
+   원고에도 붙고, 승인(confirm)이 `job.status`/`article.status`를 `approved`로 전이시킨다.
+   의학 주제는 승인 시 `requiresMedicalReview`도 함께 내린다. ⚠️ 의미가 바뀐 지점: 이 통합
+   이전에 confirm이 눌린 job("아기 셔더링어택")은 `review`에 남아 있어 다시 눌러야 approved가
+   된다.
+4. **전 구간 실측 검증** - "보조금24" job(지원금 주제, 숫자·날짜 밀도가 높아 팩트 검사 시험에
+   적합)으로 조사→버튼→작성→검수(통과)→Telegraph 발행→승인 버튼→`approved` 전이까지 실제로
+   확인했다.
+5. **이미지 자동 생성 + 본문 삽입** (`SPRINT_3_DESIGN.md` 13-1절, 2026-08-28 재작업) -
+   "이미지가 포함된 원고 풀세트가 필요하다"는 피드백으로, 브리프만 만들어 ChatGPT로 넘기던
+   방식을 완전 자동화로 바꿨다. 사용자가 `OPENAI_API_KEY`(기본)/`GEMINI_API_KEY`(전환용)를
+   직접 제공. `runWritingStage` 안에서 섹션별(도입부+소제목, 2~3장) 장면을 기획하고
+   OpenAI `gpt-image-1`로 생성 → Supabase Storage 신규 공개 버킷(`article-images`) 업로드 →
+   본문에 마크다운 이미지로 삽입 → Telegraph에 `<figure><img/><figcaption>`으로 렌더링까지
+   승인 전에 전부 끝난다. 스타일은 **실사(photorealistic)**로 확정(처음엔 일러스트였다가 사용자
+   요청으로 전환) - 얼굴 안 보이는 구도 강제 + 무지 포장/로고 없음 강제로 초상권·상표권 위험을
+   프롬프트 단계에서 방어한다. Gemini는 "나노바나나2 라이트"(`gemini-3.1-flash-lite-image`)로
+   고정했으나 ⚠️ 무료 티어라 실제 호출은 429로 막혀 있다(유료 결제 필요, 기본 provider는
+   openai라 지금은 영향 없음).
+6. **이미지 기록** - 자동 생성된 이미지는 `images` 테이블에 자동 기록된다
+   (`copyright_status: ai-generated:openai` 형태). **실제 insert로 `images.id`가 identity
+   (자동 증가)임을 확인했다** - `types/database.ts`의 미검증 주석을 해소했다. `job:image` CLI
+   (`npm run job:image -- <jobId> <imageUrl> <copyrightStatus>`)는 수동 보완 경로로 남아
+   있지만, 이미지 직접 교체 기능은 별도 구현하지 않기로 했다 - Sprint 4가 반자동 업로드라
+   사용자가 업로드 직전 단계에서 이미 직접 통제할 수 있다(사용자 확인, 2026-08-28).
+
+**실측 검증**: "맥도날드 감튀 홀더" job으로 이미지 3/3장 성공, Telegraph 페이지에 `<img>` 3개
++ `<figcaption>` 3개 정상 렌더링 확인. 실사 스타일도 별도로 생성해 확인(손만 나오고 얼굴 없음,
+무지 포장, 로고 없음). "보조금24" job의 `images`에는 초기 검증용 플레이스홀더 URL이 남아
+있다(자동화 이전 수동 테스트 흔적) - 실사용 전 정리할 것.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`

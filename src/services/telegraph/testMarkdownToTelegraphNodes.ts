@@ -85,6 +85,34 @@ function main(): void {
   assert(listBlock.children?.length === 3, `목록 항목 3개가 하나의 ul에 묶여야 한다 (실제: ${listBlock.children?.length})`);
   console.log("✅ 연속된 목록 3줄 -> 하나의 ul(li 3개)로 병합");
 
+  // 5-1) 이미지(![alt](url)) -> figure > img + figcaption(2026-08-28, AI 생성 이미지 삽입 기능).
+  const withImage = markdownToTelegraphNodes("![경복궁 야경 일러스트](https://storage.example.com/a.png)");
+  const figureNode = withImage[0];
+  assert(isTag(figureNode, "figure"), `이미지 블록은 figure여야 한다 (실제: ${JSON.stringify(figureNode)})`);
+  const imgNode = figureNode.children?.find((c) => isTag(c, "img"));
+  assert(imgNode !== undefined, "figure 안에 img가 있어야 한다");
+  assert(
+    (imgNode as { attrs?: Record<string, string> }).attrs?.src === "https://storage.example.com/a.png",
+    "img의 src가 정확해야 한다"
+  );
+  const figcaptionNode = figureNode.children?.find((c) => isTag(c, "figcaption"));
+  assert(figcaptionNode !== undefined, "alt 텍스트가 figcaption으로 함께 나와야 한다(검수 편의)");
+  assert(
+    (figcaptionNode as { children?: TelegraphNode[] }).children?.[0] === "경복궁 야경 일러스트",
+    "figcaption 내용이 alt 텍스트와 일치해야 한다"
+  );
+  console.log("✅ ![alt](url) -> <figure><img/><figcaption> 변환");
+
+  // 5-2) alt 텍스트가 빈 문자열이면 figcaption 없이 img만 나온다.
+  const withoutAlt = markdownToTelegraphNodes("![](https://storage.example.com/b.png)");
+  const bareFigure = withoutAlt[0];
+  assert(isTag(bareFigure, "figure"), "alt 없어도 figure여야 한다");
+  assert(
+    !bareFigure.children?.some((c) => isTag(c, "figcaption")),
+    "alt가 없으면 figcaption을 만들지 않아야 한다"
+  );
+  console.log("✅ alt 없는 이미지 -> figcaption 없이 img만");
+
   // 6) 회귀: 실제 원고 구조(헤더 -> 문단 -> 목록 -> 문단 순서)를 그대로 변환했을 때 순서가 보존돼야 한다.
   const fullArticle = [
     "가을 저녁 경복궁을 걸으며 궁중음식을 맛보는 별빛야행이 올해도 열립니다.",

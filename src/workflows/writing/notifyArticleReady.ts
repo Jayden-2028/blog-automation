@@ -13,13 +13,11 @@
 // 그대로 들어 있으면(드물지만 있을 수 있다) Telegram이 parse_mode=HTML에서 400으로 발송 전체를
 // 거부하기 때문이다.
 //
-// 의학 주제와 일반 주제의 알림이 다른 이유(SPRINT_2_DESIGN.md 5-2절): 의학 주제는 사람이 본문과
-// 출처를 직접 읽고 확인해야 다음 단계로 넘어갈 수 있다(article_jobs.metadata.requiresMedicalReview).
-// "원고 보기" 버튼과 [✅ 확인함]/[✏️ 수정 필요]/[🗑 폐기] 결정 버튼을 같은 메시지에 두 줄로 둔다 -
-// 원고를 열어본 뒤 같은 화면에서 바로 결정할 수 있어야 한다.
-//
-// 일반 주제는 아직 승인 버튼을 달지 않는다. 발행 승인 흐름(모든 원고 공통)은 Sprint 3의 검수
-// 게이트가 담당하고, 지금은 원고를 읽을 수 있게 하는 것까지만 한다.
+// 승인 버튼은 모든 원고 공통이다(SPRINT_3_DESIGN.md 8절, 2026-08-28): 이전에는 확인/수정/폐기가
+// 의학 주제 교차확인 전용이었고 confirm이 job.status를 바꾸지 않았다("발행 승인은 이후 검수
+// 단계에서 이어집니다"). 그 검수 단계가 이제 여기다 - confirm이 articles/article_jobs를
+// approved로 전이시킨다. 의학 주제는 여기에 한 겹을 더한다: 승인 시 requiresMedicalReview도
+// 함께 내린다(TelegramBot.handleArticleReviewCallback 참고).
 
 import { buildArticleReviewCallbackData } from "../../notifications/articleReviewCallbackData.js";
 import {
@@ -29,20 +27,13 @@ import {
   TelegramNotifier,
 } from "../../notifications/TelegramNotifier.js";
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
+import { formatReviewLines } from "../review/runArticleReview.js";
 import type { ArticleRow } from "../../types/database.js";
 import type { RunWritingStageResult } from "./runArticleJob.js";
 
 // runWritingStage 결과를 받는다(runArticleJob 전체가 아니다) - job:write는 이제 runWritingStage를
 // 직접 호출한다(조사 단계는 job:research로 분리됐고, 이미 저장된 근거가 있으면 재사용한다).
 export type RunArticleJobSuccess = Extract<RunWritingStageResult, { status: "success" }>;
-
-export function buildSourceCountSummary(result: RunArticleJobSuccess): string {
-  const counts = { official: 0, medical: 0, news: 0, community: 0 };
-  for (const source of result.sources) {
-    if (source.authority) counts[source.authority]++;
-  }
-  return `공공 ${counts.official}건 · 의료 ${counts.medical}건 · 뉴스 ${counts.news}건 · 커뮤니티 ${counts.community}건`;
-}
 
 export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoingMessage {
   const { job, article } = result;
@@ -51,29 +42,43 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     ? ["⚕️ <b>의학 주제 — 원고와 출처를 직접 확인해주세요</b>"]
     : ["📝 <b>원고 초안 준비됨</b>"];
 
+  // 2026-08-28 사용자 피드백으로 제목/카테고리만 남겼다: 키워드는 제목과 거의 겹치고, 근거
+  // 건수와 작성 소요 시간은 이 시점에 사람이 내릴 결정(승인/수정/반려)에 쓰이지 않는다.
+  // 근거 구성은 job.metadata.sourceCounts에 그대로 남아 있고, 조사 단계 알림에서 이미 봤다.
   lines.push(
     "",
     `<b>${escapeTelegramHtml(article.title ?? job.keyword)}</b>`,
-    `키워드: ${escapeTelegramHtml(job.keyword)} · category: ${escapeTelegramHtml(job.category ?? "N/A")}`,
-    `근거: ${buildSourceCountSummary(result)}`,
-    `작성 소요 시간: ${Math.round(result.durationMs / 1000)}초`
+    `category: ${escapeTelegramHtml(job.category ?? "N/A")}`
   );
+
+  // 이미지 생성 요약(2026-08-28) - 실패가 있으면 알려서, "원고 보기"를 열었을 때 이미지 빠진
+  // 섹션이 있어도 놀라지 않게 한다. 이미지 자체는 본문에 이미 삽입돼 있어 URL은 따로 안 보여준다.
+  if (result.images.succeeded > 0 || result.images.failed > 0) {
+    const imageLine =
+      result.images.failed > 0
+        ? `🖼 이미지 ${result.images.succeeded}장 생성됨 (${result.images.failed}장 실패 - 본문에서 빠진 자리가 있을 수 있습니다)`
+        : `🖼 이미지 ${result.images.succeeded}장 생성됨`;
+    lines.push("", imageLine);
+  }
+
+  // 검수 결과(SPRINT_3_DESIGN.md 6절) - 차단하지 않고 참고로만 보여준다. escapeTelegramHtml을
+  // 거는 이유는 검수 메시지 안에 근거 원문 발췌("특별석은 12만 원입니다" 등)가 그대로 들어가
+  // "<"/">"/"&"가 섞일 수 있기 때문이다.
+  lines.push("", ...formatReviewLines(result.review).map((line) => escapeTelegramHtml(line)));
 
   if (!result.telegraphUrl) {
     lines.push("", "(Telegraph 발행 실패 - 아래에 본문 전문을 대신 보냅니다)");
-  } else if (result.requiresMedicalReview) {
-    lines.push("", "아래 버튼으로 원고 전문을 열어 출처까지 직접 확인한 뒤 결정해주세요.");
+  } else {
+    lines.push("", "아래 버튼으로 원고 전문을 열어본 뒤 결정해주세요.");
   }
 
   // 결정 버튼은 telegraphUrl이 있을 때만 헤더에 함께 붙인다. telegraphUrl이 없으면 아래
-  // notifyArticleReady()가 본문 dump 뒤에 buildMedicalDecisionMessage()로 별도 발송한다 -
+  // notifyArticleReady()가 본문 dump 뒤에 buildReviewDecisionMessage()로 별도 발송한다 -
   // 여기서도 붙이면 같은 결정 버튼이 메시지 두 곳(헤더 + 폴백 결정 메시지)에 중복된다.
   const buttons: TelegramInlineKeyboardButton[][] = [];
   if (result.telegraphUrl) {
     buttons.push([{ text: "📄 원고 보기", url: result.telegraphUrl }]);
-    if (result.requiresMedicalReview) {
-      buttons.push(buildReviewDecisionButtons(job.id));
-    }
+    buttons.push(buildReviewDecisionButtons(job.id));
   }
 
   return buttons.length > 0 ? { text: lines.join("\n"), replyMarkup: { inline_keyboard: buttons } } : { text: lines.join("\n") };
@@ -89,16 +94,16 @@ export function buildArticleBodyMessages(article: ArticleRow): TelegramOutgoingM
 
 function buildReviewDecisionButtons(jobId: string): TelegramInlineKeyboardButton[] {
   return [
-    { text: "✅ 확인함", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
+    { text: "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
     { text: "✏️ 수정 필요", callback_data: buildArticleReviewCallbackData("edit", jobId) },
-    { text: "🗑 폐기", callback_data: buildArticleReviewCallbackData("discard", jobId) },
+    { text: "🗑 반려", callback_data: buildArticleReviewCallbackData("discard", jobId) },
   ];
 }
 
 /** Telegraph 폴백 경로에서만 쓴다 - 본문을 dump한 뒤에는 결정 버튼을 별도 메시지로 붙여야 한다. */
-export function buildMedicalDecisionMessage(jobId: string): TelegramOutgoingMessage {
+export function buildReviewDecisionMessage(jobId: string): TelegramOutgoingMessage {
   return {
-    text: "위 원고와 출처를 확인하셨다면 아래에서 결정해주세요.",
+    text: "위 원고를 확인하셨다면 아래에서 결정해주세요.",
     replyMarkup: { inline_keyboard: [buildReviewDecisionButtons(jobId)] },
   };
 }
@@ -107,15 +112,12 @@ export function buildMedicalDecisionMessage(jobId: string): TelegramOutgoingMess
 export async function notifyArticleReady(result: RunArticleJobSuccess): Promise<void> {
   const header = buildHeaderMessage(result);
 
-  // Telegraph가 성공했으면 header 하나로 끝난다(원고 보기 버튼 + 필요 시 결정 버튼이 이미 붙어 있다).
-  // 실패했을 때만 본문 dump + (의학이면) 별도 결정 메시지로 폴백한다.
+  // Telegraph가 성공했으면 header 하나로 끝난다(원고 보기 버튼 + 결정 버튼이 이미 붙어 있다).
+  // 실패했을 때만 본문 dump + 별도 결정 메시지로 폴백한다. 승인 버튼은 이제 모든 원고 공통이라
+  // requiresMedicalReview 여부와 무관하게 항상 결정 메시지를 보낸다.
   const messages: TelegramOutgoingMessage[] = result.telegraphUrl
     ? [header]
-    : [
-        header,
-        ...buildArticleBodyMessages(result.article),
-        ...(result.requiresMedicalReview ? [buildMedicalDecisionMessage(result.job.id)] : []),
-      ];
+    : [header, ...buildArticleBodyMessages(result.article), buildReviewDecisionMessage(result.job.id)];
 
   await TelegramNotifier.fromEnv().sendMessages(messages);
 }
