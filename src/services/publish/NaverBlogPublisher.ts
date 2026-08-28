@@ -1,0 +1,266 @@
+// 네이버 블로그 SmartEditor 자동화 - 제목/본문/이미지를 채우고 "임시저장"까지만 수행한다.
+// SPRINT_4_DESIGN.md §4/§6/§6-2/§12 근거. §10 작업 순서의 4번.
+//
+// ⚠️ 이 파일은 "발행"을 실행하지 않는다. 이건 안전장치가 아니라 이 스프린트의 정의 자체다
+// (CLAUDE.md: "반자동 — 임시저장까지만 자동, 발행 버튼은 사람"). §6-2 실측으로 발행 흐름이
+// 버튼 2단계로 나뉜다는 걸 확인했다:
+//   - [data-click-area="tpb.publish"] : 상단 툴바 - 발행 "설정 패널"을 여는 버튼(태그/카테고리
+//     등이 여기 있다) - 이 파일은 더 이상 이 버튼을 클릭하지 않는다(아래 "태그는 패널을 거치지
+//     않는다" 참고).
+//   - [data-click-area="tpb*i.publish"] (data-testid="seOnePublishBtn") : 패널 안의 진짜
+//     발행 **확정** 버튼 - 이 파일 어디에서도 이 셀렉터를 클릭하지 않는다.
+//   - [data-click-area="tpb.save"] : 상단 툴바 - 임시저장. 이 파일이 실제로 클릭하는 유일한
+//     "완료" 액션이다.
+//
+// 태그는 발행 설정 패널을 거치지 않는다(2026-08-28, §10 item 7 1차 실측 후 사용자 결정) -
+// 처음에는 tpb.publish를 열어 #tag-input에 태그를 입력했는데, 실제로 잘 반영됐다(패널
+// 스크린샷으로 확인). 그런데 이 방식은 자동화가 발행 확정 버튼과 같은 패널을 열어야 한다는
+// 점에서 "발행 버튼 근처"에 다가가는 셈이라 사용자가 더 안전한 대안을 요청했다: 원고 본문
+// 끝에 이미 해시태그 줄이 텍스트로 들어가 있으므로(runArticleJob.ts가 붙인다), 그게 본문
+// paste로 함께 들어가기만 하면 된다 - 사람이 실제 "발행"을 누르는 순간 네이버가 본문의
+// "#태그" 텍스트를 자동으로 태그로 인식해 적용해준다(사용자 확인). 그래서 이 파일은 태그
+// 입력란을 아예 건드리지 않는다 - 발행 설정 패널도 열지 않는다.
+//
+// 본문 붙여넣기 버그 수정 (2026-08-28, §12 1차 실측에서 실제로 발견됨): 처음에는
+// document.activeElement에 합성 ClipboardEvent를 직접 dispatch했는데, 사용자가 실제 초안을
+// 열어보니 제목/이미지는 들어갔지만 본문 문단이 통째로 비어 있었다 - SmartEditor(React 기반)의
+// 실제 paste 핸들러가 신뢰되지 않은(합성) 이벤트를 무시한 것으로 추정된다. 그래서 실제 OS
+// 클립보드에 HTML을 써넣고 Ctrl/Cmd+V를 누르는 방식으로 바꿨다 - 이건 브라우저가 "진짜" paste
+// 이벤트로 인식하므로 사람이 손으로 붙여넣는 것과 동일한 경로를 탄다. Playwright의
+// context.grantPermissions(["clipboard-read", "clipboard-write"])로 권한을 미리 승인해야
+// navigator.clipboard.write()가 자동화 컨텍스트에서도 막히지 않는다.
+//
+// 미검증 사항 (2026-08-28 1차 실측 + 본문 붙여넣기 수정 이후, §12/§13 참고 - 남은 것만 기록):
+//   - 수정된 클립보드 기반 본문 붙여넣기가 실제로 문단을 채우는지: 아직 라이브 재검증 전이다.
+//   - "임시저장" 성공을 알리는 정확한 신호(토스트/URL 변화 등) - 아직 고정 시간 대기로 대체.
+// 이 가설들이 틀렸다면 saveDraft()가 stage별 실패로 알려준다(어느 단계에서 막혔는지는 알 수
+// 있다) - 조용히 잘못된 결과를 성공으로 보고하지는 않는다.
+
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { chromium, type Page } from "playwright";
+
+import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
+
+export class NaverPublishLoginRequiredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NaverPublishLoginRequiredError";
+  }
+}
+
+export type NaverPublishImageInput = { url: string; alt?: string };
+
+export type NaverDraftSaveInput = {
+  title: string;
+  /**
+   * convertArticleToNaverHtml()의 출력 - SmartEditor 본문에 paste로 삽입할 HTML.
+   * 해시태그는 여기 별도 필드가 없다 - 본문 끝에 이미 "#태그1 #태그2 ..." 텍스트 줄로 포함돼
+   * paste되는 것을 그대로 쓴다(파일 상단 설명 참고, 발행 설정 패널을 열지 않는다).
+   */
+  bodyHtml: string;
+  /**
+   * 본문에 이미 마크다운으로 삽입된 이미지와는 별개로, SmartEditor 자체 업로드 기능으로도
+   * 넣고 싶은 이미지 목록(선택). 비우면 이미지 업로드 단계를 건너뛴다 - bodyHtml의 <img src>가
+   * paste로 그대로 남을 수도 있고(외부 링크 이미지), SmartEditor가 자동으로 재업로드할 수도
+   * 있다(§6-2에서 아직 확인 못함). 확실한 삽입이 필요하면 이 옵션으로 명시적으로 업로드한다.
+   */
+  images?: ReadonlyArray<NaverPublishImageInput>;
+};
+
+export type NaverDraftSaveStage = "login" | "navigate" | "title" | "body" | "image" | "save";
+
+export type NaverDraftSaveResult =
+  | { ok: true; draftUrl: string }
+  | { ok: false; stage: NaverDraftSaveStage; error: string };
+
+export type NaverBlogPublisherOptions = {
+  blogId?: string;
+  profileDir?: string;
+  /**
+   * 네이버 블로그 카테고리 번호. §6-2 실측 세션에서 확인된 기본값(32 = "육아")을 그대로
+   * 쓴다 - 이 블로그(bj2028, "남매둥이 아빠")는 육아 중심 블로그라 카테고리를 세분화하지
+   * 않는다고 가정한 잠정값이다. 카테고리별로 다른 번호가 필요해지면(예: OTT/연예 카테고리
+   * 분리) 호출자가 job.category -> categoryNo 매핑표를 만들어 이 옵션으로 넘겨야 한다 -
+   * 아직 그 매핑표는 없다(§10 item 5에서 필요해지면 만든다).
+   */
+  categoryNo?: number;
+  headless?: boolean;
+};
+
+const DEFAULT_CATEGORY_NO = 32;
+const SAVE_WAIT_MS = 3000;
+const IMAGE_UPLOAD_WAIT_MS = 3000;
+const FILE_CHOOSER_TIMEOUT_MS = 10_000;
+
+// 셀렉터 상수 (SPRINT_4_DESIGN.md §6-2 실측 기반, 2026-08-28). data-click-area는 네이버 자체
+// 클릭 추적 속성으로, CSS 모듈 해시 클래스(예: save_btn__bzc5B)보다 배포에 안정적이라 우선한다.
+// tpb.publish/#tag-input(발행 설정 패널)은 더 이상 쓰지 않는다(파일 상단 설명 참고).
+const SELECTORS = {
+  saveButton: '[data-click-area="tpb.save"]',
+  titleParagraph: ".se-component.se-documentTitle .se-text-paragraph",
+  bodyParagraph: '.se-component.se-text[data-a11y-title="본문"] .se-text-paragraph',
+  imageToolbarButton: ".se-toolbar-item-image",
+} as const;
+
+export class NaverBlogPublisher {
+  private readonly blogId: string;
+  private readonly profileDir: string;
+  private readonly categoryNo: number;
+  private readonly headless: boolean;
+
+  constructor(options: NaverBlogPublisherOptions = {}) {
+    this.blogId = options.blogId ?? NAVER_PUBLISH_CONFIG.blogId;
+    if (!this.blogId) {
+      throw new Error("blogId가 비어 있습니다(.env의 CREATOR_ADVISOR_BLOG_ID를 확인하세요).");
+    }
+    this.profileDir = options.profileDir ?? NAVER_PUBLISH_CONFIG.profileDir;
+    this.categoryNo = options.categoryNo ?? DEFAULT_CATEGORY_NO;
+    this.headless = options.headless ?? true;
+  }
+
+  /** 제목/본문/이미지/태그를 채우고 임시저장한다. 실제 발행은 절대 하지 않는다(파일 상단 설명 참고). */
+  async saveDraft(input: NaverDraftSaveInput): Promise<NaverDraftSaveResult> {
+    const context = await chromium.launchPersistentContext(this.profileDir, { headless: this.headless });
+    // 본문 붙여넣기가 실제 OS 클립보드 + Ctrl/Cmd+V를 쓰므로 미리 권한을 승인해둔다(파일 상단
+    // 설명 참고) - 권한이 없으면 navigator.clipboard.write()가 조용히 막힌다.
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "https://blog.naver.com" });
+
+    try {
+      const page = await context.newPage();
+      const writeUrl = `https://blog.naver.com/${this.blogId}/postwrite?categoryNo=${this.categoryNo}`;
+
+      try {
+        await page.goto(writeUrl, { waitUntil: "networkidle" });
+      } catch (error) {
+        return { ok: false, stage: "navigate", error: this.errorMessage(error) };
+      }
+
+      if (page.url().includes("nid.naver.com")) {
+        return {
+          ok: false,
+          stage: "login",
+          error: `NAVER 로그인이 필요합니다(세션 만료 또는 미로그인). "npm run setup:naver-publish"로 재로그인하세요.`,
+        };
+      }
+
+      await page.waitForSelector(SELECTORS.titleParagraph, { timeout: 15_000 }).catch(() => {
+        // 못 찾아도 여기서 던지지 않는다 - 아래 클릭 단계에서 더 구체적인 에러가 난다.
+      });
+
+      try {
+        await this.focusAndType(page, SELECTORS.titleParagraph, input.title);
+      } catch (error) {
+        return { ok: false, stage: "title", error: this.errorMessage(error) };
+      }
+
+      try {
+        await this.focusAndPasteHtml(page, SELECTORS.bodyParagraph, input.bodyHtml);
+      } catch (error) {
+        return { ok: false, stage: "body", error: this.errorMessage(error) };
+      }
+
+      if (input.images && input.images.length > 0) {
+        try {
+          await this.uploadImages(page, input.images);
+        } catch (error) {
+          return { ok: false, stage: "image", error: this.errorMessage(error) };
+        }
+      }
+
+      try {
+        const draftUrl = await this.clickSave(page);
+        return { ok: true, draftUrl };
+      } catch (error) {
+        return { ok: false, stage: "save", error: this.errorMessage(error) };
+      }
+    } finally {
+      // persistent context는 close해도 profileDir에 로그인 세션이 그대로 남는다.
+      await context.close().catch(() => {});
+    }
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  /**
+   * 제목/본문 클릭 후 실제 키 입력을 보낸다. 파일 상단 설명대로, "보이는 영역을 클릭하면 앱이
+   * 알아서 숨겨진 입력 proxy로 포커스를 옮긴다"는 가정 하에 page.keyboard.type()으로 사람이
+   * 타이핑하는 것과 동일한 이벤트 경로를 쓴다 - 어떤 요소가 실제로 포커스를 받는지 몰라도 된다.
+   */
+  private async focusAndType(page: Page, selector: string, text: string): Promise<void> {
+    await page.click(selector);
+    await page.keyboard.type(text, { delay: 10 });
+  }
+
+  /**
+   * 본문 HTML 붙여넣기. 실제 OS 클립보드에 HTML을 써넣고 Ctrl/Cmd+V를 눌러 "진짜" paste
+   * 이벤트를 발생시킨다(파일 상단 설명 참고 - 합성 이벤트 dispatch는 SmartEditor가 무시했다).
+   */
+  private async focusAndPasteHtml(page: Page, selector: string, html: string): Promise<void> {
+    // 태그를 걷어낸 순수 텍스트도 text/plain으로 같이 넣어둔다 - 붙여넣기 대상이 서식을 못
+    // 받아들이는 예외 상황에서도 최소한 텍스트는 남게 하기 위해서다.
+    const plainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    // tsconfig에 "dom" lib이 없어(Node 전용 프로젝트) document/Blob/ClipboardItem을 프로젝트
+    // 코드에서 직접 참조할 수 없다 - trendDateNavigation.ts와 같은 패턴으로 globalThis를 any로
+    // 캐스팅해 우회한다(실제로는 브라우저 안에서 실행되므로 타입 체크 대상이 아니다).
+    await page.evaluate(
+      async ({ htmlContent, text }) => {
+        const g: any = globalThis as any;
+        const item = new g.ClipboardItem({
+          "text/html": new g.Blob([htmlContent], { type: "text/html" }),
+          "text/plain": new g.Blob([text], { type: "text/plain" }),
+        });
+        await g.navigator.clipboard.write([item]);
+      },
+      { htmlContent: html, text: plainText }
+    );
+
+    await page.click(selector);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+  }
+
+  /**
+   * 이미지 업로드. .se-toolbar-item-image 클릭 시 네이티브 파일 선택 대화상자가 뜬다는 가정으로
+   * Playwright의 filechooser 이벤트를 기다린다(§6-2에서 라이브 클릭까지는 검증 못함).
+   */
+  private async uploadImages(page: Page, images: ReadonlyArray<NaverPublishImageInput>): Promise<void> {
+    for (const image of images) {
+      const localPath = await this.downloadToTempFile(image.url);
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent("filechooser", { timeout: FILE_CHOOSER_TIMEOUT_MS }),
+        page.click(SELECTORS.imageToolbarButton),
+      ]);
+      await fileChooser.setFiles(localPath);
+      // 업로드/리사이즈 완료 신호를 아직 몰라 보수적으로 고정 시간을 기다린다(§10 item 7에서 개선).
+      await page.waitForTimeout(IMAGE_UPLOAD_WAIT_MS);
+    }
+  }
+
+  private async downloadToTempFile(url: string): Promise<string> {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`이미지 다운로드 실패(HTTP ${response.status}): ${url}`);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const dir = mkdtempSync(path.join(tmpdir(), "naver-publish-"));
+    const extMatch = url.split("?")[0].match(/\.([a-zA-Z0-9]+)$/);
+    const ext = extMatch ? extMatch[1] : "png";
+    const filePath = path.join(dir, `image.${ext}`);
+    writeFileSync(filePath, buffer);
+    return filePath;
+  }
+
+  /**
+   * 임시저장. [data-click-area="tpb.save"]만 클릭한다 - 발행 확정 버튼
+   * ([data-click-area="tpb*i.publish"])은 이 파일 어디에서도 참조하지 않는다.
+   */
+  private async clickSave(page: Page): Promise<string> {
+    await page.click(SELECTORS.saveButton);
+    await page.waitForTimeout(SAVE_WAIT_MS);
+    // 저장 성공을 알리는 정확한 신호(토스트 메시지, URL 변화 등)는 아직 실측 못함(§10 item 7) -
+    // 우선 현재 URL을 draftUrl로 돌려준다.
+    return page.url();
+  }
+}

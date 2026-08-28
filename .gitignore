@@ -12,6 +12,10 @@ npm-debug.log*
 # Creator Advisor 전용 Playwright persistent profile (쿠키/로그인 세션 포함, 절대 커밋하지 않는다)
 .local/creator-advisor-profile/
 
+# 네이버 블로그 발행(쓰기) 전용 Playwright persistent profile. Creator Advisor(읽기) 세션과
+# 의도적으로 분리한다(SPRINT_4_DESIGN.md 5절) - 절대 커밋하지 않는다.
+.local/naver-publish-profile/
+
 # Supabase CLI 생성물
 supabase/.temp/
 
