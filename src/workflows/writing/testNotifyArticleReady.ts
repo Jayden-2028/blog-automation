@@ -1,17 +1,21 @@
 // notifyArticleReady의 메시지 조립 함수 테스트. 실제 Telegram 발송은 하지 않는다 - 순수 조립
-// 함수(buildHeaderMessage/buildArticleBodyMessages/buildMedicalDecisionMessage)만 검증한다.
+// 함수(buildHeaderMessage/buildArticleBodyMessages/buildReviewDecisionMessage)만 검증한다.
 //
 // 2026-08-27 실사용에서 발견된 요구사항을 회귀로 고정한다: 처음에는 요약만 보내 "원고를 어떻게
 // 확인할 수 있어?"라는 질문을 받았다 - 본문이 실제로 메시지에 포함되는지가 핵심 검증 대상이다.
+//
+// 2026-08-28 승인 버튼이 모든 원고 공통으로 바뀌었다(SPRINT_3_DESIGN.md 8절) - 예전에는
+// requiresMedicalReview일 때만 결정 버튼이 붙었는데 이제는 telegraphUrl이 있으면 항상 붙는다.
 
 import {
   buildArticleBodyMessages,
   buildHeaderMessage,
-  buildMedicalDecisionMessage,
+  buildReviewDecisionMessage,
   buildSourceCountSummary,
 } from "./notifyArticleReady.js";
 import { TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
 import type { RunArticleJobSuccess } from "./notifyArticleReady.js";
+import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -69,6 +73,17 @@ function makeSource(authority: SourceRow["authority"]): SourceRow {
   };
 }
 
+const PASSED_REVIEW: ArticleReviewResult = { checks: [], errorCount: 0, warningCount: 0, passed: true };
+
+function makeFailedReview(message: string): ArticleReviewResult {
+  return {
+    checks: [{ category: "quality", severity: "warning", message }],
+    errorCount: 0,
+    warningCount: 1,
+    passed: false,
+  };
+}
+
 function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJobSuccess {
   return {
     status: "success",
@@ -79,6 +94,7 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     requiresMedicalReview: false,
     durationMs: 185000,
     telegraphUrl: null,
+    review: PASSED_REVIEW,
     ...overrides,
   };
 }
@@ -92,59 +108,70 @@ function main(): void {
   assert(summary.includes("커뮤니티 1건"), `커뮤니티 1건이 요약에 있어야 한다 (실제: ${summary})`);
   console.log("✅ 출처 등급 요약 정확");
 
-  // 2) 일반(비의학) 원고: 헤더에 의학 경고가 없어야 한다.
+  // 2) 일반(비의학) 원고: 헤더에 의학 경고는 없어야 한다(telegraphUrl 없으면 버튼도 없다).
   const normalHeader = buildHeaderMessage(makeResult());
   assert(!normalHeader.text.includes("의학 주제"), "일반 원고 헤더에는 의학 경고가 없어야 한다");
   assert(normalHeader.text.includes("원고 초안 준비됨"), "일반 원고 헤더 문구가 있어야 한다");
-  assert(!normalHeader.replyMarkup, "일반 원고 헤더에는 버튼이 없어야 한다");
-  console.log("✅ 일반 원고 헤더: 의학 경고 없음, 버튼 없음");
+  assert(!normalHeader.replyMarkup, "telegraphUrl이 없으면 버튼이 없어야 한다(중복 방지, 아래 3-3 참고)");
+  console.log("✅ 일반 원고 헤더: 의학 경고 없음, telegraphUrl 없으면 버튼 없음");
 
-  // 3) 의학 원고 + telegraphUrl 있음: 헤더에 경고 + "출처까지 직접 확인" 안내가 있어야 한다.
-  // (telegraphUrl이 없으면 "Telegraph 발행 실패" 폴백 안내로 바뀐다 - 3-3에서 별도 검증)
+  // 2-1) 회귀: 검수 결과가 헤더에 표시돼야 한다(SPRINT_3_DESIGN.md 6절 - 차단은 아니지만 참고로 보여준다).
+  const withReviewIssue = buildHeaderMessage(
+    makeResult({ review: makeFailedReview("분량 3,304자 (목표 1,500~2,500)") })
+  );
+  assert(withReviewIssue.text.includes("검수"), "검수 결과 요약이 헤더에 있어야 한다");
+  assert(withReviewIssue.text.includes("3,304자"), `검수 상세 메시지가 그대로 노출돼야 한다 (실제 텍스트에 없음)`);
+  const withoutReviewIssue = buildHeaderMessage(makeResult({ review: PASSED_REVIEW }));
+  assert(withoutReviewIssue.text.includes("검수 통과"), "통과 시 '검수 통과' 문구가 있어야 한다");
+  console.log("✅ 검수 결과가 헤더에 표시됨(통과/실패 모두)");
+
+  // 3) 의학 원고 + telegraphUrl 있음: 헤더에 경고 + 버튼 안내가 있어야 한다.
   const medicalHeader = buildHeaderMessage(
     makeResult({ requiresMedicalReview: true, isMedical: true, telegraphUrl: "https://telegra.ph/test-08-27" })
   );
   assert(medicalHeader.text.includes("의학 주제"), "의학 원고 헤더에는 경고가 있어야 한다");
-  assert(medicalHeader.text.includes("출처까지 직접 확인"), "출처 확인 안내가 있어야 한다");
+  assert(medicalHeader.text.includes("아래 버튼으로"), "결정 안내가 있어야 한다");
   console.log("✅ 의학 원고 헤더: 경고 + 안내 포함");
 
-  // 3-1) telegraphUrl이 있으면 "원고 보기" URL 버튼이 1행으로 붙어야 한다(일반 주제).
+  // 3-1) 회귀: telegraphUrl이 있으면 일반 원고에도 승인 버튼이 붙어야 한다(2026-08-28, 공통 승인 흐름).
+  // 이전에는 requiresMedicalReview일 때만 붙었다 - 비의학 원고는 "원고 보기" 링크만 가고 승인
+  // 기록이 안 남는 게 사용자 질문("원고 퀄리티에 대한 품질 관리는?")으로 드러난 구멍이었다.
   const telegraphHeader = buildHeaderMessage(makeResult({ telegraphUrl: "https://telegra.ph/test-08-27" }));
   assert(!telegraphHeader.text.includes("본문 전문을 대신 보냅니다"), "telegraphUrl이 있으면 폴백 안내 문구가 없어야 한다");
   const telegraphRows = telegraphHeader.replyMarkup?.inline_keyboard ?? [];
-  assert(telegraphRows.length === 1, `telegraphUrl만 있으면 버튼 행은 1개여야 한다 (실제: ${telegraphRows.length})`);
+  assert(
+    telegraphRows.length === 2,
+    `일반 원고도 telegraphUrl이 있으면 원고 보기 + 승인 버튼, 2행이어야 한다 (실제: ${telegraphRows.length})`
+  );
   assert(
     telegraphRows[0]?.some((b) => "url" in b && b.url === "https://telegra.ph/test-08-27"),
     "원고 보기 버튼의 url이 telegraphUrl과 정확히 일치해야 한다"
   );
-  console.log("✅ telegraphUrl 있음(일반) -> 원고 보기 URL 버튼 1행");
+  assert(
+    telegraphRows[1]?.some((b) => "callback_data" in b && b.callback_data === `review:confirm:${makeJob().id}`),
+    "둘째 행에 승인 버튼이 있어야 한다(일반 원고도 공통 승인 흐름)"
+  );
+  console.log("✅ telegraphUrl 있음(일반 원고) -> 원고 보기 + 승인 버튼 2행(공통 승인 흐름 회귀)");
 
-  // 3-2) telegraphUrl + 의학 주제: 원고 보기 버튼 행 + 결정 버튼 행, 총 2행이 한 메시지에 붙어야 한다.
+  // 3-2) telegraphUrl + 의학 주제도 동일하게 2행(버튼 자체는 의학 여부와 무관하게 항상 같은 3개).
   const telegraphMedicalHeader = buildHeaderMessage(
     makeResult({ telegraphUrl: "https://telegra.ph/test-08-27", requiresMedicalReview: true, isMedical: true })
   );
   const telegraphMedicalRows = telegraphMedicalHeader.replyMarkup?.inline_keyboard ?? [];
+  assert(telegraphMedicalRows.length === 2, `버튼 행은 2개여야 한다 (실제: ${telegraphMedicalRows.length})`);
   assert(
-    telegraphMedicalRows.length === 2,
-    `telegraphUrl + 의학이면 버튼 행은 2개(원고 보기 + 결정)여야 한다 (실제: ${telegraphMedicalRows.length})`
+    telegraphMedicalRows[1]?.length === 3,
+    `결정 행에는 승인/수정/반려 3개가 있어야 한다 (실제: ${telegraphMedicalRows[1]?.length})`
   );
-  assert(
-    telegraphMedicalRows[0]?.some((b) => "url" in b && b.url === "https://telegra.ph/test-08-27"),
-    "첫 행은 원고 보기 URL 버튼이어야 한다"
-  );
-  assert(
-    telegraphMedicalRows[1]?.some((b) => "callback_data" in b && b.callback_data?.startsWith("review:confirm:")),
-    "둘째 행은 확인/수정/폐기 결정 버튼이어야 한다"
-  );
-  console.log("✅ telegraphUrl + 의학 -> 원고 보기 버튼 + 결정 버튼, 한 메시지에 2행");
+  console.log("✅ telegraphUrl + 의학 -> 원고 보기 버튼 + 승인/수정/반려 버튼, 2행");
 
   // 3-3) telegraphUrl이 null이면(발행 실패 폴백) 헤더에는 버튼을 붙이지 않는다 - 결정 버튼은
-  // notifyArticleReady()가 본문 dump 뒤에 buildMedicalDecisionMessage()로 별도 발송해야 하며,
+  // notifyArticleReady()가 본문 dump 뒤에 buildReviewDecisionMessage()로 별도 발송해야 하며,
   // 헤더에도 붙이면 중복 발송이 된다(2026-08-27 발견 후 수정한 버그의 회귀 방지).
-  const fallbackMedicalHeader = buildHeaderMessage(makeResult({ requiresMedicalReview: true, isMedical: true, telegraphUrl: null }));
-  assert(fallbackMedicalHeader.text.includes("본문 전문을 대신 보냅니다"), "telegraphUrl이 없으면 폴백 안내 문구가 있어야 한다");
-  assert(!fallbackMedicalHeader.replyMarkup, "telegraphUrl이 없으면 헤더에는 결정 버튼을 붙이면 안 된다(중복 방지)");
-  console.log("✅ telegraphUrl 없음 + 의학 -> 헤더에는 버튼 없음(중복 결정 버튼 방지)");
+  const fallbackHeader = buildHeaderMessage(makeResult({ telegraphUrl: null }));
+  assert(fallbackHeader.text.includes("본문 전문을 대신 보냅니다"), "telegraphUrl이 없으면 폴백 안내 문구가 있어야 한다");
+  assert(!fallbackHeader.replyMarkup, "telegraphUrl이 없으면 헤더에는 버튼을 붙이면 안 된다(중복 방지)");
+  console.log("✅ telegraphUrl 없음 -> 헤더에는 버튼 없음(중복 결정 버튼 방지, 의학 여부 무관)");
 
   // 4) 핵심 회귀: 본문이 실제로 메시지에 담겨야 한다("원고를 어떻게 확인해?" 질문의 원인).
   const bodyMessages = buildArticleBodyMessages(makeArticle());
@@ -174,19 +201,20 @@ function main(): void {
   assert(nullContent[0].text.includes("본문 없음"), "content가 null이어도 안전한 안내를 보내야 한다");
   console.log("✅ content null -> 안전 처리");
 
-  // 8) 의학 결정 메시지: 버튼 3개(confirm/edit/discard)가 정확한 callback_data로 붙어야 한다.
-  const decision = buildMedicalDecisionMessage("48472dba-9763-4c26-9c31-86b233a04161");
+  // 8) 결정 메시지: 버튼 3개(승인/수정 필요/반려)가 정확한 callback_data로 붙어야 한다.
+  // 이제 모든 원고 공통이라 이름도 buildReviewDecisionMessage로 바뀌었다(구 buildMedicalDecisionMessage).
+  const decision = buildReviewDecisionMessage("48472dba-9763-4c26-9c31-86b233a04161");
   const buttons = decision.replyMarkup?.inline_keyboard[0] ?? [];
   assert(buttons.length === 3, `결정 버튼은 3개여야 한다 (실제: ${buttons.length})`);
   assert(
     buttons.some((b) => "callback_data" in b && b.callback_data === "review:confirm:48472dba-9763-4c26-9c31-86b233a04161"),
-    "confirm 버튼의 callback_data가 정확해야 한다"
+    "승인 버튼의 callback_data가 정확해야 한다"
   );
   assert(
     buttons.some((b) => "callback_data" in b && b.callback_data?.startsWith("review:discard:")),
-    "discard 버튼이 있어야 한다"
+    "반려 버튼이 있어야 한다"
   );
-  console.log("✅ 의학 결정 메시지: confirm/edit/discard 버튼 정확히 부착");
+  console.log("✅ 결정 메시지: 승인/수정 필요/반려 버튼 정확히 부착");
 
   console.log("\n✅ notifyArticleReady 메시지 조립 테스트 완료");
 }

@@ -31,6 +31,8 @@ import { publishArticleToTelegraph } from "../../services/telegraph/telegraphCli
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
+import { runArticleReview } from "../review/runArticleReview.js";
+import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
 
 /** 원고 생성은 제목 생성(25초 실측)보다 훨씬 길다. 첫 실측(185초)의 3배 이상 여유를 둔다. */
@@ -116,6 +118,8 @@ export type RunWritingStageResult =
       durationMs: number;
       /** Telegraph 발행 URL. 발행이 실패해도(네트워크 등) 원고 자체는 성공으로 취급하므로 null일 수 있다. */
       telegraphUrl: string | null;
+      /** 검수 규칙 4종 결과(SPRINT_3_DESIGN.md). 차단하지 않는다 - 사람이 참고만 한다. */
+      review: ArticleReviewResult;
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
@@ -193,6 +197,18 @@ export async function runWritingStage(
     ai_model: "claude-headless(content-blog+korean-humanize)",
   });
 
+  // 검수 4종을 돌린다(SPRINT_3_DESIGN.md 3절). runWritingStage 안에서 자동으로 실행하는 이유는
+  // 규칙 기반이라 비용이 사실상 0이고, 결과가 곧 알림 내용의 일부이기 때문이다 - 조사 체크포인트처럼
+  // 별도 CLI 단계로 분리하면 사람이 명령을 한 번 더 쳐야 하는데 그 대가로 얻는 게 없다.
+  // ⚠️ 이 결과는 원고를 차단하지 않는다 - 알림에 표시되고 사람이 판단한다.
+  const review = runArticleReview({
+    job: { category: job.category },
+    article: { title: article.title, content: article.content, created_at: article.created_at },
+    sources: sources.map((s) => ({ content: s.content })),
+    hashtags: parsed.hashtags,
+    isMedical,
+  });
+
   // Telegraph 발행은 "더 잘 읽히게" 하는 부가 단계다 - 실패해도 원고 생성 자체는 성공으로
   // 취급한다(publishArticleToTelegraph는 예외를 던지지 않고 ok:false를 돌려준다).
   // ⚠️ Telegraph 페이지는 URL을 아는 누구나 볼 수 있는 공개 페이지다. 검수 전 원고가 이 URL로
@@ -210,6 +226,9 @@ export async function runWritingStage(
     isMedical,
     requiresMedicalReview: isMedical,
     telegraphUrl,
+    // 새 테이블(review_checks) 대신 metadata에 저장한다(설계 7절 결정) - migration 수동 적용
+    // 부담을 지금 질 이유가 없고, 하루 1~2건 규모에서는 JSON 연산자로 충분히 분석할 수 있다.
+    reviewChecks: review.checks,
     sourceCounts: {
       total: sources.length,
       official: sources.filter((s) => s.authority === "official").length,
@@ -229,6 +248,7 @@ export async function runWritingStage(
     telegraphUrl,
     requiresMedicalReview: isMedical,
     durationMs,
+    review,
   };
 }
 
@@ -245,6 +265,8 @@ export type RunArticleJobResult =
       isMedical: boolean;
       requiresMedicalReview: boolean;
       durationMs: { research: number; writing: number };
+      telegraphUrl: string | null;
+      review: ArticleReviewResult;
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; stage: "research" | "writing"; error: string };
@@ -275,5 +297,7 @@ export async function runArticleJob(
     isMedical: writing.isMedical,
     requiresMedicalReview: writing.requiresMedicalReview,
     durationMs: { research: research.durationMs, writing: writing.durationMs },
+    telegraphUrl: writing.telegraphUrl,
+    review: writing.review,
   };
 }
