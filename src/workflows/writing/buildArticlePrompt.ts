@@ -72,6 +72,44 @@ export function buildMedicalDisclaimer(
   return `*${text}*`;
 }
 
+// 톤앤무드 규칙(2026-08-28, 사용자 제공 네이버 블로그 샘플 7편 분석). 카테고리별로 다른 실제
+// 블로그 두 개의 문체를 관찰해 고정했다 - "기존에 우리가 해오던 톤앤무드와 다르다"는 피드백에
+// 대한 대응이다. 카테고리 무관 단일 스킬(content-blog)만으로는 이 정도 구체성을 못 얻는다.
+//
+// PERSONAL(entertainment/ott/parenting): "남매둥이 아빠" 블로그 4편 관찰 - 1인칭으로 "저도
+// 궁금해서 찾아봤습니다"류의 개인적 동기로 시작하고, 문장 종결을 "~습니다"와 "~해요/~네요/
+// ~더라고요"를 섞어 딱딱하지 않게 쓰며, 끝에 개인적 소감 문단을 둔다.
+//
+// EDITORIAL(living): "타사남의 시선" 블로그 3편 관찰 - 1인칭·개인 경험 없이 전부 "~습니다"체로
+// 통일하고, 소제목은 질문이 아니라 단정문으로 쓰며, 끝에 명확한 입장(제언·평가)을 담은 결론
+// 문단을 둔다. living 카테고리(정책·부동산·시사 이슈·제품 출시 전망 등)가 이 문체와 더 맞는다고
+// 판단했다 - 예외로 관찰된 지원금 안내 글(개인 톤) 1편이 있었으나, living 카테고리 전체를 보면
+// 정책 논쟁·이슈 분석 비중이 더 크다.
+const PERSONAL_STYLE_RULES = [
+  "1인칭 화자로 쓴다. 도입부 첫 문장이나 둘째 문장에 이 주제를 왜 찾아보게 됐는지 개인적 동기" +
+    "(궁금해서, 확인해보니, 관심이 있어서 등)를 자연스럽게 담는다.",
+  "문장 종결어미를 \"~습니다\"체로만 통일하지 않는다. \"~해요\", \"~네요\", \"~더라고요\", \"~인데요\"" +
+    " 같은 부드러운 종결도 섞어 개인 블로그 특유의 대화체 느낌을 낸다.",
+  "본문 끝에 개인적인 소감이나 생각을 짧게 정리하는 문단을 둔다(예: \"개인적으로는\", 자신의 경험과" +
+    " 연결짓는 마무리 등). 사무적으로 정보만 나열하고 끝내지 않는다.",
+  "과도하게 격식 있거나 사무적인 어조를 피한다 - 보고서가 아니라 블로그 글이다.",
+] as const;
+
+const EDITORIAL_STYLE_RULES = [
+  "1인칭을 쓰지 않는다. 개인 경험담이나 \"저는/제가\" 같은 표현을 넣지 않는다.",
+  "모든 문장을 \"~습니다/합니다\"체로 통일한다. \"~해요\", \"~네요\" 같은 구어체 종결을 쓰지 않는다.",
+  "소제목은 질문형이 아니라 단정적 진술문이나 명사구로 쓴다(예: \"~하는 이유\", \"~에 미칠 영향\").",
+  "본문 끝에 명확한 입장이나 제언을 담은 결론 문단을 둔다. 정보 나열로만 끝내지 않고, 이 사안을" +
+    " 어떻게 봐야 하는지 편집자의 판단을 분명히 밝힌다.",
+  "확정되지 않은 내용은 \"~로 보입니다\", \"~가능성이 있습니다\"처럼 신중하게 쓰되, 전체 어조는" +
+    " 자신감 있고 단정적으로 유지한다 - 우유부단하게 여러 가능성을 나열하지 않는다.",
+] as const;
+
+/** job.category로 톤을 고른다. 미분류(null)는 더 넓은 표본(4편)을 관찰한 PERSONAL을 기본으로 쓴다. */
+function pickStyleRules(category: string | null): readonly string[] {
+  return category === "living" ? EDITORIAL_STYLE_RULES : PERSONAL_STYLE_RULES;
+}
+
 const MEDICAL_RULES = [
   "이 주제는 의학 정보를 다룬다. 진단이나 처방으로 읽힐 수 있는 단정적 표현(\"~이면 ~입니다\"," +
     " \"~하면 낫습니다\", \"~병입니다\")을 쓰지 않는다.",
@@ -94,7 +132,11 @@ export function buildArticlePrompt(input: BuildArticlePromptInput): string {
   const factCard = buildFactCard(sources);
   const summary = summarizeSourcesByAuthority(sources);
 
-  const rules = isMedical ? [...COMMON_RULES, ...MEDICAL_RULES] : COMMON_RULES;
+  const rules = [
+    ...COMMON_RULES,
+    ...pickStyleRules(job.category),
+    ...(isMedical ? MEDICAL_RULES : []),
+  ];
 
   return [
     "너는 네이버 블로그에 올릴 원고를 쓰는 편집자다.",
