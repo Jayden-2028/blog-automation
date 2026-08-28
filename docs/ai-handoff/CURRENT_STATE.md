@@ -6,19 +6,20 @@
 
 **Sprint 0·1·2 완료, Sprint 3(검수 게이트 + 이미지) 전 단계 완료.** 매일 09:00 키워드 TOP 10이
 Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생긴다. 거기서부터 조사 완료
-알림의 `[✍️ 원고 작성][🗑 중단]` 버튼으로 원고 생성(Telegraph 발행, 해시태그 15개, 저신뢰 출처
-고지)까지 이어지고, 원고가 나오면 **검수 규칙 4종이 자동으로 돌아 결과가 알림에 표시**되며
-(차단은 아님), `[✅ 승인][✏️ 수정 필요][🗑 반려]` 버튼(모든 원고 공통)으로 `job`/`article`
-status가 `approved`로 전이된다. **승인 직후 이미지 브리프**(장면+ChatGPT용 생성 프롬프트+
-alt_text+금지 항목)가 자동 발송되고, 사용자가 ChatGPT로 이미지를 확보하면 `npm run job:image`로
-`images` 테이블에 기록한다. 경복궁·아기 셔더링어택·재혼 황후·보조금24 4건으로 전 구간 실측
-검증 완료. 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
-14절.
+알림의 `[✍️ 원고 작성][🗑 중단]` 버튼으로 원고 생성까지 이어지고, 그 안에서 **검수 규칙 4종이
+자동으로 돌고**(차단은 아님, 결과만 알림에 표시) **AI 이미지 2~3장이 실사(photorealistic)
+스타일로 자동 생성돼 본문에 삽입된 채로**(OpenAI `gpt-image-1` 기본) Telegraph에 발행된다 -
+카테고리별 톤(entertainment/ott/parenting은 개인 블로그 톤, living은 편집자 톤, 실제 블로그
+샘플 분석 기반)도 적용된다. `[✅ 승인][✏️ 수정 필요][🗑 반려]` 버튼(모든 원고 공통)으로
+`job`/`article` status가 `approved`로 전이된다. 경복궁·아기 셔더링어택·재혼 황후·보조금24·
+맥도날드 감튀 홀더 5건으로 전 구간 실측 검증 완료(이미지 포함 최종 형태는 맥도날드 건으로
+확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
+13-1·14절.
 
 **다음 작업: Sprint 4(네이버 반자동 발행) 설계.** Sprint 3까지 완성된 산출물(승인된 원고 + 제목
-+ 해시태그 + 이미지)을 네이버 블로그 임시저장까지 넣는 Playwright 자동화가 다음이다. 아직 설계
-문서가 없다 - 로드맵(`/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`) Sprint 4
-항목을 참고해 SPRINT_4_DESIGN.md부터 쓴다.
++ 해시태그 + 본문 삽입 이미지)을 네이버 블로그 임시저장까지 넣는 Playwright 자동화가 다음이다.
+아직 설계 문서가 없다 - 로드맵(`/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`)
+Sprint 4 항목을 참고해 SPRINT_4_DESIGN.md부터 쓴다.
 
 ## 지금 돌아가는 것
 
@@ -424,7 +425,8 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 
 설계: `docs/ai-handoff/SPRINT_3_DESIGN.md`. 승인된 결정 5건은 §15에, 작업 순서/상태는 §14에 있다.
 
-**구현 완료(커밋 `83542f6`, `f249b66`, `2c41e1a`, `a69e833`) + 실측 검증(2026-08-28, "보조금24" job)**:
+**구현 완료(커밋 `83542f6`, `f249b66`, `39322c2`, `9e693fe` 외) + 실측 검증(2026-08-28,
+"보조금24"/"맥도날드 감튀 홀더" job)**:
 
 1. **검수 규칙 4종** (`src/workflows/review/`) - 팩트/법적/광고/품질. 팩트 검사가 가장 까다로웠다:
    근거의 "2026. 9. 2."와 본문의 "9월 2일"을 같은 값으로 인식하도록 정규화해야 했고, 그래도 못
@@ -442,23 +444,27 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 4. **전 구간 실측 검증** - "보조금24" job(지원금 주제, 숫자·날짜 밀도가 높아 팩트 검사 시험에
    적합)으로 조사→버튼→작성→검수(통과)→Telegraph 발행→승인 버튼→`approved` 전이까지 실제로
    확인했다.
-5. **이미지 브리프가 승인 직후 자동 발송된다** - `buildImageBrief()`가 헤드리스 Claude로 장면
-   설명 + ChatGPT용 영어 생성 프롬프트 + alt_text + 금지 항목(실존 인물·브랜드 로고·실제 제품
-   사진은 항상 포함)을 만든다. Codex CLI는 코딩 에이전트라 이미지 생성이 불가해 실제 흐름은
-   ChatGPT 수동 핸드오프다. best-effort라 실패해도 이미 끝난 승인에는 영향이 없다.
-   ⚠️ **라이브 검증 중 실제 버그를 하나 잡았다**: 안내 문구의 `"<이미지 URL>"` 플레이스홀더가
-   이스케이프 안 돼 Telegram이 400으로 발송을 거부했다(실제 발송 실패로 재현·확인) - 수정 후
-   재발송 성공(커밋 `a69e833`).
-6. **이미지 기록** - `npm run job:image -- <jobId> <imageUrl> <copyrightStatus>`로 `images`
-   테이블(신규 `article_assets` 대신 기존 테이블 재사용, 결정 - 설계 §12)에 기록한다.
-   `copyright_status`는 `ai-generated:<도구>` / `press-release:<도메인>` / `stock:<서비스>:
-   <라이선스>` 세 형식만 허용하고, 형식이 안 맞으면 DB 접근 전에 거부한다. **실제 insert로
-   `images.id`가 identity(자동 증가)임을 확인했다**(반환값 `id=1`) - `types/database.ts`의
-   미검증 주석을 해소했다. 서치는 공식 보도자료·라이선스 명시 스톡으로만 한정, 생성이 기본
-   (결정 5번 - 웹 검색으로 찾은 이미지는 로드맵 §6-1이 "가장 큰 실질 위험"으로 지목한 타인
-   저작물이고, 사람이 봐도 침해 여부가 판별되지 않는다).
+5. **이미지 자동 생성 + 본문 삽입** (`SPRINT_3_DESIGN.md` 13-1절, 2026-08-28 재작업) -
+   "이미지가 포함된 원고 풀세트가 필요하다"는 피드백으로, 브리프만 만들어 ChatGPT로 넘기던
+   방식을 완전 자동화로 바꿨다. 사용자가 `OPENAI_API_KEY`(기본)/`GEMINI_API_KEY`(전환용)를
+   직접 제공. `runWritingStage` 안에서 섹션별(도입부+소제목, 2~3장) 장면을 기획하고
+   OpenAI `gpt-image-1`로 생성 → Supabase Storage 신규 공개 버킷(`article-images`) 업로드 →
+   본문에 마크다운 이미지로 삽입 → Telegraph에 `<figure><img/><figcaption>`으로 렌더링까지
+   승인 전에 전부 끝난다. 스타일은 **실사(photorealistic)**로 확정(처음엔 일러스트였다가 사용자
+   요청으로 전환) - 얼굴 안 보이는 구도 강제 + 무지 포장/로고 없음 강제로 초상권·상표권 위험을
+   프롬프트 단계에서 방어한다. Gemini는 "나노바나나2 라이트"(`gemini-3.1-flash-lite-image`)로
+   고정했으나 ⚠️ 무료 티어라 실제 호출은 429로 막혀 있다(유료 결제 필요, 기본 provider는
+   openai라 지금은 영향 없음).
+6. **이미지 기록** - 자동 생성된 이미지는 `images` 테이블에 자동 기록된다
+   (`copyright_status: ai-generated:openai` 형태). **실제 insert로 `images.id`가 identity
+   (자동 증가)임을 확인했다** - `types/database.ts`의 미검증 주석을 해소했다. `job:image` CLI
+   (`npm run job:image -- <jobId> <imageUrl> <copyrightStatus>`)는 수동 보완 경로로 남아
+   있지만, 이미지 직접 교체 기능은 별도 구현하지 않기로 했다 - Sprint 4가 반자동 업로드라
+   사용자가 업로드 직전 단계에서 이미 직접 통제할 수 있다(사용자 확인, 2026-08-28).
 
-**참고**: "보조금24" job의 `images`에 스키마 검증용 플레이스홀더 URL이 기록돼 있다(실제
-ChatGPT 이미지 아님) - 실사용 전 교체하거나 삭제할 것.
+**실측 검증**: "맥도날드 감튀 홀더" job으로 이미지 3/3장 성공, Telegraph 페이지에 `<img>` 3개
++ `<figcaption>` 3개 정상 렌더링 확인. 실사 스타일도 별도로 생성해 확인(손만 나오고 얼굴 없음,
+무지 포장, 로고 없음). "보조금24" job의 `images`에는 초기 검증용 플레이스홀더 URL이 남아
+있다(자동화 이전 수동 테스트 흔적) - 실사용 전 정리할 것.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`
