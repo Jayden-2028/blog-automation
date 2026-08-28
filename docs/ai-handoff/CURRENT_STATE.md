@@ -16,10 +16,12 @@ Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생�
 확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
 13-1·14절.
 
-**다음 작업: Sprint 4(네이버 반자동 발행) 설계.** Sprint 3까지 완성된 산출물(승인된 원고 + 제목
-+ 해시태그 + 본문 삽입 이미지)을 네이버 블로그 임시저장까지 넣는 Playwright 자동화가 다음이다.
-아직 설계 문서가 없다 - 로드맵(`/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`)
-Sprint 4 항목을 참고해 SPRINT_4_DESIGN.md부터 쓴다.
+**다음 작업: Sprint 4(네이버 반자동 발행) 구현 — 설계는 끝났고 결정 대기 중.**
+`docs/ai-handoff/SPRINT_4_DESIGN.md` §9에 결정 항목 6건이 있다(트리거 방식, 발행 대상 블로그,
+일일 발행 상한값, 쓰기 세션 최초 로그인 시점, 이미지 위치 타협안, 실측 단계 승인 방식). 이
+스프린트는 처음으로 사람 계정으로 실제 쓰기 작업을 브라우저에서 하므로 §10의 1번(SmartEditor
+DOM 실측)부터가 실제 네이버 세션을 여는 작업이다 - Creator Advisor 프로필과는 분리된 새
+프로필(`.local/naver-publish-profile/`)로 사용자가 최초 1회 수동 로그인해야 한다.
 
 ## 지금 돌아가는 것
 
