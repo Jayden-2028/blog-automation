@@ -66,8 +66,11 @@ async function generateWithOpenAI(input: GenerateImageInput): Promise<GenerateIm
 }
 
 const GEMINI_IMAGE_TIMEOUT_MS = 120_000;
-/** Gemini 이미지 생성 모델. 2026-08-28 GEMINI_API_KEY로 /v1beta/models 목록 조회해 존재 확인함. */
-const GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+// Gemini 이미지 생성 모델(사용자 결정, 2026-08-28: "나노바나나2 라이트"). /v1beta/models 목록에서
+// displayName으로 정확한 모델 ID를 확인했다 - "Nano Banana"는 gemini-2.5-flash-image,
+// "Nano Banana Pro"는 gemini-3-pro-image, "Nano Banana 2"는 gemini-3.1-flash-image이고
+// "Nano Banana 2 Lite"가 gemini-3.1-flash-lite-image다.
+const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 
 async function generateWithGemini(input: GenerateImageInput): Promise<GenerateImageResult> {
   const apiKey = process.env.GEMINI_API_KEY;
