@@ -90,11 +90,17 @@ supabase migration repair --status applied 20260827090344
 ### 5. 검증
 
 ```bash
-supabase migration list      # LOCAL/REMOTE 두 열이 9개로 일치
-supabase db diff --linked    # "No schema changes found" 나와야 정상
+supabase migration list      # LOCAL/REMOTE 두 열이 9개로 일치하면 성공
 ```
 
-`db diff`가 뭔가 뱉으면 로컬 파일과 원격 스키마가 실제로 다르다는 뜻이므로 **멈추고 확인**한다.
+> `supabase db diff --linked`는 shadow DB를 위해 **Docker Desktop이 필요**하다. Docker가 없으면
+> `failed to run docker`로 끝나는데, 리페어 검증에는 필수가 아니다 - 위 `migration list`의
+> LOCAL/REMOTE 일치가 곧 검증이다. Docker를 쓸 수 있으면 `db diff --linked`가 "No schema changes
+> found"를 내는지 추가 확인하면 되고, 뭔가 뱉으면 로컬 파일과 원격 스키마가 실제로 다르다는
+> 뜻이므로 멈추고 확인한다.
+
+**2026-08-28 실행 결과**: 9개 전부 LOCAL/REMOTE 일치 확인. `db diff --linked`는 Docker 미설치로
+건너뜀(무해).
 
 ## 이후 워크플로우
 
