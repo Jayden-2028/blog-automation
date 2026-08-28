@@ -9,9 +9,14 @@
 // <key>StartCalendarInterval</key> Hour=8/Minute=0 을 담은 .plist를 등록하면 된다.
 import "dotenv/config";
 
+import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
 import type { SchedulerJob } from "../scheduler/Scheduler.js";
 import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
+
+// Creator Advisor 수집(trendCollect)은 enrichment 단계다 - 실패해도 seed_queries만으로 파이프라인이
+// 정상 완주하므로 job 전체를 실패로 처리하지 않는다(buildDailyQueryPool.ts의 fallback 설계와 동일).
+const NON_FATAL_STAGES = new Set(["trendCollect"]);
 
 const job: SchedulerJob = {
   name: "daily-keyword",
@@ -24,6 +29,10 @@ const job: SchedulerJob = {
       console.log(`   [${entry.stage}] ${entry.status} (${entry.durationMs}ms)${detail}`);
     }
 
+    if (result.trendCollection?.status === "failed") {
+      console.log(`\n⚠️ Creator Advisor 수집 실패(비치명적) - ${result.trendCollection.error}`);
+    }
+
     if (result.relevance) {
       console.log(
         `\n▶ relevance filter: ${result.relevance.totalBefore}건 → ${result.relevance.totalAfter}건 ` +
@@ -31,14 +40,25 @@ const job: SchedulerJob = {
       );
     }
 
-    const failedStage = result.stageLog.find((entry) => entry.status === "failed");
+    const failedStage = result.stageLog.find(
+      (entry) => entry.status === "failed" && !NON_FATAL_STAGES.has(entry.stage)
+    );
     if (failedStage) {
+      const message = `"${failedStage.stage}" 단계 실패: ${failedStage.error}`;
+      // 지금까지는 실패해도 로그 파일에만 남아서 아무도 몰랐다. 매일 도는 무인 job이므로
+      // 알림 없이 조용히 죽는 것을 막는다.
+      await notifyPipelineFailure(message, result.stageLog);
       // stageLog에 이미 상세 내용을 남겼으니, LocalScheduler가 프로세스 레벨 실패로도 기록하도록 다시 던진다.
-      throw new Error(`"${failedStage.stage}" 단계 실패: ${failedStage.error}`);
+      throw new Error(message);
     }
 
     if (!result.notification?.sent) {
-      console.log(`\n⚠️ Telegram 미발송 (reason: ${result.notification?.reason ?? "unknown"})`);
+      const reason = result.notification?.reason ?? "unknown";
+      console.log(`\n⚠️ Telegram 미발송 (reason: ${reason})`);
+      // dry_run이 아닌데 발송되지 않았다면 사용자가 오늘 키워드를 못 받는다는 뜻이므로 알린다.
+      if (reason !== "dry_run") {
+        await notifyPipelineFailure(`키워드 알림이 발송되지 않았습니다 (reason: ${reason})`, result.stageLog);
+      }
       return;
     }
 

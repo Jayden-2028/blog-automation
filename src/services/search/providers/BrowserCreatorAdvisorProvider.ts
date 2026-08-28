@@ -12,10 +12,9 @@
 //
 // URL/topic 구조(2026-08-26 실측 확인): trends 페이지는 blogId 하나에 고정된 단일 URL이고
 // (https://creator-advisor.naver.com/naver_blog/{blogId}/trends), topic은 URL query param이
-// 아니라 그 페이지 안의 topic card(Swiper 슬라이드)들이다. Swiper가 오프스크린 슬라이드까지
-// DOM에 이미 렌더링해두는 경우가 흔해서, 이 provider는 우선 "페이지 1회 로드 후 DOM에 존재하는
-// card를 그대로 파싱"만 하고 Swiper 조작(다음 슬라이드로 넘기기)은 하지 않는다 - 실제로 DOM에
-// 일부 topic만 존재하는 경우가 확인되면 그때 Swiper 순회를 추가해야 한다(섣불리 구현하지 않는다).
+// 아니라 그 페이지 안의 topic card(Swiper 슬라이드)들이다. Swiper는 topic card를 모두 DOM에
+// 만들지만 viewport 주변 card의 keyword row만 lazy rendering하므로, HTML을 캡처하기 전에 모든
+// topic 슬라이드를 순회해 각 card의 row를 채운다.
 //
 // 이 파일은 "브라우저를 어떻게 조작할지"만 다룬다. "렌더링된 HTML에서 값을 어떻게 뽑을지"는
 // parseTrendHtml.ts로 분리되어 있다 — 그래서 파싱 로직은 실제 브라우저 없이 mock fixture로도
@@ -34,6 +33,8 @@ import { CREATOR_ADVISOR_TREND_SELECTORS, parseTrendPage, type TrendCardScope } 
 import {
   CREATOR_ADVISOR_VIEWPORT,
   ensureTrendsViewState,
+  traverseTopicSwiper,
+  waitForTopicCardRowsSettled,
   TRENDS_READY_TEXT_CANDIDATES,
   waitForTrendsPageRendered,
 } from "./creatorAdvisor/trendsPageReadiness.js";
@@ -187,6 +188,23 @@ export class BrowserCreatorAdvisorProvider implements CreatorAdvisorProvider {
       // 아니라 keyword 데이터가 있는 가장 최신 날짜를 찾아 그 날짜로 화면을 이동시킨다.
       const dateResult = await findLatestAvailableTrendDate(page);
 
+      // topic과 demographic swiper는 같은 클래스를 쓰므로 제목 패턴으로 topic swiper를 골라 전체
+      // 슬라이드를 순회한다. enrichment 수집이므로 순회 실패는 함수 내부에서 격리하고 기존 파싱
+      // 흐름을 계속한다.
+      await traverseTopicSwiper(page);
+
+      // 날짜 이동 후에도 topic card row가 다시 비동기로 채워진다 - 여기서 한 번 더 안정될 때까지
+      // 기다린 뒤 캡처한다. findLatestAvailableTrendDate 내부의 판정만 믿고 바로 content()를 찍으면
+      // 마지막 날짜 이동 직후의 미완성 DOM을 잡을 수 있다.
+      const rowsReadiness = await waitForTopicCardRowsSettled(page);
+      if (!rowsReadiness.ready) {
+        console.warn(
+          `⚠️ BrowserCreatorAdvisorProvider: topic card row가 ${rowsReadiness.waitedMs}ms 안에 안정되지 ` +
+            `않았습니다 (topic card ${rowsReadiness.topicCardCount}개 중 ${rowsReadiness.loadedTopicCardCount}개 로딩, ` +
+            `row ${rowsReadiness.topicRowCount}건). 현재 상태 그대로 파싱합니다.`
+        );
+      }
+
       const html = await page.content();
       const collectedAt = new Date().toISOString();
       const parsed = parseTrendPage(html, collectedAt);
@@ -197,8 +215,7 @@ export class BrowserCreatorAdvisorProvider implements CreatorAdvisorProvider {
         // 문제가 아니라 데이터 문제이므로 여기서 경고할 대상이 아니다.
         console.warn(
           `⚠️ BrowserCreatorAdvisorProvider: DOM에 존재하는 topic category card(${parsed.cardScope.topicCardCount}개)가 ` +
-            `요청한 maxTopics(${maxTopics})보다 적습니다. Swiper 순회가 필요할 수 있으나 아직 구현되지 ` +
-            `않았습니다 - 현재 DOM에 있는 만큼만 반환합니다.`
+            `요청한 maxTopics(${maxTopics})보다 적습니다. 현재 DOM에 있는 만큼만 반환합니다.`
         );
       }
 
