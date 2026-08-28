@@ -312,13 +312,21 @@ Telegraph 미리보기에 이미지를 넣는 것도 이번에는 하지 않는�
 | 2 | 검수 결과를 알림에 표시 | Claude | ✅ 완료 (커밋 `f249b66`) |
 | 3 | 공통 승인 흐름으로 `review:` 콜백 승격 | Claude | ✅ 완료 (커밋 `f249b66`) |
 | 4 | 실측 1건으로 전 구간 검증 | Claude + 사용자 | ✅ 완료 (2026-08-28, "보조금24" job) |
-| 5 | 이미지 브리프 생성 + Telegram 전달 | Claude | 대기 |
-| 6 | 이미지 기록 경로(`images` insert) + identity 검증 | Claude | 대기 |
+| 5 | 이미지 브리프 생성 + Telegram 전달 | Claude | ✅ 완료 (커밋 `2c41e1a`, `a69e833`) |
+| 6 | 이미지 기록 경로(`images` insert) + identity 검증 | Claude | ✅ 완료 (커밋 `2c41e1a`) |
 
 **4번 실측 결과**: "보조금24로 숨은 정부지원금" job(정부 지원금 주제 - 숫자·날짜 밀도가 높아
 팩트 검사를 실전에서 시험하기 좋은 케이스)으로 조사→버튼→작성→검수→Telegraph 발행→승인
 버튼까지 전 구간을 실제로 돌렸다. 검수 통과(`reviewChecks: []`, 오탐 없음), 승인 버튼 클릭 후
 `job.status`/`article.status` 모두 `review` → `approved`로 정상 전이 확인.
+
+**5·6번 실측 결과(같은 job으로 계속)**: `notifyImageBrief()`를 실제로 호출해 브리프를
+생성·발송했다. **첫 시도에서 Telegram 400 오류로 실패** - `job:image` 안내 문구에 하드코딩한
+`"<이미지 URL>"` 플레이스홀더가 이스케이프 없이 들어가 Telegram이 "<이미지"를 알 수 없는 HTML
+태그로 해석했다(커밋 `a69e833`로 수정). 수정 후 재발송 성공. 이어서 `npm run job:image`로 실제
+insert를 실행해 **`images.id`가 identity(자동 증가 정수)임을 확인했다**(첫 반환값 `1`) -
+`types/database.ts` 주석의 미검증 상태가 해소됐다. 기록된 이미지는 스키마 검증용 플레이스홀더
+URL이며, 실제 ChatGPT 이미지로 나중에 교체가 필요하다.
 
 ## 15. 결정 상태
 
