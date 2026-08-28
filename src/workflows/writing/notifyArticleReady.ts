@@ -35,14 +35,6 @@ import type { RunWritingStageResult } from "./runArticleJob.js";
 // 직접 호출한다(조사 단계는 job:research로 분리됐고, 이미 저장된 근거가 있으면 재사용한다).
 export type RunArticleJobSuccess = Extract<RunWritingStageResult, { status: "success" }>;
 
-export function buildSourceCountSummary(result: RunArticleJobSuccess): string {
-  const counts = { official: 0, medical: 0, news: 0, community: 0 };
-  for (const source of result.sources) {
-    if (source.authority) counts[source.authority]++;
-  }
-  return `공공 ${counts.official}건 · 의료 ${counts.medical}건 · 뉴스 ${counts.news}건 · 커뮤니티 ${counts.community}건`;
-}
-
 export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoingMessage {
   const { job, article } = result;
 
@@ -50,12 +42,13 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     ? ["⚕️ <b>의학 주제 — 원고와 출처를 직접 확인해주세요</b>"]
     : ["📝 <b>원고 초안 준비됨</b>"];
 
+  // 2026-08-28 사용자 피드백으로 제목/카테고리만 남겼다: 키워드는 제목과 거의 겹치고, 근거
+  // 건수와 작성 소요 시간은 이 시점에 사람이 내릴 결정(승인/수정/반려)에 쓰이지 않는다.
+  // 근거 구성은 job.metadata.sourceCounts에 그대로 남아 있고, 조사 단계 알림에서 이미 봤다.
   lines.push(
     "",
     `<b>${escapeTelegramHtml(article.title ?? job.keyword)}</b>`,
-    `키워드: ${escapeTelegramHtml(job.keyword)} · category: ${escapeTelegramHtml(job.category ?? "N/A")}`,
-    `근거: ${buildSourceCountSummary(result)}`,
-    `작성 소요 시간: ${Math.round(result.durationMs / 1000)}초`
+    `category: ${escapeTelegramHtml(job.category ?? "N/A")}`
   );
 
   // 검수 결과(SPRINT_3_DESIGN.md 6절) - 차단하지 않고 참고로만 보여준다. escapeTelegramHtml을
