@@ -62,6 +62,8 @@
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "job:daily-keyword": "tsx src/jobs/dailyKeywordJob.ts",
     "job:telegram-poll": "tsx src/jobs/telegramPollJob.ts",
+    "job:watchdog": "tsx src/jobs/watchdogJob.ts",
+    "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",
     "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts"
   },
   "dependencies": {
