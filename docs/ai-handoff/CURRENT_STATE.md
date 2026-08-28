@@ -567,25 +567,27 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 
 ## 인프라 정리 (2026-08-28, 중간 점검 후속)
 
-중간 점검에서 나온 "아쉬운 점" 3건 착수. 상세는 `CLOUD_MIGRATION.md` /
+중간 점검에서 나온 "아쉬운 점" 3건 **전부 완료(2026-08-28)**. 상세는 `CLOUD_MIGRATION.md` /
 `SUPABASE_MIGRATION_SYNC.md`.
 
-1. **클라우드 감시인 (Phase 1 완료)** - `src/jobs/watchdogJob.ts` + `.github/workflows/watchdog.yml`.
-   로컬 맥과 다른 호스트(GitHub 러너)에서 매일 11:00 KST에 "오늘 완료된 discovery_run이 있나"를
-   확인하고 없으면 Telegram으로 알린다. 강제 종료 시 실패 알림이 안 나가던 구멍을 밖에서 막는다.
-   `npm run test:watchdog`(7케이스) + 라이브 dry-run 통과. **가동에는 사용자 개입 2건 필요**:
-   repo secret 4개 등록 + 워크플로우 파일 main push. Phase 2(Telegram 수신 분리)/Phase 3(로그인
-   세션 이전)는 설계만.
+1. **클라우드 감시인 (Phase 1 완료 + 가동)** - `src/jobs/watchdogJob.ts` +
+   `.github/workflows/watchdog.yml`. GitHub 러너가 매일 02:00 UTC(11:00 KST)에 "오늘 완료된
+   discovery_run이 있나"를 확인하고 없으면 Telegram으로 알린다. 로컬 맥과 완전히 독립 - 강제
+   종료 시 실패 알림이 안 나가던 구멍을 밖에서 막는다. `npm run test:watchdog`(7케이스) 통과,
+   **GitHub Actions에서 실제 실행해 run #19 감지 + conclusion success 확인**. repo secret 4개
+   (`SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`/`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`) 등록됨.
+   ⚠️ 알림 발송 경로(stale 판정 → Telegram)는 `SEND=1 npm run test:watchdog`로 한 번 눈으로
+   확인할 것. Phase 2(Telegram 수신 분리)/Phase 3(로그인 세션 이전)는 설계만.
 
-2. **Supabase CLI 동기화 (완료, 2026-08-28)** - `brew install`로 v2.116.0 설치, `supabase init`로
-   `config.toml` 생성. 사용자가 `supabase login` + `link` 후 `scripts/supabase-repair.sh` 실행 →
+2. **Supabase CLI 동기화 (완료)** - `brew install`로 v2.116.0 설치, `supabase init`로
+   `config.toml` 생성. `supabase login` + `link` 후 `scripts/supabase-repair.sh` 실행 →
    `supabase migration list`에서 9개 전부 LOCAL/REMOTE 일치 확인. 이제 Dashboard SQL Editor 수작업
    대신 `supabase db push`로 스키마를 바꾼다(CLAUDE.md 승인 게이트는 유지). `db diff --linked`는
    Docker 필요라 건너뜀 - `migration list` 일치가 검증. 상세 `SUPABASE_MIGRATION_SYNC.md`.
 
-3. **git 브랜치 정리 (진행 중)** - `backup/full-linear-history`에 정리 전 46커밋 보존. 스프린트
-   경계마다 `feat/sprint-{0..5}-*` 브랜치 + PR #1~#6 생성(전부 origin). **사용자가 PR 6개를
-   0→5 순서로 병합하면 완료** - `.github/workflows/watchdog.yml`이 main에 올라가야 감시인
-   스케줄이 활성화된다.
+3. **git 브랜치 정리 (완료)** - 정리 전 46커밋은 로컬 `backup/full-linear-history`에 보존.
+   스프린트 경계마다 PR #1~#6을 만들어 0→5 순서로 `main`에 병합(스프린트별 merge commit 6개).
+   6주치 작업이 처음으로 `origin/main`에 백업됐다. feature 브랜치는 원격/로컬 모두 정리. 이후
+   작업은 스프린트당 브랜치 1개 + PR.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`
