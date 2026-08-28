@@ -577,12 +577,15 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
    repo secret 4개 등록 + 워크플로우 파일 main push. Phase 2(Telegram 수신 분리)/Phase 3(로그인
    세션 이전)는 설계만.
 
-2. **Supabase CLI 도입** - `brew install`로 v2.116.0 설치, `supabase init`로 `config.toml` 생성.
-   9개 마이그레이션이 전부 Dashboard 수작업 적용이라 원격 `schema_migrations`가 비어 있는 문제를
-   `scripts/supabase-repair.sh`(9개를 `applied` 표시, SQL 실행 안 함)로 해소하는 절차 준비.
-   **사용자 개입 필요**: `supabase login` + `supabase link --project-ref <ref>`(DB 비밀번호) 후
-   스크립트 실행. 이후 Dashboard 수작업 대신 `supabase db push`(승인 게이트 유지).
+2. **Supabase CLI 동기화 (완료, 2026-08-28)** - `brew install`로 v2.116.0 설치, `supabase init`로
+   `config.toml` 생성. 사용자가 `supabase login` + `link` 후 `scripts/supabase-repair.sh` 실행 →
+   `supabase migration list`에서 9개 전부 LOCAL/REMOTE 일치 확인. 이제 Dashboard SQL Editor 수작업
+   대신 `supabase db push`로 스키마를 바꾼다(CLAUDE.md 승인 게이트는 유지). `db diff --linked`는
+   Docker 필요라 건너뜀 - `migration list` 일치가 검증. 상세 `SUPABASE_MIGRATION_SYNC.md`.
 
-3. **git 브랜치 정리** - (병합/push는 사용자 승인 대기 중)
+3. **git 브랜치 정리 (진행 중)** - `backup/full-linear-history`에 정리 전 46커밋 보존. 스프린트
+   경계마다 `feat/sprint-{0..5}-*` 브랜치 + PR #1~#6 생성(전부 origin). **사용자가 PR 6개를
+   0→5 순서로 병합하면 완료** - `.github/workflows/watchdog.yml`이 main에 올라가야 감시인
+   스케줄이 활성화된다.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`
