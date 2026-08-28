@@ -262,7 +262,6 @@ async function main(): Promise<void> {
     mergeJobMetadata: number;
     findLatestArticle: number;
     updateArticleStatus: number;
-    sendImageBrief: number;
   };
   function newReviewCalls(): ReviewCalls {
     return {
@@ -271,7 +270,6 @@ async function main(): Promise<void> {
       mergeJobMetadata: 0,
       findLatestArticle: 0,
       updateArticleStatus: 0,
-      sendImageBrief: 0,
     };
   }
 
@@ -281,12 +279,7 @@ async function main(): Promise<void> {
 
   const REVIEW_ARTICLE_ID = 42;
 
-  function makeReviewBot(opts: {
-    job: ArticleJobRow | null;
-    calls: ReviewCalls;
-    article?: ArticleRow | null;
-    failImageBrief?: boolean;
-  }): TelegramBot {
+  function makeReviewBot(opts: { job: ArticleJobRow | null; calls: ReviewCalls; article?: ArticleRow | null }): TelegramBot {
     const article: ArticleRow | null =
       opts.article !== undefined
         ? opts.article
@@ -324,10 +317,6 @@ async function main(): Promise<void> {
       updateArticleStatus: async (_id, status) => {
         opts.calls.updateArticleStatus++;
         return article ? { ...article, status } : null;
-      },
-      sendImageBrief: async () => {
-        opts.calls.sendImageBrief++;
-        if (opts.failImageBrief) throw new Error("이미지 브리프 생성 실패");
       },
     });
   }
@@ -401,26 +390,6 @@ async function main(): Promise<void> {
     console.log("✅ confirm(비의학) -> 동일하게 approved, 의학 전용 문구 없음");
   }
 
-  // 7-4c) confirm은 article이 있으면 이미지 브리프도 함께 보낸다(SPRINT_3_DESIGN.md 9절
-  // "원고 확정 -> 브리프 전달"). article이 없으면(7-6b) 보낼 대상이 없으니 호출하지 않는다.
-  {
-    const calls = newReviewCalls();
-    const bot = makeReviewBot({ job: makeReviewJob(), calls });
-    await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
-    assert(calls.sendImageBrief === 1, "confirm 후 이미지 브리프를 1회 보내야 한다");
-    console.log("✅ confirm -> 이미지 브리프 발송 트리거됨");
-  }
-
-  // 7-4d) 이미지 브리프 생성이 실패해도 승인 자체는 정상 처리돼야 한다(best-effort).
-  {
-    const calls = newReviewCalls();
-    const bot = makeReviewBot({ job: makeReviewJob(), calls, failImageBrief: true });
-    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
-    assert(result.outcome.status === "reviewed" && result.outcome.action === "confirm", "브리프 실패해도 승인은 성공해야 한다");
-    assert(result.message.includes("승인됨"), "브리프 실패해도 승인 메시지는 정상이어야 한다");
-    console.log("✅ 이미지 브리프 실패해도 승인 자체는 정상 처리(best-effort)");
-  }
-
   // 7-5) discard: status를 rejected로 바꾼다. article 상태는 건드리지 않는다(반려된 원고는 애초에
   // 발행 대상이 아니므로 article.status를 approved 경로와 대칭으로 바꿀 필요가 없다).
   {
@@ -434,9 +403,8 @@ async function main(): Promise<void> {
     );
     assert(calls.updateStatus === 1, "discard는 status를 갱신해야 한다");
     assert(calls.updateArticleStatus === 0, "discard는 article.status를 바꾸지 않는다");
-    assert(calls.sendImageBrief === 0, "discard는 이미지 브리프를 보내면 안 된다(승인된 적 없는 원고다)");
     assert(result.message.includes("반려됨"), "반려 문구여야 한다(구 '폐기됨'에서 변경)");
-    console.log("✅ discard -> status='rejected', article은 불변, '반려됨' 문구, 브리프 없음");
+    console.log("✅ discard -> status='rejected', article은 불변, '반려됨' 문구");
   }
 
   // 7-6) edit: metadata만 남기고 requiresMedicalReview는 여전히 true로 남아야 한다(재확인 전까지
@@ -448,9 +416,8 @@ async function main(): Promise<void> {
     assert(result.outcome.status === "reviewed" && result.outcome.action === "edit", "edit은 reviewed/edit이어야 한다");
     assert(calls.updateStatus === 0, "edit은 job.status를 바꾸면 안 된다");
     assert(calls.updateArticleStatus === 0, "edit은 article.status를 바꾸면 안 된다");
-    assert(calls.sendImageBrief === 0, "edit은 이미지 브리프를 보내면 안 된다(아직 승인 전이다)");
     assert(result.message.includes("수정 필요"), "수정 필요 안내가 있어야 한다");
-    console.log("✅ edit -> metadata만 갱신(게이트는 계속 걸려 있음), status 불변, 브리프 없음");
+    console.log("✅ edit -> metadata만 갱신(게이트는 계속 걸려 있음), status 불변");
   }
 
   // 7-6b) confirm인데 원고가 아예 없으면(예외적 상황) article 갱신 없이 job만 approved로 바뀐다 -

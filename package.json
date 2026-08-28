@@ -30,6 +30,7 @@
     "test:article-review": "tsx src/workflows/review/testArticleReview.ts",
     "test:image-copyright": "tsx src/config/testImageCopyrightRules.ts",
     "test:image-brief": "tsx src/workflows/writing/testBuildImageBrief.ts",
+    "test:article-images": "tsx src/workflows/writing/testGenerateArticleImages.ts",
     "test:notify-image-brief": "tsx src/workflows/writing/testNotifyImageBrief.ts",
     "test:record-image": "tsx src/workflows/writing/testRecordArticleImage.ts",
     "test:telegraph-nodes": "tsx src/services/telegraph/testMarkdownToTelegraphNodes.ts",

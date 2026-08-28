@@ -26,11 +26,14 @@ import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
+import { createImage } from "../../services/supabase/repositories/imageRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
+import { generateArticleImages } from "./generateArticleImages.js";
+import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
 import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
@@ -105,6 +108,8 @@ export type RunWritingStageOptions = {
   sources?: SourceRow[];
   /** sources 생략 시 내부에서 runResearchStage를 호출할 때 전달할 옵션. */
   researchOptions?: RunResearchStageOptions;
+  /** false로 주면 이미지 생성을 건너뛴다(테스트, 또는 비용을 아끼고 싶을 때). 기본은 생성한다. */
+  generateImages?: boolean;
 };
 
 export type RunWritingStageResult =
@@ -120,6 +125,8 @@ export type RunWritingStageResult =
       telegraphUrl: string | null;
       /** 검수 규칙 4종 결과(SPRINT_3_DESIGN.md). 차단하지 않는다 - 사람이 참고만 한다. */
       review: ArticleReviewResult;
+      /** 생성 성공/실패 개수(2026-08-28). 이미지 자체는 본문에 이미 삽입돼 있다 - 이건 알림용 요약이다. */
+      images: { succeeded: number; failed: number };
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
@@ -180,12 +187,30 @@ export async function runWritingStage(
 
   const parsed = parseArticleOutput(generated.output, job.keyword);
 
-  // 최종 본문 = 모델이 쓴 body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
+  // 이미지 자동 생성 + 본문 삽입(2026-08-28, 사용자 요청: "이미지가 첨부된 원고 풀세트").
+  // AI 생성이 기본(사용자 결정)이고, 실패해도 원고 텍스트 자체는 이미 완성돼 있으므로 계속
+  // 진행한다(generateArticleImages는 예외를 던지지 않고 failures 배열로만 알린다).
+  const imageGeneration: GenerateArticleImagesResult =
+    options.generateImages === false
+      ? { body: parsed.body, images: [], failures: [] }
+      : await generateArticleImages({
+          jobId,
+          title: parsed.title,
+          keyword: job.keyword,
+          category: job.category,
+          seoDescription: parsed.seoDescription,
+          body: parsed.body,
+        });
+  if (imageGeneration.failures.length > 0) {
+    console.error(`⚠️ 이미지 ${imageGeneration.failures.length}건 생성 실패 (원고는 계속 진행) -`, imageGeneration.failures.join(" / "));
+  }
+
+  // 최종 본문 = (이미지 삽입된) body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
   // 해시태그/고지를 body에 직접 섞지 않고 여기서 결정적으로 붙이는 이유(2026-08-28, 사용자 요청):
   // 둘 다 "매번 정확히 지켜져야 하는" 항목이라 모델 출력에만 맡기면 빠뜨릴 수 있다.
   // buildMedicalDisclaimer()는 실제 sources 등급을 보고 문구를 정하므로 모델이 지어낼 수 없다.
   const disclaimer = buildMedicalDisclaimer(isMedical, sources);
-  const content = [parsed.body, parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null, disclaimer]
+  const content = [imageGeneration.body, parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null, disclaimer]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
 
@@ -196,6 +221,23 @@ export async function runWritingStage(
     status: "review",
     ai_model: "claude-headless(content-blog+korean-humanize)",
   });
+
+  // 생성된 이미지를 images 테이블에 기록한다(article.id가 생긴 뒤에만 가능하다).
+  // 실패해도 원고 저장 자체를 막지 않는다 - 이미지가 본문에는 이미 들어가 있으므로 기록 실패는
+  // 사후에 job:image로 보완할 수 있다.
+  for (const image of imageGeneration.images) {
+    try {
+      await createImage({
+        article_id: article.id,
+        image_url: image.imageUrl,
+        source: image.provider,
+        copyright_status: image.copyrightStatus,
+        alt_text: image.altText,
+      });
+    } catch (error) {
+      console.error(`⚠️ 이미지 기록 실패(본문에는 이미 삽입됨) -`, error instanceof Error ? error.message : error);
+    }
+  }
 
   // 검수 4종을 돌린다(SPRINT_3_DESIGN.md 3절). runWritingStage 안에서 자동으로 실행하는 이유는
   // 규칙 기반이라 비용이 사실상 0이고, 결과가 곧 알림 내용의 일부이기 때문이다 - 조사 체크포인트처럼
@@ -229,6 +271,8 @@ export async function runWritingStage(
     // 새 테이블(review_checks) 대신 metadata에 저장한다(설계 7절 결정) - migration 수동 적용
     // 부담을 지금 질 이유가 없고, 하루 1~2건 규모에서는 JSON 연산자로 충분히 분석할 수 있다.
     reviewChecks: review.checks,
+    imageCounts: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
+    imageFailures: imageGeneration.failures,
     sourceCounts: {
       total: sources.length,
       official: sources.filter((s) => s.authority === "official").length,
@@ -249,6 +293,7 @@ export async function runWritingStage(
     requiresMedicalReview: isMedical,
     durationMs,
     review,
+    images: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
   };
 }
 
@@ -267,6 +312,7 @@ export type RunArticleJobResult =
       durationMs: { research: number; writing: number };
       telegraphUrl: string | null;
       review: ArticleReviewResult;
+      images: { succeeded: number; failed: number };
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; stage: "research" | "writing"; error: string };
@@ -299,5 +345,6 @@ export async function runArticleJob(
     durationMs: { research: research.durationMs, writing: writing.durationMs },
     telegraphUrl: writing.telegraphUrl,
     review: writing.review,
+    images: writing.images,
   };
 }

@@ -32,6 +32,11 @@ export type BuildImageBriefInput = {
   category: string | null;
   /** 있으면 장면 설명에 참고한다(요약이 원고 핵심을 짧게 담고 있다). */
   seoDescription?: string | null;
+  /**
+   * 이 이미지가 본문의 어느 부분에 들어가는지(예: "도입부(대표 이미지)", 특정 소제목 텍스트).
+   * planArticleImages.ts가 여러 장을 만들 때 장면이 서로 겹치지 않도록 구분해서 넘긴다.
+   */
+  sectionHint?: string | null;
 };
 
 export type ImageBriefOptions = {
@@ -58,14 +63,15 @@ function buildPrompt(input: BuildImageBriefInput): string {
     `키워드: ${input.keyword}`,
     input.category ? `분야: ${input.category}` : null,
     input.seoDescription ? `요약: ${input.seoDescription}` : null,
+    input.sectionHint ? `이 이미지가 들어갈 위치: ${input.sectionHint}` : null,
   ]
     .filter(Boolean)
     .join("\n");
 
   return [
-    "너는 블로그 원고에 어울리는 대표 이미지를 기획하는 아트 디렉터다.",
-    "아래 원고에 쓸 이미지 1장을 기획하라. 이미지는 네가 만들지 않는다 - 담당자가 이 기획을",
-    "그대로 ChatGPT에 붙여넣어 이미지를 생성하거나, 명시된 범위 안에서 이미지를 찾을 것이다.",
+    "너는 블로그 원고에 쓸 이미지를 기획하는 아트 디렉터다.",
+    "아래 원고의 지정된 위치에 들어갈 이미지 1장을 기획하라. 여기서 만드는 건 '기획'(장면 설명 +" +
+      " 이미지 생성 프롬프트)이고, 실제 생성은 이 기획을 그대로 이미지 생성 모델에 넘겨서 한다.",
     "",
     context,
     "",

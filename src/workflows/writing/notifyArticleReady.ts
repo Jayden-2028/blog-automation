@@ -51,6 +51,16 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     `category: ${escapeTelegramHtml(job.category ?? "N/A")}`
   );
 
+  // 이미지 생성 요약(2026-08-28) - 실패가 있으면 알려서, "원고 보기"를 열었을 때 이미지 빠진
+  // 섹션이 있어도 놀라지 않게 한다. 이미지 자체는 본문에 이미 삽입돼 있어 URL은 따로 안 보여준다.
+  if (result.images.succeeded > 0 || result.images.failed > 0) {
+    const imageLine =
+      result.images.failed > 0
+        ? `🖼 이미지 ${result.images.succeeded}장 생성됨 (${result.images.failed}장 실패 - 본문에서 빠진 자리가 있을 수 있습니다)`
+        : `🖼 이미지 ${result.images.succeeded}장 생성됨`;
+    lines.push("", imageLine);
+  }
+
   // 검수 결과(SPRINT_3_DESIGN.md 6절) - 차단하지 않고 참고로만 보여준다. escapeTelegramHtml을
   // 거는 이유는 검수 메시지 안에 근거 원문 발췌("특별석은 12만 원입니다" 등)가 그대로 들어가
   // "<"/">"/"&"가 섞일 수 있기 때문이다.

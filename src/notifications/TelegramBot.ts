@@ -16,7 +16,6 @@ import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repos
 import { runWritingStage } from "../workflows/writing/runArticleJob.js";
 import { notifyArticleReady } from "../workflows/writing/notifyArticleReady.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
-import { notifyImageBrief } from "../workflows/writing/notifyImageBrief.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
@@ -132,11 +131,6 @@ export type TelegramBotOptions = {
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
   updateArticleStatus?: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   /**
-   * 승인 직후 이미지 브리프를 만들어 보낸다(SPRINT_3_DESIGN.md 9절 "원고 확정 -> 브리프 전달").
-   * best-effort다 - 실패해도 승인 자체는 이미 끝나 있어야 한다(호출자가 그렇게 처리한다).
-   */
-  sendImageBrief?: (jobId: string, article: ArticleRow, job: ArticleJobRow) => Promise<void>;
-  /**
    * research:write 콜백에서 호출한다. 기본 구현은 job:write CLI와 동일하게 runWritingStage 후
    * 성공하면 notifyArticleReady로 알린다(원고 보기 버튼이 붙은 진짜 완료 메시지는 거기서 나간다).
    * 테스트에서는 실제 LLM/Telegram 호출 없이 결과만 주입한다.
@@ -159,7 +153,6 @@ export class TelegramBot {
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
-  private readonly sendImageBrief: (jobId: string, article: ArticleRow, job: ArticleJobRow) => Promise<void>;
   private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
@@ -189,20 +182,6 @@ export class TelegramBot {
       });
     this.updateArticleStatus =
       options.updateArticleStatus ?? ((articleId, status) => updateArticleStatusRepo(articleId, status));
-    this.sendImageBrief =
-      options.sendImageBrief ??
-      (async (jobId, article, job) => {
-        const seoDescription = job.metadata.seoDescription;
-        const result = await notifyImageBrief(jobId, {
-          title: article.title ?? job.keyword,
-          keyword: job.keyword,
-          category: job.category,
-          seoDescription: typeof seoDescription === "string" ? seoDescription : null,
-        });
-        if (result.status === "failed") {
-          console.error("⚠️ 이미지 브리프 발송 실패 (승인 자체는 정상 처리됨) -", result.error);
-        }
-      });
     this.triggerWriting =
       options.triggerWriting ??
       (async (jobId) => {
@@ -433,13 +412,13 @@ export class TelegramBot {
     const article = await this.findLatestArticleByJobId(job.id);
     if (article) {
       await this.updateArticleStatus(article.id, "approved");
-      // 이미지 브리프는 부가 단계다 - 실패해도 승인 결과(outcome/message)에 영향을 주지 않는다.
-      // 별도 메시지로 나가므로 여기서 기다리되(순서상 승인 메시지 다음에 도착), 예외를 밖으로
-      // 던지면 안 된다(sendImageBrief 기본 구현이 이미 내부에서 잡는다).
-      await this.sendImageBrief(job.id, article, job).catch((error) => {
-        console.error("⚠️ 이미지 브리프 처리 중 예외 (승인 자체는 정상 처리됨) -", error);
-      });
     }
+    // 이미지 브리프 자동 발송(TelegramBot의 옛 sendImageBrief 주입 지점)은 여기서 뺐다
+    // (2026-08-28 재작업): 이미지가 이제 runWritingStage 단계에서 AI로 자동 생성돼 원고에 이미
+    // 삽입된 채로 승인 대기 중이었다 - 승인 시점에 "브리프를 만들어드릴게요"를 또 보내면 이미
+    // 있는 이미지와 헷갈린다. buildImageBrief/notifyImageBrief 모듈 자체는 남겨뒀다 - 생성된
+    // 이미지가 부적절해 사람이 직접 검색한 대체 이미지로 바꾸고 싶을 때 쓸 수동 경로(job:image)로
+    // 재활용할 수 있다.
 
     return {
       outcome: { status: "reviewed", action: "confirm", job: updated },
