@@ -16,10 +16,12 @@ Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생�
 확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
 13-1·14절.
 
-**다음 작업: Sprint 4(네이버 반자동 발행) 설계.** Sprint 3까지 완성된 산출물(승인된 원고 + 제목
-+ 해시태그 + 본문 삽입 이미지)을 네이버 블로그 임시저장까지 넣는 Playwright 자동화가 다음이다.
-아직 설계 문서가 없다 - 로드맵(`/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`)
-Sprint 4 항목을 참고해 SPRINT_4_DESIGN.md부터 쓴다.
+**다음 작업: Sprint 4(네이버 반자동 발행) 구현 — 설계는 끝났고 결정 대기 중.**
+`docs/ai-handoff/SPRINT_4_DESIGN.md` §9에 결정 항목 6건이 있다(트리거 방식, 발행 대상 블로그,
+일일 발행 상한값, 쓰기 세션 최초 로그인 시점, 이미지 위치 타협안, 실측 단계 승인 방식). 이
+스프린트는 처음으로 사람 계정으로 실제 쓰기 작업을 브라우저에서 하므로 §10의 1번(SmartEditor
+DOM 실측)부터가 실제 네이버 세션을 여는 작업이다 - Creator Advisor 프로필과는 분리된 새
+프로필(`.local/naver-publish-profile/`)로 사용자가 최초 1회 수동 로그인해야 한다.
 
 ## 지금 돌아가는 것
 
@@ -466,5 +468,101 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 + `<figcaption>` 3개 정상 렌더링 확인. 실사 스타일도 별도로 생성해 확인(손만 나오고 얼굴 없음,
 무지 포장, 로고 없음). "보조금24" job의 `images`에는 초기 검증용 플레이스홀더 URL이 남아
 있다(자동화 이전 수동 테스트 흔적) - 실사용 전 정리할 것.
+
+## Sprint 4: 네이버 반자동 발행 (진행 중, 2026-08-28)
+
+설계: `docs/ai-handoff/SPRINT_4_DESIGN.md`. 결정 6건은 §9에, 작업 순서는 §10에 있다.
+
+**완료(§10 item 1-4)**:
+
+1. **실측** - `npm run setup:naver-publish` + `npm run inspect:publish-layer`(신규, "발행"
+   버튼을 1회 눌러 설정 패널만 여는 전용 스크립트, 실제 발행 확정 버튼은 절대 클릭하지 않음)로
+   실제 로그인 세션에서 SmartEditor DOM을 실측했다. 핵심 발견:
+   - `/{blogId}/postwrite?categoryNo={n}`로 **직접** 이동하면 프레임셋을 거치지 않고
+     SmartEditor가 최상위 문서로 바로 뜬다(블로그 홈은 frameset이라 자동화에 쓰면 안 됨).
+   - 저장/발행 버튼이 3개로 나뉜다 - 툴바 `tpb.save`(임시저장), 툴바 `tpb.publish`(설정
+     패널을 여는 버튼, 발행 확정 아님), 패널 안 `tpb*i.publish`/`seOnePublishBtn`(진짜 발행
+     확정 - 코드 어디에도 이 셀렉터를 클릭하는 부분이 없다).
+   - 태그 입력란(`#tag-input`)은 패널을 열어야만 DOM에 렌더링된다(정적 화면엔 없음).
+   - 상세 셀렉터 표는 `SPRINT_4_DESIGN.md` §6-2.
+2. **`convertArticleToNaverHtml.ts`** (+ 테스트 8건, `npm run test:naver-html`) -
+   `markdownToTelegraphNodes.ts`와 같은 마크다운 부분집합을 SmartEditor 붙여넣기용 HTML
+   문자열로 변환. Telegraph 변환기와 달리 Node[] 트리가 아니라 HTML 문자열이 필요한 이유:
+   SmartEditor는 API가 없어 브라우저에 paste 이벤트로 넣는 경로만 있다.
+3. **`NaverBlogPublisher.ts`** - 제목/본문/이미지/태그를 채우고 "임시저장"만 하는 핵심 클래스
+   (`saveDraft()`). ⚠️ **아직 라이브로 끝까지 실행해보지 않았다** - §10 item 7(실측 1건 검증,
+   사용자 승인 필요)에서 처음 실제로 돌려본다. 미검증 가설이 여러 개 섞여 있다(파일 상단 주석에
+   전부 기록):
+   - 제목/본문 입력: SmartEditor는 보이는 `<p>`가 아니라 화면 밖에 숨겨진
+     `contenteditable` proxy(IME 처리용으로 추정)가 실제 입력을 받는 구조로 보인다 - "보이는
+     영역 클릭 -> 앱이 알아서 그 proxy로 포커스를 옮긴다"는 가정으로 `page.keyboard.type()`/
+     paste event를 쓴다.
+   - 이미지 업로드: 툴바 버튼 클릭 시 네이티브 파일 선택 대화상자가 뜬다는 가정
+     (`page.waitForEvent("filechooser")`).
+   - 태그 입력 후 Escape로 패널을 닫아도 입력한 태그가 유지되는지.
+   - "임시저장" 성공 신호(토스트/URL 변화 등) - 지금은 저장 버튼 클릭 후 고정 3초 대기 +
+     현재 URL을 draftUrl로 반환하는 임시 구현.
+   - `saveDraft()`는 이 가설들이 틀리면 어느 stage(login/navigate/title/body/image/tags/save)
+     에서 막혔는지를 결과로 알려준다 - 조용히 잘못된 성공을 보고하지 않는다.
+   - 카테고리 번호는 실측 세션에서 확인된 32(육아)를 기본값으로 잠정 고정했다 - 내부 category
+     (entertainment/ott/parenting/living)별로 다른 네이버 카테고리가 필요한지는 아직 결정된
+     바 없다(§10 item 5에서 필요해지면 매핑표를 만든다).
+4. **프로필 분리** - `src/config/naverPublish.ts`(Sprint 4 시작 시 이미 작성됨)가
+   `.local/naver-publish-profile/`을 Creator Advisor의 `.local/creator-advisor-profile/`과
+   분리해 관리한다(둘 다 gitignore).
+
+5. **`publishArticleToNaver.ts` + `job:publish` CLI** - job 상태(`approved`인지) 확인 →
+   원고/이미지/해시태그 조립 → `NaverBlogPublisher.saveDraft()` 호출 → `publications`에 기록.
+   설계에서 정한 대로 이미지는 본문 paste에 `<img>`로 넣지 않고(`stripImageMarkdownBlocks()`로
+   먼저 걷어냄) SmartEditor 툴바 업로드 경로로만 넣는다 - paste와 toolbar 업로드를 동시에 쓰면
+   중복 삽입되기 때문이다. **멱등성**: 같은 job으로 두 번 실행해도 `publications`에 이미
+   pending/published row가 있으면 재실행하지 않고 기존 기록을 그대로 돌려준다. **실패도
+   기록한다** - `NaverBlogPublisher`가 어느 stage(login/title/body/image/tags/save)에서
+   실패했는지까지 `publications.status='failed'`와 함께 CLI 출력에 그대로 나온다. 성공 시
+   `publications.status`는 `'pending'`으로 남는다(`'published'`가 아니다 - 실제 발행 버튼은
+   누르지 않았으므로 "published"라고 부르면 사실과 다르다). 단위 테스트 6건 전부 주입된
+   가짜 의존성으로 오케스트레이션 로직만 검증(`npm run test:naver-publish`) - 실제
+   Supabase/Playwright는 호출하지 않는다.
+
+6. **`notifyPublishReady.ts`** - 임시저장 성공을 Telegram으로 알린다. `notifyArticleReady.ts`와
+   달리 승인/반려 결정 버튼이 없다 - 이 시점의 유일한 다음 행동("네이버 앱에서 직접 발행 버튼
+   누르기")은 Telegram 버튼으로 대신할 수 없기 때문이다. 초안 URL을 여는 버튼 하나만 붙이고,
+   그 URL이 정확히 저장한 초안을 여는지는 아직 검증 못했다는 문구를 메시지 자체에도 넣었다.
+   `job:publish` CLI에 배선 완료. 테스트 5건(`npm run test:notify-publish`).
+
+7. **✅ 완료(2026-08-28)** - "맥도날드 감튀 홀더" job으로 `npm run job:publish -- <jobId>
+   --watch`(headless:false로 직접 지켜봄) 실행, 이후 발견된 버그 수정 + 재검증까지 마쳤다.
+   상세는 `SPRINT_4_DESIGN.md` §12/§13/§14. 최종 확인된 것:
+   - ✅ 제목 입력(숨겨진 contenteditable proxy 가설)
+   - ✅ **이미지 toolbar 업로드** (`.se-toolbar-item-image` → filechooser → setInputFiles -
+     실제로 NAVER 자체 CDN `blogfiles.pstatic.net`에 재업로드됨, 3장 전부 정상 삽입을 사용자가
+     육안 확인) - 가장 불확실했던 부분이라 제일 중요한 확인이었다.
+   - ✅ 임시저장 자체("임시저장 글" 목록에 실제로 생김, 시각도 일치)
+   - 🐛→✅ **본문 붙여넣기 버그 발견 후 수정·재검증** - 1차 실측 때 실제로는 본문 문단이 통째로
+     비어 있었다(제목에 이미 포함된 단어 때문에 자동 검사가 "본문도 있다"고 오판했었다 -
+     검증 스크립트의 허점). 원인은 합성 `ClipboardEvent`를 `document.activeElement`에 직접
+     dispatch하는 방식을 SmartEditor가 신뢰하지 않아 무시한 것 - 실제 OS 클립보드에 쓰고
+     `Ctrl/Cmd+V`를 누르는 방식으로 바꿔서 재검증했고, 사용자가 브라우저를 직접 보며 본문
+     문단이 실제로 채워지는 것을 확인했다.
+   - ✅→🔄 **해시태그 흐름 변경**: 처음엔 발행 설정 패널(`tpb.publish` 클릭 → `#tag-input`)에
+     직접 입력했고 실제로 잘 반영됐지만(사용자 스크린샷 확인), 사용자가 "발행 버튼에 더 가까이
+     다가가는 방식이라 위험하다"며 다른 방법을 요청 - 본문 끝에 이미 있는 "#태그" 텍스트가
+     paste로 함께 들어가면 네이버가 실제 발행 시점에 자동으로 태그를 인식해 적용해준다는
+     사용자 설명에 따라, `NaverBlogPublisher.ts`에서 발행 패널을 아예 열지 않도록 코드를
+     단순화했다(`fillTags()`/패널 관련 코드 전부 제거). `saveDraft()` 흐름은 이제
+     login → navigate → title → body → image → save로 줄었다 - 자동화가 클릭하는 버튼이
+     `tpb.save` 하나뿐이라 실제 발행 버튼과의 거리가 코드상으로도 더 멀어졌다.
+   - ⚠️ **별도 발견**: 같은 계정으로 동시에 다른 곳(폰 앱 등)에서 글을 쓰고 있으면 자동화
+     세션이 로그아웃될 수 있다 - `job:publish` 실행 전 동시 사용 여부를 먼저 확인하는 게 안전.
+   - `save_count_btn__ZTLNa`(`[data-click-area="tpb*s.count"]`, "임시저장된 글 보기") 셀렉터를
+     새로 발견 - 저장/발행과 무관한 안전한 조회용 버튼(발행 흐름에는 아직 안 씀).
+
+**Sprint 4 §10 작업 순서 1~7번 전부 완료.** 승인된 원고가 `job:publish` 한 번으로 네이버
+블로그 임시저장함에 제목·본문·이미지가 채워진 채로 들어가고(해시태그는 본문 텍스트로 자동
+포함), Telegram으로 초안 확인 알림이 온다 - 로드맵의 8단계 파이프라인 중 7단계(발행 직전까지)가
+실사용 조건에서 검증까지 마쳤다. 남은 사람 개입은 실제 "발행" 버튼 클릭뿐이다. 테스트용으로
+만들어진 초안 2건("맥도날드 감튀 홀더..." 정상본 + "...[재검증]" 본문 검증용)은 실제 배포용이
+아니므로 사용자가 초안함에서 정리해도 된다. "임시저장" 성공 신호(토스트/URL 변화)는 여전히
+고정 시간 대기로 대체돼 있다 - 급하지 않으면 다음에 개선한다.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`
