@@ -41,6 +41,7 @@
     "job:research": "tsx src/workflows/research/runResearchStageCli.ts",
     "job:reject": "tsx src/workflows/writing/rejectJobCli.ts",
     "job:image": "tsx src/workflows/writing/recordImageCli.ts",
+    "setup:naver-publish": "tsx src/services/publish/setupNaverPublishSession.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
     "debug:creator-advisor": "tsx src/services/search/providers/creatorAdvisor/debugCreatorAdvisor.ts",
