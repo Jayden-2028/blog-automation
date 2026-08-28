@@ -43,6 +43,13 @@ function main(): void {
   assert(withHtml.text.includes("&lt;B&gt;"), "프롬프트의 특수문자가 이스케이프돼야 한다");
   console.log("✅ HTML 특수문자 이스케이프");
 
+  // 5) 회귀(2026-08-28 실측): job:image 안내 문구의 "<이미지 URL>" 플레이스홀더가 이스케이프되지
+  // 않아 Telegram이 "<이미지"를 알 수 없는 HTML 태그로 해석해 발송이 400으로 거부됐다. 알려주는
+  // 문구가 우리가 직접 쓴 하드코딩 텍스트여도 예외 없이 이스케이프해야 한다는 회귀 고정이다.
+  assert(!message.text.includes("<이미지 URL>"), "꺾쇠괄호 플레이스홀더가 이스케이프 없이 남아 있으면 안 된다");
+  assert(message.text.includes("&lt;이미지 URL&gt;"), "job:image 안내 문구도 이스케이프돼야 한다");
+  console.log("✅ job:image 안내 문구의 꺾쇠괄호 플레이스홀더도 이스케이프됨(실측 회귀 - Telegram 400 방지)");
+
   console.log("\n✅ buildImageBriefMessage 테스트 완료");
 }
 

@@ -27,7 +27,9 @@ export function buildImageBriefMessage(jobId: string, keyword: string, brief: Pa
     escapeTelegramHtml(brief.prohibited || "실존 인물, 브랜드 로고, 실제 제품 사진"),
     "",
     "이미지를 확보하셨으면 아래 명령으로 기록해주세요:",
-    `npm run job:image -- ${jobId} "<이미지 URL>" "ai-generated:chatgpt"`,
+    // "<이미지 URL>"처럼 꺾쇠괄호를 그대로 쓰면 Telegram이 HTML 태그로 오해해 발송 전체가
+    // 400으로 거부된다(2026-08-28 실측에서 실제로 발생) - 안내 문구도 escapeTelegramHtml을 거친다.
+    escapeTelegramHtml(`npm run job:image -- ${jobId} "<이미지 URL>" "ai-generated:chatgpt"`),
   ];
 
   return { text: lines.join("\n") };
