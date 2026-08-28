@@ -1,0 +1,43 @@
+# 키워드 수집 감시인 - 로컬 맥과 다른 호스트(GitHub 클라우드 러너)에서 매일 돌면서
+# "오늘 성공한 discovery_run이 있는가"만 확인한다. 없으면 Telegram으로 알린다.
+#
+# 배경: docs/ai-handoff/CLOUD_MIGRATION.md, CURRENT_STATE.md "잠자기로 인한 조용한 실패".
+# 로컬 09:00 job이 강제 종료되면 실패 알림조차 못 보내는데, 이 워크플로우가 그 구멍을 밖에서 막는다.
+#
+# 필요한 repo secret 4개 (Settings > Secrets and variables > Actions):
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# Playwright도 claude CLI도 쓰지 않으므로 이 4개면 충분하다.
+
+name: keyword-collection-watchdog
+
+on:
+  schedule:
+    # 02:00 UTC = 11:00 KST. 로컬 daily-keyword job(09:00 KST, ~90초)이 끝나고도 남을 만큼 뒤에 둔다.
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run watchdog
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run job:watchdog
