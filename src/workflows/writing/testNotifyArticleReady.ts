@@ -11,7 +11,6 @@ import {
   buildArticleBodyMessages,
   buildHeaderMessage,
   buildReviewDecisionMessage,
-  buildSourceCountSummary,
 } from "./notifyArticleReady.js";
 import { TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
 import type { RunArticleJobSuccess } from "./notifyArticleReady.js";
@@ -102,14 +101,17 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
 function main(): void {
   console.log("▶ notifyArticleReady 메시지 조립 테스트 시작\n");
 
-  // 1) 출처 등급 요약 문자열.
-  const summary = buildSourceCountSummary(makeResult());
-  assert(summary.includes("공공 2건"), `공공 2건이 요약에 있어야 한다 (실제: ${summary})`);
-  assert(summary.includes("커뮤니티 1건"), `커뮤니티 1건이 요약에 있어야 한다 (실제: ${summary})`);
-  console.log("✅ 출처 등급 요약 정확");
+  // 1) 회귀(2026-08-28 사용자 피드백): 헤더는 제목/카테고리만 담는다. 키워드(제목과 중복),
+  // 근거 건수, 작성 소요 시간은 승인/수정/반려 결정에 쓰이지 않아 뺐다 - 메시지가 지저분해진다.
+  const normalHeader = buildHeaderMessage(makeResult());
+  assert(normalHeader.text.includes("2026 경복궁 별빛야행 정리"), "제목이 헤더에 있어야 한다");
+  assert(normalHeader.text.includes("category: living"), "카테고리가 헤더에 있어야 한다");
+  assert(!normalHeader.text.includes("근거:"), "근거 건수는 헤더에 없어야 한다");
+  assert(!normalHeader.text.includes("키워드:"), "키워드 줄은 헤더에 없어야 한다(제목과 중복)");
+  assert(!normalHeader.text.includes("작성 소요 시간"), "작성 소요 시간은 헤더에 없어야 한다");
+  console.log("✅ 헤더는 제목/카테고리만(근거·키워드·소요시간 제외)");
 
   // 2) 일반(비의학) 원고: 헤더에 의학 경고는 없어야 한다(telegraphUrl 없으면 버튼도 없다).
-  const normalHeader = buildHeaderMessage(makeResult());
   assert(!normalHeader.text.includes("의학 주제"), "일반 원고 헤더에는 의학 경고가 없어야 한다");
   assert(normalHeader.text.includes("원고 초안 준비됨"), "일반 원고 헤더 문구가 있어야 한다");
   assert(!normalHeader.replyMarkup, "telegraphUrl이 없으면 버튼이 없어야 한다(중복 방지, 아래 3-3 참고)");

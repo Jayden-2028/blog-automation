@@ -47,8 +47,12 @@ function buildHeaderLines(job: ArticleJobRow, sources: SourceRow[]): string[] {
   ];
 }
 
-function buildFooterLines(job: ArticleJobRow): string[] {
-  return ["", "진행하려면: npm run job:write -- " + job.id, "중단하려면: npm run job:reject -- " + job.id];
+// 2026-08-28: "진행하려면 npm run job:write -- <id>" 안내 두 줄을 뺐다. 버튼이 붙기 전에는
+// 이게 유일한 진행 수단이라 필요했지만, 이제 같은 메시지에 [✍️ 원고 작성][🗑 중단] 버튼이
+// 있어 명령어를 폰에서 옮겨 칠 이유가 없다 - jobId가 그대로 노출되는 긴 줄이라 메시지만 지저분해진다.
+// 터미널로 직접 하려면 `npm run job:write`를 인자 없이 실행하면 대기 중인 job 목록이 나온다.
+function buildFooterLines(_job: ArticleJobRow): string[] {
+  return [];
 }
 
 /** 요약 생성이 실패했을 때만 쓰는 폴백 - 출처별 제목+짧은 발췌+URL을 그대로 나열한다. */
