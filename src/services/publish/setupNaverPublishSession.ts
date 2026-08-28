@@ -37,6 +37,15 @@ async function pollUntil(page: Page, timeoutMs: number, predicate: () => boolean
   return true;
 }
 
+/**
+ * 최상위 문서 + 모든 하위 frame의 content를 각각 저장한다.
+ *
+ * 왜 frame까지 도는가(2026-08-28 실측에서 발견): 네이버 블로그는 최상위 문서가
+ * `<iframe id="mainFrame">` 하나만 있는 frameset이고, SmartEditor는 그 mainFrame(또는 그
+ * 안의 더 깊은 frame) 안에서 로드된다. `page.content()`는 최상위 문서만 직렬화하고 iframe
+ * 내부는 빈 `<iframe src="...">` 태그로만 보여준다 - 실제 에디터 DOM(제목/본문/툴바 셀렉터)은
+ * 프레임 각각의 content()를 따로 불러야 잡힌다.
+ */
 async function saveSnapshot(page: Page, label: string): Promise<void> {
   mkdirSync(OUT_DIR, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -45,8 +54,22 @@ async function saveSnapshot(page: Page, label: string): Promise<void> {
   const html = await page.content();
   writeFileSync(`${base}.html`, html, "utf-8");
   await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
-
   console.log(`   📸 스냅샷 저장: ${base}.html (+ .png)`);
+
+  const frames = page.frames().filter((frame) => frame !== page.mainFrame());
+  console.log(`   🔎 하위 frame ${frames.length}개 발견`);
+  for (const [index, frame] of frames.entries()) {
+    const frameUrl = frame.url();
+    console.log(`      [${index}] ${frame.name() || "(이름 없음)"} - ${frameUrl}`);
+    try {
+      const frameHtml = await frame.content();
+      const framePath = `${base}_frame${index}_${frame.name() || "unnamed"}.html`;
+      writeFileSync(framePath, frameHtml, "utf-8");
+      console.log(`          -> 저장됨: ${framePath} (${frameHtml.length}자)`);
+    } catch (error) {
+      console.log(`          -> 읽기 실패(cross-origin 등): ${error instanceof Error ? error.message : error}`);
+    }
+  }
 }
 
 async function main(): Promise<void> {
