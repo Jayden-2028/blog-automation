@@ -4,10 +4,13 @@
 
 ## 한 줄 상태
 
-**Sprint 0 완주.** 매일 09:00 launchd가 키워드 TOP 10을 Telegram으로 보내는 파이프라인이 실제로
-동작한다(무인 job 전 구간 검증 완료, run #17). 다음은 Sprint 1(Telegram 인라인 버튼 선택 루프).
+**Sprint 0·1 완주.** 매일 09:00 키워드 TOP 10이 Telegram으로 오고, 항목마다 붙은 Go/Pass 버튼을
+누르면 5분 내에 `article_jobs`에 job이 생기고 추천 제목이 돌아온다. 실제 클릭으로 전 구간 검증 완료.
+다음은 Sprint 2(자료조사 + 원고 생성).
 
 ## 지금 돌아가는 것
+
+### 매일 아침: 키워드 수집 -> 알림
 
 ```
 pmset(08:55 자동 기상) -> launchd(09:00) -> caffeinate -i -> npm run job:daily-keyword
@@ -23,6 +26,91 @@ pmset(08:55 자동 기상) -> launchd(09:00) -> caffeinate -i -> npm run job:dai
 ```
 
 전체 소요 약 80초. `trendCollect` 실패는 비치명적으로 처리되어 job을 죽이지 않는다.
+알림은 헤더 1건 + 항목 10건으로 나가고, 항목마다 `[✍️ Go] [⏭ Pass]` 버튼이 붙는다.
+
+### 상시: 버튼 클릭 처리 (5분 주기)
+
+```
+launchd(StartInterval 300) -> caffeinate -i -> npm run job:telegram-poll
+  getUpdates(offset)  -> telegram_offsets 커서 이후만
+  callback 파싱       -> go / pass / (구)sel
+  chat_id 검증        -> 다른 대화에서 온 것 거부
+  keyword_rankings 재조회 -> 위조/만료 callback_data 거부
+  article_jobs 기록   -> Go=selected / Pass=rejected
+  claude -p 제목 생성 -> Go로 새로 만들어진 job에만
+  확인 메시지 + 버튼 상태 갱신
+```
+
+처리할 update가 없으면 약 2초에 조용히 끝난다(로그도 남기지 않는다). Go 처리 시 제목 생성에
+25초쯤 걸려 `caffeinate`가 필요하다.
+
+## Sprint 1: 선택 루프 (2026-08-27 완료)
+
+설계는 `docs/ai-handoff/SPRINT_1_DESIGN.md`. 확정된 두 결정은 주기적 폴링(맥 잠자기 회피)과
+추천 제목의 선택-후 생성이다.
+
+### 새 테이블 2개
+
+- `article_jobs` — 선택된 키워드 1건 = job 1건. 이후 조사->집필->이미지->검수->발행 전 단계의
+  상태 머신. `keyword_rankings`를 FK로 참조하지 않고 값을 복사한다(run 스냅샷은 정리 대상이지만
+  job은 며칠~몇 주 살아 있어야 한다).
+- `telegram_offsets` — getUpdates 커서. 수신기가 짧게 반복 실행되므로 메모리에 둘 수 없다.
+
+둘 다 RLS on + anon/authenticated 권한 회수 + service_role 명시.
+
+### 멱등성과 마음 바꾸기
+
+`unique (source_run_id, source_rank)`로 중복 클릭을 막는다. upsert가 아니라 insert 후
+unique violation(23505)을 잡는데, upsert는 기존 row를 덮어써서 이미 writing 단계인 job이 버튼
+재클릭으로 selected로 리셋되기 때문이다.
+
+`selected <-> rejected`는 서로 전환할 수 있다. 잘못 눌렀을 때 빠져나올 방법이 없으면 unique
+index 때문에 그 항목이 영구히 막힌다. 다만 이미 researching/writing인 job은 `locked`로 거부한다.
+
+### callback_data 규약
+
+`go:<run_id>:<rank>` / `pass:<run_id>:<rank>`. 구 `sel:` 접두사는 go 별칭으로 계속 받는다
+(이미 발송된 메시지의 버튼을 회수할 수 없다).
+
+키워드를 넣지 않는 이유가 둘이다. Telegram의 64바이트 제한에 한글 키워드 하나로도 걸리고,
+참조 키만 담으면 수신 측이 `keyword_rankings`에서 다시 읽어야 하는데 이것이 곧 검증이 된다 -
+위조된 값으로 임의 키워드를 주입해도 조회되지 않으면 거부된다.
+
+발송 측과 수신 측이 같은 형식을 써야 하므로 `notifications/telegramCallbackData.ts` 하나만
+참조하게 했다. 각자 조립하면 한쪽만 바뀌었을 때 버튼이 조용히 죽는다.
+
+### 헤드리스 LLM
+
+`services/llm/runHeadlessClaude.ts`가 `claude -p`를 1회 실행한다. Sprint 2의 원고 생성도 같은
+경로를 쓴다. API가 아니라 CLI인 이유는 기존 블로그 작성 스킬을 그대로 재사용하기 위해서다 -
+프롬프트로 이식하면 스킬이 두 벌이 된다.
+
+프롬프트는 argv가 아니라 stdin으로 넘기고(원고 길이에서 argv 제한·셸 이스케이프), 도구 사용은
+기본 차단하며, 타임아웃을 반드시 건다.
+
+### UX: 숫자 격자 -> 항목별 Go/Pass
+
+처음에는 전체를 한 메시지에 담고 하단에 1~10 숫자 버튼을 달았는데, 폰에서 항목이 한 화면에 안
+들어와 스크롤로 대조해야 했다. Telegram은 인라인 키보드를 메시지 단위로만 붙일 수 있어서, 항목
+바로 아래 버튼을 두려면 항목마다 메시지가 따로 가야 한다(헤더 1 + 항목 10 = 11건, 6초).
+
+Pass는 `rejected`로 기록한다. 다음 개선 지점이 키워드 품질인데 사용자가 실제로 무엇을 거부했는지가
+가장 직접적인 신호이고, 지금 모으지 않으면 소급할 수 없다. Pass에서는 제목을 만들지 않는다.
+
+### 실측 검증 (실제 폰 클릭)
+
+  Go(rank 2,7)      -> selected + 제목 3개
+  Pass(rank 6)      -> rejected, 제목 0개(LLM 호출 없음)
+  중복 Go(rank 1,2) -> unchanged, job/제목 재생성 없음
+
+5건 39초. 가장 위험하다고 본 헤드리스 제목 생성이 첫 실행에서 동작했고 출력 파싱도 깨끗했다.
+
+### 알려진 한계
+
+같은 run의 알림을 재발송하면 이미 결정된 항목의 버튼이 초기 상태로 보인다. 발송 시점에 기존
+결정을 조회하지 않기 때문이다. 매일 새 run이 생기므로 실사용에서는 거의 나타나지 않고, 다시
+눌러도 `unchanged`로 처리돼 데이터는 안전하다. 필요해지면 `ArticleJobRepository.listByRunId`를
+발송 경로에 연결하면 된다.
 
 ## 2026-08-26 세션에서 한 일
 
@@ -198,6 +286,8 @@ launchctl print gui/$(id -u)/com.wooahpapa.blog-automation.daily-keyword | grep 
 
 ```
 npm run build
+npm run test:telegram-bot                # 신규 - callback 핸들러 9케이스
+npm run test:callback-data               # 신규 - callback_data 규약
 npm run test:score-keyword               # 신규 - freshness 불변식
 npm run test:keyword-category            # 신규 - 실제 수집 키워드 24건
 npm run test:creator-advisor-parser
@@ -212,6 +302,7 @@ npm run test:ranking
 
 npm run collect:creator-advisor          # 신규, 기본 dry-run / WRITE=1로 저장
 npm run debug:ca-snapshots               # 신규, DOM 스냅샷 -> .local/dom-snapshots/
+npm run job:telegram-poll                # 신규, 버튼 클릭 1회 수신 처리
 ```
 
 `test:naver`/`test:keywords`/`test:ranking`은 외부 NAVER API를 실제 호출한다.
@@ -257,10 +348,17 @@ npm run debug:ca-snapshots               # 신규, DOM 스냅샷 -> .local/dom-s
    않게" 할 뿐 "깨우지는" 못하고, `pmset repeat`도 전원이 차단된 상태에서는 한계가 있다.
    더 큰 문제는 **강제 종료 시 실패 알림이 나가지 않는다**는 점이다(위 운영 노트 참고).
    Creator Advisor 크롤링이 로그인된 브라우저 프로필에 묶여 있어 클라우드 이전이 단순하지 않다.
-5. `images`/`analytics` 타입 정의 없음 (Codex 위임 적합).
-6. Supabase CLI 미설치. migration history와 로컬 파일이 계속 어긋나 있다.
-7. 테스트에 assertion 프레임워크가 없다(console.log + assert 헬퍼).
-8. `parseTrendHtml.ts` 상단 주석의 "topic과 demographic이 같은 swiper 인스턴스"는 실측과 어긋날
+5. ~~`images`/`analytics` 타입 정의 없음~~ — 해결됨(2026-08-27). `database.ts`가 12개 테이블을
+   모두 안다. 다만 두 테이블의 `id`가 identity인지는 형제 테이블 관례로 추론한 것이라,
+   처음 insert하는 시점(Sprint 3/5)에 실제로 확인해야 한다.
+6. **같은 run 재발송 시 버튼 상태가 초기값으로 보인다.** 위 Sprint 1 "알려진 한계" 참고. 무해하다.
+7. **버튼 반응까지 최대 5분 걸린다.** 주기적 폴링의 구조적 특성이고, `answerCallbackQuery`는
+   그 시점에 만료돼 버튼 로딩 표시가 그냥 사라진다(확인 메시지는 정상 도착). 즉시 반응이
+   필요해지면 클라우드 webhook으로 옮겨야 하는데, 핸들러가 수신 방식과 분리돼 있어 옮길 때
+   버릴 코드는 거의 없다.
+8. Supabase CLI 미설치. migration history와 로컬 파일이 계속 어긋나 있다.
+9. 테스트에 assertion 프레임워크가 없다(console.log + assert 헬퍼).
+10. `parseTrendHtml.ts` 상단 주석의 "topic과 demographic이 같은 swiper 인스턴스"는 실측과 어긋날
    가능성이 있으나 확정 근거가 부족해 수정하지 않았다.
 
 ## n8n 도입 검토 결과
@@ -271,13 +369,16 @@ stage log·실패 격리·비치명적 단계 구분을 하고 있고, Playwrigh
 채널이 늘어 분기·재시도가 많아지는 Sprint 4~5에 재검토한다. 클라우드 이전이 목적이라면 n8n보다
 GitHub Actions가 더 맞다(이미 npm 스크립트라 `cron` + `npm run job:daily-keyword`면 된다).
 
-## 다음: Sprint 1 (선택 루프 닫기)
+## 다음: Sprint 2 (자료조사 + 원고 생성)
 
-- `notifications/TelegramBot.ts` — `getUpdates` long-polling 수신기. 발송 전용
-  `TelegramNotifier`는 그대로 두고 별도 클래스로.
-- 알림 메시지에 인라인 버튼 부착. callback_data = `sel:<run_id>:<rank>`
-- `article_jobs` 테이블 — 선택된 키워드 1건 = job 1건. 이후 단계의 상태 머신.
-  기존 `KEYWORD_STATUSES`(discovered→selected→…→published) 재사용.
-- `generateTitleSuggestions.ts`의 `[placeholder]`를 실제 LLM 생성으로 교체.
+`article_jobs`에 `status='selected'`로 쌓인 job을 읽어 원고까지 만든다.
+
+- `workflows/research/` — 선택 키워드로 NAVER 뉴스/웹/블로그 재검색 -> 상위 N건 본문 수집 ->
+  `sources` 테이블 -> 출처 URL·발표일·발행처가 붙은 "팩트 카드"
+- `workflows/writing/` — `runHeadlessClaude`(Sprint 1에서 만듦)로 카테고리별 스킬 선택:
+  ott/entertainment -> entertainment-blog-writer, parenting -> parenting-blog-writer,
+  living -> trend-blog-writer
+- 팩트 카드를 프롬프트 입력으로 강제하고 출처 없는 주장을 금지한다
+- 결과를 `articles`에 저장(테이블은 이미 있다)
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`

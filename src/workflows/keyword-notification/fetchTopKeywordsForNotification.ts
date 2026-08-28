@@ -13,7 +13,7 @@ import type { NotificationKeywordItem, NotificationSourceRun } from "../../types
 
 export type FetchTopKeywordsResult = {
   run: NotificationSourceRun;
-  items: Omit<NotificationKeywordItem, "titleSuggestions">[];
+  items: NotificationKeywordItem[];
 } | null;
 
 export async function fetchTopKeywordsForNotification(
