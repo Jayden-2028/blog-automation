@@ -8,6 +8,12 @@
 // Telegraph가 허용하는 태그: a, aside, b, blockquote, br, code, em, figcaption, figure,
 // h3, h4, hr, i, iframe, img, li, ol, p, pre, s, strong, u, ul, video. h1/h2는 없다 -
 // 우리 원고의 "## 소제목"은 h3로 매핑한다.
+//
+// 이미지(![alt](url)) 지원 이유(2026-08-28, 사용자 요청): generateArticleImages.ts가 AI 생성
+// 이미지를 본문에 마크다운 이미지 문법으로 끼워 넣는다. <figure><img/><figcaption></figure>로
+// 감싸는 이유는 alt 텍스트를 Telegraph 페이지에서도 눈으로 볼 수 있게 하기 위해서다 - 사용자가
+// "업로드 전에 이미지를 직접 검수"한다고 했으므로, 이미지가 어떤 의도로 들어갔는지(프롬프트 요약)를
+// 캡션으로 같이 보여주면 판단하기 쉽다.
 
 export type TelegraphNode = string | { tag: string; attrs?: Record<string, string>; children?: TelegraphNode[] };
 
@@ -44,6 +50,9 @@ function parseInline(text: string): TelegraphNode[] {
   return nodes.length > 0 ? nodes : [text];
 }
 
+/** "![alt](url)" 한 줄짜리 블록인지 확인한다. generateArticleImages.ts가 이 형식으로만 삽입한다. */
+const IMAGE_LINE_PATTERN = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
+
 /** 연속된 "- " 목록 줄들을 하나의 ul 블록으로 묶는다. */
 function isListLine(line: string): boolean {
   return /^\s*[-*]\s+/.test(line);
@@ -64,6 +73,18 @@ export function markdownToTelegraphNodes(markdown: string): TelegraphNode[] {
   for (const block of paragraphs) {
     const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
     if (lines.length === 0) continue;
+
+    // 이미지: 블록 전체가 "![alt](url)" 한 줄이면 figure+img(+figcaption)로 만든다.
+    if (lines.length === 1) {
+      const imageMatch = lines[0].match(IMAGE_LINE_PATTERN);
+      if (imageMatch) {
+        const [, alt, src] = imageMatch;
+        const figureChildren: TelegraphNode[] = [{ tag: "img", attrs: { src } }];
+        if (alt) figureChildren.push({ tag: "figcaption", children: [alt] });
+        nodes.push({ tag: "figure", children: figureChildren });
+        continue;
+      }
+    }
 
     // 헤더: 블록 전체가 "## " 한 줄이라고 가정한다(프롬프트가 그렇게 쓰도록 강제한다).
     if (lines.length === 1 && /^##+\s+/.test(lines[0])) {

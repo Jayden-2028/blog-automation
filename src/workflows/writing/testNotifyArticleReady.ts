@@ -94,6 +94,7 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     durationMs: 185000,
     telegraphUrl: null,
     review: PASSED_REVIEW,
+    images: { succeeded: 0, failed: 0 },
     ...overrides,
   };
 }
