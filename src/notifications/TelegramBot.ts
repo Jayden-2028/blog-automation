@@ -7,6 +7,10 @@
 // credential은 절대 로그로 출력하지 않는다.
 
 import { getKeywordRankingByRunAndRank } from "../services/supabase/repositories/keywordRankingRepository.js";
+import {
+  listArticlesByJobId,
+  updateArticleStatus as updateArticleStatusRepo,
+} from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
 import { runWritingStage } from "../workflows/writing/runArticleJob.js";
@@ -19,7 +23,7 @@ import { parseResearchDecisionCallbackData } from "./researchDecisionCallbackDat
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
 import type { ResearchDecisionAction } from "./researchDecisionCallbackData.js";
-import type { ArticleJobRow, ArticleJobStatus, KeywordRankingRow } from "../types/database.js";
+import type { ArticleJobRow, ArticleJobStatus, ArticleRow, ArticleStatus, KeywordRankingRow } from "../types/database.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
@@ -123,6 +127,9 @@ export type TelegramBotOptions = {
   /** 의학 교차확인 처리에 쓴다. jobId로 job을 직접 조회한다(키워드 선택과 달리 run/rank가 없다). */
   loadJobById?: (jobId: string) => Promise<ArticleJobRow | null>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
+  /** 승인(confirm) 시 원고 상태도 함께 바꾸는 데 쓴다(SPRINT_3_DESIGN.md 8절). job의 최신 원고 1건을 찾는다. */
+  findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
+  updateArticleStatus?: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   /**
    * research:write 콜백에서 호출한다. 기본 구현은 job:write CLI와 동일하게 runWritingStage 후
    * 성공하면 notifyArticleReady로 알린다(원고 보기 버튼이 붙은 진짜 완료 메시지는 거기서 나간다).
@@ -144,6 +151,8 @@ export class TelegramBot {
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
+  private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
+  private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
@@ -165,6 +174,14 @@ export class TelegramBot {
     this.loadJobById = options.loadJobById ?? ((jobId) => ArticleJobRepository.findById(jobId));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
+    this.findLatestArticleByJobId =
+      options.findLatestArticleByJobId ??
+      (async (jobId) => {
+        const articles = await listArticlesByJobId(jobId);
+        return articles[articles.length - 1] ?? null;
+      });
+    this.updateArticleStatus =
+      options.updateArticleStatus ?? ((articleId, status) => updateArticleStatusRepo(articleId, status));
     this.triggerWriting =
       options.triggerWriting ??
       (async (jobId) => {
@@ -312,9 +329,17 @@ export class TelegramBot {
 
   // ---------- 의학 주제 교차확인(원고 검수) ----------
   // SPRINT_2_DESIGN.md 5-2절. runArticleJob이 의학 주제로 판정한 원고는
-  // article_jobs.metadata.requiresMedicalReview=true로 표시되고, 사람이 출처를 직접 확인한 뒤
-  // 이 콜백으로 결정을 남겨야 한다. 이 확인 자체가 "발행 승인"은 아니다 - 발행 승인 흐름은
-  // Sprint 3의 일반 검수 게이트가 담당하고, 여기서는 requiresMedicalReview 플래그만 다룬다.
+  // article_jobs.metadata.requiresMedicalReview=true로 표시된다.
+  //
+  // 승인 버튼은 모든 원고 공통이다(SPRINT_3_DESIGN.md 8절, 2026-08-28): 예전에는 confirm이
+  // requiresMedicalReview만 내리고 job.status는 건드리지 않았다("발행 승인은 이후 검수 단계에서
+  // 이어집니다"). 이제 confirm 자체가 그 승인이다 - job.status와 최신 article.status를
+  // approved로 전이시킨다. 의학 주제는 여기에 한 겹을 더한다: requiresMedicalReview가 켜져
+  // 있으면 승인 시 그것도 함께 내린다. 버튼을 두 벌(발행 승인 / 의학 확인) 만들지 않는 이유는
+  // 화면에 버튼 6개가 뜨면 무엇을 눌러야 하는지 알 수 없기 때문이다.
+  //
+  // ⚠️ 이 변경은 기존 의미를 바꾼다: 이 통합 이전에 confirm이 눌린 job은 requiresMedicalReview만
+  // 내려가고 status는 review에 남아 있다 - approved로 만들려면 다시 confirm을 눌러야 한다.
 
   /**
    * "review:<action>:<jobId>" callback을 처리한다. handleCallbackQuery(키워드 선택)와 완전히
@@ -339,19 +364,31 @@ export class TelegramBot {
 
     if (parsed.action === "discard") {
       const updated = (await this.updateJobStatus(job.id, "rejected")) ?? job;
-      await this.mergeJobMetadata(job.id, { medicalReviewDecision: "discarded", medicalReviewedAt: new Date().toISOString() });
+      await this.mergeJobMetadata(job.id, {
+        reviewDecision: "discarded",
+        reviewedAt: new Date().toISOString(),
+        // 의학 주제였다면 이력에도 남긴다(구 필드명 유지 - 과거 job과 조회 방식을 맞춘다).
+        ...(job.metadata.requiresMedicalReview
+          ? { medicalReviewDecision: "discarded", medicalReviewedAt: new Date().toISOString() }
+          : {}),
+      });
       return {
         outcome: { status: "reviewed", action: "discard", job: updated },
-        message: `🗑 <b>폐기됨</b>\n${escapeTelegramHtml(job.keyword)}`,
+        message: `🗑 <b>반려됨</b>\n${escapeTelegramHtml(job.keyword)}`,
       };
     }
 
     if (parsed.action === "edit") {
-      // requiresMedicalReview는 그대로 true로 남긴다 - "확인했지만 손볼 곳이 있다"는 뜻이라,
-      // 실제로 수정된 뒤 다시 confirm이 눌릴 때까지 게이트가 계속 걸려 있어야 한다.
+      // job.status는 review에 남긴다(승인 아님) - "확인했지만 손볼 곳이 있다"는 뜻이라, 실제로
+      // 수정된 뒤 다시 confirm이 눌릴 때까지 계속 검수 대기 상태여야 한다. requiresMedicalReview도
+      // 켜져 있었다면 그대로 true로 남긴다(같은 이유).
+      const timestamp = new Date().toISOString();
       await this.mergeJobMetadata(job.id, {
-        medicalReviewDecision: "needs_edit",
-        medicalReviewedAt: new Date().toISOString(),
+        reviewDecision: "needs_edit",
+        reviewedAt: timestamp,
+        ...(job.metadata.requiresMedicalReview
+          ? { medicalReviewDecision: "needs_edit", medicalReviewedAt: timestamp }
+          : {}),
       });
       return {
         outcome: { status: "reviewed", action: "edit", job },
@@ -359,20 +396,35 @@ export class TelegramBot {
       };
     }
 
-    // confirm: 사람이 출처를 직접 확인했다는 기록만 남긴다. requiresMedicalReview를 내려서
-    // Sprint 3의 검수 게이트가 이 job을 더 이상 "의학 확인 대기"로 막지 않게 한다.
-    const updated =
-      (await this.mergeJobMetadata(job.id, {
-        requiresMedicalReview: false,
-        medicalReviewDecision: "confirmed",
-        medicalReviewedAt: new Date().toISOString(),
-      })) ?? job;
+    // confirm: 승인이다. job.status와 최신 article.status를 approved로 전이시킨다.
+    const timestamp = new Date().toISOString();
+    const wasMedical = Boolean(job.metadata.requiresMedicalReview);
+
+    await this.mergeJobMetadata(job.id, {
+      reviewDecision: "confirmed",
+      reviewedAt: timestamp,
+      ...(wasMedical
+        ? { requiresMedicalReview: false, medicalReviewDecision: "confirmed", medicalReviewedAt: timestamp }
+        : {}),
+    });
+    const updated = (await this.updateJobStatus(job.id, "approved")) ?? job;
+
+    const article = await this.findLatestArticleByJobId(job.id);
+    if (article) {
+      await this.updateArticleStatus(article.id, "approved");
+    }
+    // 이미지 브리프 자동 발송(TelegramBot의 옛 sendImageBrief 주입 지점)은 여기서 뺐다
+    // (2026-08-28 재작업): 이미지가 이제 runWritingStage 단계에서 AI로 자동 생성돼 원고에 이미
+    // 삽입된 채로 승인 대기 중이었다 - 승인 시점에 "브리프를 만들어드릴게요"를 또 보내면 이미
+    // 있는 이미지와 헷갈린다. buildImageBrief/notifyImageBrief 모듈 자체는 남겨뒀다 - 생성된
+    // 이미지가 부적절해 사람이 직접 검색한 대체 이미지로 바꾸고 싶을 때 쓸 수동 경로(job:image)로
+    // 재활용할 수 있다.
 
     return {
       outcome: { status: "reviewed", action: "confirm", job: updated },
       message:
-        `✅ <b>교차확인 완료</b>\n${escapeTelegramHtml(job.keyword)}\n` +
-        `의학 정보 확인이 끝났습니다. 발행 승인은 이후 검수 단계에서 이어집니다.`,
+        `✅ <b>승인됨</b>\n${escapeTelegramHtml(job.keyword)}` +
+        (wasMedical ? "\n의학 정보 교차확인도 함께 완료됐습니다." : ""),
     };
   }
 
@@ -460,9 +512,9 @@ export class TelegramBot {
     if (!keyboard || messageId === undefined) return;
 
     const LABELS: Record<ArticleReviewAction, string> = {
-      confirm: "확인함",
+      confirm: "승인",
       edit: "수정 필요",
-      discard: "폐기",
+      discard: "반려",
     };
 
     const updated = keyboard.map((row) =>

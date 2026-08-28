@@ -68,6 +68,36 @@ function main(): void {
   assert(medicalPrompt.includes("진단이나 처방으로 읽힐"), "의학 원고에는 단정적 표현 금지 규칙이 있어야 한다");
   console.log("✅ 의학 프롬프트: 의학 전용 규칙 추가됨");
 
+  // 2-1) 회귀(2026-08-28 사용자 제공 블로그 샘플 분석): 카테고리별로 다른 톤 규칙이 들어가야 한다.
+  // living은 편집자 톤(1인칭 금지, "~습니다"체 통일), 나머지(entertainment/ott/parenting)는
+  // 개인 블로그 톤(1인칭, 개인 소감 문단)을 쓴다.
+  const livingPrompt = buildArticlePrompt({ job: makeJob({ category: "living" }), sources: [makeSource()], isMedical: false });
+  assert(livingPrompt.includes("1인칭을 쓰지 않는다"), "living은 편집자 톤 규칙(1인칭 금지)이 있어야 한다");
+  assert(livingPrompt.includes("결론 문단을 둔다"), "living은 명확한 입장을 담은 결론 규칙이 있어야 한다");
+  assert(!livingPrompt.includes("개인적인 소감"), "living에는 개인 블로그 톤 규칙이 섞이면 안 된다");
+
+  for (const category of ["entertainment", "ott", "parenting"] as const) {
+    const personalPrompt = buildArticlePrompt({ job: makeJob({ category }), sources: [makeSource()], isMedical: false });
+    assert(
+      personalPrompt.includes("1인칭 화자로 쓴다"),
+      `${category}는 개인 블로그 톤 규칙(1인칭)이 있어야 한다`
+    );
+    assert(
+      personalPrompt.includes("개인적인 소감"),
+      `${category}는 개인 소감 문단 규칙이 있어야 한다`
+    );
+    assert(
+      !personalPrompt.includes("1인칭을 쓰지 않는다"),
+      `${category}에는 편집자 톤 규칙(1인칭 금지)이 섞이면 안 된다`
+    );
+  }
+  console.log("✅ 카테고리별 톤 규칙 분기(living=편집자 톤 / entertainment·ott·parenting=개인 블로그 톤)");
+
+  // 2-2) category가 없으면(null) 더 넓은 표본을 관찰한 개인 블로그 톤을 기본으로 쓴다.
+  const noCategoryPrompt = buildArticlePrompt({ job: makeJob({ category: null }), sources: [makeSource()], isMedical: false });
+  assert(noCategoryPrompt.includes("1인칭 화자로 쓴다"), "category 없음은 개인 블로그 톤을 기본으로 써야 한다");
+  console.log("✅ category 없음 -> 개인 블로그 톤 기본값");
+
   // 3) 근거가 없으면 "지어내지 말라"는 안내가 팩트 카드 자리에 들어가야 한다.
   const emptyPrompt = buildArticlePrompt({ job: makeJob(), sources: [], isMedical: false });
   assert(emptyPrompt.includes("절대 단정하지"), "근거 없음 경고가 포함돼야 한다");
