@@ -1,12 +1,16 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-08-26 (Asia/Seoul)
+기준일: 2026-08-28 (Asia/Seoul)
 
 ## 한 줄 상태
 
-**Sprint 0·1 완주.** 매일 09:00 키워드 TOP 10이 Telegram으로 오고, 항목마다 붙은 Go/Pass 버튼을
-누르면 5분 내에 `article_jobs`에 job이 생기고 추천 제목이 돌아온다. 실제 클릭으로 전 구간 검증 완료.
-다음은 Sprint 2(자료조사 + 원고 생성).
+**Sprint 0·1 완주, Sprint 2(자료조사 + 원고 생성) 진행 중.** 매일 09:00 키워드 TOP 10이 Telegram으로
+오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생긴다. 거기서부터 조사 완료 알림의
+`[✍️ 원고 작성][🗑 중단]` 버튼(또는 동등한 CLI `job:research`/`job:write`/`job:reject`)으로
+원고 생성(Telegraph 발행 + "원고 보기" 버튼, 해시태그 15개, 저신뢰 출처 고지)까지 이어지는 흐름이
+경복궁·아기 셔더링어택·재혼 황후 3건으로 실측 검증 완료. 상세는
+`docs/ai-handoff/SPRINT_2_DESIGN.md` 14절. 다음은 이미지(Sprint 3 설계 예정) 또는 모든 원고
+공통 승인 게이트(현재는 의학 주제만 확인/수정/폐기 버튼이 있음).
 
 ## 지금 돌아가는 것
 
@@ -369,16 +373,45 @@ stage log·실패 격리·비치명적 단계 구분을 하고 있고, Playwrigh
 채널이 늘어 분기·재시도가 많아지는 Sprint 4~5에 재검토한다. 클라우드 이전이 목적이라면 n8n보다
 GitHub Actions가 더 맞다(이미 npm 스크립트라 `cron` + `npm run job:daily-keyword`면 된다).
 
-## 다음: Sprint 2 (자료조사 + 원고 생성)
+## Sprint 2: 자료조사 + 원고 생성 (진행 중, 2026-08-28)
 
-`article_jobs`에 `status='selected'`로 쌓인 job을 읽어 원고까지 만든다.
+설계는 `docs/ai-handoff/SPRINT_2_DESIGN.md`. 다음이 구현되고 경복궁·아기 셔더링어택·재혼 황후
+3건으로 실측 검증됐다(커밋 `55bf97e` → `e1b953d` → `8f7540b` → `86c8996` → `d893113` →
+`d2876ed` → `776c581`):
 
-- `workflows/research/` — 선택 키워드로 NAVER 뉴스/웹/블로그 재검색 -> 상위 N건 본문 수집 ->
-  `sources` 테이블 -> 출처 URL·발표일·발행처가 붙은 "팩트 카드"
-- `workflows/writing/` — `runHeadlessClaude`(Sprint 1에서 만듦)로 카테고리별 스킬 선택:
-  ott/entertainment -> entertainment-blog-writer, parenting -> parenting-blog-writer,
-  living -> trend-blog-writer
-- 팩트 카드를 프롬프트 입력으로 강제하고 출처 없는 주장을 금지한다
-- 결과를 `articles`에 저장(테이블은 이미 있다)
+```
+npm run job:research -- <jobId>   NAVER 재검색 + 공공 도메인 fetch -> sources 저장 ->
+                                    LLM 요약(경고/사실/판단 3구간)을 Telegram으로 발송,
+                                    [✍️ 원고 작성][🗑 중단] 버튼 부착
+(사람이 확인 -> 버튼 클릭 또는 CLI)
+npm run job:write -- <jobId>      저장된 sources를 재사용해 원고 생성(재조사 안 함) ->
+                                    해시태그 15개 + (의학이면) 출처 신뢰도 고지 부착 ->
+                                    Telegraph 발행 -> "📄 원고 보기" 버튼 발송
+npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝낸다(사유 기록)
+```
+
+원고 작성/중단은 이제 Telegram 버튼으로도 된다 - write 버튼은 `runWritingStage`(최대 수 분)를
+`job:telegram-poll`의 콜백 처리 안에서 그대로 실행한다(Go 버튼의 제목 생성과 같은 패턴).
+
+- **자료조사** (`workflows/research/`): 카테고리 무관 NAVER 뉴스/웹/블로그 재검색, 출처를
+  official/medical/news/community 4등급으로 분류(`config/sourceAuthorityRules.ts`), official
+  등급 URL은 본문을 직접 fetch해 스니펫을 보강한다(`fetchOfficialSourceContent.ts` — 네비게이션
+  메뉴 오추출 결함을 고쳐 실제 예매 기간을 뽑아내는 것까지 검증됨, SPRINT_2_DESIGN.md 12/14-1절).
+- **의학 주제**: 자동 배제하지 않고 생성하되, 판정되면(`config/medicalTopicRules.ts`)
+  `requiresMedicalReview`가 붙어 Telegram에 "확인함/수정 필요/폐기" 버튼이 함께 간다(설계 5절).
+- **집필** (`workflows/writing/`): `runHeadlessClaude`로 `moai-writer:korean-humanize` +
+  `moai-marketer:content-blog` 스킬을 헤드리스 실행. 실측 원고 길이 1786자(목표 1500~2500 내),
+  소요 185초.
+- **체크포인트 도입 이유**: 첫 실측에서 대상 키워드("2026 경복궁 별빛야행")가 실제로는 이미 예매가
+  마감된 이벤트였는데, 원고 생성 비용(3분)을 다 쓴 뒤에야 알게 됐다. 조사 직후 사람이 "이 근거로
+  써도 될까요?"를 판단할 지점을 만들었다 (SPRINT_2_DESIGN.md 13/14-2절).
+- **원고 확인**: Telegram 메시지는 마크다운을 서식으로 렌더링하지 않아 telegra.ph 페이지로 발행하고
+  버튼으로 연결한다. 발행 실패 시엔 본문 dump로 폴백(14-3절). ⚠️ Telegraph 페이지는 URL을 아는
+  누구나 볼 수 있는 공개 페이지 — 검수 전 원고 노출 트레이드오프를 사용자가 승인했다.
+
+**남은 것**: 이미지 삽입(Sprint 3 설계로 이관), SPA 예매 페이지(ticketlink.co.kr 등) 자동 판독은
+미해결 — 체크포인트에서 사람이 원본 사이트를 직접 열어보는 것으로 당분간 대체. 승인 버튼
+(확인/수정/폐기)은 아직 의학 주제 전용이고, 비의학 원고 공통 승인 게이트는 Sprint 3 검수
+게이트와 함께 붙일 예정.
 
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`

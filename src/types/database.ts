@@ -23,6 +23,9 @@ export const ARTICLE_STATUSES = [
 ] as const;
 export type ArticleStatus = (typeof ARTICLE_STATUSES)[number];
 
+export const SOURCE_AUTHORITY_LEVELS = ["official", "medical", "news", "community"] as const;
+export type SourceAuthorityLevel = (typeof SOURCE_AUTHORITY_LEVELS)[number];
+
 export const PUBLICATION_STATUSES = [
   "pending",
   "publishing",
@@ -57,20 +60,24 @@ export type KeywordUpdate = Partial<KeywordInsert>;
 
 export type SourceRow = {
   id: number;
-  keyword_id: number;
+  keyword_id: number | null;
+  job_id: string | null;
   title: string | null;
   url: string | null;
   source_name: string | null;
+  authority: SourceAuthorityLevel | null;
   published_at: string | null;
   content: string | null;
   created_at: string;
 };
 
 export type SourceInsert = {
-  keyword_id: number;
+  keyword_id?: number | null;
+  job_id?: string | null;
   title?: string | null;
   url?: string | null;
   source_name?: string | null;
+  authority?: SourceAuthorityLevel | null;
   published_at?: string | null;
   content?: string | null;
 };
@@ -81,7 +88,8 @@ export type SourceUpdate = Partial<SourceInsert>;
 
 export type ArticleRow = {
   id: number;
-  keyword_id: number;
+  keyword_id: number | null;
+  job_id: string | null;
   title: string | null;
   content: string | null;
   status: ArticleStatus;
@@ -91,7 +99,8 @@ export type ArticleRow = {
 };
 
 export type ArticleInsert = {
-  keyword_id: number;
+  keyword_id?: number | null;
+  job_id?: string | null;
   title?: string | null;
   content?: string | null;
   status?: ArticleStatus;
