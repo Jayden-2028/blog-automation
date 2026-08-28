@@ -565,4 +565,24 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 아니므로 사용자가 초안함에서 정리해도 된다. "임시저장" 성공 신호(토스트/URL 변화)는 여전히
 고정 시간 대기로 대체돼 있다 - 급하지 않으면 다음에 개선한다.
 
+## 인프라 정리 (2026-08-28, 중간 점검 후속)
+
+중간 점검에서 나온 "아쉬운 점" 3건 착수. 상세는 `CLOUD_MIGRATION.md` /
+`SUPABASE_MIGRATION_SYNC.md`.
+
+1. **클라우드 감시인 (Phase 1 완료)** - `src/jobs/watchdogJob.ts` + `.github/workflows/watchdog.yml`.
+   로컬 맥과 다른 호스트(GitHub 러너)에서 매일 11:00 KST에 "오늘 완료된 discovery_run이 있나"를
+   확인하고 없으면 Telegram으로 알린다. 강제 종료 시 실패 알림이 안 나가던 구멍을 밖에서 막는다.
+   `npm run test:watchdog`(7케이스) + 라이브 dry-run 통과. **가동에는 사용자 개입 2건 필요**:
+   repo secret 4개 등록 + 워크플로우 파일 main push. Phase 2(Telegram 수신 분리)/Phase 3(로그인
+   세션 이전)는 설계만.
+
+2. **Supabase CLI 도입** - `brew install`로 v2.116.0 설치, `supabase init`로 `config.toml` 생성.
+   9개 마이그레이션이 전부 Dashboard 수작업 적용이라 원격 `schema_migrations`가 비어 있는 문제를
+   `scripts/supabase-repair.sh`(9개를 `applied` 표시, SQL 실행 안 함)로 해소하는 절차 준비.
+   **사용자 개입 필요**: `supabase login` + `supabase link --project-ref <ref>`(DB 비밀번호) 후
+   스크립트 실행. 이후 Dashboard 수작업 대신 `supabase db push`(승인 게이트 유지).
+
+3. **git 브랜치 정리** - (병합/push는 사용자 승인 대기 중)
+
 전체 로드맵: `/Users/wooahpapa/.claude/plans/gpt-recursive-squirrel.md`
