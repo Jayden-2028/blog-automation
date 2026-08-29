@@ -3,37 +3,11 @@
 // 알린다.** 신규 소스가 daily job을 죽이면 안 되기 때문이다(buildDailyQueryPool.ts fallback 원칙).
 
 import { TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
+import { describeError } from "../../services/describeError.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
 import { GOOGLE_TRENDS_SOURCE, mapGoogleTrendsItemsToInserts } from "./mapGoogleTrendsCandidates.js";
 import type { FetchGoogleTrendsResult } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
-
-/**
- * Supabase(PostgrestError)는 Error 인스턴스가 아니라 평범한 객체라 String(error)가
- * "[object Object]"를 만든다. runCreatorAdvisorCollection.ts와 같은 이유로 원인을 보존한다.
- */
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-
-  if (error && typeof error === "object") {
-    const e = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const parts = [
-      typeof e.message === "string" ? e.message : null,
-      typeof e.code === "string" ? `code=${e.code}` : null,
-      typeof e.details === "string" && e.details ? `details=${e.details}` : null,
-      typeof e.hint === "string" && e.hint ? `hint=${e.hint}` : null,
-    ].filter(Boolean);
-    if (parts.length > 0) return parts.join(" | ");
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return Object.prototype.toString.call(error);
-    }
-  }
-
-  return String(error);
-}
 
 export type RunGoogleTrendsCollectionOptions = {
   /** 생략하면 TREND_SOURCE_CONFIGS.google_trends.enabled. false면 즉시 skipped. */

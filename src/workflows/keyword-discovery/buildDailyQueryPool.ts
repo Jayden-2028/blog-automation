@@ -25,6 +25,7 @@
 
 import { TREND_SOURCE_CONFIGS, TREND_SOURCES, type TrendSource } from "../../config/trendSources.js";
 import { SeedQueryRepository } from "../../repositories/SeedQueryRepository.js";
+import { describeError } from "../../services/describeError.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { selectTopCreatorAdvisorCandidates } from "../creator-advisor/selectTopCreatorAdvisorCandidates.js";
 import type { SeedQueryRow, TrendCandidateRow } from "../../types/database.js";
@@ -194,17 +195,25 @@ function mergeEntries(
   return { entries: [...byKeyword.values()], mergedCount };
 }
 
-/** 이 소스를 이번 run에서 조회할지 판정한다. */
-function resolveEnabledSources(options: BuildDailyQueryPoolOptions): TrendSource[] {
-  if (options.enabledSources) return [...options.enabledSources];
+/**
+ * 이 소스를 이번 run에서 조회할지 판정한다. 우선순위가 높은 것부터:
+ *
+ * 1. creatorAdvisorEnabled — creator_advisor 하나만 켜고 끄는 명시적 override(하위 호환 옵션).
+ *    **enabledSources보다 우선한다.** 이 옵션이 있기 전부터 "false면 조회조차 하지 않는다"가
+ *    계약이었고, 나중에 추가된 enabledSources가 그걸 덮으면 조용히 계약이 깨진다.
+ * 2. enabledSources — 테스트/로컬에서 조회 대상을 좁힐 때.
+ * 3. TREND_SOURCE_CONFIGS[source].enabled — 운영 기본값(env).
+ */
+function isSourceEnabled(source: TrendSource, options: BuildDailyQueryPoolOptions): boolean {
+  if (source === "creator_advisor" && options.creatorAdvisorEnabled !== undefined) {
+    return options.creatorAdvisorEnabled;
+  }
+  if (options.enabledSources) return options.enabledSources.includes(source);
+  return TREND_SOURCE_CONFIGS[source].enabled;
+}
 
-  return TREND_SOURCES.filter((source) => {
-    // creatorAdvisorEnabled는 creator_advisor에만 적용되는 하위 호환 옵션이다.
-    if (source === "creator_advisor" && options.creatorAdvisorEnabled !== undefined) {
-      return options.creatorAdvisorEnabled;
-    }
-    return TREND_SOURCE_CONFIGS[source].enabled;
-  });
+function resolveEnabledSources(options: BuildDailyQueryPoolOptions): TrendSource[] {
+  return TREND_SOURCES.filter((source) => isSourceEnabled(source, options));
 }
 
 function resolveLoader(source: TrendSource, options: BuildDailyQueryPoolOptions): LoadTrendCandidates {
@@ -248,7 +257,12 @@ export async function buildDailyQueryPool(
     } catch (error) {
       // 개별 소스 실패는 daily workflow 전체를 막지 않는다(요구사항 #7). 로그인 실패/not ready/
       // browser error/timeout/available 날짜 없음 등 사유가 무엇이든 나머지 소스로 진행한다.
-      const message = error instanceof Error ? error.message : String(error);
+      //
+      // describeError를 쓰는 이유: 여기서 오는 오류는 대부분 Supabase PostgrestError이고, 그건
+      // Error 인스턴스가 아니라 평범한 객체라 String(error)가 "[object Object]"를 만든다.
+      // 이 문자열이 그대로 trendErrorBySource -> Telegram 실패 알림까지 가므로 원인이 사라지면
+      // 어느 소스가 왜 죽었는지 알 방법이 없어진다.
+      const message = describeError(error);
       trendErrorBySource[source] = message;
       console.error(`⚠️ buildDailyQueryPool: trend_candidates(${source}) 조회 실패, 나머지로 진행 -`, message);
     }
