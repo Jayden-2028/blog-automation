@@ -401,14 +401,63 @@ export const SEED_QUERY_ALIASES: Record<string, string[]> = {
   "쿠팡플레이": ["쿠팡플레이", "coupang play"],
 } as const;
 
+// Topic Grouping(Top N 선정 단계의 "같은 주제" 판정) 설정. topicGrouping.ts 참고.
+//
+// clustering(CLUSTERING_CONFIG)과 목적이 다르다. clustering은 수백 개 후보를 이슈 단위로 묶는 1차
+// 작업이고, 이쪽은 그 결과 중 Top N을 고를 때 "이미 뽑은 것과 사실상 같은 건인가"만 다시 보는
+// 2차 안전장치다. clustering이 놓쳐도(특히 cross-seed로 같은 이슈가 잡힌 경우 - topicGrouping.ts
+// 상단 주석) Top 10이 한 주제로 도배되는 것을 막는다.
+export const TOPIC_GROUPING_CONFIG = {
+  // batch 크기 * 이 비율 이하의 document frequency를 가진 핵심 명사를 "희소(distinctive)"로 본다.
+  // 400개 cluster 기준 8건 이하. 그날의 고유명사("들쥐" 4건)는 통과하고, 플랫폼/범용어("넷플릭스"
+  // 수십 건)는 통과하지 못하는 지점으로 잡았다.
+  distinctiveDocFrequencyRatio: 0.02,
+  // 후보가 얕은 날 비율만으로는 0에 수렴하므로 하한을 둔다(df 2 = 두 후보가 공유하는 단어).
+  minDistinctiveDocFrequency: 2,
+  // 후보가 아주 많은 날 흔한 단어까지 희소로 인정되는 것을 막는 상한.
+  maxDistinctiveDocFrequency: 12,
+  // 희소 토큰을 공유하지 않아도, 핵심 명사 집합 자체가 이만큼 겹치면 같은 주제로 본다.
+  coreNounSameTopicThreshold: 0.5,
+  // 위 비율 판정이 짧은 제목에서 우연히 성립하는 것을 막는 최소 교집합 개수.
+  coreNounSameTopicMinIntersection: 2,
+  // 플랫폼/장르처럼 "주제"가 아니라 "분류"를 가리키는 단어. 희소성 통계만으로는 고유명사와 구분할
+  // 수 없어서(후보가 얕은 날에는 "넷플릭스"의 df가 "들쥐"의 df와 거의 같아진다) 명시적으로 제외한다.
+  // 이게 없으면 서로 다른 작품인 "넷플릭스 들쥐"와 "넷플릭스 오징어게임"이 플랫폼 이름 하나로 묶인다.
+  //
+  // 여기 나열한 것은 어느 날이든 분류어인 고정 목록이고, 그날그날의 분류어(= seed_queries에 사람이
+  // 등록해둔 상시 검색어)는 selectDiverseTopN이 runtime으로 추가 주입한다.
+  categoryTerms: [
+    "넷플릭스", "netflix", "티빙", "tving", "웨이브", "wavve", "디즈니플러스", "디즈니",
+    "쿠팡플레이", "왓챠", "유튜브", "youtube", "ott", "드라마", "영화", "예능", "시리즈",
+    "방송", "연예", "육아", "날씨", "지원금", "정부지원금",
+  ] as string[],
+  // 희소해 보여도 주제를 대표하지 못하는 범용 수식어. 신호 계산에서 통째로 제외한다.
+  // 이게 없으면 서로 다른 드라마 두 편이 "촬영지" 하나로 같은 주제가 된다.
+  genericTokens: [
+    "리뷰", "후기", "정보", "방법", "이유", "결말", "출연진", "촬영지", "공개일",
+    "시즌", "가격", "일정", "신청", "총정리", "정리", "순위", "근황", "논란",
+    "공개", "확정", "변경", "무료", "실화", "해석", "가능성", "예고", "모음",
+    "추천", "비교", "차이", "후속", "반응", "일화", "회차", "티저", "예고편",
+    "관람평", "줄거리", "등장인물", "몰아보기", "다시보기",
+  ] as string[],
+} as const;
+
 // Ranking Diversity(Top N 선정 다양성) 설정.
 // 최종 selection 단계에서 동일 seedQuery/canonical topic 편중을 막고, 가능하면 category별로
 // 최소 1개씩 포함되도록 한다(selectDiverseTopN.ts). 실제 고점 이슈가 없는 category는 억지로 채우지 않는다.
 export const DIVERSITY_CONFIG = {
   // 최종 Top N 안에서 동일 seedQuery가 등장할 수 있는 최대 횟수.
   maxPerSeedQuery: 2,
-  // 최종 Top N 안에서 동일 canonical keyword(topic)가 등장할 수 있는 최대 횟수.
+  // 최종 Top N 안에서 동일 topic이 등장할 수 있는 최대 횟수.
+  //
+  // "동일 topic"의 판정 기준이 2026-08-29에 바뀌었다. 이전에는 canonical keyword "문자열 완전 일치"
+  // 였는데, 그래서 같은 이슈라도 제목이 다르면(= canonical이 다르면) cap이 아예 발화하지 않았다.
+  // 실제로 "넷플릭스 들쥐" 한 건이 서로 다른 canonical 4개로 Top 10을 4칸 차지했다.
+  // 지금은 topicGrouping.ts의 isSameTopic()(희소 핵심 명사 공유 또는 핵심 명사 overlap)으로 센다.
   maxPerCanonicalTopic: 1,
+  // false로 두면 위 판정이 예전처럼 canonical keyword 문자열 완전 일치로 돌아간다.
+  // 주제 판정이 과하게 묶는 날이 관측되면 코드 수정 없이 이 값만 내려 원복할 수 있게 남겨둔다.
+  enableTopicGrouping: true,
   // category별 최소 1개 포함을 시도할 대상 category 목록.
   targetCategories: ["ott", "parenting", "living", "entertainment"] as string[],
   // true면 targetCategories 중 Top N에 대표가 없는 category를 candidate pool에서 backfill 시도한다.

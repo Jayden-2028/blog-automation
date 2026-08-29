@@ -84,6 +84,11 @@ export type RankKeywordsOptions = {
   topN?: number;
   /** 대표 seedQuery 동률 판정에만 사용하는 query별 운영 priority. */
   priorityByQuery?: Record<string, number>;
+  /**
+   * Top N 주제 중복 판정에서 "분류어"로 취급할 단어(seed_queries 유래 상시 검색어).
+   * selectDiverseTopN -> topicGrouping의 extraCategoryTerms로 전달된다.
+   */
+  categoryTerms?: readonly string[];
 };
 
 export type RankKeywordsResult = {
@@ -153,7 +158,8 @@ export async function rankKeywords(
   // diversity 정책(동일 seedQuery/canonical topic 편중 방지 + category backfill)을 적용해 최종 Top N을 뽑는다.
   const diverseSelection = selectDiverseTopN(
     scoredSortedDesc.map((item) => item.ranked),
-    topN
+    topN,
+    { categoryTerms: options.categoryTerms }
   );
   const rankings: RankedKeyword[] = diverseSelection.map((item, index) => ({ rank: index + 1, ...item }));
 
@@ -268,6 +274,9 @@ export async function runDailyKeywordWorkflow(
   let queries = options.queries;
   let seedCategoryByQuery: Record<string, string> | undefined;
   let seedPriorityByQuery: Record<string, number> | undefined;
+  // seed_queries(사람이 등록한 상시 검색어)만 모은다. Creator Advisor에서 온 그날의 화제 키워드는
+  // 주제 그 자체이므로 분류어로 취급하면 안 된다(topicGrouping.ts 참고).
+  let stableSeedTerms: string[] | undefined;
 
   if (!queries) {
     // Creator Advisor를 먼저 수집해 trend_candidates를 최신화한 뒤 query pool을 조립한다.
@@ -310,6 +319,9 @@ export async function runDailyKeywordWorkflow(
     queries = queryPool.entries.map((entry) => entry.keyword);
     seedCategoryByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.category]));
     seedPriorityByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.priority]));
+    stableSeedTerms = queryPool.entries
+      .filter((entry) => entry.origin === "seed" || entry.origin === "merged")
+      .map((entry) => entry.keyword);
   }
 
   const collectOptions: CollectCandidatesOptions = {
@@ -348,6 +360,7 @@ export async function runDailyKeywordWorkflow(
       ...seedPriorityByQuery,
       ...options.rankOptions?.priorityByQuery,
     },
+    categoryTerms: options.rankOptions?.categoryTerms ?? stableSeedTerms,
   };
   const ranked = await runStage(stageLog, "rank", () => rankKeywords(clusters, queries!, rankOptions));
   if (!ranked) {

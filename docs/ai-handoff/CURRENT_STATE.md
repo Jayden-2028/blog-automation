@@ -356,9 +356,16 @@ npm run job:telegram-poll                # 신규, 버튼 클릭 1회 수신 처
    되돌리면 실제로 실패하는 것까지 확인했다.
    `TREND_MOMENTUM_CONFIG.neutralScoreRatio: 0.4`도 같은 패턴이라 확인했으나, `unknown`(12점)이
    관측된 모든 값(17~30)보다 낮아 실제 역전이 없어 손대지 않았다.
-3. **Top 10에 같은 주제가 2번씩 들어간다.** `DIVERSITY_CONFIG.maxPerSeedQuery = 2` 설정대로 동작
-   중이다. 1로 낮추면 10개 주제가 되지만, 후보가 얕은 날 품질 낮은 키워드가 밀려 들어올 수 있어
-   며칠 운영 후 판단하기로 했다.
+3. **~~Top 10에 같은 주제가 2번씩 들어간다~~ — 부분 해결됨(2026-08-29).**
+   실제로는 2번이 아니라 **4번**까지 들어갔다("넷플릭스 들쥐" 4건). 원인이 두 겹이었다:
+   (a) cross-seed clustering이 `excludeSeedQueryFromTokens` 때문에 구조적으로 병합 불가
+       (유사도가 정확히 0.000), (b) `maxPerCanonicalTopic=1`이 canonical 문자열 완전 일치로만 세서
+       cap이 발화하지 않음. seed 2개 × `maxPerSeedQuery=2` = 정확히 4건이었다.
+   (b)는 `topicGrouping.ts`(신규)로 해결 — 최종 선정 단계에서 희소 핵심 명사 공유/핵심 명사 overlap
+   으로 같은 주제를 판정한다. `npm run test:topic-grouping`이 고정한다.
+   **(a)는 그대로 남아 있다** — clustering 로직 변경이라 승인이 필요하다. 지금은 한 이슈가 여전히
+   cluster 4개로 쪼개져 있어 relatedCount/news/cross 점수를 손해 본다.
+   상세: `docs/ai-handoff/KEYWORD_SOURCE_EXPANSION.md`
 4. **맥이 09:00에 완전히 꺼져 있으면 여전히 실행되지 않는다.** `caffeinate`는 "도는 중에 잠들지
    않게" 할 뿐 "깨우지는" 못하고, `pmset repeat`도 전원이 차단된 상태에서는 한계가 있다.
    더 큰 문제는 **강제 종료 시 실패 알림이 나가지 않는다**는 점이다(위 운영 노트 참고).
