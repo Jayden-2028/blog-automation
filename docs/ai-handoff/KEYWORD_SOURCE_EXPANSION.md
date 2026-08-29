@@ -9,7 +9,9 @@
 3. "커뮤니티" 카테고리 추가 (더쿠·펨코·다음/네이버 인기카페 인기글)
 4. 다음 실시간 검색 + 구글 트렌드를 검색 풀에 반영
 
-1·2번은 이 브랜치에서 **구현·검증 완료**. 3·4번은 **설계까지**이며 승인·결정 항목이 §7에 있다.
+**진행 상태**: 1·2번 구현·검증 완료. 3번(커뮤니티)은 `community` category까지 완료, 수집기는 설계.
+4번은 구글 트렌드 구현 완료(실측 미검증·기본 disabled), 다음 실시간은 설계. 사용자 결정 사항은 §7,
+이번 세션에서 실제로 구현한 것은 §7-1, 남은 순서는 §8.
 
 > **이 세션의 검증 한계**: 원격 컨테이너에 `.env`가 없고 외부 egress가 차단돼 있다.
 > Supabase/NAVER API 호출과 외부 endpoint 실측은 불가능했다. 순수 함수 테스트와 `npm run build`는
@@ -113,7 +115,8 @@ clustering과 달리 **seed 토큰을 지우지 않는다** — §1-1이 이 모
 ✅ 넷플릭스 들쥐 4건 -> 1건으로 축소
 ✅ Top 10 안에 같은 주제 중복 없음
 ✅ 확보된 자리에 다른 주제가 실제로 채워짐
-✅ target category 4종 대표 모두 유지됨
+✅ pool에 존재하는 target category 전부 대표 확보
+✅ community(신규 category)가 backfill로 편입됨
 ```
 
 `npm run build` 통과. 되돌리려면 `DIVERSITY_CONFIG.enableTopicGrouping = false` 한 줄이면 예전
@@ -304,52 +307,163 @@ Creator Advisor는 이미 "검색 키워드" 형태로 준다. 커뮤니티는 �
 
 ---
 
-## 7. 결정·승인 필요 항목
+## 7. 결정 사항 (2026-08-29 사용자 확정)
 
-### A. clustering 근본 수정 (승인 필요 — CLAUDE.md 금지 항목)
+| 항목 | 결정 | 상태 |
+|---|---|---|
+| A. clustering 근본 수정 (§1-1) | **지금은 두고 관찰** | 보류 — 며칠 Top 10을 보고 재판단 |
+| B. 커뮤니티를 category로 (§5-4) | **(B) 5번째 category `community`** | ✅ 구현 완료 |
+| C. 스크래핑 대상 (§5-2) | 네이버 공식 API(카페글·지식iN) + 네이트판 + 더쿠 + 다음/네이버 카페 인기글. **펨코 제외** | 설계 확정, 구현 대기 |
+| D. 커뮤니티 엔티티 추출에 LLM 1콜/일 (§5-1) | **사용** | 설계 확정, 구현 대기 |
+| E. quota 배분 (§4-2) | 제안대로 (query 84 → 약 110, 소요 80초 → 약 105초) | ✅ config 반영 |
 
-§1-1의 `excludeSeedQueryFromTokens` cross-seed 문제. 제안하는 최소 수정은
-**"cross-seed 비교일 때는 seed 토큰을 지우지 않는다"** 한 가지다(같은 seed 내부 동작은 그대로).
+### A에 대한 메모
 
-- 영향: 같은 이슈가 하나로 병합되어 `relatedCount`/news/cross 신호가 정상화 → 순위가 올라간다
-- 위험: 오병합. 같은 플랫폼의 서로 다른 작품이 묶일 수 있다(§2의 과병합 문제와 동일한 위험)
-- 되돌리기: config 한 줄
-- 검증: `diagnoseFalseMerges.ts` + 실제 run 데이터로 before/after 비교
-- **지금은 손대지 않았다.** §2의 선정 단계 안전장치만으로 사용자가 본 증상은 사라진다.
+보류를 택했으므로 **한 이슈가 여전히 cluster 4개로 쪼개져 relatedCount/news/cross 점수를 손해 보는
+상태는 유지된다.** Top 10 표시만 고쳐진 것이다. 관찰 포인트는 두 가지다.
 
-### B. 커뮤니티를 category로 만들 것인가 (§5-4)
+1. 도배가 실제로 사라졌는가 (기대: 사라진다)
+2. 원래 1위였어야 할 이슈가 병합 실패 때문에 3~4위로 밀리고 있지는 않은가
+   → `discovery_runs.metadata`의 preDiversityRankings와 최종 rankings를 비교하면 보인다
 
-(A) 출처 축 분리 / (B) 5번째 category `community`. **Claude 권장은 (B)**.
-
-### C. 스크래핑 대상 확정 (§5-2)
-
-어디까지 붙일지. 최소안(네이트판 + 네이버 공식 API 2종) ~ 최대안(더쿠·디시·카페 인기글 포함).
-펨코는 별도 판단.
-
-### D. 커뮤니티 키워드 추출에 LLM 1콜/일 사용 (§5-1)
-
-규칙 기반 대안이 없다고 판단했다. 비용·의존성 관점에서 승인 필요.
-
-### E. quota 배분 (§4-2)
-
-query 84 → 110건. daily job 소요 80초 → 약 105초. 이 증가를 받아들일지.
+2번이 반복 관측되면 그때 §1-1을 승인 요청한다.
 
 ---
 
-## 8. 실행 순서 제안
+## 7-1. 2026-08-29 세션에서 실제로 구현한 것
+
+§8의 0~3단계를 이 브랜치에서 마쳤다. 4~5단계(다음 실시간, 커뮤니티)는 **외부 페이지 DOM 실측이
+필요해 이 원격 세션에서는 불가능**하므로 설계 상태로 남겼다.
+
+### (1) Top N 주제 중복 제거 — §2
+
+### (2) `community` category — 결정 B
+
+| 파일 | 변경 |
+|---|---|
+| `config/keywordCategoryRules.ts` | `KeywordCategory`에 `community` 추가, 규칙을 **맨 마지막**에 배치 |
+| `config/keywordScoring.ts` | `DIVERSITY_CONFIG.targetCategories`에 `community` 추가 |
+| `workflows/writing/buildArticlePrompt.ts` | `pickStyleRules` 분기를 명시적으로 (community → PERSONAL, 임시) |
+| `config/testKeywordCategoryRules.ts` | community 케이스 8건 추가 |
+
+**규칙을 맨 마지막에 둔 것이 핵심이다.** "출처가 아니라 내용으로 판정한다"는 결정 B의 조건을
+순서로 강제한다 — 더쿠에서 온 연예 가십은 entertainment, 펨코에서 온 지원금 소식은 living이 되고,
+앞 네 규칙이 전부 미스한 순수 인터넷 화제만 community가 된다. 테스트가 이 순서를 고정한다.
+
+> **부수 발견**: community 테스트를 쓰다가 entertainment 규칙의 구멍을 찾았다. "연예인 갑질 논란"에
+> 매칭되는 어휘가 하나도 없어서(`연예인`이 규칙에 없었다) community로 떨어졌다. 커뮤니티 소스가
+> 붙으면 이 형태가 대량으로 들어오므로 `연예인`/`아이돌`을 entertainment에 추가했다.
+> `배우`/`가수`는 넣지 않았다 — 부분 문자열 매칭이라 "배우자 출산휴가"가 연예 뉴스가 된다.
+
+`community` 톤은 현재 PERSONAL로 보낸다. `trend-blog-writer`의 실제 문체(찬반 양측 정리 + 화자의
+개인적 견해)는 개인 경험담과 다르므로, **발행 표본이 쌓이면 전용 rule set이 필요하다**(미해결).
+
+### (3) 다중 source query pool — §4-2
+
+`buildDailyQueryPool`이 `source="creator_advisor"` 하드코딩에서 벗어났다. 이제
+`config/trendSources.ts`의 enabled 소스를 순회하며 소스별 quota만큼 뽑아 합친다.
+
+- **스키마 변경 없음** (§4-1 예상대로). `trend_candidates` unique index에 이미 source가 있다.
+- 소스 하나가 실패해도 나머지로 진행한다. 전부 실패해도 seed_queries만으로 정상 동작한다.
+- 결과에 `trendCountBySource` / `trendErrorBySource`가 추가돼 어느 소스가 기여했는지 보인다.
+- `QueryPoolEntry.source` 추가. `origin`(seed냐 아니냐)과 `source`(어디서 왔나)는 별개 축이라
+  한 필드에 섞지 않았다 — topicGrouping의 분류어 판정이 origin 축을 쓴다.
+- 기존 호출부와 테스트는 그대로 통과한다(`loadLatestCreatorAdvisorCandidates` 옵션 유지).
+
+신규 소스 priority는 2로, Creator Advisor(3)보다 낮다. CA는 "네이버 블로그에서 실제로 검색된
+키워드"라 이 프로젝트의 발행 채널과 가장 직접 연결돼 있기 때문이다.
+
+### (4) 구글 트렌드 RSS — §6-2
+
+| 파일 | 역할 |
+|---|---|
+| `services/search/providers/googleTrends/parseGoogleTrendsRss.ts` | RSS 파서 (순수, **절대 throw 안 함**) |
+| `services/search/providers/googleTrends/GoogleTrendsProvider.ts` | fetch + 타임아웃 |
+| `services/search/providers/googleTrends/fixtures/trendingRss.sample.xml` | 테스트 fixture |
+| `workflows/google-trends/mapGoogleTrendsCandidates.ts` | RSS 항목 → `trend_candidates` row |
+| `workflows/google-trends/runGoogleTrendsCollection.ts` | 배선 (실패해도 status로만 알림) |
+| `workflows/google-trends/runCollectionCli.ts` | `npm run collect:google-trends` (**기본 dry-run**) |
+| `workflows/google-trends/testGoogleTrends.ts` | `npm run test:google-trends` |
+
+Creator Advisor와 다른 점 세 가지를 매핑에서 처리했다.
+
+1. **topic이 없다.** 구글 트렌드는 분야 구분 없이 순위 목록만 준다 → `topic`은 고정값
+   `"google_trends"`(원문 보존 필드에 거짓 분야명을 지어내지 않는다), category는 키워드 어휘 분류에
+   전적으로 의존하고 신호가 없으면 `living`으로 폴백한다. 새 "미분류" 값을 만들지 않은 이유는
+   category 소비자(backfill, 원고 톤)가 그 값을 몰라 조용히 어긋나기 때문이다.
+2. **movement_type을 알 수 없다** → `flat`. 전부 `new`로 두면 "어제도 1위였던 키워드"를 신규라고
+   말하게 된다. `flat`이 스키마 4값 중 "변화 정보 없음"에 가장 가깝다.
+3. **candidate_score를 순위 + approx_traffic으로 만든다.** CA 점수와 스케일을 맞출 필요는 없다 —
+   candidate_score는 같은 source 안에서만 비교된다(소스별 quota로 따로 자르므로).
+
+`dailyKeywordWorkflow`의 `trendCollect` 단계가 두 소스를 순차 수집하고 상태를 집계한다
+(하나라도 성공 → success / 전부 disabled → skipped / 성공 0 + 실패 1 이상 → failed). 어느 쪽이든
+파이프라인을 멈추지 않는다.
+
+### ⚠️ 구글 트렌드는 아직 실측되지 않았다
+
+이 세션은 외부 egress가 차단돼 `trends.google.com`에 한 번도 접속하지 못했다. 엔드포인트
+(`/trending/rss?geo=KR`)와 필드 구성은 **공개 스키마 기준 추정**이다. 그래서:
+
+- 파서를 **어떤 입력에도 예외를 던지지 않게** 만들었다(빈 문자열/HTML 오류 페이지/구조 변경 →
+  0건 반환). 테스트가 이걸 고정한다.
+- `approx_traffic`/`news_item`/`pubDate`를 전부 optional로 뒀다. 없어도 항목을 버리지 않는다.
+- **`GOOGLE_TRENDS_ENABLED` 기본값은 false다.** 맥에서 `npm run collect:google-trends`(dry-run)로
+  실제 응답을 눈으로 확인한 뒤에 켜야 한다. CLI가 조회 결과를 목록으로 출력한다.
+
+### 검증 결과 (전부 offline, 외부 호출/DB 쓰기 없음)
 
 ```
-0. (완료) Top N 주제 중복 제거 + 회귀 테스트          <- 이 브랜치
-1. 맥에서 실측 확인
-   - npm run test:topic-grouping / build
-   - .env 필요한 테스트 재실행 (이 세션에서는 credential 부재로 미실행)
-   - 내일 아침 run에서 Top 10 실제 변화 확인
-2. buildDailyQueryPool 다중 source 지원 (§4-2)         <- 이후 전부의 전제
-3. 구글 트렌드 RSS provider (§6-2)                     <- 가장 싸고 안전
-4. 다음 실시간 트렌드 provider (§6-1)
-5. 커뮤니티 수집 + LLM 엔티티 추출 (§5)                <- B/C/D 결정 후
-6. (선택) clustering 근본 수정 (§7-A)                  <- 승인 후
+npm run build                       OK
+npm run test:topic-grouping         pass
+npm run test:google-trends          pass   (신규, 파서 강건성 포함)
+npm run test:daily-query-pool       pass   (기존 테스트 무수정 통과)
+npm run test:keyword-category       pass   (community 8건 추가, 총 32건)
+npm run test:score-keyword          pass
+npm run test:creator-advisor-*      pass   (parser / pipeline / collection)
+npm run test:callback-data          pass
+npm run test:telegram-bot           pass
+npm run test:article-prompt         pass
+npm run test:fact-card              pass
+npm run test:article-review         pass
+npm run test:naver-html             pass
 ```
 
-2~4는 범위가 명확한 반복 코딩이라 `delegate-codex` 위임 후보다. 5는 설계 판단이 섞여 있어 Claude가
-직접 한다.
+> 이 원격 세션에는 `.env`가 없어 Supabase 클라이언트를 import하는 테스트는 더미 환경변수
+> (`SUPABASE_URL=https://dummy.invalid SUPABASE_SERVICE_ROLE_KEY=dummy`)로 실행했다. 전부 loader를
+> 주입받는 테스트라 실제 원격 접근은 일어나지 않는다. 맥에서는 그냥 `npm run <test>`로 돌면 된다.
+> 외부 API를 실제 호출하는 `test:naver`/`test:keywords`/`test:ranking`은 이 세션에서 실행하지 못했다.
+
+---
+
+## 8. 실행 순서
+
+```
+0. ✅ Top N 주제 중복 제거 + 회귀 테스트
+1. ✅ buildDailyQueryPool 다중 source 지원 (§4-2)
+2. ✅ 구글 트렌드 RSS provider (§6-2)          <- 코드 완료, 실측 미검증 / 기본 disabled
+3. ✅ community category (결정 B)
+--- 여기까지 이 브랜치 ---
+4. ⬜ 맥에서 실측 확인
+   a. npm run test:topic-grouping / test:google-trends / build
+   b. npm run collect:google-trends            (dry-run, 실제 RSS 응답 눈으로 확인)
+   c. 확인되면 .env에 GOOGLE_TRENDS_ENABLED=true
+   d. WRITE=1 npm run collect:google-trends    (원격 DB 쓰기 - 승인 필요)
+   e. 내일 아침 run에서 Top 10 변화 관찰
+5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
+6. ⬜ 커뮤니티 수집 + LLM 엔티티 추출 (§5)      <- 결정 C/D 반영, 펨코 제외
+7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
+```
+
+5·6은 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수 없다. 실측 뒤 파서 작성은
+범위가 명확해지므로 `delegate-codex` 위임 후보가 된다(Creator Advisor Swiper 순회 때와 같은 방식).
+
+### 새 환경변수 (전부 기본 false / 미설정 시 기존 동작)
+
+```
+GOOGLE_TRENDS_ENABLED=false                    # 실측 확인 후 true
+GOOGLE_TRENDS_MAX_DAILY_CANDIDATES=10
+GOOGLE_TRENDS_CANDIDATE_TTL_HOURS=12
+DAUM_REALTIME_ENABLED=false                    # 5단계 구현 후
+COMMUNITY_TRENDS_ENABLED=false                 # 6단계 구현 후
+```

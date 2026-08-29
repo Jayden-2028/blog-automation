@@ -66,6 +66,8 @@ const OTHERS = [
   makeCandidate("독감 예방접종 무료 대상 확대", "예방접종", "parenting", 57),
   // 범용 수식어("리뷰")만 공유하는 서로 다른 작품 - 묶이면 안 된다.
   makeCandidate("영화 파묘 재개봉 리뷰 반응", "영화", "ott", 56),
+  // community(2026-08-29 추가) 대표. 점수가 낮아 greedy 단계에서는 못 들어오고 backfill로만 들어온다.
+  makeCandidate("출근길 빌런 목격담 갑론을박", "커뮤니티", "community", 40),
 ];
 
 function main(): void {
@@ -171,11 +173,24 @@ function main(): void {
   );
   console.log("  ✅ 확보된 자리에 다른 주제가 실제로 채워짐");
 
+  // backfill은 "pool에 후보가 있는" target category만 채운다(없는 category를 억지로 만들지 않는 것이
+  // selectDiverseTopN의 3번 규칙이다). 그래서 pool에 실제로 존재하는 category만 검사한다.
   const categories = new Set(top.map((item) => item.category));
+  const categoriesInPool = new Set(batch.map((item) => item.category));
   for (const category of DIVERSITY_CONFIG.targetCategories) {
+    if (!categoriesInPool.has(category)) continue;
     assert(categories.has(category), `category backfill이 깨졌다 - "${category}" 대표가 없다`);
   }
-  console.log("  ✅ target category 4종 대표 모두 유지됨");
+  console.log(
+    `  ✅ pool에 존재하는 target category 전부 대표 확보 (${DIVERSITY_CONFIG.targetCategories.filter((c) => categoriesInPool.has(c)).join(", ")})`
+  );
+
+  // community는 점수가 낮아 greedy로는 못 들어온다 - backfill이 실제로 동작했다는 뜻이다.
+  assert(
+    top.some((item) => item.category === "community"),
+    "신규 community category가 backfill로 Top 10에 들어와야 한다"
+  );
+  console.log("  ✅ community(신규 category)가 backfill로 편입됨");
 
   console.log("\n✅ 전체 통과");
 }

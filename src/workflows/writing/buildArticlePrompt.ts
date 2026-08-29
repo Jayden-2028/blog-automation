@@ -105,9 +105,17 @@ const EDITORIAL_STYLE_RULES = [
     " 자신감 있고 단정적으로 유지한다 - 우유부단하게 여러 가능성을 나열하지 않는다.",
 ] as const;
 
-/** job.category로 톤을 고른다. 미분류(null)는 더 넓은 표본(4편)을 관찰한 PERSONAL을 기본으로 쓴다. */
+/**
+ * job.category로 톤을 고른다. 미분류(null)는 더 넓은 표본(4편)을 관찰한 PERSONAL을 기본으로 쓴다.
+ *
+ * community(2026-08-29 추가)는 명시적으로 PERSONAL로 보낸다. 조건식만 보면 굳이 적지 않아도 같은
+ * 결과지만, 새 category가 어느 톤으로 가는지가 조건식의 부수효과로 결정되면 나중에 조용히 어긋난다.
+ * 다만 이건 임시 배치다 - `trend-blog-writer` 스킬의 실제 문체(찬반 양측 정리 + 화자의 개인적 견해)는
+ * PERSONAL(개인 경험담)과 다르므로, 발행 표본이 쌓이면 전용 rule set을 따로 만들어야 한다.
+ */
 function pickStyleRules(category: string | null): readonly string[] {
-  return category === "living" ? EDITORIAL_STYLE_RULES : PERSONAL_STYLE_RULES;
+  if (category === "living") return EDITORIAL_STYLE_RULES;
+  return PERSONAL_STYLE_RULES;
 }
 
 const MEDICAL_RULES = [
