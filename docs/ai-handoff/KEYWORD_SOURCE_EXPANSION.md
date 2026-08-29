@@ -10,12 +10,13 @@
 4. 다음 실시간 검색 + 구글 트렌드를 검색 풀에 반영
 
 **진행 상태**: 1·2번 구현·검증 완료. 3번(커뮤니티)은 `community` category까지 완료, 수집기는 설계.
-4번은 구글 트렌드 구현 완료(실측 미검증·기본 disabled), 다음 실시간은 설계. 사용자 결정 사항은 §7,
+4번은 구글 트렌드 **실측 검증 완료**(기본 disabled), 다음 실시간은 설계. 사용자 결정 사항은 §7,
 이번 세션에서 실제로 구현한 것은 §7-1, 남은 순서는 §8.
 
-> **이 세션의 검증 한계**: 원격 컨테이너에 `.env`가 없고 외부 egress가 차단돼 있다.
-> Supabase/NAVER API 호출과 외부 endpoint 실측은 불가능했다. 순수 함수 테스트와 `npm run build`는
-> 전부 통과했고, 외부 endpoint(§5·§6)는 **맥에서 실측 확인이 필요하다**.
+> **검증 한계**: 원격 컨테이너에 `.env`가 없고 외부 egress가 차단돼 있어, Supabase/NAVER API 호출은
+> 이 세션에서 실행하지 못했다(순수 함수 테스트와 `npm run build`는 전부 통과). 구글 트렌드는
+> **맥에서 실측 확인을 마쳤고 그 결과가 §7-1에 반영돼 있다.** 다음 실시간·커뮤니티는 여전히 설계
+> 단계이며 DOM 실측이 필요하다.
 
 ---
 
@@ -400,16 +401,77 @@ Creator Advisor와 다른 점 세 가지를 매핑에서 처리했다.
 (하나라도 성공 → success / 전부 disabled → skipped / 성공 0 + 실패 1 이상 → failed). 어느 쪽이든
 파이프라인을 멈추지 않는다.
 
-### ⚠️ 구글 트렌드는 아직 실측되지 않았다
+### 구글 트렌드 실측 결과 (2026-08-29, 맥)
 
-이 세션은 외부 egress가 차단돼 `trends.google.com`에 한 번도 접속하지 못했다. 엔드포인트
-(`/trending/rss?geo=KR`)와 필드 구성은 **공개 스키마 기준 추정**이다. 그래서:
+**엔드포인트 추정이 맞았다.** `/trending/rss?geo=KR`이 인증 없이 TOP 10 + 항목별 뉴스 2건을 정상
+응답했고, `ht:approx_traffic` / `ht:news_item`(제목·URL·출처) 구성도 가정과 일치했다.
+파싱 10건, dropped 0, `trendDate: 2026-08-29`.
 
-- 파서를 **어떤 입력에도 예외를 던지지 않게** 만들었다(빈 문자열/HTML 오류 페이지/구조 변경 →
-  0건 반환). 테스트가 이걸 고정한다.
-- `approx_traffic`/`news_item`/`pubDate`를 전부 optional로 뒀다. 없어도 항목을 버리지 않는다.
-- **`GOOGLE_TRENDS_ENABLED` 기본값은 false다.** 맥에서 `npm run collect:google-trends`(dry-run)로
-  실제 응답을 눈으로 확인한 뒤에 켜야 한다. CLI가 조회 결과를 목록으로 출력한다.
+그런데 **실제 데이터가 설계상 리스크 하나를 그대로 터뜨렸다.**
+
+| # | 키워드 | 검색량 | 어휘 분류 결과 |
+|---|---|---|---|
+| 1 | 2026년 태풍 | 2000+ | living ✅ |
+| 2 | 게임스컴 | 200+ | ❌ 미매칭 → living |
+| 3 | 오연수 | 500+ | ❌ 미매칭 → living **(연예)** |
+| 4 | 용종 | 2000+ | ❌ 미매칭 → living |
+| 5 | 유재석 | 5000+ | ❌ 미매칭 → living **(연예)** |
+| 6 | 엄태웅 | 200+ | ❌ 미매칭 → living **(연예)** |
+| 7 | 자폭 | 100+ | ❌ 미매칭 → living |
+| 8 | 션 | 500+ | ❌ 미매칭 → living **(1글자)** |
+| 9 | 창신메모리테크놀로지 | 1000+ | ❌ 미매칭 → living |
+| 10 | 포스코노동조합 | 100+ | ❌ 미매칭 → living |
+
+**10건 중 9건이 어휘 규칙에 걸리지 않았다.** 급상승 검색어의 상당수가 인명·고유명사이기 때문이다.
+§6-2에 "topic이 없어 category를 어휘 분류에 전적으로 의존한다"고 리스크로 적어둔 그대로였고,
+결과적으로 유재석·오연수·엄태웅이 **"생활정보"로 분류돼 편집자 톤 원고로 갈 상황**이었다.
+
+#### 해결 1: 뉴스 출처를 category 신호로 쓴다 (`config/newsOutletRules.ts` 신규)
+
+피드는 topic 대신 **그 검색어가 왜 떴는지 설명하는 뉴스 항목**을 준다. 그리고 한국 언론 지형에서
+**스포츠지·연예매체에 실렸다는 사실 자체가 연예 뉴스라는 강한 신호**다 — 인명 사전 없이 얻을 수
+있는 정보 중 가장 신뢰도가 높다.
+
+```
+오연수 -> 스포츠조선 -> entertainment ✅
+유재석 -> 스포츠동아 -> entertainment ✅
+엄태웅 -> 스포츠동아 -> entertainment ✅
+나머지 7건 -> 매칭 없음, 건드리지 않음   (오탐 0건)
+```
+
+판정 순서는 **키워드 어휘 → 뉴스 출처 → living 폴백**이다. 어휘가 먼저인 것이 중요하다 —
+그래야 "아기 수족구"가 스포츠지에 실려도 parenting을 유지한다. 테스트가 이 순서를 고정한다.
+
+종합지(조선일보·연합뉴스 등)는 목록에 넣지 않았다. 연예부터 정치까지 다 쓰므로 신호가 되지 못한다.
+실제로 "션"이 조선일보 연예 기사로 떴지만, 조선일보를 넣으면 정치·경제 기사까지 연예가 된다.
+
+뉴스 **제목** 어휘로도 분류해봤지만 효과가 없었다(태풍 1건만 잡았고 그건 이미 키워드에서 잡힌다).
+오탐 위험만 늘어 채택하지 않았다.
+
+#### 해결 2: 1글자 키워드를 버린다 (`MIN_TREND_KEYWORD_LENGTH`)
+
+"션"(가수 션)이 들어왔다. 이건 단순히 검색 품질 문제가 아니라 **관련성 필터를 통째로 무력화한다**:
+
+```
+tokenize()가 CLUSTERING_CONFIG.minTokenLength(2) 미만 토큰을 버림
+  -> 1글자 seed는 토큰이 0개
+  -> computeSeedRelevance가 neutralRelevanceWhenSeedTooShort(0.7) 반환
+  -> minRelevanceThreshold(0.25)를 넘어 그 seed의 후보가 전부 통과
+```
+
+즉 1글자 키워드 하나가 relevance 게이트를 열어 무관한 후보 수십 건을 clustering까지 밀어 넣는다.
+`seed_queries`는 사람이 큐레이션하므로 이런 값이 없지만 동적 소스는 무엇이든 준다.
+제외하되 **rank는 원본 피드 순위를 유지한다** — 당겨 매기면 "구글에서 몇 위였나"가 왜곡되고
+candidate_score도 실제보다 높아진다.
+
+#### 아직 판단하지 않은 것: 블로그와 무관한 키워드 (§9)
+
+게임스컴·자폭·창신메모리테크놀로지·포스코노동조합 4건은 이 블로그 카테고리(육아/엔터/OTT/생활/
+커뮤니티)와 거리가 멀다. quota 10칸 중 4칸을 먹는다.
+
+**지금은 필터하지 않았다.** 이유는 두 가지다. (1) 이미 6-factor scoring + diversity가 뒤에서
+거르므로 Top 10까지 올라올 가능성이 낮고, (2) "무관하다"를 규칙으로 정하면 오히려 좋은 키워드를
+놓친다 — "포스코 파업"은 사회 이슈로 `community` 소재가 될 수도 있다. 며칠 관찰 후 판단한다.
 
 ### 검증 결과 (전부 offline, 외부 호출/DB 쓰기 없음)
 
@@ -441,27 +503,35 @@ npm run test:naver-html             pass
 ```
 0. ✅ Top N 주제 중복 제거 + 회귀 테스트
 1. ✅ buildDailyQueryPool 다중 source 지원 (§4-2)
-2. ✅ 구글 트렌드 RSS provider (§6-2)          <- 코드 완료, 실측 미검증 / 기본 disabled
+2. ✅ 구글 트렌드 RSS provider (§6-2) — 맥 실측 완료, 분류 보강까지 반영
 3. ✅ community category (결정 B)
 --- 여기까지 이 브랜치 ---
-4. ⬜ 맥에서 실측 확인
-   a. npm run test:topic-grouping / test:google-trends / build
-   b. npm run collect:google-trends            (dry-run, 실제 RSS 응답 눈으로 확인)
-   c. 확인되면 .env에 GOOGLE_TRENDS_ENABLED=true
-   d. WRITE=1 npm run collect:google-trends    (원격 DB 쓰기 - 승인 필요)
-   e. 내일 아침 run에서 Top 10 변화 관찰
+4. ⬜ 구글 트렌드 켜기
+   a. npm run collect:google-trends            (dry-run, 이제 category 분포까지 출력)
+      -> 연예인이 entertainment로 잡히는지 확인
+   b. .env에 GOOGLE_TRENDS_ENABLED=true
+   c. WRITE=1 npm run collect:google-trends    (원격 DB 쓰기 - 승인 필요)
+   d. 다음 아침 run에서 Top 10 변화 관찰
 5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
 6. ⬜ 커뮤니티 수집 + LLM 엔티티 추출 (§5)      <- 결정 C/D 반영, 펨코 제외
 7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
+8. ⬜ (관찰 후 판단) 블로그 무관 키워드 필터 (§7-1)
 ```
 
 5·6은 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수 없다. 실측 뒤 파서 작성은
 범위가 명확해지므로 `delegate-codex` 위임 후보가 된다(Creator Advisor Swiper 순회 때와 같은 방식).
 
+### 관찰 항목 (며칠 Top 10을 보고 판단)
+
+1. 같은 주제 도배가 실제로 사라졌는가 (§2)
+2. 병합 실패로 순위가 밀리는 이슈가 있는가 (§7-A) — preDiversityRankings와 rankings 비교
+3. 구글 트렌드 유래 키워드가 Top 10에 들어오는가, 들어온다면 쓸 만한가
+4. 블로그와 무관한 키워드(반도체·노동·무기)가 quota만 먹고 끝나는가 (§7-1)
+
 ### 새 환경변수 (전부 기본 false / 미설정 시 기존 동작)
 
 ```
-GOOGLE_TRENDS_ENABLED=false                    # 실측 확인 후 true
+GOOGLE_TRENDS_ENABLED=false                    # 실측 완료, 승인 후 true
 GOOGLE_TRENDS_MAX_DAILY_CANDIDATES=10
 GOOGLE_TRENDS_CANDIDATE_TTL_HOURS=12
 DAUM_REALTIME_ENABLED=false                    # 5단계 구현 후

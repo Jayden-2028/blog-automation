@@ -10,7 +10,7 @@ import { parseGoogleTrendsRss, type GoogleTrendsItem } from "./parseGoogleTrends
 
 /**
  * 신 엔드포인트. 구 `/trends/trendingsearches/daily/rss?geo=KR`은 폐기됐다.
- * ⚠️ 이 세션에서는 외부 egress 차단으로 실측하지 못했다 - 맥에서 먼저 dry-run으로 확인할 것.
+ * 2026-08-29 실측 확인: geo=KR로 TOP 10 + 항목별 뉴스 2건이 인증 없이 정상 응답했다.
  */
 export const GOOGLE_TRENDS_RSS_URL = "https://trends.google.com/trending/rss";
 

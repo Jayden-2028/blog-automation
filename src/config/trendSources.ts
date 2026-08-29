@@ -89,6 +89,20 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
   },
 };
 
+/**
+ * 동적 소스에서 온 키워드의 최소 길이(공백 제거 기준). 이보다 짧으면 버린다.
+ *
+ * 왜 필요한가(2026-08-29 실측): 구글 트렌드 TOP 10에 "션"(가수 션)이 들어왔다. 1글자 키워드는
+ * 단순히 검색 품질이 나쁜 정도가 아니라 **관련성 필터를 통째로 무력화한다**:
+ *   textNormalize.tokenize()가 CLUSTERING_CONFIG.minTokenLength(2) 미만 토큰을 버린다
+ *   -> 1글자 seed는 토큰이 0개
+ *   -> computeSeedRelevance가 SEED_RELEVANCE_CONFIG.neutralRelevanceWhenSeedTooShort(0.7)를 반환
+ *   -> minRelevanceThreshold(0.25)를 넘어 **그 seed에서 나온 후보가 전부 통과**
+ * 즉 1글자 키워드 하나가 relevance 게이트를 열어 무관한 후보 수십 건을 clustering까지 밀어 넣는다.
+ * seed_queries는 사람이 큐레이션하므로 이런 값이 없지만, 동적 소스는 무엇이든 줄 수 있다.
+ */
+export const MIN_TREND_KEYWORD_LENGTH = 2;
+
 /** enabled=true인 source만 순서대로 반환한다. */
 export function getEnabledTrendSources(): TrendSource[] {
   return TREND_SOURCES.filter((source) => TREND_SOURCE_CONFIGS[source].enabled);
