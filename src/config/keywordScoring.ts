@@ -459,7 +459,10 @@ export const DIVERSITY_CONFIG = {
   // 주제 판정이 과하게 묶는 날이 관측되면 코드 수정 없이 이 값만 내려 원복할 수 있게 남겨둔다.
   enableTopicGrouping: true,
   // category별 최소 1개 포함을 시도할 대상 category 목록.
-  targetCategories: ["ott", "parenting", "living", "entertainment"] as string[],
+  // "community"는 2026-08-29 추가(커뮤니티/다음/구글 소스 확장). backfill은 pool에 해당 category
+  // 후보가 실제로 있을 때만 동작하므로(selectDiverseTopN 3번 규칙), 커뮤니티 수집이 붙기 전까지는
+  // 이 항목이 있어도 동작이 달라지지 않는다.
+  targetCategories: ["ott", "parenting", "living", "entertainment", "community"] as string[],
   // true면 targetCategories 중 Top N에 대표가 없는 category를 candidate pool에서 backfill 시도한다.
   enableCategoryBackfill: true,
 } as const;

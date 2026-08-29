@@ -14,6 +14,7 @@
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
+import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
@@ -31,6 +32,10 @@ import type {
   RunCreatorAdvisorCollectionOptions,
   RunCreatorAdvisorCollectionResult,
 } from "./creator-advisor/runCreatorAdvisorCollection.js";
+import type {
+  RunGoogleTrendsCollectionOptions,
+  RunGoogleTrendsCollectionResult,
+} from "./google-trends/runGoogleTrendsCollection.js";
 import type { BuildDailyQueryPoolResult } from "./keyword-discovery/buildDailyQueryPool.js";
 import type {
   CollectNaverCandidatesOptions,
@@ -207,6 +212,8 @@ export type DailyKeywordWorkflowOptions = {
   queries?: string[];
   /** Creator Advisor 수집 단계(trendCollect)에 그대로 전달된다. */
   trendCollectOptions?: RunCreatorAdvisorCollectionOptions;
+  /** 구글 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
+  googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -219,6 +226,8 @@ export type DailyKeywordWorkflowResult = {
   stageLog: DailyKeywordStageLogEntry[];
   /** Creator Advisor 수집 결과. options.queries를 명시적으로 넘긴 경우 null(수집 단계를 건너뜀). */
   trendCollection: RunCreatorAdvisorCollectionResult | null;
+  /** 구글 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
+  googleTrendsCollection: RunGoogleTrendsCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
   queryPool: BuildDailyQueryPoolResult | null;
   collected: CollectNaverCandidatesResult | null;
@@ -262,6 +271,7 @@ export async function runDailyKeywordWorkflow(
   const result: DailyKeywordWorkflowResult = {
     stageLog,
     trendCollection: null,
+    googleTrendsCollection: null,
     queryPool: null,
     collected: null,
     relevance: null,
@@ -287,20 +297,51 @@ export async function runDailyKeywordWorkflow(
     // Creator Advisor는 seed_queries를 보강하는 enrichment source일 뿐 필수 의존성이 아니며,
     // runCreatorAdvisorCollection() 자체가 예외를 던지지 않고 status로 실패를 알린다.
     const trendStartedAt = Date.now();
+
+    // 소스별로 독립 수집한다. 하나가 실패해도 나머지는 계속 돌아야 하므로 순차 실행하되 서로의
+    // 결과를 참조하지 않는다. 각 러너는 throw하지 않고 status로만 알린다(각 파일 상단 주석).
     const trendCollection = await runCreatorAdvisorCollection(options.trendCollectOptions);
     result.trendCollection = trendCollection;
-    stageLog.push({
-      stage: "trendCollect",
-      status: trendCollection.status === "failed" ? "failed" : trendCollection.status === "skipped" ? "skipped" : "success",
-      durationMs: Date.now() - trendStartedAt,
-      error: trendCollection.error,
-    });
+
+    const googleTrendsCollection = await runGoogleTrendsCollection(options.googleTrendsOptions);
+    result.googleTrendsCollection = googleTrendsCollection;
+
     if (trendCollection.status === "success") {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] Creator Advisor 수집: ${trendCollection.fetchedCount}건 조회 → ` +
           `${trendCollection.upsertedCount}건 저장 (trendDate: ${trendCollection.trendDate ?? "N/A"}, 만료 ${trendCollection.expiredCount}건)`
       );
     }
+    if (googleTrendsCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 구글 트렌드 수집: ${googleTrendsCollection.fetchedCount}건 조회 → ` +
+          `${googleTrendsCollection.upsertedCount}건 저장 (trendDate: ${googleTrendsCollection.trendDate ?? "N/A"}, 만료 ${googleTrendsCollection.expiredCount}건)`
+      );
+    }
+
+    // stage 하나에 여러 소스가 들어가므로 상태를 집계한다.
+    // - 하나라도 성공 -> success (나머지 실패는 error 문자열로만 남긴다)
+    // - 전부 skipped   -> skipped (소스가 전부 disabled인 정상 상태)
+    // - 그 외(성공 0 + 실패 1 이상) -> failed
+    // 어느 쪽이든 이 단계는 파이프라인을 멈추지 않는다 - 동적 소스는 전부 enrichment다.
+    const trendResults = [
+      { source: "creator_advisor", result: trendCollection },
+      { source: "google_trends", result: googleTrendsCollection },
+    ];
+    const succeeded = trendResults.filter((entry) => entry.result.status === "success");
+    const failures = trendResults.filter((entry) => entry.result.status === "failed");
+    const trendStageStatus =
+      succeeded.length > 0 ? "success" : failures.length > 0 ? "failed" : "skipped";
+    const trendStageError = failures.length
+      ? failures.map((entry) => `${entry.source}: ${entry.result.error ?? "unknown"}`).join(" | ")
+      : undefined;
+
+    stageLog.push({
+      stage: "trendCollect",
+      status: trendStageStatus,
+      durationMs: Date.now() - trendStartedAt,
+      error: trendStageError,
+    });
 
     // seed_queries(static) + trend_candidates(dynamic, Creator Advisor)를 합친 daily query pool.
     // Creator Advisor가 disabled이거나 실패해도 buildDailyQueryPool()은 예외를 던지지 않고
@@ -313,7 +354,12 @@ export async function runDailyKeywordWorkflow(
     }
     result.queryPool = queryPool;
     if (queryPool.trendCount > 0) {
-      console.log(`ℹ️ [dailyKeywordWorkflow] query pool: seed ${queryPool.seedCount}건 + trend ${queryPool.trendCount}건`);
+      const bySource = Object.entries(queryPool.trendCountBySource)
+        .map(([source, count]) => `${source} ${count}`)
+        .join(", ");
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] query pool: seed ${queryPool.seedCount}건 + trend ${queryPool.trendCount}건 (${bySource})`
+      );
     }
 
     queries = queryPool.entries.map((entry) => entry.keyword);

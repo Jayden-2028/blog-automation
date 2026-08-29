@@ -53,6 +53,8 @@
     "debug:creator-advisor": "tsx src/services/search/providers/creatorAdvisor/debugCreatorAdvisor.ts",
     "debug:ca-snapshots": "tsx src/services/search/providers/creatorAdvisor/captureDomSnapshots.ts",
     "collect:creator-advisor": "tsx src/workflows/creator-advisor/runCollectionCli.ts",
+    "collect:google-trends": "tsx src/workflows/google-trends/runCollectionCli.ts",
+    "test:google-trends": "tsx src/workflows/google-trends/testGoogleTrends.ts",
     "debug:trend": "tsx src/workflows/keyword-ranking/debug/trendMomentumDebug.ts",
     "debug:pipeline": "tsx src/workflows/keyword-ranking/debug/pipelineTrace.ts",
     "debug:compare-display": "tsx src/workflows/keyword-ranking/debug/compareDisplayCounts.ts",
