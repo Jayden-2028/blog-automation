@@ -12,6 +12,7 @@
 // daily workflow가 이 소스 없이 seed_queries만으로 계속 진행할 수 있어야 하기 때문이다.
 
 import { CREATOR_ADVISOR_CONFIG } from "../../config/creatorAdvisor.js";
+import { describeError } from "../../services/describeError.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { BrowserCreatorAdvisorProvider } from "../../services/search/providers/BrowserCreatorAdvisorProvider.js";
 import {
@@ -21,34 +22,6 @@ import {
 import type { FetchTrendKeywordsResult } from "../../services/search/providers/BrowserCreatorAdvisorProvider.js";
 
 const CREATOR_ADVISOR_SOURCE = "creator_advisor";
-
-/**
- * Supabase(PostgrestError)는 Error 인스턴스가 아니라 { message, details, hint, code } 형태의 평범한
- * 객체다 - String(error)로 감싸면 "[object Object]"가 되어 실패 원인이 통째로 사라진다. 이 파이프라인은
- * 실패를 예외 대신 문자열로만 전달하므로, 여기서 최대한 원인을 보존한다.
- */
-function describeError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-
-  if (error && typeof error === "object") {
-    const e = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
-    const parts = [
-      typeof e.message === "string" ? e.message : null,
-      typeof e.code === "string" ? `code=${e.code}` : null,
-      typeof e.details === "string" && e.details ? `details=${e.details}` : null,
-      typeof e.hint === "string" && e.hint ? `hint=${e.hint}` : null,
-    ].filter(Boolean);
-    if (parts.length > 0) return parts.join(" | ");
-
-    try {
-      return JSON.stringify(error);
-    } catch {
-      return Object.prototype.toString.call(error);
-    }
-  }
-
-  return String(error);
-}
 
 export type RunCreatorAdvisorCollectionOptions = {
   /** 생략하면 CREATOR_ADVISOR_CONFIG.enabled. false면 크롤링/저장 없이 skipped로 즉시 반환한다. */

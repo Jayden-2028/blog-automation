@@ -464,6 +464,36 @@ tokenize()가 CLUSTERING_CONFIG.minTokenLength(2) 미만 토큰을 버림
 제외하되 **rank는 원본 피드 순위를 유지한다** — 당겨 매기면 "구글에서 몇 위였나"가 왜곡되고
 candidate_score도 실제보다 높아진다.
 
+#### 활성화 (2026-08-29 사용자 승인)
+
+**`.env`가 아니라 코드 기본값을 바꿨다.** `TREND_SOURCE_CONFIGS.google_trends.enabled`의 기본값을
+false → **true**로 두고, 끄고 싶을 때만 `GOOGLE_TRENDS_ENABLED=false`를 명시하게 했다.
+
+`.env`를 고치는 방식보다 나은 이유:
+- `.env`는 git에 없다. 맥에만 있는 값이라 클라우드 이전(`CLOUD_MIGRATION.md`)이나 재설치 때
+  이 설정이 조용히 사라진다. 코드 기본값은 저장소를 따라다닌다.
+- 사용자가 `git pull` 외에 할 일이 없다.
+
+기본값 기준을 소스마다 다르게 잡은 근거도 config에 적어뒀다: **"사람의 사전 준비 없이 혼자 도는가."**
+구글 트렌드는 인증도 브라우저도 로그인 프로필도 필요 없고 실측 검증까지 끝났다 → 기본 true.
+Creator Advisor는 사람이 최초 1회 수동 로그인한 profile에 의존한다 → 기본 false(준비 안 된 환경에서
+켜지면 매일 실패한다). 다음 실시간/커뮤니티는 수집기 자체가 없다 → 기본 false.
+
+#### 켜면서 함께 고친 것 (테스트가 잡아낸 결함 2건)
+
+기본값을 켜자 기존 테스트가 실제 Supabase를 조회하려 시도했고, 그 과정에서 두 가지가 드러났다.
+
+1. **`[object Object]` 재발.** `buildDailyQueryPool`의 catch가 `String(error)`를 쓰고 있었다.
+   여기로 오는 오류는 대부분 Supabase PostgrestError(Error 인스턴스가 아닌 평범한 객체)라
+   실패 원인이 통째로 사라진다 — 이 프로젝트가 2026-08-26에 이미 한 번 겪고 고쳤던 결함인데
+   신규 코드 경로에서 되살아났다. 두 곳에 중복돼 있던 `describeError`를
+   `services/describeError.ts`로 뽑아 세 곳이 공유하게 했다.
+2. **`enabledSources`가 `creatorAdvisorEnabled: false`를 덮었다.** "disabled면 조회조차 하지
+   않는다"는 기존 계약이 나중에 추가된 옵션 때문에 조용히 깨져 있었다. `creatorAdvisorEnabled`가
+   항상 우선하도록 판정 순서를 명시했다.
+
+두 결함 모두 신규 회귀 테스트(`testMultiSourceIsolatesFailures`)가 고정한다.
+
 #### 아직 판단하지 않은 것: 블로그와 무관한 키워드 (§9)
 
 게임스컴·자폭·창신메모리테크놀로지·포스코노동조합 4건은 이 블로그 카테고리(육아/엔터/OTT/생활/
@@ -506,12 +536,10 @@ npm run test:naver-html             pass
 2. ✅ 구글 트렌드 RSS provider (§6-2) — 맥 실측 완료, 분류 보강까지 반영
 3. ✅ community category (결정 B)
 --- 여기까지 이 브랜치 ---
-4. ⬜ 구글 트렌드 켜기
-   a. npm run collect:google-trends            (dry-run, 이제 category 분포까지 출력)
-      -> 연예인이 entertainment로 잡히는지 확인
-   b. .env에 GOOGLE_TRENDS_ENABLED=true
-   c. WRITE=1 npm run collect:google-trends    (원격 DB 쓰기 - 승인 필요)
-   d. 다음 아침 run에서 Top 10 변화 관찰
+4. ✅ 구글 트렌드 켜기 (2026-08-29 사용자 승인)
+   코드 기본값을 true로 바꿨다 - .env 수정이 필요 없다. git pull만 하면 다음 09:00 run부터
+   trendCollect 단계가 수집·upsert한다. 끄려면 .env에 GOOGLE_TRENDS_ENABLED=false.
+   ⬜ 다음 아침 run에서 Top 10 변화 관찰
 5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
 6. ⬜ 커뮤니티 수집 + LLM 엔티티 추출 (§5)      <- 결정 C/D 반영, 펨코 제외
 7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
@@ -531,7 +559,7 @@ npm run test:naver-html             pass
 ### 새 환경변수 (전부 기본 false / 미설정 시 기존 동작)
 
 ```
-GOOGLE_TRENDS_ENABLED=false                    # 실측 완료, 승인 후 true
+# GOOGLE_TRENDS_ENABLED                        # 코드 기본값 true. 끌 때만 false로 명시.
 GOOGLE_TRENDS_MAX_DAILY_CANDIDATES=10
 GOOGLE_TRENDS_CANDIDATE_TTL_HOURS=12
 DAUM_REALTIME_ENABLED=false                    # 5단계 구현 후

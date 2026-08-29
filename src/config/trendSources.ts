@@ -8,9 +8,13 @@
 // (keyword_normalized, topic_normalized, trend_date, source)이고 source는 text 컬럼이라,
 // 새 소스는 문자열 하나만 추가하면 되고 migration이 필요 없다.
 //
-// enabled 기본값은 creator_advisor를 제외하고 전부 false다. 신규 소스는 (1) 외부 페이지 구조에
-// 의존하거나 (2) 아직 실측 검증이 끝나지 않았으므로, 켜는 것은 명시적 선택이어야 한다 -
-// buildDailyQueryPool은 어떤 소스가 꺼져 있거나 실패해도 나머지로 정상 동작한다.
+// enabled 기본값은 소스마다 다르고, 기준은 "사람의 사전 준비 없이 혼자 도는가"다.
+// - google_trends: 기본 true. 인증도 브라우저도 로그인 프로필도 필요 없고, 2026-08-29에 실측
+//   검증을 마쳤다(KR TOP 10 정상 응답 + 분류 확인). 켜두는 것이 기본이고 끄는 것이 예외다.
+// - creator_advisor: 기본 false. 사람이 최초 1회 수동 로그인한 persistent profile에 의존하므로,
+//   준비가 안 된 환경에서 켜지면 매일 실패한다.
+// - daum_realtime / community: 기본 false. 아직 수집기가 구현되지 않았다.
+// 어느 쪽이든 buildDailyQueryPool은 소스가 꺼져 있거나 실패해도 나머지로 정상 동작한다.
 
 import { CREATOR_ADVISOR_CONFIG } from "./creatorAdvisor.js";
 
@@ -66,7 +70,8 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
     candidateTtlHours: CREATOR_ADVISOR_CONFIG.candidateTtlHours,
   },
   google_trends: {
-    enabled: parseBooleanEnv(process.env.GOOGLE_TRENDS_ENABLED, false),
+    // 기본 true(2026-08-29 사용자 승인 + 실측 검증 완료). 끄려면 GOOGLE_TRENDS_ENABLED=false.
+    enabled: parseBooleanEnv(process.env.GOOGLE_TRENDS_ENABLED, true),
     maxDailyCandidates: parseIntEnv(process.env.GOOGLE_TRENDS_MAX_DAILY_CANDIDATES, 10),
     maxCandidatesPerTopic: parseIntEnv(process.env.GOOGLE_TRENDS_MAX_DAILY_CANDIDATES, 10),
     // 구글 트렌드는 "지금 급상승"이라 수명이 짧다. CA(24h)보다 짧게 잡는다.
