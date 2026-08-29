@@ -1,9 +1,13 @@
 // 구글 트렌드 RSS 파서 + candidate 매핑 + 수집 배선 테스트.
 // 외부 호출/DB 접근 없이 fixture와 주입된 함수만 사용한다.
 //
-// 이 테스트가 특히 중요한 이유: 실제 피드는 이 세션에서 실측하지 못했다(외부 egress 차단).
-// 그래서 "정상 응답을 잘 파싱한다"보다 **"이상한 응답에도 죽지 않는다"**를 더 강하게 고정한다 -
-// 피드 구조가 바뀌었을 때 daily job이 죽는 것이 가장 큰 위험이다.
+// 두 가지를 고정한다.
+//
+// 1) **이상한 응답에도 죽지 않는다.** 외부 피드는 언제든 구조가 바뀌거나 오류 페이지를 준다.
+//    그때 daily job이 죽는 것이 가장 큰 위험이므로, 깨진 입력은 예외가 아니라 0건이어야 한다.
+// 2) **첫 실측 데이터(2026-08-29 KR TOP 10)의 분류 결과.** 그 10건에서 category 분류의 실제 한계가
+//    드러났다 - 9건이 키워드 어휘에 안 걸려 전부 living으로 떨어졌고, 그중 유재석/오연수/엄태웅은
+//    명백한 연예 뉴스였다. 뉴스 출처 신호를 넣어 해결했으므로 그 데이터를 회귀 케이스로 박아둔다.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -11,7 +15,13 @@ import { dirname, join } from "node:path";
 
 import { parseGoogleTrendsRss, parseApproxTraffic, decodeXmlEntities } from "../../services/search/providers/googleTrends/parseGoogleTrendsRss.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
-import { mapGoogleTrendsItemsToInserts, GOOGLE_TRENDS_SOURCE } from "./mapGoogleTrendsCandidates.js";
+import {
+  mapGoogleTrendsItemsToInserts,
+  resolveGoogleTrendsCategory,
+  isUsableTrendKeyword,
+  GOOGLE_TRENDS_SOURCE,
+} from "./mapGoogleTrendsCandidates.js";
+import type { GoogleTrendsItem } from "../../services/search/providers/googleTrends/parseGoogleTrendsRss.js";
 import { runGoogleTrendsCollection } from "./runGoogleTrendsCollection.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -162,10 +172,70 @@ async function testCollection(): Promise<void> {
   console.log("  ✅ PostgrestError형 객체도 [object Object]가 되지 않음");
 }
 
+// 2026-08-29 맥에서 실제로 수집된 구글 트렌드 KR TOP 10(뉴스 출처만 발췌).
+// 가상 예시가 아니라 첫 실측 데이터다 - category 분류가 회귀하면 여기서 잡힌다.
+const REAL_TOP10: { keyword: string; outlets: string[]; expected: string }[] = [
+  { keyword: "2026년 태풍", outlets: ["이코노미톡뉴스", "연합뉴스TV"], expected: "living" },
+  { keyword: "게임스컴", outlets: ["Daum", "뉴시스"], expected: "living" },
+  // 인명 3건: 키워드 어휘로는 못 잡고 스포츠지 출처로만 잡힌다. 이 테스트의 핵심이다.
+  { keyword: "오연수", outlets: ["Chosunbiz", "스포츠조선"], expected: "entertainment" },
+  { keyword: "용종", outlets: ["헬스조선", "하이닥"], expected: "living" },
+  { keyword: "유재석", outlets: ["Daum", "스포츠동아"], expected: "entertainment" },
+  { keyword: "엄태웅", outlets: ["Daum", "스포츠동아"], expected: "entertainment" },
+  { keyword: "자폭", outlets: ["연합뉴스", "YTN 사이언스"], expected: "living" },
+  // 종합지(조선일보)는 연예부터 정치까지 다 쓰므로 신호가 아니다 -> living 유지.
+  { keyword: "션", outlets: ["조선일보", "국민일보"], expected: "living" },
+  { keyword: "창신메모리테크놀로지", outlets: ["Daum", "Chosunbiz"], expected: "living" },
+  { keyword: "포스코노동조합", outlets: ["Daum", "서울경제"], expected: "living" },
+];
+
+function makeItem(keyword: string, outlets: string[]): GoogleTrendsItem {
+  return {
+    keyword,
+    newsItems: outlets.map((source) => ({ title: `${keyword} 관련 기사`, source })),
+  };
+}
+
+function testRealWorldCategories(): void {
+  for (const { keyword, outlets, expected } of REAL_TOP10) {
+    const actual = resolveGoogleTrendsCategory(makeItem(keyword, outlets));
+    assert(actual === expected, `"${keyword}" -> ${expected} 이어야 한다 (실제 ${actual})`);
+  }
+  console.log("  ✅ 실측 TOP 10 category 분류 (인명 3건을 뉴스 출처로 정확히 잡음)");
+
+  // 순서 불변식: 키워드 어휘가 뉴스 출처보다 먼저다. 그래야 육아 키워드가 스포츠지에 실려도 안 흔들린다.
+  const babyOnSportsPaper = makeItem("아기 수족구 초기증상", ["스포츠조선", "OSEN"]);
+  assert(
+    resolveGoogleTrendsCategory(babyOnSportsPaper) === "parenting",
+    "키워드 어휘(parenting)가 뉴스 출처(entertainment)를 이겨야 한다"
+  );
+  console.log("  ✅ 판정 순서 고정: 키워드 어휘 > 뉴스 출처 > living 폴백");
+
+  // 1글자 키워드는 relevance 게이트를 무력화하므로 반드시 버려야 한다.
+  assert(!isUsableTrendKeyword("션"), "1글자 키워드는 버려야 한다");
+  assert(!isUsableTrendKeyword(" 김 "), "공백 제거 후 1글자도 버려야 한다");
+  assert(isUsableTrendKeyword("유재석"), "정상 키워드는 통과해야 한다");
+  assert(isUsableTrendKeyword("태풍"), "2글자는 통과해야 한다");
+
+  const items = REAL_TOP10.map(({ keyword, outlets }) => makeItem(keyword, outlets));
+  const { rows, droppedCount, droppedKeywords } = mapGoogleTrendsItemsToInserts(items, {
+    collectedAt: COLLECTED_AT,
+  });
+  assert(droppedCount === 1 && droppedKeywords[0] === "션", `"션" 1건만 버려야 한다 (실제 ${droppedKeywords.join(",")})`);
+  assert(rows.length === 9, `9건이 남아야 한다 (실제 ${rows.length}건)`);
+  console.log('  ✅ 1글자 키워드("션") 제외 - relevance 게이트 무력화 방지');
+
+  // rank는 버리기 전 피드 순위를 유지해야 한다("션"은 8위였으므로 그 뒤는 9, 10위 그대로).
+  const posco = rows.find((r) => r.keyword === "포스코노동조합");
+  assert(posco?.rank === 10, `버린 뒤에도 원래 순위를 유지해야 한다 (실제 ${posco?.rank})`);
+  console.log("  ✅ 제외해도 원본 피드 순위(rank) 보존");
+}
+
 async function main(): Promise<void> {
   console.log("▶ 구글 트렌드 수집 테스트 시작\n");
   testParser();
   testMapping();
+  testRealWorldCategories();
   await testProviderInjection();
   await testCollection();
   console.log("\n✅ 전체 통과");

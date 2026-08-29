@@ -11,9 +11,10 @@
 // **절대 예외를 던지지 않는 방향**으로 만든다 - 외부 피드 구조가 바뀌었을 때 daily job이 죽는 것보다
 // 0건을 반환하고 넘어가는 편이 낫다(호출자가 status로 처리한다).
 //
-// ⚠️ 실측 미검증: 이 세션은 외부 egress가 차단돼 있어 실제 피드로 확인하지 못했다. 필드 구성은
-// 공개된 스키마 기준이며, 맥에서 `npm run collect:google-trends`(기본 dry-run)로 먼저 확인해야 한다.
-// 그래서 approx_traffic/news_item/pubDate는 전부 optional로 두고, 없어도 항목을 버리지 않는다.
+// 실측 확인됨(2026-08-29, 맥에서 KR 피드 10건 정상 파싱): 엔드포인트, ht:approx_traffic,
+// ht:news_item(제목/URL/출처) 구성이 전부 아래 가정과 일치했다.
+// 그래도 approx_traffic/news_item/pubDate는 optional로 둔다 - 항목마다 있고 없고가 실제로 갈렸고
+// (검색량이 없는 항목이 관측됨), 구글이 피드 구성을 바꿔도 조용히 0건이 되는 편이 낫기 때문이다.
 
 export type GoogleTrendsNewsItem = {
   title: string;

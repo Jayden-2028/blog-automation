@@ -4,10 +4,21 @@
 // Creator Advisor와 다른 점 세 가지:
 //
 // 1) topic이 없다. 구글 트렌드는 분야 구분 없이 순위 목록 하나만 준다. 그래서 topic에는 고정값
-//    "google_trends"를 넣고(원문 보존 필드이므로 거짓 분야명을 지어내지 않는다), topic_normalized는
-//    키워드 어휘 분류(classifyKeywordCategory)에 전적으로 의존한다. 어휘 신호가 없으면 폴백할 topic
-//    매핑이 없으므로 "living"으로 둔다 - 미분류를 뜻하는 별도 값을 새로 만들면 category를 소비하는
-//    쪽(diversity backfill, 원고 톤)이 전부 그 값을 몰라 조용히 어긋난다.
+//    "google_trends"를 넣고(원문 보존 필드이므로 거짓 분야명을 지어내지 않는다), category는
+//    아래 3단계로 정한다.
+//
+//    첫 실측(2026-08-29 KR TOP 10)에서 **10건 중 9건이 키워드 어휘 규칙에 걸리지 않았다** -
+//    급상승 검색어의 상당수가 인명·고유명사이기 때문이다. 폴백할 topic 매핑도 없어 유재석/오연수/
+//    엄태웅이 전부 living("생활정보")이 됐다. category는 원고 톤과 Top 10 backfill을 결정하므로
+//    실제로 엉뚱한 톤의 원고를 만드는 오분류다.
+//
+//    실마리는 피드가 topic 대신 주는 **뉴스 항목의 출처**였다. 스포츠지/연예매체에 실렸다는 사실이
+//    곧 연예 뉴스라는 강한 신호다(newsOutletRules.ts). 판정 순서:
+//      a. 키워드 어휘 (classifyKeywordCategory)      - 가장 직접적인 신호
+//      b. 뉴스 출처   (classifyCategoryByNewsOutlets) - 인명을 잡는 유일한 실마리
+//      c. "living" 폴백                               - 미분류용 새 값을 만들지 않는다
+//    a가 b보다 먼저인 것이 중요하다. 그래야 "아기 수족구"가 스포츠지에 실려도 parenting을 유지한다.
+//    실측 결과 b는 연예인 3건을 정확히 잡고 나머지 7건은 건드리지 않았다(오탐 0).
 //
 // 2) movement_type을 알 수 없다. 피드는 "지금 급상승"만 주고 어제 대비 순위 변화를 주지 않는다.
 //    전부 "new"로 두는 것은 거짓이므로("어제도 1위였던 키워드"를 new라고 하게 된다) "flat"을 쓴다 -
@@ -16,8 +27,9 @@
 // 3) candidate_score를 순위와 검색량으로 만든다. Creator Advisor는 rank + movement로 계산하는데
 //    (scoreCreatorAdvisorCandidate.ts) 여기엔 movement가 없다. 대신 피드가 approx_traffic을 준다.
 
-import { TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
+import { MIN_TREND_KEYWORD_LENGTH, TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
 import { classifyKeywordCategory } from "../../config/keywordCategoryRules.js";
+import { classifyCategoryByNewsOutlets } from "../../config/newsOutletRules.js";
 import type { GoogleTrendsItem } from "../../services/search/providers/googleTrends/parseGoogleTrendsRss.js";
 import type { TrendCandidateInsert } from "../../types/database.js";
 
@@ -36,6 +48,26 @@ const TRAFFIC_FULL_SCORE_THRESHOLD = 50_000;
 
 function normalize(value: string): string {
   return value.trim().toLowerCase();
+}
+
+/**
+ * 키워드 어휘 -> 뉴스 출처 -> living 순으로 category를 정한다(파일 상단 주석의 3단계).
+ * 순서가 곧 신뢰도 순이며, 앞 단계가 확실한 신호를 주면 뒤는 보지 않는다.
+ */
+export function resolveGoogleTrendsCategory(item: GoogleTrendsItem): string {
+  return (
+    classifyKeywordCategory(item.keyword) ??
+    classifyCategoryByNewsOutlets(item.newsItems.map((news) => news.source)) ??
+    FALLBACK_CATEGORY
+  );
+}
+
+/**
+ * 이 키워드를 daily pool에 넣어도 되는지. 지금은 최소 길이 하나만 본다.
+ * 1글자 키워드는 relevance 게이트를 무력화하므로 반드시 걸러야 한다(MIN_TREND_KEYWORD_LENGTH 주석).
+ */
+export function isUsableTrendKeyword(keyword: string): boolean {
+  return keyword.replace(/\s+/g, "").length >= MIN_TREND_KEYWORD_LENGTH;
 }
 
 /**
@@ -72,7 +104,7 @@ export function mapGoogleTrendsItemToInsert(
     keyword: item.keyword,
     keyword_normalized: normalize(item.keyword),
     topic: GOOGLE_TRENDS_TOPIC,
-    topic_normalized: classifyKeywordCategory(item.keyword) ?? FALLBACK_CATEGORY,
+    topic_normalized: resolveGoogleTrendsCategory(item),
     source: GOOGLE_TRENDS_SOURCE,
     trend_date: options.collectedAt.slice(0, 10),
     rank,
@@ -95,28 +127,33 @@ export function mapGoogleTrendsItemToInsert(
 }
 
 /**
- * 피드 순서를 rank로 사용한다(배열 index + 1). 같은 키워드가 두 번 나오면 뒤쪽을 버린다 -
- * unique index가 (keyword_normalized, topic_normalized, trend_date, source)인데 topic이 고정값이라
- * 같은 키워드는 반드시 conflict key가 겹치고, 한 배치 안에 겹치면 upsert 전체가 거부된다(21000).
- * Creator Advisor 쪽에서 실제로 겪은 문제라 여기서는 처음부터 막는다.
+ * 피드 순서를 rank로 사용한다(배열 index + 1). 두 가지를 버린다:
+ *
+ * - **중복 키워드**: unique index가 (keyword_normalized, topic_normalized, trend_date, source)인데
+ *   topic이 고정값이라 같은 키워드는 반드시 conflict key가 겹치고, 한 배치 안에 겹치면 upsert
+ *   전체가 거부된다(21000). Creator Advisor 쪽에서 실제로 겪은 문제라 여기서는 처음부터 막는다.
+ * - **너무 짧은 키워드**: 1글자 seed는 relevance 필터를 무력화한다(MIN_TREND_KEYWORD_LENGTH 주석).
+ *
+ * rank는 **버리기 전 피드 순위를 그대로 유지한다.** 버린 만큼 당겨서 매기면 "구글 트렌드에서 몇
+ * 위였나"라는 원본 사실이 왜곡되고, candidate_score도 실제보다 높아진다.
  */
 export function mapGoogleTrendsItemsToInserts(
   items: readonly GoogleTrendsItem[],
   options: MapGoogleTrendsOptions
-): { rows: TrendCandidateInsert[]; droppedCount: number } {
+): { rows: TrendCandidateInsert[]; droppedCount: number; droppedKeywords: string[] } {
   const rows: TrendCandidateInsert[] = [];
   const seen = new Set<string>();
-  let droppedCount = 0;
+  const droppedKeywords: string[] = [];
 
   items.forEach((item, index) => {
     const key = normalize(item.keyword);
-    if (seen.has(key)) {
-      droppedCount++;
+    if (seen.has(key) || !isUsableTrendKeyword(item.keyword)) {
+      droppedKeywords.push(item.keyword);
       return;
     }
     seen.add(key);
     rows.push(mapGoogleTrendsItemToInsert(item, index + 1, options));
   });
 
-  return { rows, droppedCount };
+  return { rows, droppedCount: droppedKeywords.length, droppedKeywords };
 }
