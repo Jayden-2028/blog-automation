@@ -43,6 +43,7 @@
     "job:image": "tsx src/workflows/writing/recordImageCli.ts",
     "job:publish": "tsx src/services/publish/publishNaverDraftCli.ts",
     "setup:naver-publish": "tsx src/services/publish/setupNaverPublishSession.ts",
+    "setup:blogger": "tsx src/services/publish/blogger/setupBloggerAuth.ts",
     "inspect:publish-layer": "tsx src/services/publish/inspectPublishLayer.ts",
     "test:naver-html": "tsx src/services/publish/testConvertArticleToNaverHtml.ts",
     "test:naver-publish": "tsx src/services/publish/testPublishArticleToNaver.ts",
