@@ -193,6 +193,19 @@ alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
 내부 category 1개를 라벨 1개로(`연예` / `OTT` / `육아` / `생활정보` / `이슈`). 라벨 남발
 금지(SEO §3-1). 슬러그는 키워드 로마자 kebab-case를 배리에이션 단계에서 생성.
 
+### 9-3. Blogger 인증 완료 (2026-08-30)
+
+- GCP 프로젝트 `blog-automation`, OAuth 클라이언트(데스크톱 앱) 생성 완료. Client ID/Secret은
+  `.env`(BLOGGER_CLIENT_ID/SECRET).
+- `npm run setup:blogger`(`src/services/publish/blogger/setupBloggerAuth.ts`, OAuth loopback)로
+  **refresh token 발급 완료** → `.env`의 `BLOGGER_REFRESH_TOKEN`. `refresh_token → access_token`
+  교환 + 대상 블로그 접근까지 실측 검증.
+- 대상 블로그 확인: blog ID `6088186200818704009` = **"남매둥이 우아 아빠의 육아 생활"**
+  (`https://wooahpapa.blogspot.com/`).
+- ⚠️ **OAuth 동의 화면이 아직 "테스트" 상태** → 이 refresh token은 **7일 뒤 만료**. 실가동 전에
+  프로덕션 게시 필요(홈페이지 URL + 개인정보처리방침 URL — §10-1 참고, tistory.com URL 사용 가능).
+- 설정: `src/config/publishTargets.ts`(`BLOGGER_CONFIG`), `.env.example`에 키 목록.
+
 ## 10. 남은 결정 / 확인
 
 **A. Blogspot 초기 노출** — 가동 첫 며칠은 비공개(draft)로 올려 형태 확인 후 공개 전환 vs 처음부터
