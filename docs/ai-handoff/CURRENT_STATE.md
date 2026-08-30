@@ -16,16 +16,17 @@ Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생�
 확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
 13-1·14절.
 
-**다음 작업: Sprint 4(네이버 반자동 발행) 구현 — 설계는 끝났고 결정 대기 중.**
-`docs/ai-handoff/SPRINT_4_DESIGN.md` §9에 결정 항목 6건이 있다(트리거 방식, 발행 대상 블로그,
-일일 발행 상한값, 쓰기 세션 최초 로그인 시점, 이미지 위치 타협안, 실측 단계 승인 방식). 이
-스프린트는 처음으로 사람 계정으로 실제 쓰기 작업을 브라우저에서 하므로 §10의 1번(SmartEditor
-DOM 실측)부터가 실제 네이버 세션을 여는 작업이다 - Creator Advisor 프로필과는 분리된 새
-프로필(`.local/naver-publish-profile/`)로 사용자가 최초 1회 수동 로그인해야 한다.
+**다음 작업(2026-08-30 사용자 결정): 티스토리 + 블로그스팟(Blogspot) 자동 발행 — 원고 승인 후
+자동 업로드까지.** 별도 새 브랜치에서 진행한다. 네이버 반자동 발행(Sprint 4)이 참고 모델이지만,
+티스토리/블로그스팟은 공식 API가 있어(네이버 SmartEditor 브라우저 자동화와 달리) 접근이 다르다 -
+설계부터 시작. 승인된 원고(`job.status = approved`)를 트리거로 삼는다.
 
-Sprint 4와 별개로, `claude/keyword-collection-optimization-6ojcou` 브랜치에서 **키워드 수집
-확장(구글 트렌드 소스 추가 + Top N 주제 중복 제거)이 구현·실측·활성화까지 완료됐다** - 아래
-"키워드 수집 확장" 절 참고.
+**직전 진행 상황**:
+- `claude/community-collector` 브랜치에서 **커뮤니티(더쿠) 수집기 구현·실측·활성화 완료.**
+  머지는 2026-08-31 오전 09:00 run 결과 관찰 후 진행. 아래 "키워드 수집 확장" 절 §7-4.
+- Sprint 4(네이버 반자동 발행)는 §10 작업 1~7 완료 - 승인 원고가 `job:publish` 한 번으로
+  네이버 임시저장함까지 들어간다. 남은 사람 개입은 "발행" 버튼 클릭뿐.
+- `claude/keyword-collection-optimization-6ojcou` 브랜치도 아직 `main` 미머지.
 
 ## 지금 돌아가는 것
 
@@ -621,7 +622,9 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 - ⬜ (관찰 후 판단, 승인 필요) cross-seed clustering 근본 수정.
 - ⬜ (관찰 후 판단) 블로그와 무관한 키워드(반도체·노동·무기 등) 필터링 여부.
 - 두 브랜치(`claude/keyword-collection-optimization-6ojcou`, `claude/community-collector`) 모두
-  아직 `main`에 머지되지 않았다(PR 없음) - 머지는 승인 후 진행.
+  아직 `main`에 머지되지 않았다(PR 없음). **`claude/community-collector` 머지는 2026-08-31 오전
+  09:00 run 결과 관찰 후 진행**(2026-08-30 사용자 결정).
+- ~~네이트판/다음카페 대체 접근 경로 탐색~~ - 드롭(2026-08-30). 더쿠 단독 provider 유지.
 
 ## 인프라 정리 (2026-08-28, 중간 점검 후속)
 
