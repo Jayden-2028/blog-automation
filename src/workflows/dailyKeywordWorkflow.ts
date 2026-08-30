@@ -13,6 +13,7 @@
 // 기록한 뒤 이후 단계를 "skipped" 처리하고 즉시 반환한다 — 그래서 호출자는 stageLog만 보면 정확히
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
+import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
@@ -36,6 +37,10 @@ import type {
   RunGoogleTrendsCollectionOptions,
   RunGoogleTrendsCollectionResult,
 } from "./google-trends/runGoogleTrendsCollection.js";
+import type {
+  RunCommunityCollectionOptions,
+  RunCommunityCollectionResult,
+} from "./community/runCommunityCollection.js";
 import type { BuildDailyQueryPoolResult } from "./keyword-discovery/buildDailyQueryPool.js";
 import type {
   CollectNaverCandidatesOptions,
@@ -214,6 +219,8 @@ export type DailyKeywordWorkflowOptions = {
   trendCollectOptions?: RunCreatorAdvisorCollectionOptions;
   /** 구글 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
   googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
+  /** 커뮤니티(더쿠 등) 수집 단계(trendCollect)에 그대로 전달된다. */
+  communityOptions?: RunCommunityCollectionOptions;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -228,6 +235,8 @@ export type DailyKeywordWorkflowResult = {
   trendCollection: RunCreatorAdvisorCollectionResult | null;
   /** 구글 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
   googleTrendsCollection: RunGoogleTrendsCollectionResult | null;
+  /** 커뮤니티 수집 결과. 위와 같다. disabled면 status="skipped". */
+  communityCollection: RunCommunityCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
   queryPool: BuildDailyQueryPoolResult | null;
   collected: CollectNaverCandidatesResult | null;
@@ -272,6 +281,7 @@ export async function runDailyKeywordWorkflow(
     stageLog,
     trendCollection: null,
     googleTrendsCollection: null,
+    communityCollection: null,
     queryPool: null,
     collected: null,
     relevance: null,
@@ -306,6 +316,9 @@ export async function runDailyKeywordWorkflow(
     const googleTrendsCollection = await runGoogleTrendsCollection(options.googleTrendsOptions);
     result.googleTrendsCollection = googleTrendsCollection;
 
+    const communityCollection = await runCommunityCollection(options.communityOptions);
+    result.communityCollection = communityCollection;
+
     if (trendCollection.status === "success") {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] Creator Advisor 수집: ${trendCollection.fetchedCount}건 조회 → ` +
@@ -318,6 +331,12 @@ export async function runDailyKeywordWorkflow(
           `${googleTrendsCollection.upsertedCount}건 저장 (trendDate: ${googleTrendsCollection.trendDate ?? "N/A"}, 만료 ${googleTrendsCollection.expiredCount}건)`
       );
     }
+    if (communityCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 커뮤니티 수집: ${communityCollection.fetchedCount}건 조회 → ` +
+          `${communityCollection.upsertedCount}건 저장 (trendDate: ${communityCollection.trendDate ?? "N/A"}, 만료 ${communityCollection.expiredCount}건)`
+      );
+    }
 
     // stage 하나에 여러 소스가 들어가므로 상태를 집계한다.
     // - 하나라도 성공 -> success (나머지 실패는 error 문자열로만 남긴다)
@@ -327,6 +346,7 @@ export async function runDailyKeywordWorkflow(
     const trendResults = [
       { source: "creator_advisor", result: trendCollection },
       { source: "google_trends", result: googleTrendsCollection },
+      { source: "community", result: communityCollection },
     ];
     const succeeded = trendResults.filter((entry) => entry.result.status === "success");
     const failures = trendResults.filter((entry) => entry.result.status === "failed");
