@@ -610,11 +610,12 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
   유래 키워드 품질, 블로그 무관 키워드 quota 잠식 여부) - `KEYWORD_SOURCE_EXPANSION.md` §8 참고.
 - ⬜ 다음 실시간 트렌드 provider - daum.net DOM 실측부터(원격 세션에서 불가, 맥에서 진행).
 - 🟡 커뮤니티 수집기 - 별도 브랜치 `claude/community-collector`(2026-08-30)에서 파이프라인
-  (LLM 엔티티 추출 + 매핑 + 워크플로우 + CLI, `test:community`)까지 구현·오프라인 검증 완료.
-  **사이트별 provider(네이트판/더쿠/다음카페/네이버카페) 4건은 여전히 미구현** - `npm run
-  recon:community`를 맥에서 먼저 실행해 각 사이트 robots.txt/HTML을 확보해야 파서를 쓸 수 있다
-  (이 원격 세션은 egress가 막혀 실제 사이트 접근 불가, 자체 확인함). 상세는
-  `KEYWORD_SOURCE_EXPANSION.md` §7-2. `TREND_SOURCE_CONFIGS.community.enabled`는 여전히 false.
+  (LLM 엔티티 추출 + 매핑 + 워크플로우 + CLI)에 더해 **더쿠(theqoo.net/hot) provider까지 구현
+  완료.** 실측 결과 네이트판/다음카페/네이버카페는 robots.txt가 정확히 목록 경로를 막아 제외됐고,
+  더쿠만 접근 가능해 유일한 provider로 등록했다(공지 row와 인기글 row를 class 유무로 구분).
+  **남은 건 맥에서 `npm run collect:community`(dry-run) 실제 fetch 확인 하나뿐** - 되면
+  `dailyKeywordWorkflow.ts` 연결 + `TREND_SOURCE_CONFIGS.community.enabled` 활성화는 구글 트렌드
+  때처럼 사용자 승인 필요. 상세는 `KEYWORD_SOURCE_EXPANSION.md` §7-2/§7-3.
 - ⬜ (관찰 후 판단, 승인 필요) cross-seed clustering 근본 수정.
 - ⬜ (관찰 후 판단) 블로그와 무관한 키워드(반도체·노동·무기 등) 필터링 여부.
 - 두 브랜치(`claude/keyword-collection-optimization-6ojcou`, `claude/community-collector`) 모두

@@ -10,10 +10,12 @@
 4. 다음 실시간 검색 + 구글 트렌드를 검색 풀에 반영
 
 **진행 상태**: 1·2번 구현·검증 완료. 3번(커뮤니티)은 `community` category 완료 +
-**수집기 파이프라인(LLM 추출/매핑/워크플로우) 구현·오프라인 검증 완료, 실제 사이트 provider는 실측
-대기**(브랜치 `claude/community-collector`, §7-2). 4번은 구글 트렌드 **실측 검증 완료·활성화**
-(브랜치 `claude/keyword-collection-optimization-6ojcou`), 다음 실시간은 설계만. 사용자 결정 사항은
-§7, 첫 세션에서 구현한 것은 §7-1, 커뮤니티 수집기 세션에서 구현한 것은 §7-2, 남은 순서는 §8.
+**수집기 파이프라인 + 더쿠(theqoo) provider 구현·오프라인 검증 완료, 맥에서 실제 fetch 확인만
+남음**(브랜치 `claude/community-collector`, §7-2/§7-3). 네이트판·다음카페·네이버카페는 robots.txt가
+막아 제외됐다(§7-3). 4번은 구글 트렌드 **실측 검증 완료·활성화**(브랜치
+`claude/keyword-collection-optimization-6ojcou`), 다음 실시간은 설계만. 사용자 결정 사항은 §7,
+첫 세션에서 구현한 것은 §7-1, 커뮤니티 수집기 파이프라인은 §7-2, 더쿠 provider + robots.txt 실측
+반영은 §7-3, 남은 순서는 §8.
 
 > **검증 한계**: 원격 컨테이너에 `.env`가 없고 외부 egress가 차단돼 있어, Supabase/NAVER API 호출은
 > 이 세션에서 실행하지 못했다(순수 함수 테스트와 `npm run build`는 전부 통과). 구글 트렌드는
@@ -572,22 +574,55 @@ npm run test:naver-html             pass
    동적 소스가 공유하는 게이트이기 때문이다(작은 리팩터, 동작 변경 없음, 기존 `test:google-trends`
    회귀 통과 확인).
 
-**아직 안 한 것 / 다음 세션에 필요한 것**:
-- 사이트별 `CommunitySourceProvider` 구현 4건(네이트판/더쿠/다음카페/네이버카페) - `recon:community`
-  결과 HTML을 fixture 삼아 각 사이트의 인기글 제목 목록을 뽑는 파서를 쓴다. 이건 결과가 명확한
-  반복 작업이라 `delegate-codex` 위임 후보다(파서 하나당 "이 HTML에서 제목 배열을 뽑아라"로 범위가
-  좁다).
-- `dailyKeywordWorkflow.ts`에 `runCommunityCollection`을 연결하는 배선(구글 트렌드가 이미 있는
-  자리 - `trendCollectOptions`/`googleTrendsOptions` 옆에 `communityOptions` 추가하는 정도).
-  **provider가 최소 1개는 실제로 동작하기 전까지는 연결하지 않았다** - 지금 연결해봐야 매일
-  0건만 upsert하는 죽은 코드라서.
-- `TREND_SOURCE_CONFIGS.community.enabled`는 여전히 기본 false다. provider가 붙고 실측 검증까지
-  끝난 뒤 구글 트렌드 때처럼 사용자 승인을 받아 켠다.
-- **오프라인 검증만 완료했다**(`npm run build` + `npm run test:community` + `npm run
-  test:google-trends` 회귀, 더미 Supabase 환경변수, 실제 원격 접근 없음). `runHeadlessClaude`가
-  실제로 `claude` CLI를 찾아 호출하는 경로는 이 원격 컨테이너에 그 바이너리가 없어 검증하지
-  못했다 - 맥에서 `npm run collect:community`로 실제 호출까지 확인이 필요하다(단, provider가
-  없으면 여전히 0건이라 이 검증도 provider 연결 이후에나 의미가 있다).
+## 7-3. 2026-08-30 세션 후속: 실측 결과 반영 + 더쿠 provider 구현
+
+사용자가 맥에서 `npm run recon:community` + `npm run communityProbe` 결과를 공유해줬다. 실제
+결과는 예상과 달랐다:
+
+- **네이트판/다음카페/네이버카페**: robots.txt가 **정확히 우리가 쓰려던 목록 경로를 disallow**
+  했다(`/talk/ranking/d`, `/_c21_/home`, `/ca-fe/home/ranking`). §5-3 원칙("robots.txt가 금지하면
+  그 소스는 제외한다")에 따라 이 경로로는 붙이지 않기로 했다 - 3곳 모두 결정 C에서 빠졌다.
+  다른 접근 경로(공식 API 등)를 찾으면 재검토 대상이지만 지금은 없다.
+- **더쿠(theqoo.net/hot)**: robots.txt에 disallow가 없어 실제 목록 페이지(22,804자)를 정상
+  받았다. `communityProbe.ts`로 구조를 두 단계로 확인했다:
+  1. 후보 그룹 탐색 -> `td.title > a`가 유력(46개 anchor, 그중 제목 8~60자 후보 22개)
+  2. 상세 확인(상위 tr/li class 포함) -> **운영 공지(로그인 보안 안내 등) 6건이 진짜 인기글과
+     같은 태그 구조로 섞여 있었다.** 구분 신호를 찾아보니 공지 row만 `tr.notice`(+ `nofn`/
+     `nofnhide` 등 부가 class)를 갖고, **진짜 인기글 row는 class 속성 자체가 없었다** - 이게
+     유일하고 신뢰할 수 있는 구분 신호였다. 또한 `td.title` 안에 anchor가 2개(제목 + 추천수
+     숫자)씩 있어, 숫자만 있는 텍스트는 제목 후보에서 걸러야 했다.
+
+이 구조를 그대로 구현했다:
+
+- `src/services/community/theqoo/parseTheqooHtml.ts` - 순수 파서. `tr.notice`는 제외, class 없는
+  `tr`만 인기글로 집계, `td.title > a` 중 숫자만 있는 anchor(추천수)는 제목으로 뽑지 않는다.
+  `parseTrendHtml.ts`(Creator Advisor)와 같은 "row 하나 실패는 그 row만 skip, 전체는 안 죽는다"
+  원칙.
+- `src/services/community/theqoo/TheqooProvider.ts` - fetch 래퍼(`CommunitySourceProvider` 구현).
+  User-Agent 위장 안 함(§5-3), robots.txt는 이미 실측 확인했으므로 매 호출 재조회하지 않는다.
+- `src/services/community/theqoo/fixtures/theqooHot.sample.html` + `testParseTheqooHtml.ts`
+  (`npm run test:theqoo-parser`) - fixture는 실제 실측 구조(공지 class/무-class 구분, 제목+추천수
+  두 anchor)를 그대로 본떴지만, **제목 텍스트는 저작권이 있는 실제 게시글 원문이 아니라 임의로
+  지어낸 placeholder다**(`docs/ai-handoff/community-recon/`를 git에 안 올리는 것과 같은 이유).
+- `COMMUNITY_SOURCE_PROVIDERS`에 `theqooProvider`를 등록했다. `npm run collect:community`
+  (dry-run)을 이 원격 세션에서 실행하면 "등록된 사이트: 1개(더쿠 핫게시판)"까지는 나오고, 실제
+  fetch는 이 세션의 egress 차단으로 403을 받아 `sourceErrors`로 격리된다(설계대로 동작 - 전체
+  status는 여전히 success). **맥에서 실제 fetch 성공까지는 아직 확인 못 했다.**
+
+**아직 안 한 것 / 다음에 필요한 것**:
+- **맥에서 `npm run collect:community`(dry-run) 실제 실행 확인** - 더쿠에서 진짜 제목 목록을
+  받아오는지, `runHeadlessClaude`가 실제로 `claude` CLI를 찾아 LLM 추출까지 마치는지(이 원격
+  컨테이너엔 그 바이너리가 없어 검증 못 함). 이게 되면 "provider가 최소 1개는 실제로 동작"
+  조건이 충족된다.
+- 확인되면: `dailyKeywordWorkflow.ts`에 `runCommunityCollection` 연결(구글 트렌드가 이미 있는
+  자리 - `trendCollectOptions`/`googleTrendsOptions` 옆에 `communityOptions` 추가) +
+  `TREND_SOURCE_CONFIGS.community.enabled`를 켜는 것 - 둘 다 구글 트렌드 때처럼 **사용자 승인
+  필요**.
+- 네이트판/다음카페/네이버카페의 대체 접근 경로(다른 URL, 공식 API 등) 탐색 여부는 사용자 판단
+  필요 - 지금은 시도하지 않았다.
+- **오프라인 검증만 완료했다**(`npm run build` + `test:community`/`test:theqoo-parser`/
+  `test:google-trends`/`test:topic-grouping`/`test:daily-query-pool`/`test:keyword-category`
+  회귀, 더미 Supabase 환경변수, 실제 원격 접근 없음).
 
 ---
 
@@ -604,15 +639,19 @@ npm run test:naver-html             pass
    trendCollect 단계가 수집·upsert한다. 끄려면 .env에 GOOGLE_TRENDS_ENABLED=false.
    ⬜ 다음 아침 run에서 Top 10 변화 관찰
 5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
-6. 🟡 커뮤니티 수집 + LLM 엔티티 추출 (§5, §7-2)  <- 파이프라인 완료, 사이트 provider 4건 실측 대기
+6. 🟡 커뮤니티 수집 + LLM 엔티티 추출 (§5, §7-2/§7-3)
+   파이프라인 + 더쿠(theqoo) provider 구현·오프라인 검증 완료. 네이트판/다음카페/네이버카페는
+   robots.txt가 막아 제외(§7-3). ⬜ 맥에서 `npm run collect:community` 실제 fetch 확인,
+   그 뒤 dailyKeywordWorkflow 연결 + community.enabled 켜기는 사용자 승인 필요.
 --- 여기까지 둘째 브랜치(claude/community-collector) ---
 7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
 8. ⬜ (관찰 후 판단) 블로그 무관 키워드 필터 (§7-1)
 ```
 
-5·6(사이트 provider 부분)은 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수
-없다 - `npm run recon:community`를 맥에서 먼저 돌려야 한다(§7-2). 실측 뒤 파서 작성은 범위가
-명확해지므로 `delegate-codex` 위임 후보가 된다(Creator Advisor Swiper 순회 때와 같은 방식).
+5(다음 실시간)는 여전히 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수 없다 -
+`npm run recon:community`를 맥에서 먼저 돌려야 한다(§7-2, 대상 URL은 CommunitySource.ts에 더쿠
+외에도 추가해야 함). 실측 뒤 파서 작성은 범위가 명확해지므로 `delegate-codex` 위임 후보가 된다
+(Creator Advisor Swiper 순회 때와 같은 방식) - 더쿠 provider(§7-3)가 그 패턴의 실제 예시다.
 
 ### 관찰 항목 (며칠 Top 10을 보고 판단)
 
