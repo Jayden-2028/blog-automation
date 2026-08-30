@@ -1,175 +1,225 @@
-# Sprint 5 설계 — 다채널 자동 발행 (Blogspot + 티스토리)
+# Sprint 5 설계 — 다채널 발행 (티스토리 반자동 + Blogspot 완전자동, OSMU)
 
-작성일: 2026-08-30 · 상태: **설계 초안, 결정 대기**(결정 항목은 §9) · 브랜치 `claude/multi-platform-publish`
+작성일: 2026-08-30 · 상태: **설계 초안, 결정·정보 대기**(§9, §10) · 브랜치 `claude/multi-platform-publish`
 
-## 1. 배경
+## 1. 목표 (2026-08-30 사용자 확정)
 
-Sprint 4로 네이버는 "승인 원고 → 임시저장함까지 자동, 발행 버튼은 사람"이 완성됐다. 이번엔
-발행 채널을 넓힌다. 사용자 지시(2026-08-30): **티스토리 + Blogspot에 원고 승인 후 자동
-업로드까지**.
+승인된 네이버 원고 1건을 기준으로:
 
-로드맵(§Sprint 5+ 2번)이 순서를 이미 정해놨다: `WordPress → Blogspot → 티스토리`, 기술 난이도
-순. WordPress는 이번 범위에서 뺀다(사용자 지시). **Blogspot을 먼저** 붙이고 티스토리를 뒤에
-붙인다.
+| 채널 | 발행 방식 | 원고 |
+|---|---|---|
+| 네이버 | 반자동 (기존, Sprint 4) — 임시저장까지 자동, 발행 버튼은 사람 | 기준 원고 |
+| **티스토리** | **반자동** — 임시저장까지 자동, 발행 버튼은 사람 (네이버와 동일) | OSMU 배리에이션 |
+| **Blogspot** | **완전 자동** — 업로드 + 발행(공개)까지 무인 | OSMU 배리에이션 |
 
-## 2. 핵심 사실 — 두 플랫폼의 접근 경로가 다르다
+**OSMU(One Source Multi Use)**: 네이버 원고를 소스로, 티스토리·Blogspot 각각의 검색 상위노출과
+SEO를 충족하는 배리에이션 원고를 생성한다. 단순 서식 변환이 아니라 **의미 있는 재작성**이다 —
+같은 사람이 운영하는 서로 다른 도메인에 거의 같은 글이 올라가면 한쪽이 중복 콘텐츠로 걸러진다.
+
+이미지: 네이버 원고와 동일하게 OpenAI API(`gpt-image-1`) + Gemini API. 네이버 원고 이미지 재사용
+가능(기본), 채널별 재생성도 옵션.
+
+## 2. 두 플랫폼의 접근 경로
 
 | | Blogspot (Blogger) | 티스토리 |
 |---|---|---|
-| 공식 API | **Blogger API v3, 정상 운영** (`posts.insert`, OAuth 2.0) | **없음. Open API 2024-02 완전 종료** |
-| 발행 방식 | HTTPS API 호출 1건 | 브라우저 자동화(Playwright)뿐 — 네이버와 같은 처지 |
-| 완전 자동 발행 | 정당·저위험 (구글 공식 경로) | 가능하나 계정 스팸 판정 위험 (네이버와 동일) |
-| 인증 | GCP OAuth client + refresh token (최초 1회 동의) | 로그인된 persistent 프로필 (네이버 방식 재사용) |
-| 이미지 | 본문 HTML의 외부 `<img src>` 그대로 사용 (Supabase 공개 URL) | Playwright 파일 업로드 or HTML 모드 외부 `<img>` |
+| 공식 API | **Blogger API v3 정상 운영** (`posts.insert`, OAuth 2.0) | **없음. Open API 2024-02 완전 종료** |
+| 자동화 | HTTPS API 호출 1건 → 완전 자동 발행 안전 | Playwright 브라우저 자동화(네이버와 동일) |
+| 인증 | GCP OAuth client + refresh token (최초 1회 동의, §8) | 로그인된 persistent 프로필 (네이버 방식 재사용) |
+| 이미지 | 본문 HTML 외부 `<img src>` 그대로 (Supabase 공개 URL) | Playwright 파일 업로드 (네이버 방식) |
 
 출처: [Blogger API v3 posts.insert](https://developers.google.com/blogger/docs/3.0/reference/posts/insert) ·
-[티스토리 Open API 종료 안내](https://tistory.github.io/document-tistory-apis/)
+[티스토리 Open API 종료](https://tistory.github.io/document-tistory-apis/)
 
-**결론**: Blogspot은 API로 진짜 "완전 자동 발행"이 안전하게 된다. 티스토리는 네이버와 똑같이
-브라우저 자동화이고, 완전 무인 "공개 발행"은 §9-B에서 사용자가 위험을 감수할지 결정해야 한다.
+## 3. OSMU 배리에이션 — SEO 템플릿
 
-## 3. 목표와 비목표
+### 3-1. 공통 SEO 원칙 (조사 기반, 2025~2026)
 
-**목표**: 원고가 승인되면(`job.status = approved`), 사람 개입 없이 활성화된 플랫폼 전부에
-업로드되고, 각 결과(발행 URL 또는 실패 stage)가 Telegram으로 온다.
+두 채널 모두 사실상 **구글 검색이 주 유입**이다(티스토리도 다음보다 구글 인덱싱 비중이 크다).
+그래서 본문 구조 템플릿은 하나로 통일하고, 메타데이터만 채널별로 다르게 채운다.
 
-**비목표**
-- WordPress, Medium 등 다른 채널 (로드맵상 다음)
-- 발행 후 수정/삭제 (별도 스프린트)
-- 댓글·통계 (Sprint 6+)
-- 네이버 흐름 변경 — 네이버는 반자동 그대로 둔다
+- **제목**: 핵심 키워드를 앞쪽에, 짧고 명확하게. 채널마다 표현을 바꿔 자기 채널끼리 완전 일치를 피함
+- **첫 문단 100자 안에 핵심 키워드** 반드시 포함
+- **H2/H3 소제목 계층**을 명확히. 소제목은 질문형/How-to형(검색 쿼리와 매칭 + 스니펫 노출 유리)
+- **FAQ 블록**(끝부분 3~5문답) — 구글 featured snippet / "People also ask" 대응
+- **요약 문단**(끝) — 핵심 재진술
+- **이미지 alt 텍스트에 키워드**, 파일명도 키워드 기반(현재 UUID → 개선 필요, §7)
+- **본문 내부 링크** 1~2개(같은 블로그 관련 글) — 초기엔 생략 가능
+- **메타 설명(search description)**: 키워드 + 요점, 155자 내. 랭킹엔 영향 없지만 클릭률에 영향
+
+출처: [티스토리 SEO 전략](https://jehovahrapha-nissi.com/entry/티스토리-검색-노출SEO-강화-전략-콘텐츠-구조-링크) ·
+[2025 구글 SEO 가이드](https://blog.medianavi.kr/2025-08-11-Google-SEO-Guide-2025/) ·
+[Blogger SEO tips](https://www.pitiya.com/blogger-seo.html)
+
+### 3-2. 채널별 메타데이터
+
+| 필드 | 티스토리 | Blogspot |
+|---|---|---|
+| 슬러그(permalink) | 숫자 자동(티스토리 제약) 또는 문자열 지정 | **영문 kebab-case 직접 지정** (날짜·숫자 금지) |
+| 검색 설명 | 글쓰기 "설명" 필드 | 포스트 "검색 설명(Search Description)" 필드 |
+| 분류 | 태그(자유) + 카테고리 | 라벨(Label) — 단, 라벨 남발 금지(중복 콘텐츠 페이지 생성) |
+| 카테고리 매핑 | 내부 entertainment/ott/parenting/living → 각 채널 카테고리 (§10-D) | 라벨로 대체 |
+
+### 3-3. 배리에이션 생성
+
+`runHeadlessClaude`(`claude -p`)로 1콜, 네이버 원고 집필과 같은 경로. 입력 = 승인된 네이버
+원고 + 대상 채널 + SEO 템플릿 지침. 출력(채널별):
+
+```
+title:            (재작성된 제목)
+searchDescription: (155자 내)
+slug:             (Blogspot만; 영문 kebab)
+tags:             (5~10개)
+body:             (마크다운 부분집합 — ##, **, -, ![]() ; FAQ·요약 포함)
+```
+
+`moai-marketer:content-blog`(SEO 블로그) + `moai-writer:korean-humanize`(AI 티 제거) 스킬을
+그대로 재사용한다. **팩트·수치·날짜·인용은 네이버 원고에서 100% 보존**(재작성은 표현만).
 
 ## 4. 아키텍처
 
 ```
 src/config/
-  publishTargets.ts          플랫폼별 enabled·일일 상한·blogId 등 (trendSources.ts와 같은 패턴)
+  publishTargets.ts           채널별 enabled·일일상한·blogId·카테고리매핑 (trendSources.ts 패턴)
+
+src/workflows/writing/
+  generateArticleVariant.ts   승인 원고 → 채널별 배리에이션 1건 (claude -p, §3-3)
 
 src/services/publish/
-  convertArticleToHtml.ts     마크다운 부분집합 → 독립 HTML 문자열 (<img> 유지 버전)
-                              — convertArticleToNaverHtml.ts를 일반화, 네이버 전용 strip 로직만 분리
+  convertArticleToHtml.ts     마크다운 부분집합 → 독립 HTML (<img> 유지) — Naver 변환기 일반화
   blogger/
-    BloggerOAuthClient.ts     refresh token → access token, posts.insert 호출
-    setupBloggerAuth.ts       `npm run setup:blogger` — 최초 1회 OAuth 동의 → refresh token 저장
+    BloggerOAuthClient.ts     refresh token → access token, posts.insert
+    setupBloggerAuth.ts       npm run setup:blogger — 최초 1회 OAuth 동의
   tistory/
-    TistoryPublisher.ts       Playwright: 로그인 확인 → 글쓰기 진입 → 채움 → 발행(또는 비공개 저장)
-    setupTistorySession.ts    `npm run setup:tistory` — 프로필에 최초 1회 수동 로그인
+    TistoryPublisher.ts       Playwright: 로그인확인 → 글쓰기 → HTML모드 붙여넣기 → 이미지 업로드
+                              → 태그 → "임시저장"만 (발행 버튼 안 누름)
+    setupTistorySession.ts    npm run setup:tistory — 프로필에 최초 1회 수동 로그인
+    inspectTistoryEditor.ts   DOM 실측 전용(발행 버튼 절대 클릭 안 함) — Naver inspect와 동일
 
 src/workflows/publish/
-  publishArticleToBlogspot.ts  승인 job 1건 → BloggerOAuthClient → publications 기록
-  publishArticleToTistory.ts   승인 job 1건 → TistoryPublisher → publications 기록
-  publishApprovedArticles.ts   ★ 트리거: approved인데 아직 안 올라간 job을 훑어 활성 플랫폼으로 fan-out
-  publishCli.ts                `npm run job:publish-multi -- <jobId>` 수동 진입점(디버그용)
+  publishArticleToBlogspot.ts  승인 job → 배리에이션 로드/생성 → Blogger API → publications 기록
+  publishArticleToTistory.ts   승인 job → 배리에이션 로드/생성 → TistoryPublisher → publications 기록
+  publishApprovedArticles.ts   ★ 폴링: approved인데 미발행인 job을 활성 채널로 fan-out
+  notifyMultiPublish.ts        채널별 결과 알림 (Blogspot=발행완료 URL / 티스토리=임시저장 URL)
 
 src/jobs/
-  publishPollJob.ts            launchd가 주기 실행 (telegramPollJob.ts와 같은 구조)
+  publishPollJob.ts            launchd 주기 실행 (telegramPollJob.ts 구조 + caffeinate)
 ```
 
-기존 `publishArticleToNaver.ts`의 계약을 그대로 따른다: job 조회 → `approved` 확인 → 최신
-article/이미지 로드 → 멱등성 체크(같은 `article_id + platform`에 진행/완료 row 있으면 skip) →
-발행 → `publications` 기록(성공/실패 모두).
+## 5. 트리거 — 폴링 job
 
-## 5. 트리거 — 폴링 job (콜백 인라인 아님)
-
-승인 콜백(`review:confirm`) 안에서 바로 발행하지 않는다. 이유:
-- Blogger API는 빠르지만 티스토리 Playwright는 최대 수 분 → Telegram 콜백 응답이 그만큼 멈춘다
-- 발행 실패 시 재시도가 어렵다 (콜백은 한 번 눌리면 끝)
-- 맥 잠자기 중 죽으면 승인만 되고 발행이 영영 안 된다
-
-대신 `publishPollJob`을 launchd로 주기 실행(`caffeinate -i` 감쌈, 네이버/telegram-poll과 동일).
-매 실행:
+승인 콜백 안에서 발행하지 않는다(티스토리 Playwright가 수 분 → 콜백 멈춤, 재시도 불가,
+잠자기 중 죽으면 발행 유실). 대신 `publishPollJob`을 launchd로 주기 실행:
 
 ```
 1. article_jobs에서 status='approved' 조회
-2. 각 job의 최신 article에 대해, publications를 플랫폼별로 확인
-3. 활성 플랫폼 중 아직 성공 기록이 없는 곳으로만 발행
-4. 일일 상한(§8) 확인 — 넘으면 이번 job은 건너뛰고 다음 실행 때 재시도
-5. 활성 플랫폼 전부 성공 → job.status='published'
-6. 결과를 Telegram으로 (성공 URL / 실패 stage)
+2. 각 job의 최신 네이버 원고 기준, publications를 채널별로 확인
+3. 활성 채널 중 아직 성공 기록 없는 곳:
+   a. 배리에이션 원고 없으면 generateArticleVariant로 생성(1회, 저장)
+   b. 일일 상한(§6) 확인 — 넘으면 이번엔 건너뛰고 다음 실행 때 재시도
+   c. Blogspot: 발행(공개) / 티스토리: 임시저장
+4. publications 기록 (성공 URL / 실패 stage)
+5. Blogspot 성공 + 티스토리 임시저장 완료 → job.status='published'
+   (네이버·티스토리는 "임시저장까지"가 이 파이프라인의 완료 정의)
+6. Telegram 알림
 ```
 
-`approved`가 종착이 아니라 대기열이 된다. 재시도·부분 성공·상한 초과가 전부 자연스럽게 처리된다.
+`approved`가 종착이 아니라 **발행 대기열**이 된다. 재시도·부분성공·상한초과가 자연 처리된다.
 
-## 6. 콘텐츠 변환
+## 6. 안전장치
 
-`convertArticleToNaverHtml.ts`가 이미 우리 마크다운 부분집합(`##`, `**`, `*`, `[]()`, `-`,
-`![]()`)을 HTML로 만든다. 이걸 일반화한다:
+- **일일 발행 상한을 코드로 하드 가드** — `publications`에서 오늘 채널별 수를 세어 초과 시 발행
+  안 함. 제안: 채널당 하루 **2건**(티스토리 플랫폼 한도는 15건이나 저품질 회피 목적).
+- **발행 시각 분산** — 폴링 주기 + 랜덤 지터. 승인 직후 정각에 몰아 올리지 않음.
+- **채널 실패 격리** — 한 채널 실패가 다른 채널을 막지 않음.
+- **멱등성** — 같은 job 재실행 시 이미 성공한 채널은 재발행 안 함(`article_id + platform`로 확인).
+- **인물 원고 사람 승인** — `approved`가 트리거이므로 이미 통과된 상태(로드맵 §6-2). 추가 게이트 불필요.
+- **배리에이션 팩트 보존** — 재작성 후 `articleReviewChecks`(팩트/법적/광고/품질)를 배리에이션에도
+  1회 돌려 결과를 알림에 표시(네이버 원고와 동일 방식, 차단 아님).
 
-- **Blogspot**: `![alt](url)` → `<img src="{supabase 공개 URL}" alt="{alt}">` 그대로. Blogger는
-  본문 HTML을 저장만 하고 이미지를 재호스팅하지 않는다 — Supabase Storage 공개 버킷
-  (`article-images`)이 영구 공개이므로 문제없다. `<h3>`/`<p>`/`<ul>` 등도 그대로 통과.
-- **티스토리**: 네이버와 같은 고민. 티스토리 에디터에는 **기본 HTML 모드**가 있어(툴바 "기본
-  모드" ↔ "HTML" 전환) 서식 손실 없이 HTML 문자열을 그대로 넣을 수 있다 — 네이버 SmartEditor의
-  clipboard paste보다 신뢰도가 높다. 이미지는 §9-C에서 결정.
-- 해시태그: 네이버처럼 본문 끝 "#태그" 텍스트 줄이 그대로 따라간다. 티스토리는 별도 태그 입력란이
-  있으므로 Playwright로 채워도 된다(발행 버튼과 무관한 필드라 위험하지 않음).
+## 7. 배리에이션 원고 저장 — 결정 필요 (§10-A)
 
-## 7. Blogspot 인증 — refresh token
+옵션:
+- **(A1) `articles`에 `platform` 컬럼 추가** (nullable, null=네이버 기준). 배리에이션 = 새 row.
+  `listArticlesByJobId`가 이미 여러 row를 다룸. migration 1줄. **권장.**
+- (A2) `article_jobs.metadata.variants[platform]`에 JSON. migration 없음. 단 본문이 커서 metadata가
+  비대해짐, 조회·인덱싱 불리.
 
-1. GCP 프로젝트에서 OAuth 2.0 Client(Desktop app) 생성, Blogger API 사용 설정
-2. `npm run setup:blogger` — 로컬 서버로 동의 화면 1회 → `refresh_token` 획득
-3. 저장 위치: `.env`의 `BLOGGER_REFRESH_TOKEN` + `BLOGGER_CLIENT_ID`/`BLOGGER_CLIENT_SECRET`
-   (`.env`는 이미 gitignore, service-role 키 등과 같은 취급)
-4. 런타임에 `refresh_token` → `access_token` 교환(만료 1시간, 자동 갱신)
-5. 대상 블로그: `BLOGGER_BLOG_ID` (Blogger 관리 화면 URL 또는 `blogs.getByUrl`로 확인)
+이미지 파일명도 함께 개선: 현재 Supabase Storage 키가 UUID → `{키워드-슬러그}-{n}.png`로 바꾸면
+alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
 
-스코프는 `https://www.googleapis.com/auth/blogger` 하나면 `posts.insert`에 충분하다.
+## 8. GCP OAuth — 이게 뭔가 (Blogspot 발행에 필요)
 
-## 8. 안전장치 (로드맵 §6-3)
+**한 줄**: 우리 스크립트가 "당신 대신, 당신의 Blogspot에만" 글을 올릴 수 있게 구글이 발급하는
+열쇠를 만드는 절차다. 무료.
 
-- **일일 발행 상한을 코드로 하드 가드** — 설정값이 아니라 상한. `publications`에서 오늘
-  `platform`별 `published` 수를 세고 초과 시 발행 안 함. 기본값 제안: 플랫폼당 **하루 2건**
-  (티스토리 플랫폼 자체 한도는 15건이지만 저품질 회피가 목적).
-- **발행 시각 분산** — 폴링 주기에 랜덤 지터. 승인 직후 정각에 몰아 올리지 않는다.
-- **인물 관련 원고는 이미 사람 승인 필수** — `job.status=approved`가 트리거이므로 이 게이트는
-  이미 통과된 상태(로드맵 §6-2). 추가 게이트 불필요.
-- **티스토리 발행 실패 격리** — 한 플랫폼 실패가 다른 플랫폼 발행을 막지 않는다
-  (`runCommunityCollection`의 사이트별 격리와 같은 원칙).
-- **멱등성** — 같은 job 재실행 시 이미 성공한 플랫폼은 재발행 안 함.
+**용어**
+- **GCP(Google Cloud Platform)**: 구글의 개발자 콘솔(console.cloud.google.com). 계정만 있으면 됨.
+- **프로젝트**: GCP 안에서 기능을 묶는 폴더. "blog-automation" 하나 만들면 됨.
+- **Blogger API 사용 설정**: 그 프로젝트에서 Blogger 기능을 켜는 스위치.
+- **OAuth 클라이언트 ID(Desktop app)**: "이 앱이 구글 로그인으로 권한을 받겠다"는 신분증.
+  만들면 **Client ID**와 **Client Secret** 두 문자열이 나온다.
+- **OAuth 동의**: `npm run setup:blogger` 실행 → 브라우저에 구글 "허용하시겠습니까?" 화면 →
+  "허용" 클릭 → 스크립트가 **refresh token**(장기 열쇠)을 받아 `.env`에 저장.
+- 이후 스크립트는 refresh token으로 1시간짜리 access token을 자동 발급해 계속 씀. 권한 회수는
+  구글 계정 보안 설정에서 언제든 가능.
 
-## 9. 결정 항목 (사용자 승인 필요)
+**사용자가 할 일** (§10-C에 체크리스트로 다시 정리):
+1. console.cloud.google.com 접속 → 프로젝트 생성
+2. "API 및 서비스 → 라이브러리"에서 **Blogger API** 검색 → 사용 설정
+3. "API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 → OAuth 클라이언트 ID → 데스크톱 앱"
+4. 나온 **Client ID / Client Secret**를 Claude에게 전달
+5. `npm run setup:blogger` 실행하고 브라우저에서 "허용" 클릭 (Claude가 안내)
 
-**A. 순서·범위** — Blogspot 먼저 구현·검증 → 그 다음 티스토리. WordPress는 제외. (권장: 그대로)
+## 9. 확보된 정보 (2026-08-30 사용자 제공)
 
-**B. 티스토리 발행 가시성** — 완전 자동 발행 시 티스토리에 어떻게 올릴지:
-  - (B1) **공개 발행** — 진짜 완전 자동. 저품질/스팸 판정 위험을 사용자가 감수.
-  - (B2) **비공개로 발행 후 알림** — 글은 실제로 생성(초안 아님)되고 URL이 오지만 비공개.
-    사람이 티스토리에서 "공개"로 전환. "업로드까지 자동 + 공개는 사람" 절충안. (권장)
-  - (B3) 네이버처럼 임시저장까지만.
+- 티스토리 주소: `https://wooahpapa.tistory.com/`
+- Blogspot 계정: `bjkim2028@gmail.com` (blog ID는 §10-B에서 확인 — Blogger 관리화면 URL의 숫자,
+  또는 `blogs.getByUrl`로 조회)
 
-**C. 티스토리 이미지 삽입** — (C1) Playwright 파일 업로드(네이버 방식, 티스토리 CDN 재호스팅,
-  신뢰도 높음, 느림) vs (C2) HTML 모드에 Supabase 외부 `<img>` URL 그대로(빠름, 티스토리가
-  외부 이미지를 계속 서빙해줄지 불확실). (권장: C1)
+## 10. 결정·정보 요청
 
-**D. 대상 블로그** — Blogspot `BLOGGER_BLOG_ID`, 티스토리 블로그 주소/계정. 사용자가 제공.
-  카테고리 매핑(내부 entertainment/ott/parenting/living → 각 플랫폼 카테고리) 필요 여부.
+**A. 배리에이션 저장** — A1(`articles.platform` 컬럼, migration 1줄) vs A2(metadata JSON). 권장 A1.
 
-**E. 일일 상한값** — 플랫폼당 하루 몇 건. (제안: 2)
+**B. Blogspot blog ID** — Blogger(blogger.com) 로그인 → 해당 블로그 관리화면 진입 → 주소창 URL의
+`blogID=` 뒤 숫자(19자리쯤). 또는 블로그 공개 주소(`xxx.blogspot.com`)를 알려주면 API로 조회 가능.
 
-**F. GCP OAuth client** — 사용자가 GCP 프로젝트에서 생성·제공할지, 아니면 Claude가 절차를
-  단계별로 안내할지.
+**C. GCP OAuth 진행** — 사용자가 §8 1~4를 직접 하고 Client ID/Secret 전달 vs Claude가 화면 캡처
+받아가며 단계별 동행. (Claude는 GCP 콘솔에 로그인 못 하므로 클릭은 사용자 몫)
 
-## 10. 작업 순서 (결정 후)
+**D. 카테고리 매핑** — 티스토리 `wooahpapa.tistory.com`의 카테고리 목록, Blogspot 라벨 규칙.
+내부 4분류(entertainment/ott/parenting/living)를 각 채널 어디에 넣을지. (없으면 전부 기본 카테고리 +
+태그로만)
+
+**E. 일일 상한값** — 채널당 하루 몇 건. 제안 2.
+
+**F. 티스토리 발행 가시성** — 임시저장까지만(네이버와 동일, 권장) 확정. 이후 티스토리 앱에서
+사람이 "발행" 클릭.
+
+**G. Blogspot 발행 시 초기 노출** — 바로 공개 vs 첫 며칠은 비공개로 올려 형태 확인 후 공개.
+
+## 11. 작업 순서 (결정 후)
 
 ```
-1. convertArticleToHtml.ts — convertArticleToNaverHtml 일반화 + 테스트
-2. publishTargets.ts — 설정 스캐폴드 (전부 기본 disabled)
-3. BloggerOAuthClient + setup:blogger — 인증 흐름, 사용자가 1회 동의
-4. publishArticleToBlogspot.ts + 멱등성/기록 + 단위 테스트(주입 의존성)
-5. 실측 1건 — 승인된 실제 job으로 Blogspot에 비공개/드래프트 발행해 형태 확인 (사용자 승인)
-6. publishApprovedArticles + publishPollJob + launchd 등록
-7. Blogspot 완전 자동 가동 + 며칠 관찰
---- 여기서 티스토리 ---
-8. 티스토리 DOM 실측 (네이버 때처럼 setup 세션에서, 발행 버튼은 절대 안 누름)
-9. TistoryPublisher.ts — §9-B 결정대로
-10. 실측 1건 (사용자 승인) → 가동
+1. convertArticleToHtml.ts (Naver 변환기 일반화) + 테스트
+2. publishTargets.ts 설정 스캐폴드 (전부 기본 disabled)
+3. generateArticleVariant.ts + SEO 템플릿 프롬프트 + 테스트(주입)
+4. (A1이면) articles.platform 컬럼 migration — 사용자 승인
+--- Blogspot ---
+5. BloggerOAuthClient + setup:blogger — 사용자 OAuth 동의 1회
+6. publishArticleToBlogspot + 멱등성/기록 + 단위 테스트
+7. 실측 1건 — 승인 job으로 Blogspot에 비공개 발행해 형태 확인 (사용자 승인)
+8. publishApprovedArticles + publishPollJob + launchd — Blogspot 완전자동 가동 + 관찰
+--- 티스토리 ---
+9. 티스토리 에디터 DOM 실측 (setup 세션, 발행 버튼 안 누름)
+10. TistoryPublisher (HTML 모드 붙여넣기 + 이미지 업로드 + 태그 + 임시저장)
+11. publishArticleToTistory + 실측 1건 (사용자 승인) → 가동
 ```
 
-Blogspot(1~7)까지가 "완전 자동 발행"의 첫 실현이다. 티스토리(8~10)는 실측이 선행돼야 해서
-브라우저 있는 환경에서만 진행 가능.
+Blogspot(1~8)이 이 프로젝트 첫 "완전 자동 발행"이다. 티스토리(9~11)는 브라우저 실측이 선행돼야
+해서 맥에서만 진행.
 
-## 11. 이번 스프린트가 끝나면
+## 12. 끝나면
 
-승인 버튼 한 번으로 원고가 Blogspot에 자동 게시되고(공개), 티스토리에 자동 업로드된다
-(§9-B 결정에 따라 공개 또는 비공개). 로드맵 8단계 파이프라인의 S7(발행)이 네이버 반자동 +
-2개 채널 완전 자동으로 확장된다. 남는 것은 S8(댓글·통계·대시보드)뿐.
+승인 버튼 한 번으로: 네이버 임시저장(기존) + 티스토리 임시저장 + Blogspot 공개 발행. 세 채널
+모두 채널별 SEO 배리에이션 원고. 로드맵 S7(발행)이 사실상 완성되고, 남는 건 S8(댓글·통계).
