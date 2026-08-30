@@ -25,6 +25,9 @@ supabase/.temp/
 # Creator Advisor DOM 조사용 스냅샷 (페이지 원문 - 커밋하지 않는다)
 .local/dom-snapshots/
 
+# 커뮤니티 수집기 실측용 원본 HTML(scripts/communityRecon.ts 산출물 - 저작권 있는 원문이라 커밋하지 않는다)
+docs/ai-handoff/community-recon/
+
 # Codex 데스크톱 앱([desktop] external-agent-import-sync-enabled)이 .claude/skills를
 # 자동 동기화하며 만드는 생성물. CLI(codex exec)로 하는 위임과는 무관하다.
 # Claude -> Codex 기계 치환 때문에 역할이 뒤집혀 있어(예: "Codex remains project lead")
