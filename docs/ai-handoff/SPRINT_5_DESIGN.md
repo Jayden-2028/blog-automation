@@ -202,8 +202,11 @@ alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
   교환 + 대상 블로그 접근까지 실측 검증.
 - 대상 블로그 확인: blog ID `6088186200818704009` = **"남매둥이 우아 아빠의 육아 생활"**
   (`https://wooahpapa.blogspot.com/`).
-- ⚠️ **OAuth 동의 화면이 아직 "테스트" 상태** → 이 refresh token은 **7일 뒤 만료**. 실가동 전에
-  프로덕션 게시 필요(홈페이지 URL + 개인정보처리방침 URL — §10-1 참고, tistory.com URL 사용 가능).
+- ✅ **OAuth 동의 화면 프로덕션 게시 완료**(2026-08-31) → refresh token 만료 없음. 홈페이지/
+  개인정보처리방침은 Google Sites로 만들었다(`https://sites.google.com/view/blog-automation-wooahpapa/`
+  + `/privacy`). blogspot.com은 public suffix라 승인 도메인으로 거부됨 - Google Sites(`google.com`
+  도메인, 인증 불필요)로 우회. "확인되지 않은 앱" 경고는 그대로(개인용, 인증 안 받음).
+  프로덕션 전환 후 토큰 재발급해 `.env` 갱신 + `refresh_token → access_token` 재검증.
 - 설정: `src/config/publishTargets.ts`(`BLOGGER_CONFIG`), `.env.example`에 키 목록.
 
 ## 10. 남은 결정 / 확인
