@@ -57,6 +57,7 @@
     "test:google-trends": "tsx src/workflows/google-trends/testGoogleTrends.ts",
     "collect:community": "tsx src/workflows/community/runCollectionCli.ts",
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
+    "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
     "recon:community": "tsx scripts/communityRecon.ts",
     "debug:trend": "tsx src/workflows/keyword-ranking/debug/trendMomentumDebug.ts",
     "debug:pipeline": "tsx src/workflows/keyword-ranking/debug/pipelineTrace.ts",

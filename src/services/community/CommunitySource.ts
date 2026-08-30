@@ -1,18 +1,24 @@
 // 커뮤니티 인기글 소스 공통 인터페이스.
 //
-// 이 파일은 "사이트 하나를 어떻게 붙일지"의 계약만 정의한다. 실제 사이트별 구현(더쿠/네이트판/
-// 다음·네이버 카페 인기글)은 아직 없다 - KEYWORD_SOURCE_EXPANSION.md §5-2가 "⚠️ 맥에서 실측 필요"로
-// 표시한 그대로, 이 원격 세션은 외부 사이트로 나가는 egress가 전부 막혀 있어(agent proxy가
-// theqoo.net 등을 EGRESS_BLOCKED로 거부함, 2026-08-30 확인) DOM 구조를 볼 수가 없다.
-// 실제 페이지 구조 없이 파서를 쓰면 추측으로 코드를 만드는 것이라 오히려 위험하다 - 구글 트렌드
+// 이 파일은 "사이트 하나를 어떻게 붙일지"의 계약을 정의한다. 이 원격 세션은 외부 사이트로 나가는
+// egress가 전부 막혀 있어(agent proxy가 theqoo.net 등을 EGRESS_BLOCKED로 거부함) 직접 실측을 할
+// 수 없다 - 그래서 사용자가 맥에서 scripts/communityRecon.ts(robots.txt 확인 + HTML 캡처) +
+// scripts/communityProbe.ts(DOM 구조 진단)를 실행해 실측 데이터를 확보하고, 그 결과를 공유받아
+// 파서를 썼다. 실제 페이지 구조 없이 파서를 추측해 쓰지 않는다는 원칙은 그대로다 - 구글 트렌드
 // RSS도 실제 실측 데이터(trendingRss.sample.xml)를 먼저 확보한 뒤에야 파서를 썼다(같은 원칙).
 //
-// 그래서 이 파일은 인터페이스 + 빈 provider 목록만 두고, runCommunityCollection.ts는 provider가
-// 0개여도(=아직 아무 사이트도 안 붙었어도) 정상적으로 "0건 수집"을 반환하도록 설계했다. 사이트가
-// 하나씩 붙을 때마다 COMMUNITY_SOURCE_PROVIDERS에 추가하기만 하면 나머지 파이프라인(LLM 추출 ->
-// 매핑 -> upsert)은 이미 완성돼 있어 손댈 필요가 없다.
+// 실측 결과(2026-08-30, KEYWORD_SOURCE_EXPANSION.md §7-2):
+// - **더쿠(theqoo.net/hot)**: robots.txt에 disallow 없음, 실제 목록 페이지 정상 응답 확인 ->
+//   TheqooProvider.ts 구현 완료, 아래 목록에 포함.
+// - **네이트판/다음카페/네이버카페**: robots.txt가 정확히 우리가 쓰려던 목록 경로를 disallow함 ->
+//   §5-3 원칙("robots.txt가 금지하면 그 소스는 제외한다")에 따라 이 경로로는 붙이지 않는다.
+//   다른 접근 경로(공식 API 등)를 찾으면 재검토 대상이지만, 지금은 없다.
 //
-// 사이트 실측 순서는 scripts/communityRecon.ts 참고(§5-3 robots.txt 확인 포함, 맥에서 실행).
+// COMMUNITY_SOURCE_PROVIDERS가 비어 있던 시절과 달리 지금은 provider가 1개 이상 있지만,
+// runCommunityCollection.ts는 여전히 provider 0개에서도 안전하게 "0건 수집"을 반환한다 - 사이트가
+// 하나씩 붙거나 빠져도 나머지 파이프라인(LLM 추출 -> 매핑 -> upsert)은 손댈 필요가 없다.
+
+import { theqooProvider } from "./theqoo/TheqooProvider.js";
 
 /** 커뮤니티 인기글 목록 항목. 제목만 쓴다 - 본문/이미지/작성자는 저장하지 않는다(§5-3). */
 export type CommunityPost = {
@@ -31,10 +37,8 @@ export type CommunitySourceProvider = {
 };
 
 /**
- * 결정 C(KEYWORD_SOURCE_EXPANSION.md §7)의 대상: 네이트판 오늘의 톡, 더쿠 핫게시판,
- * 다음/네이버 카페 인기글. 펨코는 Cloudflare Bot Management가 강해 명시적으로 제외했다(§5-2).
- *
- * 지금은 실제 실측 전이라 비어 있다. 사이트 하나를 실측하고 파서를 쓸 준비가 되면 여기에
- * CommunitySourceProvider 하나를 추가한다.
+ * 결정 C(KEYWORD_SOURCE_EXPANSION.md §7)의 대상 중 실제로 접근 가능한 것으로 확인된 소스만
+ * 여기 등록한다. 펨코는 Cloudflare Bot Management가 강해 애초에 제외했고(§5-2), 네이트판/
+ * 다음카페/네이버카페는 robots.txt가 막아 제외했다(파일 상단 주석).
  */
-export const COMMUNITY_SOURCE_PROVIDERS: readonly CommunitySourceProvider[] = [];
+export const COMMUNITY_SOURCE_PROVIDERS: readonly CommunitySourceProvider[] = [theqooProvider];
