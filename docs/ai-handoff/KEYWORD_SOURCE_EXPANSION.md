@@ -609,20 +609,31 @@ npm run test:naver-html             pass
   fetch는 이 세션의 egress 차단으로 403을 받아 `sourceErrors`로 격리된다(설계대로 동작 - 전체
   status는 여전히 success). **맥에서 실제 fetch 성공까지는 아직 확인 못 했다.**
 
-**아직 안 한 것 / 다음에 필요한 것**:
-- **맥에서 `npm run collect:community`(dry-run) 실제 실행 확인** - 더쿠에서 진짜 제목 목록을
-  받아오는지, `runHeadlessClaude`가 실제로 `claude` CLI를 찾아 LLM 추출까지 마치는지(이 원격
-  컨테이너엔 그 바이너리가 없어 검증 못 함). 이게 되면 "provider가 최소 1개는 실제로 동작"
-  조건이 충족된다.
-- 확인되면: `dailyKeywordWorkflow.ts`에 `runCommunityCollection` 연결(구글 트렌드가 이미 있는
-  자리 - `trendCollectOptions`/`googleTrendsOptions` 옆에 `communityOptions` 추가) +
-  `TREND_SOURCE_CONFIGS.community.enabled`를 켜는 것 - 둘 다 구글 트렌드 때처럼 **사용자 승인
-  필요**.
+**남은 것**:
 - 네이트판/다음카페/네이버카페의 대체 접근 경로(다른 URL, 공식 API 등) 탐색 여부는 사용자 판단
   필요 - 지금은 시도하지 않았다.
-- **오프라인 검증만 완료했다**(`npm run build` + `test:community`/`test:theqoo-parser`/
-  `test:google-trends`/`test:topic-grouping`/`test:daily-query-pool`/`test:keyword-category`
-  회귀, 더미 Supabase 환경변수, 실제 원격 접근 없음).
+
+## 7-4. 2026-08-30 세션 후속: 맥 실측 + 배선 + 활성화 (사용자 승인)
+
+- **맥 dry-run 실측 완료** - `npm run collect:community`(dry-run)로 더쿠에서 인기글 20건 fetch
+  성공. `runHeadlessClaude`가 실제 `claude` CLI로 엔티티 추출까지 도는 것 확인. "provider 최소
+  1개 실동작" 조건 충족.
+- **`dailyKeywordWorkflow.ts` 배선** - 구글 트렌드 옆에 `runCommunityCollection(options.communityOptions)`
+  추가. `trendCollect` 단계 집계(`trendResults`)에 `community` 포함. `dailyKeywordJob.ts`에
+  커뮤니티/구글 트렌드 비치명적 실패 + 커뮤니티 `sourceErrors` 사이트별 로그 추가.
+- **활성화 (2026-08-30 사용자 승인, 방법 A)** - `TREND_SOURCE_CONFIGS.community.enabled` 코드
+  기본값을 `true`로. 구글 트렌드 전례와 동일 - `.env` 수정 불필요, git pull만으로 다음 09:00
+  run부터 적용. 끄려면 `.env`에 `COMMUNITY_TRENDS_ENABLED=false`.
+- **테스트 결함 수정** - `testCommunityCollection.ts`의 "never throws" 블록이 `dryRun:false` +
+  실 Supabase 부재에 의존해 실패를 유도하고 있었다. `.env`가 있는 맥에서 이 테스트가 실제로
+  prod `trend_candidates`에 테스트 row(`이서준 열애설`, `metadata.site: "site_ok"`) 1건을
+  write했다. → 주입 함수 throw + `dryRun:true`로 교체(`testGoogleTrends.ts`와 같은 원칙).
+  오염된 row 1건은 사용자 승인 후 삭제 완료(`source=community` 현재 0건).
+- **검증** - `npm run build` + `test:community`/`test:theqoo-parser`/`test:google-trends`/
+  `test:topic-grouping`/`test:keyword-category`/`test:daily-query-pool` 회귀 통과.
+
+**다음**: 다음 09:00 run 로그에서 `[trendCollect]` 커뮤니티 라인 확인 + Top 10에 커뮤니티
+키워드 유입/품질 며칠 관찰.
 
 ---
 
@@ -639,10 +650,10 @@ npm run test:naver-html             pass
    trendCollect 단계가 수집·upsert한다. 끄려면 .env에 GOOGLE_TRENDS_ENABLED=false.
    ⬜ 다음 아침 run에서 Top 10 변화 관찰
 5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
-6. 🟡 커뮤니티 수집 + LLM 엔티티 추출 (§5, §7-2/§7-3)
-   파이프라인 + 더쿠(theqoo) provider 구현·오프라인 검증 완료. 네이트판/다음카페/네이버카페는
-   robots.txt가 막아 제외(§7-3). ⬜ 맥에서 `npm run collect:community` 실제 fetch 확인,
-   그 뒤 dailyKeywordWorkflow 연결 + community.enabled 켜기는 사용자 승인 필요.
+6. ✅ 커뮤니티 수집 + LLM 엔티티 추출 (§5, §7-2/§7-3/§7-4)
+   파이프라인 + 더쿠(theqoo) provider. 맥 dry-run 20건 fetch 실측 완료. dailyKeywordWorkflow
+   배선 + community.enabled 코드 기본값 true (2026-08-30 사용자 승인). 네이트판/다음카페/
+   네이버카페는 robots.txt가 막아 제외(§7-3). ⬜ 다음 아침 run에서 Top 10 유입 관찰.
 --- 여기까지 둘째 브랜치(claude/community-collector) ---
 7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
 8. ⬜ (관찰 후 판단) 블로그 무관 키워드 필터 (§7-1)

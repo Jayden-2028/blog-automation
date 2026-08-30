@@ -13,7 +13,10 @@
 //   검증을 마쳤다(KR TOP 10 정상 응답 + 분류 확인). 켜두는 것이 기본이고 끄는 것이 예외다.
 // - creator_advisor: 기본 false. 사람이 최초 1회 수동 로그인한 persistent profile에 의존하므로,
 //   준비가 안 된 환경에서 켜지면 매일 실패한다.
-// - daum_realtime / community: 기본 false. 아직 수집기가 구현되지 않았다.
+// - community: 기본 true. 더쿠(theqoo.net/hot)만 붙어 있고 robots.txt 실측상 허용, 인증/프로필
+//   불필요, 2026-08-30에 맥에서 dry-run fetch 20건 실측 검증. 켜두는 것이 기본, 끄려면
+//   COMMUNITY_TRENDS_ENABLED=false. 사이트 하나가 막혀도 runCommunityCollection이 격리한다.
+// - daum_realtime: 기본 false. 아직 수집기가 구현되지 않았다.
 // 어느 쪽이든 buildDailyQueryPool은 소스가 꺼져 있거나 실패해도 나머지로 정상 동작한다.
 
 import { CREATOR_ADVISOR_CONFIG } from "./creatorAdvisor.js";
@@ -85,7 +88,8 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
     candidateTtlHours: parseIntEnv(process.env.DAUM_REALTIME_CANDIDATE_TTL_HOURS, 8),
   },
   community: {
-    enabled: parseBooleanEnv(process.env.COMMUNITY_TRENDS_ENABLED, false),
+    // 기본 true(2026-08-30 사용자 승인 + 맥 dry-run 실측). 끄려면 COMMUNITY_TRENDS_ENABLED=false.
+    enabled: parseBooleanEnv(process.env.COMMUNITY_TRENDS_ENABLED, true),
     maxDailyCandidates: parseIntEnv(process.env.COMMUNITY_TRENDS_MAX_DAILY_CANDIDATES, 12),
     // 커뮤니티는 사이트별로 성격이 달라 topic(=사이트)당 상한을 둔다. 한 사이트가 독식하면
     // 그 사이트의 편향이 그대로 daily pool의 편향이 된다.

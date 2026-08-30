@@ -302,17 +302,13 @@ async function testCollectionNeverThrows(): Promise<void> {
 
   // 가장 중요한 계약: 예상 못한 예외(Error)도 throw하지 않고 failed로 변환
   {
-    const throwingProvider: CommunitySourceProvider = {
-      site: "site_ok",
-      label: "정상 사이트",
-      fetchPosts: async () => {
-        throw "not an Error instance"; // 의도적으로 비-Error를 던져 describeError 경로도 함께 검증
-      },
-    };
-    // fetchPosts 실패는 sourceErrors로 격리되므로, 진짜 예외는 mapCommunityItemsToInserts 이후
-    // upsertCandidates 단계에서 던지는 것으로 시뮬레이션한다(실제 Supabase 오류 형태).
+    // fetchPosts 실패는 sourceErrors로 격리되므로(위 블록에서 검증), 여기서는 그 격리 경로를
+    // 벗어난 지점에서 예외가 나는 상황을 시뮬레이션한다. extractKeywords가 던지는(=결과 객체의
+    // error 필드가 아니라 실제 throw) 케이스가 그 지점이다. dryRun:true로 두어 실제 Supabase는
+    // 절대 건드리지 않는다(testGoogleTrends.ts의 forced-failure 주입과 같은 원칙).
     const result = await runCommunityCollection({
       enabled: true,
+      dryRun: true,
       sources: [
         {
           site: "site_ok",
@@ -320,10 +316,9 @@ async function testCollectionNeverThrows(): Promise<void> {
           fetchPosts: async () => [{ title: "이서준 열애설", siteRank: 1 }],
         },
       ],
-      extractKeywords: async () => ({ items: [{ index: 0, keyword: "이서준 열애설", category: "entertainment" }] }),
-      // dryRun을 false로 두되 실제 Supabase가 없는 이 테스트 환경에서는 upsertCandidates가
-      // 자연스럽게 실패하므로 그 실패가 status:'failed'로 정확히 변환되는지 확인한다.
-      dryRun: false,
+      extractKeywords: async () => {
+        throw { message: "unexpected", code: "500", details: "boom" }; // 비-Error 객체로 describeError 경로도 검증
+      },
     });
     assert(result.status === "failed", "예기치 못한 예외는 status:'failed'로 변환돼야 한다");
     assert(typeof result.error === "string" && result.error.length > 0, "실패 원인이 문자열로 보존돼야 한다([object Object] 금지)");

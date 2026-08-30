@@ -579,7 +579,7 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 ## 키워드 수집 확장 (2026-08-29, `claude/keyword-collection-optimization-6ojcou`)
 
 설계·진단 상세는 `docs/ai-handoff/KEYWORD_SOURCE_EXPANSION.md`. 사용자 요청 4건 중 1·2·4번
-구현 완료, 3번(커뮤니티)은 category만 완료.
+구현 완료. 3번(커뮤니티)은 2026-08-30에 더쿠 provider 실측 + 배선 + 활성화까지 완료(§7-4).
 
 1. **Top N 주제 중복 제거** - "넷플릭스 들쥐"가 Top 10 중 4칸을 차지하던 문제. 신규
    `workflows/keyword-ranking/topicGrouping.ts`가 희소 핵심 명사 공유로 같은 주제를 판정해
@@ -596,7 +596,8 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
    PostgrestError가 `[object Object]`가 되던 문제(2026-08-26에 고쳤던 게 신규 경로에서 재발 -
    `services/describeError.ts`로 통합), (b) `enabledSources` 옵션이 `creatorAdvisorEnabled:
    false`를 덮어써 "disabled면 조회 안 함" 계약이 깨져 있던 문제.
-3. **`community` category 추가** - 분류 체계에 편입 완료, 실제 수집기는 미구현(설계만).
+3. **`community` category + 수집기** - 분류 체계 편입 + 더쿠 provider + daily job 배선 + 활성화
+   완료(2026-08-30, §7-4). ⬜ 다음 아침 run에서 Top 10 유입 관찰.
 4. **`buildDailyQueryPool` 다중 source 지원** - source 하나가 실패해도 나머지로 진행(실패 격리),
    스키마 변경 없음(`trend_candidates.source`가 text 컬럼이라 문자열만 추가하면 됨).
 
@@ -609,13 +610,14 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 - ⬜ 내일 아침 09:00 run에서 구글 트렌드 유입 후 Top 10 변화 관찰(도배 해소 여부, 구글 트렌드
   유래 키워드 품질, 블로그 무관 키워드 quota 잠식 여부) - `KEYWORD_SOURCE_EXPANSION.md` §8 참고.
 - ⬜ 다음 실시간 트렌드 provider - daum.net DOM 실측부터(원격 세션에서 불가, 맥에서 진행).
-- 🟡 커뮤니티 수집기 - 별도 브랜치 `claude/community-collector`(2026-08-30)에서 파이프라인
-  (LLM 엔티티 추출 + 매핑 + 워크플로우 + CLI)에 더해 **더쿠(theqoo.net/hot) provider까지 구현
-  완료.** 실측 결과 네이트판/다음카페/네이버카페는 robots.txt가 정확히 목록 경로를 막아 제외됐고,
-  더쿠만 접근 가능해 유일한 provider로 등록했다(공지 row와 인기글 row를 class 유무로 구분).
-  **남은 건 맥에서 `npm run collect:community`(dry-run) 실제 fetch 확인 하나뿐** - 되면
-  `dailyKeywordWorkflow.ts` 연결 + `TREND_SOURCE_CONFIGS.community.enabled` 활성화는 구글 트렌드
-  때처럼 사용자 승인 필요. 상세는 `KEYWORD_SOURCE_EXPANSION.md` §7-2/§7-3.
+- ✅ 커뮤니티 수집기 - 브랜치 `claude/community-collector`(2026-08-30). 파이프라인(LLM 엔티티
+  추출 + 매핑 + 워크플로우 + CLI) + 더쿠(theqoo.net/hot) provider. 네이트판/다음카페/네이버카페는
+  robots.txt가 목록 경로를 막아 제외, 더쿠만 유일 provider(공지/인기글은 class 유무로 구분).
+  **맥에서 `npm run collect:community` dry-run 20건 fetch 실측 완료**, `dailyKeywordWorkflow.ts`
+  배선 + `TREND_SOURCE_CONFIGS.community.enabled` 코드 기본값 `true`로 활성화(2026-08-30 사용자
+  승인, 구글 트렌드와 같은 방식 - 끄려면 `.env`에 `COMMUNITY_TRENDS_ENABLED=false`). 결함 있던
+  `test:community`가 prod에 남긴 테스트 row 1건은 삭제 완료. ⬜ 다음 아침 run에서 Top 10 유입
+  관찰. 상세는 `KEYWORD_SOURCE_EXPANSION.md` §7-2/§7-3/§7-4.
 - ⬜ (관찰 후 판단, 승인 필요) cross-seed clustering 근본 수정.
 - ⬜ (관찰 후 판단) 블로그와 무관한 키워드(반도체·노동·무기 등) 필터링 여부.
 - 두 브랜치(`claude/keyword-collection-optimization-6ojcou`, `claude/community-collector`) 모두

@@ -32,6 +32,17 @@ const job: SchedulerJob = {
     if (result.trendCollection?.status === "failed") {
       console.log(`\n⚠️ Creator Advisor 수집 실패(비치명적) - ${result.trendCollection.error}`);
     }
+    if (result.googleTrendsCollection?.status === "failed") {
+      console.log(`\n⚠️ 구글 트렌드 수집 실패(비치명적) - ${result.googleTrendsCollection.error}`);
+    }
+    if (result.communityCollection?.status === "failed") {
+      console.log(`\n⚠️ 커뮤니티 수집 실패(비치명적) - ${result.communityCollection.error}`);
+    }
+    if (result.communityCollection?.sourceErrors) {
+      for (const [site, error] of Object.entries(result.communityCollection.sourceErrors)) {
+        console.log(`\n⚠️ 커뮤니티 "${site}" 조회 실패(비치명적, 나머지로 진행) - ${error}`);
+      }
+    }
 
     if (result.relevance) {
       console.log(
