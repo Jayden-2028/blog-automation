@@ -10,7 +10,8 @@
 
 import { runGoogleTrendsCollection } from "./runGoogleTrendsCollection.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
-import { isUsableTrendKeyword, resolveGoogleTrendsCategory } from "./mapGoogleTrendsCandidates.js";
+import { resolveGoogleTrendsCategory } from "./mapGoogleTrendsCandidates.js";
+import { isUsableTrendKeyword } from "../../config/trendSources.js";
 
 const write = process.env.WRITE === "1";
 const geo = process.env.GEO ?? "KR";

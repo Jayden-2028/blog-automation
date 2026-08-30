@@ -108,6 +108,14 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
  */
 export const MIN_TREND_KEYWORD_LENGTH = 2;
 
+/**
+ * 이 키워드를 daily pool에 넣어도 되는지. 지금은 최소 길이 하나만 본다.
+ * 구글 트렌드/커뮤니티 등 사람이 큐레이션하지 않는 모든 동적 소스가 공유한다(MIN_TREND_KEYWORD_LENGTH 주석).
+ */
+export function isUsableTrendKeyword(keyword: string): boolean {
+  return keyword.replace(/\s+/g, "").length >= MIN_TREND_KEYWORD_LENGTH;
+}
+
 /** enabled=true인 source만 순서대로 반환한다. */
 export function getEnabledTrendSources(): TrendSource[] {
   return TREND_SOURCES.filter((source) => TREND_SOURCE_CONFIGS[source].enabled);

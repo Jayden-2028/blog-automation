@@ -27,7 +27,7 @@
 // 3) candidate_score를 순위와 검색량으로 만든다. Creator Advisor는 rank + movement로 계산하는데
 //    (scoreCreatorAdvisorCandidate.ts) 여기엔 movement가 없다. 대신 피드가 approx_traffic을 준다.
 
-import { MIN_TREND_KEYWORD_LENGTH, TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
+import { TREND_SOURCE_CONFIGS, isUsableTrendKeyword } from "../../config/trendSources.js";
 import { classifyKeywordCategory } from "../../config/keywordCategoryRules.js";
 import { classifyCategoryByNewsOutlets } from "../../config/newsOutletRules.js";
 import type { GoogleTrendsItem } from "../../services/search/providers/googleTrends/parseGoogleTrendsRss.js";
@@ -60,14 +60,6 @@ export function resolveGoogleTrendsCategory(item: GoogleTrendsItem): string {
     classifyCategoryByNewsOutlets(item.newsItems.map((news) => news.source)) ??
     FALLBACK_CATEGORY
   );
-}
-
-/**
- * 이 키워드를 daily pool에 넣어도 되는지. 지금은 최소 길이 하나만 본다.
- * 1글자 키워드는 relevance 게이트를 무력화하므로 반드시 걸러야 한다(MIN_TREND_KEYWORD_LENGTH 주석).
- */
-export function isUsableTrendKeyword(keyword: string): boolean {
-  return keyword.replace(/\s+/g, "").length >= MIN_TREND_KEYWORD_LENGTH;
 }
 
 /**

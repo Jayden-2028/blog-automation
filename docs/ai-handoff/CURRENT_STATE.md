@@ -1,6 +1,6 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-08-29 (Asia/Seoul)
+기준일: 2026-08-30 (Asia/Seoul)
 
 ## 한 줄 상태
 
@@ -609,10 +609,16 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 - ⬜ 내일 아침 09:00 run에서 구글 트렌드 유입 후 Top 10 변화 관찰(도배 해소 여부, 구글 트렌드
   유래 키워드 품질, 블로그 무관 키워드 quota 잠식 여부) - `KEYWORD_SOURCE_EXPANSION.md` §8 참고.
 - ⬜ 다음 실시간 트렌드 provider - daum.net DOM 실측부터(원격 세션에서 불가, 맥에서 진행).
-- ⬜ 커뮤니티 수집기 - 더쿠/펨코 등 DOM 실측 필요.
+- 🟡 커뮤니티 수집기 - 별도 브랜치 `claude/community-collector`(2026-08-30)에서 파이프라인
+  (LLM 엔티티 추출 + 매핑 + 워크플로우 + CLI, `test:community`)까지 구현·오프라인 검증 완료.
+  **사이트별 provider(네이트판/더쿠/다음카페/네이버카페) 4건은 여전히 미구현** - `npm run
+  recon:community`를 맥에서 먼저 실행해 각 사이트 robots.txt/HTML을 확보해야 파서를 쓸 수 있다
+  (이 원격 세션은 egress가 막혀 실제 사이트 접근 불가, 자체 확인함). 상세는
+  `KEYWORD_SOURCE_EXPANSION.md` §7-2. `TREND_SOURCE_CONFIGS.community.enabled`는 여전히 false.
 - ⬜ (관찰 후 판단, 승인 필요) cross-seed clustering 근본 수정.
 - ⬜ (관찰 후 판단) 블로그와 무관한 키워드(반도체·노동·무기 등) 필터링 여부.
-- 이 브랜치는 아직 `main`에 머지되지 않았다(PR 없음) - 머지는 승인 후 진행.
+- 두 브랜치(`claude/keyword-collection-optimization-6ojcou`, `claude/community-collector`) 모두
+  아직 `main`에 머지되지 않았다(PR 없음) - 머지는 승인 후 진행.
 
 ## 인프라 정리 (2026-08-28, 중간 점검 후속)
 

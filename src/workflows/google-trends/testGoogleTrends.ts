@@ -18,9 +18,9 @@ import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/
 import {
   mapGoogleTrendsItemsToInserts,
   resolveGoogleTrendsCategory,
-  isUsableTrendKeyword,
   GOOGLE_TRENDS_SOURCE,
 } from "./mapGoogleTrendsCandidates.js";
+import { isUsableTrendKeyword } from "../../config/trendSources.js";
 import type { GoogleTrendsItem } from "../../services/search/providers/googleTrends/parseGoogleTrendsRss.js";
 import { runGoogleTrendsCollection } from "./runGoogleTrendsCollection.js";
 

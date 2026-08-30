@@ -9,9 +9,11 @@
 3. "커뮤니티" 카테고리 추가 (더쿠·펨코·다음/네이버 인기카페 인기글)
 4. 다음 실시간 검색 + 구글 트렌드를 검색 풀에 반영
 
-**진행 상태**: 1·2번 구현·검증 완료. 3번(커뮤니티)은 `community` category까지 완료, 수집기는 설계.
-4번은 구글 트렌드 **실측 검증 완료**(기본 disabled), 다음 실시간은 설계. 사용자 결정 사항은 §7,
-이번 세션에서 실제로 구현한 것은 §7-1, 남은 순서는 §8.
+**진행 상태**: 1·2번 구현·검증 완료. 3번(커뮤니티)은 `community` category 완료 +
+**수집기 파이프라인(LLM 추출/매핑/워크플로우) 구현·오프라인 검증 완료, 실제 사이트 provider는 실측
+대기**(브랜치 `claude/community-collector`, §7-2). 4번은 구글 트렌드 **실측 검증 완료·활성화**
+(브랜치 `claude/keyword-collection-optimization-6ojcou`), 다음 실시간은 설계만. 사용자 결정 사항은
+§7, 첫 세션에서 구현한 것은 §7-1, 커뮤니티 수집기 세션에서 구현한 것은 §7-2, 남은 순서는 §8.
 
 > **검증 한계**: 원격 컨테이너에 `.env`가 없고 외부 egress가 차단돼 있어, Supabase/NAVER API 호출은
 > 이 세션에서 실행하지 못했다(순수 함수 테스트와 `npm run build`는 전부 통과). 구글 트렌드는
@@ -528,6 +530,67 @@ npm run test:naver-html             pass
 
 ---
 
+## 7-2. 2026-08-30 세션에서 실제로 구현한 것 (`claude/community-collector`)
+
+§8의 6번(커뮤니티 수집 + LLM 엔티티 추출)을 시작했다. **사이트별 스크래핑(더쿠/네이트판/다음·
+네이버 카페)은 여전히 DOM 실측이 필요해 이 원격 세션에서 할 수 없었다** - 이번엔 egress 자체를
+실측해서 확인했다: 이 세션의 agent proxy는 `theqoo.net` 등 목표 사이트를 `EGRESS_BLOCKED`로
+전부 거부한다(WebFetch/curl 둘 다 확인). 그래서 이번 세션은 **사이트 provider를 뺀 나머지 전부**를
+구현했다 - provider는 인터페이스만 있으면 나중에 이 파이프라인을 전혀 건드리지 않고 추가된다.
+
+구현한 것:
+
+1. `src/services/community/CommunitySource.ts` - `CommunitySourceProvider` 인터페이스
+   (`{ site, label, fetchPosts() }`). `COMMUNITY_SOURCE_PROVIDERS`는 **아직 빈 배열**이다(실제
+   사이트 없음).
+2. `src/workflows/community/extractCommunityKeywords.ts` - §5-1의 "하루 1회 LLM 1콜" 구현.
+   `runHeadlessClaude`를 재사용해 사이트 무관 제목 목록을 한 번에 넘기고, `번호|키워드|category`
+   형식으로 돌려받는다. 파싱은 `generateTitleSuggestions.ts`의 방어적 정리(따옴표/번호 제거,
+   형식 어긴 줄 무시)를 따른다. **posts가 0건이면 LLM을 호출하지 않는다** - 지금은 provider가
+   없어 매 실행이 이 경로를 탄다.
+3. `src/workflows/community/mapCommunityCandidates.ts` - 추출 결과 -> `TrendCandidateInsert`.
+   category는 **LLM 결과 -> `classifyKeywordCategory` 어휘 규칙 -> `community` 자체 폴백** 순으로
+   정한다. 구글 트렌드의 폴백(`living`)과 다르게 잡은 이유: 이 소스 자체가 "인터넷 화제"라는 정의라,
+   끝까지 못 잡은 항목은 생활정보보다 화제/밈에 더 가깝다고 판단했다. candidate_score는 검색량
+   신호가 없어 site 내 순위(siteRank)만으로 계산하고, 구글 트렌드(만점 50)보다 만점을 낮게
+   잡았다(30) - 신호가 약한 소스라는 걸 스케일에도 반영. 배치 내 conflict key(21000) 중복 제거는
+   기존 두 소스와 동일하게 적용.
+4. `src/workflows/community/runCommunityCollection.ts` - `runGoogleTrendsCollection.ts`와 같은
+   "절대 throw하지 않는다" 계약. **사이트별 실패를 격리한다**(`buildDailyQueryPool`의 소스별
+   try/catch와 같은 원칙) - 사이트 하나가 막혀도 나머지로 진행. provider가 0개면 LLM 호출 없이
+   `status: "success", fetchedCount: 0`을 반환한다(현재 실제 상태).
+5. `src/workflows/community/runCollectionCli.ts` - `WRITE=1` 게이트를 포함한 동일한 dry-run
+   기본 CLI. 지금 실행하면 "등록된 사이트: 0개"만 나온다(배선 확인용).
+6. `scripts/communityRecon.ts` - **다음 단계를 위한 실측 도구.** `npm run recon:community`로
+   맥에서 실행하면 대상 4개 사이트의 `robots.txt`를 먼저 확인하고(금지된 경로는 건너뜀), 통과한
+   페이지의 원본 HTML을 `docs/ai-handoff/community-recon/`(git에 커밋 안 함, `.gitignore` 추가)에
+   저장한다. 이 원격 세션에서 자체 테스트했을 때 4개 사이트 전부 이 환경의 egress 프록시가
+   `Host not in allowlist`로 막았다(실제 사이트 응답이 아님을 확인 후 결과 파일은 삭제했다) -
+   즉 이 스크립트가 실제 사이트 데이터를 주는지는 맥에서만 확인 가능하다.
+7. `isUsableTrendKeyword`(1글자 키워드 제외)를 `mapGoogleTrendsCandidates.ts`에서
+   `config/trendSources.ts`로 옮겼다 - 구글 트렌드 전용이 아니라 사람이 큐레이션하지 않는 모든
+   동적 소스가 공유하는 게이트이기 때문이다(작은 리팩터, 동작 변경 없음, 기존 `test:google-trends`
+   회귀 통과 확인).
+
+**아직 안 한 것 / 다음 세션에 필요한 것**:
+- 사이트별 `CommunitySourceProvider` 구현 4건(네이트판/더쿠/다음카페/네이버카페) - `recon:community`
+  결과 HTML을 fixture 삼아 각 사이트의 인기글 제목 목록을 뽑는 파서를 쓴다. 이건 결과가 명확한
+  반복 작업이라 `delegate-codex` 위임 후보다(파서 하나당 "이 HTML에서 제목 배열을 뽑아라"로 범위가
+  좁다).
+- `dailyKeywordWorkflow.ts`에 `runCommunityCollection`을 연결하는 배선(구글 트렌드가 이미 있는
+  자리 - `trendCollectOptions`/`googleTrendsOptions` 옆에 `communityOptions` 추가하는 정도).
+  **provider가 최소 1개는 실제로 동작하기 전까지는 연결하지 않았다** - 지금 연결해봐야 매일
+  0건만 upsert하는 죽은 코드라서.
+- `TREND_SOURCE_CONFIGS.community.enabled`는 여전히 기본 false다. provider가 붙고 실측 검증까지
+  끝난 뒤 구글 트렌드 때처럼 사용자 승인을 받아 켠다.
+- **오프라인 검증만 완료했다**(`npm run build` + `npm run test:community` + `npm run
+  test:google-trends` 회귀, 더미 Supabase 환경변수, 실제 원격 접근 없음). `runHeadlessClaude`가
+  실제로 `claude` CLI를 찾아 호출하는 경로는 이 원격 컨테이너에 그 바이너리가 없어 검증하지
+  못했다 - 맥에서 `npm run collect:community`로 실제 호출까지 확인이 필요하다(단, provider가
+  없으면 여전히 0건이라 이 검증도 provider 연결 이후에나 의미가 있다).
+
+---
+
 ## 8. 실행 순서
 
 ```
@@ -535,19 +598,21 @@ npm run test:naver-html             pass
 1. ✅ buildDailyQueryPool 다중 source 지원 (§4-2)
 2. ✅ 구글 트렌드 RSS provider (§6-2) — 맥 실측 완료, 분류 보강까지 반영
 3. ✅ community category (결정 B)
---- 여기까지 이 브랜치 ---
+--- 여기까지 첫 브랜치(claude/keyword-collection-optimization-6ojcou) ---
 4. ✅ 구글 트렌드 켜기 (2026-08-29 사용자 승인)
    코드 기본값을 true로 바꿨다 - .env 수정이 필요 없다. git pull만 하면 다음 09:00 run부터
    trendCollect 단계가 수집·upsert한다. 끄려면 .env에 GOOGLE_TRENDS_ENABLED=false.
    ⬜ 다음 아침 run에서 Top 10 변화 관찰
 5. ⬜ 다음 실시간 트렌드 provider (§6-1)        <- daum.net DOM 실측부터
-6. ⬜ 커뮤니티 수집 + LLM 엔티티 추출 (§5)      <- 결정 C/D 반영, 펨코 제외
+6. 🟡 커뮤니티 수집 + LLM 엔티티 추출 (§5, §7-2)  <- 파이프라인 완료, 사이트 provider 4건 실측 대기
+--- 여기까지 둘째 브랜치(claude/community-collector) ---
 7. ⬜ (관찰 후 판단) clustering 근본 수정 (§7-A)
 8. ⬜ (관찰 후 판단) 블로그 무관 키워드 필터 (§7-1)
 ```
 
-5·6은 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수 없다. 실측 뒤 파서 작성은
-범위가 명확해지므로 `delegate-codex` 위임 후보가 된다(Creator Advisor Swiper 순회 때와 같은 방식).
+5·6(사이트 provider 부분)은 외부 페이지 DOM 구조 실측이 선행돼야 해서 원격 세션에서 진행할 수
+없다 - `npm run recon:community`를 맥에서 먼저 돌려야 한다(§7-2). 실측 뒤 파서 작성은 범위가
+명확해지므로 `delegate-codex` 위임 후보가 된다(Creator Advisor Swiper 순회 때와 같은 방식).
 
 ### 관찰 항목 (며칠 Top 10을 보고 판단)
 
