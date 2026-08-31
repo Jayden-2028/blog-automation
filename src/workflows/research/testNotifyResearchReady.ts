@@ -157,6 +157,21 @@ function main(): void {
   );
   console.log("✅ 마지막 메시지에만 버튼 부착");
 
+  // 10) 자동 흐름(2026-08-31): Go 시점에 저장된 추천 제목(job.metadata.titleSuggestions)이
+  //     조사 완료 알림에 포함돼야 한다 - 여기가 제목을 처음 보여주는 자리다.
+  const withTitles = buildResearchPreviewMessages(
+    makeJob({ metadata: { titleSuggestions: ["제목 하나", "제목 둘"] } }),
+    sources,
+    okSummary("- 요약")
+  );
+  const joined = withTitles.map((m) => m.text).join("\n");
+  assert(joined.includes("추천 제목"), "조사 완료 알림에 추천 제목 블록이 있어야 한다");
+  assert(joined.includes("제목 하나") && joined.includes("제목 둘"), "저장된 제목이 그대로 노출돼야 한다");
+  // 제목이 없으면 블록도 없다.
+  const noTitles = buildResearchPreviewMessages(makeJob({ metadata: {} }), sources, okSummary("- 요약"));
+  assert(!noTitles.map((m) => m.text).join("\n").includes("추천 제목"), "제목이 없으면 블록도 없어야 한다");
+  console.log("✅ 추천 제목: metadata에 있으면 노출, 없으면 생략");
+
   console.log("\n✅ buildResearchPreviewMessages 테스트 완료");
 }
 

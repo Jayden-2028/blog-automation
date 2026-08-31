@@ -51,8 +51,13 @@ function buildHeaderLines(job: ArticleJobRow, sources: SourceRow[]): string[] {
 // 이게 유일한 진행 수단이라 필요했지만, 이제 같은 메시지에 [✍️ 원고 작성][🗑 중단] 버튼이
 // 있어 명령어를 폰에서 옮겨 칠 이유가 없다 - jobId가 그대로 노출되는 긴 줄이라 메시지만 지저분해진다.
 // 터미널로 직접 하려면 `npm run job:write`를 인자 없이 실행하면 대기 중인 job 목록이 나온다.
-function buildFooterLines(_job: ArticleJobRow): string[] {
-  return [];
+function buildFooterLines(job: ArticleJobRow): string[] {
+  // Go 시점에 생성해 job.metadata.titleSuggestions에 저장해 둔 추천 제목. 자동 흐름(2026-08-31)에서는
+  // 이 조사 완료 알림이 제목을 처음 보여주는 자리다 - "원고를 쓸까?"를 판단할 때 제목도 같이 본다.
+  const raw = (job.metadata as Record<string, unknown> | null)?.titleSuggestions;
+  const titles = Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
+  if (titles.length === 0) return [];
+  return ["", "✍️ <b>추천 제목</b>", ...titles.map((title, index) => `${index + 1}. ${escapeTelegramHtml(title)}`)];
 }
 
 /** 요약 생성이 실패했을 때만 쓰는 폴백 - 출처별 제목+짧은 발췌+URL을 그대로 나열한다. */
