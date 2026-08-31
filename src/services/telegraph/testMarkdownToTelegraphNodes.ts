@@ -137,6 +137,15 @@ function main(): void {
   assert(Array.isArray(edgeCase) && edgeCase.length === 0, "빈 문자열은 빈 배열을 반환해야 한다");
   console.log("✅ 빈 문자열 -> 빈 배열(안전 처리)");
 
+  // 8) 이미지 보류(2026-09-01): "[IMAGE: 설명]" 마커는 이미지 markdown(![](url))이 아니므로
+  //    그대로 문단 텍스트로 통과해야 한다 - 사용자가 그 자리에 직접 이미지를 넣도록 안내한다.
+  const withMarker = markdownToTelegraphNodes("도입 문단입니다.\n\n[IMAGE: 한강 불꽃축제 전경, 얼굴 없는 관람객 뒷모습]\n\n다음 문단.");
+  const markerTags = withMarker.map((n) => (typeof n === "object" ? n.tag : "text"));
+  assert(JSON.stringify(markerTags) === JSON.stringify(["p", "p", "p"]), `[IMAGE:] 마커는 문단으로 통과해야 한다 (실제: ${JSON.stringify(markerTags)})`);
+  assert(JSON.stringify(withMarker).includes("[IMAGE: 한강 불꽃축제"), "마커 텍스트가 그대로 남아야 한다");
+  assert(!JSON.stringify(withMarker).includes('"tag":"figure"'), "마커를 figure/img로 변환하면 안 된다");
+  console.log("✅ [IMAGE: 설명] 마커 -> 문단 텍스트로 통과(figure 변환 안 함)");
+
   console.log("\n✅ markdownToTelegraphNodes 테스트 완료");
 }
 

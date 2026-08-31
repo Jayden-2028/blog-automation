@@ -398,10 +398,18 @@ export async function runWritingStage(
   // 규칙 기반이라 비용이 사실상 0이고, 결과가 곧 알림 내용의 일부이기 때문이다 - 조사 체크포인트처럼
   // 별도 CLI 단계로 분리하면 사람이 명령을 한 번 더 쳐야 하는데 그 대가로 얻는 게 없다.
   // ⚠️ 이 결과는 원고를 차단하지 않는다 - 알림에 표시되고 사람이 판단한다.
+  //
+  // 팩트 대조 대상(2026-09-01): sources 테이블 + research/<슬러그>.md 전문. 파일 기반 파이프라인에서
+  // 에이전트가 인용한 웹 출처는 sources에 URL만 들어가고 본문(content)이 없어, 파일 전문을 함께
+  // 넘겨야 "근거에서 확인되지 않음" 오탐을 줄일 수 있다(§2 확인된 사실 / §6 수치·기준 정리).
+  const researchText = await defaultReadResearchFile(researchPath);
+  const reviewSources = researchText
+    ? [...sources.map((s) => ({ content: s.content })), { content: researchText }]
+    : sources.map((s) => ({ content: s.content }));
   const review = runArticleReview({
     job: { category: job.category },
     article: { title: article.title, content: article.content, created_at: article.created_at },
-    sources: sources.map((s) => ({ content: s.content })),
+    sources: reviewSources,
     hashtags: parsed.hashtags,
     isMedical,
   });
