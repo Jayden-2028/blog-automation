@@ -94,6 +94,9 @@ export async function publishArticleToTistory(
     return { ok: false, reason: "daily_limit", detail: `오늘 티스토리 발행이 상한(${TISTORY_CONFIG.dailyLimit})에 도달했습니다.` };
   }
 
+  // 갓 생성한 배리에이션의 태그. articles에 metadata 컬럼이 없어 재사용 경로에서는 잃는다
+  // (그때는 category 라벨로 폴백). 대부분은 첫 발행이라 배리에이션 태그(5~10개)를 그대로 쓴다.
+  let freshTags: string[] = [];
   if (!variantArticle) {
     const result = await generateVariant({
       category: job.category,
@@ -101,6 +104,7 @@ export async function publishArticleToTistory(
       baseBody: baseArticle.content ?? "",
     });
     if (result.status !== "success") return { ok: false, reason: "variant_failed", detail: result.error };
+    freshTags = result.variant.tags;
     variantArticle = await createVariantArticle({
       jobId,
       title: result.variant.title,
@@ -111,8 +115,10 @@ export async function publishArticleToTistory(
   }
 
   const bodyHtml = convertArticleToHtml(variantArticle.content ?? "");
-  // 티스토리는 태그를 별도 입력란에 넣는다(§9-1). 배리에이션 tags가 없으면 category 라벨 하나라도.
-  const tags = job.category ? [BLOGSPOT_LABEL_BY_INTERNAL[job.category]].filter(Boolean) : [];
+  // 티스토리는 태그를 별도 입력란에 넣는다(§9-1, 자유 태그라 SEO에 유효). 배리에이션 태그를
+  // 우선하고, 없으면(재사용 경로) category 라벨 하나로 폴백한다.
+  const categoryFallback = job.category ? [BLOGSPOT_LABEL_BY_INTERNAL[job.category]].filter(Boolean) : [];
+  const tags = freshTags.length > 0 ? freshTags : categoryFallback;
 
   const draftResult = await saveDraft({ title: variantArticle.title ?? job.keyword, bodyHtml, tags });
   if (!draftResult.ok) {
