@@ -58,9 +58,11 @@ export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutg
 }
 
 export async function notifyMultiPublish(results: JobPublishResult[]): Promise<void> {
+  const QUIET: ReadonlyArray<string> = ["already_done", "skipped", "deferred"];
   const messages = results
-    // 이번 실행에서 실제로 뭔가 일어난 job만 알린다 - 전부 already_done이면 조용히 넘어간다.
-    .filter((r) => r.channels.some((c) => c.status !== "already_done" && c.status !== "skipped"))
+    // 이번 실행에서 실제로 뭔가 일어난 job만 알린다. 전부 already_done/skipped/deferred면 조용히
+    // 넘어간다 - deferred(상한초과, 정리 필요)는 10분마다 반복되므로 매번 알리면 소음이 된다.
+    .filter((r) => r.channels.some((c) => !QUIET.includes(c.status)))
     .map(buildMultiPublishMessage);
   if (messages.length === 0) return;
   await TelegramNotifier.fromEnv().sendMessages(messages);
