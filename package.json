@@ -68,6 +68,7 @@
     "test:callback-data": "tsx src/notifications/testTelegramCallbackData.ts",
     "test:telegram-bot": "tsx src/notifications/testTelegramBot.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
+    "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",
     "job:daily-keyword": "tsx src/jobs/dailyKeywordJob.ts",
     "job:community-keyword": "tsx src/jobs/communityKeywordJob.ts",
     "job:telegram-poll": "tsx src/jobs/telegramPollJob.ts",

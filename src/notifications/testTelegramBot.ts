@@ -11,7 +11,7 @@
 // 5. 잘못 눌렀을 때 Pass <-> Go로 되돌릴 수 있다
 // 6. 이미 진행 중인 job은 버튼으로 되돌려지지 않는다
 
-import { TelegramBot } from "./TelegramBot.js";
+import { jobFromFreshSelection, TelegramBot } from "./TelegramBot.js";
 import type { ArticleJobRow, ArticleRow, KeywordRankingRow } from "../types/database.js";
 import type { TelegramCallbackQuery } from "./TelegramBot.js";
 
@@ -171,6 +171,8 @@ async function main(): Promise<void> {
   }
 
   // 4) 정상 선택: job 생성 + 제목 생성 + metadata 저장 + 확인 메시지.
+  //    자동 흐름(2026-08-31): 추천 제목은 확인 메시지가 아니라 조사 완료 알림에서 보여준다.
+  //    확인 메시지는 "자료조사 시작"만 알린다(자료조사 자체는 pollOnce가 이어서 돌린다).
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls });
@@ -179,9 +181,27 @@ async function main(): Promise<void> {
     assert(calls.create === 1, `job 생성은 1회여야 한다 (실제: ${calls.create})`);
     assert(calls.titles === 1, `제목 생성은 1회여야 한다 (실제: ${calls.titles})`);
     assert(calls.saveTitles === 1, "생성된 제목을 metadata에 저장해야 한다");
-    assert(result.message.includes("제목 A"), "확인 메시지에 추천 제목이 들어가야 한다");
+    assert(result.message.includes("자료조사"), "확인 메시지에 자료조사 시작 안내가 들어가야 한다");
     assert(result.message.includes("양준모"), "확인 메시지에 선택한 키워드가 들어가야 한다");
-    console.log("✅ 정상 선택 -> job 생성 + 제목 3개 + 확인 메시지");
+    console.log("✅ 정상 선택 -> job 생성 + 제목 3개 + 자료조사 시작 안내");
+  }
+
+  // 4-1) jobFromFreshSelection: 자료조사 자동 시작 대상 판정.
+  {
+    const job = makeJob({ status: "selected" });
+    assert(jobFromFreshSelection({ status: "created", job }) === job, "created는 자료조사 대상이다");
+    assert(
+      jobFromFreshSelection({ status: "changed", job, from: "rejected" }) === job,
+      "rejected -> selected 복구는 자료조사 대상이다"
+    );
+    assert(
+      jobFromFreshSelection({ status: "changed", job: makeJob({ status: "rejected" }), from: "selected" }) === null,
+      "Go -> Pass 전환은 자료조사 대상이 아니다"
+    );
+    assert(jobFromFreshSelection({ status: "passed", job }) === null, "Pass는 자료조사 대상이 아니다");
+    assert(jobFromFreshSelection({ status: "unchanged", job }) === null, "중복 클릭은 자료조사 대상이 아니다");
+    assert(jobFromFreshSelection({ status: "locked", job }) === null, "locked는 자료조사 대상이 아니다");
+    console.log("✅ jobFromFreshSelection -> created/복구만 자료조사 시작");
   }
 
   // 5) 같은 결정 중복 클릭: job을 다시 만들지 않고, 비싼 제목 생성도 하지 않는다.
