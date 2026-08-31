@@ -51,6 +51,7 @@ function makeArticle(overrides: Partial<ArticleRow> = {}): ArticleRow {
     content: "가을 저녁 경복궁을 걸으며...\n\n## 일정과 가격\n9월 2일부터...",
     status: "review",
     ai_model: "claude-headless",
+    platform: null,
     created_at: "2026-08-27T00:00:00.000Z",
     updated_at: "2026-08-27T00:00:00.000Z",
     ...overrides,
