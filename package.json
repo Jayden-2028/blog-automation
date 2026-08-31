@@ -53,6 +53,7 @@
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
     "test:publish-blogspot": "tsx src/workflows/publish/testPublishArticleToBlogspot.ts",
     "test:publish-approved": "tsx src/workflows/publish/testPublishApprovedArticles.ts",
+    "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
