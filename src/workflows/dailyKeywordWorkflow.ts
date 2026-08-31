@@ -13,6 +13,7 @@
 // 기록한 뒤 이후 단계를 "skipped" 처리하고 즉시 반환한다 — 그래서 호출자는 stageLog만 보면 정확히
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
+import type { TrendSource } from "../config/trendSources.js";
 import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
@@ -221,6 +222,16 @@ export type DailyKeywordWorkflowOptions = {
   googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
   /** 커뮤니티(더쿠 등) 수집 단계(trendCollect)에 그대로 전달된다. */
   communityOptions?: RunCommunityCollectionOptions;
+  /**
+   * 이번 run에서 수집·조회할 동적 트렌드 소스. 생략하면 세 소스 모두(현행 동작).
+   * - 오전 job: ["creator_advisor", "google_trends"] — 커뮤니티는 오후로 분리(2026-08-31)
+   * - 오후 커뮤니티 job: ["community"]
+   * trendCollect 단계에서 어떤 수집기를 돌릴지, buildDailyQueryPool이 어떤 source의 trend_candidates를
+   * 읽을지를 함께 결정한다(오후 run이 오전에 쌓인 creator_advisor 후보를 다시 태우지 않도록).
+   */
+  collectionSources?: readonly TrendSource[];
+  /** buildDailyQueryPool에 그대로 전달. false면 seed_queries를 빼고 동적 소스만으로 pool을 만든다(오후 커뮤니티 전용). */
+  includeSeedQueries?: boolean;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -308,15 +319,28 @@ export async function runDailyKeywordWorkflow(
     // runCreatorAdvisorCollection() 자체가 예외를 던지지 않고 status로 실패를 알린다.
     const trendStartedAt = Date.now();
 
+    // 이번 run이 다룰 동적 소스. 생략하면 세 소스 모두(현행). 오전 job은 커뮤니티를 빼고,
+    // 오후 커뮤니티 job은 community 하나만 넘긴다(2026-08-31, 발송 2회 분리).
+    const collectionSources: readonly TrendSource[] =
+      options.collectionSources ?? ["creator_advisor", "google_trends", "community"];
+    const forceSkip = { enabled: false } as const;
+
     // 소스별로 독립 수집한다. 하나가 실패해도 나머지는 계속 돌아야 하므로 순차 실행하되 서로의
     // 결과를 참조하지 않는다. 각 러너는 throw하지 않고 status로만 알린다(각 파일 상단 주석).
-    const trendCollection = await runCreatorAdvisorCollection(options.trendCollectOptions);
+    // collectionSources에 없는 소스는 enabled:false로 강제 skip한다.
+    const trendCollection = await runCreatorAdvisorCollection(
+      collectionSources.includes("creator_advisor") ? options.trendCollectOptions : { ...options.trendCollectOptions, ...forceSkip }
+    );
     result.trendCollection = trendCollection;
 
-    const googleTrendsCollection = await runGoogleTrendsCollection(options.googleTrendsOptions);
+    const googleTrendsCollection = await runGoogleTrendsCollection(
+      collectionSources.includes("google_trends") ? options.googleTrendsOptions : { ...options.googleTrendsOptions, ...forceSkip }
+    );
     result.googleTrendsCollection = googleTrendsCollection;
 
-    const communityCollection = await runCommunityCollection(options.communityOptions);
+    const communityCollection = await runCommunityCollection(
+      collectionSources.includes("community") ? options.communityOptions : { ...options.communityOptions, ...forceSkip }
+    );
     result.communityCollection = communityCollection;
 
     if (trendCollection.status === "success") {
@@ -367,7 +391,12 @@ export async function runDailyKeywordWorkflow(
     // Creator Advisor가 disabled이거나 실패해도 buildDailyQueryPool()은 예외를 던지지 않고
     // seed_queries만으로 구성된 결과를 반환한다 - 그래서 이 "seed" 단계의 성공/실패 여부는
     // 기존과 동일하게 seed_queries 조회 성패에만 좌우된다.
-    const queryPool = await runStage(stageLog, "seed", () => buildDailyQueryPool());
+    const queryPool = await runStage(stageLog, "seed", () =>
+      buildDailyQueryPool({
+        enabledSources: options.collectionSources,
+        includeSeedQueries: options.includeSeedQueries,
+      })
+    );
     if (!queryPool) {
       skipRemaining(stageLog, ["collect", "relevance", "cluster", "rank", "save", "notify"]);
       return result;

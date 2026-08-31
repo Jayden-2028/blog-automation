@@ -32,7 +32,7 @@ export async function sendKeywordNotification(
   // (SPRINT_1_DESIGN.md 7절). 알림 시점에 10건을 만들면 8~9건은 쓰이지도 않고 버려진다.
   const payload: KeywordNotificationPayload = { run: fetched.run, items: fetched.items };
 
-  const chunks = formatNotificationMessage(payload);
+  const chunks = formatNotificationMessage(payload, { headerTitle: options.headerTitle });
   const messages = chunks.map((chunk) => chunk.text);
   // 항목마다 메시지가 따로 가므로(formatNotificationMessage 참고) 각 메시지에 그 항목의
   // Go/Pass 버튼만 붙인다. 헤더는 ranks가 비어 있어 버튼 없이 나간다.

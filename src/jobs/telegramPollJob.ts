@@ -7,16 +7,28 @@
 // 처리할 update가 없으면 조용히 끝난다 - 5분마다 도는 job이 매번 로그를 남기면 로그가 쓸모없어진다.
 import "dotenv/config";
 
+import { resolve } from "node:path";
+
 import { TelegramBot } from "../notifications/TelegramBot.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
+import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
 
 async function main(): Promise<void> {
+  // Go 콜백이 자료조사(최대 3분)를, 원고 작성 버튼이 집필(최대 5분)을 콜백 처리 안에서 동기
+  // 실행한다. 5분 주기를 넘기면 다음 launchd 발화가 겹치므로 파일 락으로 동시 실행을 막는다.
+  const lock = acquireSingleInstanceLock(resolve("logs/.telegram-poll.lock"));
+  if (!lock) {
+    // 이전 실행이 아직 돌고 있다 - 조용히 끝낸다. 다음 주기에 다시 시도한다.
+    return;
+  }
+
   const bot = TelegramBot.fromEnv({
     generateTitles: (job) =>
       generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
   });
 
-  const { processed, results, reviewResults, researchDecisionResults, errors } = await bot.pollOnce();
+  const { processed, results, reviewResults, researchDecisionResults, researchTriggerResults, errors } =
+    await bot.pollOnce();
 
   if (processed === 0) return;
 
@@ -54,6 +66,16 @@ async function main(): Promise<void> {
       console.log(`   ⚕️ 의학 교차확인 ${outcome.action} -> job ${outcome.job.id} (${outcome.job.keyword})`);
     } else if (outcome.status === "job_not_found") {
       console.log(`   · 의학 교차확인: job을 찾을 수 없음`);
+    }
+  }
+
+  for (const { job, result } of researchTriggerResults) {
+    if (result.status === "success") {
+      console.log(`   🔍 자료조사 완료(근거 ${result.sourceCount}건) -> job ${job.id} (${job.keyword})`);
+    } else if (result.status === "skipped") {
+      console.log(`   · 자료조사 건너뜀 -> job ${job.id} (${result.reason})`);
+    } else {
+      console.log(`   ⚠️ 자료조사 실패 -> job ${job.id} (${job.keyword}) - ${result.error}`);
     }
   }
 
