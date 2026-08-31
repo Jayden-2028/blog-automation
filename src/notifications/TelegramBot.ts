@@ -13,8 +13,9 @@ import {
 } from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
-import { runWritingStage } from "../workflows/writing/runArticleJob.js";
+import { runResearchStage, runWritingStage } from "../workflows/writing/runArticleJob.js";
 import { notifyArticleReady } from "../workflows/writing/notifyArticleReady.js";
+import { notifyResearchReady } from "../workflows/research/notifyResearchReady.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
@@ -93,6 +94,28 @@ export type TriggerWritingOutcome =
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
 
+// ---------- Go -> 자료조사 자동 시작 ----------
+// SPRINT: 오전/오후 자동 흐름(2026-08-31). Go 버튼을 누르면 job 생성·제목 생성에 이어 자료조사까지
+// 콜백 처리 안에서 그대로 실행한다(triggerWriting과 같은 패턴). 조사가 끝나면 notifyResearchReady가
+// 요약 + 추천 제목 + [원고 작성][중단] 버튼을 보낸다.
+export type TriggerResearchOutcome =
+  | { status: "success"; sourceCount: number }
+  | { status: "skipped"; reason: string }
+  | { status: "failed"; error: string };
+
+export type ResearchTriggerResult = { job: ArticleJobRow; result: TriggerResearchOutcome };
+
+/**
+ * 방금 selected가 된 job이면 반환한다(자료조사 자동 시작 대상). 신규 Go(created) 또는
+ * rejected -> selected 복구(changed + job.status === "selected")만 해당한다.
+ * Pass, 중복 클릭(unchanged), locked, Go -> Pass 전환은 대상이 아니다.
+ */
+export function jobFromFreshSelection(outcome: HandleCallbackOutcome): ArticleJobRow | null {
+  if (outcome.status === "created") return outcome.job;
+  if (outcome.status === "changed" && outcome.job.status === "selected") return outcome.job;
+  return null;
+}
+
 export type HandleResearchDecisionOutcome =
   | { status: "ignored"; reason: "not_a_research_decision" | "wrong_chat" }
   | { status: "job_not_found" }
@@ -138,6 +161,12 @@ export type TelegramBotOptions = {
   triggerWriting?: (jobId: string) => Promise<TriggerWritingOutcome>;
   /** research:reject 콜백에서 호출한다. rejectJobCli.ts와 같은 함수를 쓴다. */
   rejectJob?: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
+  /**
+   * Go로 새 job이 생겼을 때 곧바로 자료조사를 실행한다. 기본 구현은 job:research CLI와 동일하게
+   * runResearchStage 후 성공하면 notifyResearchReady(요약 + 원고 작성 버튼)를 보낸다.
+   * 테스트에서는 실제 조사/Telegram 호출 없이 결과만 주입한다.
+   */
+  triggerResearch?: (jobId: string) => Promise<TriggerResearchOutcome>;
 };
 
 export class TelegramBot {
@@ -154,6 +183,7 @@ export class TelegramBot {
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
+  private readonly triggerResearch: (jobId: string) => Promise<TriggerResearchOutcome>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
   constructor(options: TelegramBotOptions) {
@@ -196,6 +226,18 @@ export class TelegramBot {
         return { status: "failed", error: result.error };
       });
     this.rejectJob = options.rejectJob ?? ((jobId, reason) => rejectArticleJob(jobId, reason, "telegram"));
+    this.triggerResearch =
+      options.triggerResearch ??
+      (async (jobId) => {
+        const result = await runResearchStage(jobId);
+        if (result.status === "success") {
+          // 요약 + 추천 제목 + [✍️ 원고 작성][🗑 중단] 버튼이 붙은 진짜 다음 단계 메시지는 여기서 나간다.
+          await notifyResearchReady(result.job, result.sources);
+          return { status: "success", sourceCount: result.sources.length };
+        }
+        if (result.status === "skipped") return { status: "skipped", reason: result.reason };
+        return { status: "failed", error: result.error };
+      });
   }
 
   static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
@@ -300,16 +342,38 @@ export class TelegramBot {
       }
     }
 
-    return { outcome: { status: "created", job }, message: this.buildConfirmationMessage(job, titleSuggestions) };
+    return { outcome: { status: "created", job }, message: this.buildConfirmationMessage(job) };
   }
 
   private buildPassMessage(job: ArticleJobRow): string {
     return `⏭ <b>넘김</b>\n${escapeTelegramHtml(job.keyword)}`;
   }
 
-  private buildConfirmationMessage(job: ArticleJobRow, titleSuggestions: string[]): string {
+  private buildResearchFailedMessage(job: ArticleJobRow, error: string): string {
+    const titles = this.titleSuggestionsOf(job);
     const lines = [
-      `✅ <b>선택 완료</b>`,
+      `⚠️ <b>자료조사 실패</b>`,
+      ``,
+      `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+      escapeTelegramHtml(error).slice(0, 400),
+      ``,
+      `다시 시도: <code>npm run job:research -- ${job.id}</code>`,
+    ];
+    if (titles.length > 0) {
+      lines.push(``, `<b>추천 제목</b>`);
+      titles.forEach((title, index) => lines.push(`${index + 1}. ${escapeTelegramHtml(title)}`));
+    }
+    return lines.join("\n");
+  }
+
+  private titleSuggestionsOf(job: ArticleJobRow): string[] {
+    const raw = (job.metadata as Record<string, unknown> | null)?.titleSuggestions;
+    return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
+  }
+
+  private buildConfirmationMessage(job: ArticleJobRow): string {
+    const lines = [
+      `✅ <b>선택 완료 · 자료조사 시작</b>`,
       ``,
       `<b>${escapeTelegramHtml(job.keyword)}</b>`,
       `category: ${escapeTelegramHtml(job.category ?? "N/A")} · ${job.total_score ?? "?"}점`,
@@ -319,10 +383,9 @@ export class TelegramBot {
       lines.push(`원문: ${escapeTelegramHtml(job.headline)}`);
     }
 
-    if (titleSuggestions.length > 0) {
-      lines.push(``, `<b>추천 제목</b>`);
-      titleSuggestions.forEach((title, index) => lines.push(`${index + 1}. ${escapeTelegramHtml(title)}`));
-    }
+    // 추천 제목은 조사 완료 알림(notifyResearchReady)에서 요약과 함께 보여준다. 여기서는 조사가
+    // 돌고 있다는 것만 알린다 - 1~3분 뒤 요약 + 제목 + [원고 작성] 버튼이 온다.
+    lines.push(``, `🔍 자료조사 중입니다 (1~3분). 끝나면 요약과 추천 제목을 보내드립니다.`);
 
     return lines.join("\n");
   }
@@ -581,6 +644,7 @@ export class TelegramBot {
     results: HandleCallbackResult[];
     reviewResults: HandleArticleReviewResult[];
     researchDecisionResults: HandleResearchDecisionResult[];
+    researchTriggerResults: ResearchTriggerResult[];
     errors: string[];
   }> {
     const lastUpdateId = await TelegramOffsetRepository.getLastUpdateId(this.receiverId);
@@ -589,6 +653,7 @@ export class TelegramBot {
     const results: HandleCallbackResult[] = [];
     const reviewResults: HandleArticleReviewResult[] = [];
     const researchDecisionResults: HandleResearchDecisionResult[] = [];
+    const researchTriggerResults: ResearchTriggerResult[] = [];
     const errors: string[] = [];
     let maxUpdateId = lastUpdateId ?? -1;
 
@@ -620,6 +685,19 @@ export class TelegramBot {
 
         results.push(result);
         await this.respondToCallback(update.callback_query, result);
+
+        // Go로 job이 새로 selected가 되면(신규 생성 또는 rejected -> selected 복구) 곧바로 자료조사를
+        // 시작한다. 확인 메시지는 위 respondToCallback에서 이미 나갔고, 여기서 조사(최대 수 분)를
+        // 돌린 뒤 notifyResearchReady가 요약 + 원고 작성 버튼을 보낸다. 중복 클릭 등으로 이미
+        // researching 이후로 넘어간 job은 runResearchStage가 skipped로 조용히 처리한다.
+        const selectedJob = jobFromFreshSelection(result.outcome);
+        if (selectedJob) {
+          const triggered = await this.triggerResearch(selectedJob.id);
+          researchTriggerResults.push({ job: selectedJob, result: triggered });
+          if (triggered.status === "failed") {
+            await this.sendMessage(this.buildResearchFailedMessage(selectedJob, triggered.error));
+          }
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         console.error(`⚠️ update ${update.update_id} 처리 실패 -`, reason);
@@ -631,7 +709,7 @@ export class TelegramBot {
       await TelegramOffsetRepository.setLastUpdateId(maxUpdateId, this.receiverId);
     }
 
-    return { processed: updates.length, results, reviewResults, researchDecisionResults, errors };
+    return { processed: updates.length, results, reviewResults, researchDecisionResults, researchTriggerResults, errors };
   }
 
   /** respondToCallback과 같은 원칙(§answerCallbackQuery 만료 무시)으로 검수 결과를 알린다. */

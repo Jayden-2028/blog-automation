@@ -53,13 +53,22 @@ export type NotificationMessageChunk = {
   ranks: number[];
 };
 
-export function formatNotificationMessage(payload: KeywordNotificationPayload): NotificationMessageChunk[] {
+export type FormatNotificationMessageOptions = {
+  /** 헤더 첫 줄. 생략하면 "📊 오늘의 키워드 랭킹 TOP N"(오전 기본). 오후 커뮤니티 run은 별도 문구를 넘긴다. */
+  headerTitle?: string;
+};
+
+export function formatNotificationMessage(
+  payload: KeywordNotificationPayload,
+  options: FormatNotificationMessageOptions = {}
+): NotificationMessageChunk[] {
   const { run } = payload;
+  const headerTitle = options.headerTitle ?? `📊 <b>오늘의 키워드 랭킹 TOP ${payload.items.length}</b>`;
 
   // 헤더는 버튼이 없다(ranks: []). 발송 측이 이 값으로 reply_markup 생략을 판단한다.
   const header: NotificationMessageChunk = {
     text:
-      `📊 <b>오늘의 키워드 랭킹 TOP ${payload.items.length}</b>\n` +
+      `${headerTitle}\n` +
       `${formatDateHeader(run.startedAt)} · run #${run.id}\n` +
       `Seed ${run.activeSeedsCount}개 · 후보 ${run.candidatesCount}건 · 클러스터 ${run.clustersCount}개 · ` +
       `${run.categories.length}개 카테고리`,
