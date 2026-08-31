@@ -447,7 +447,9 @@ export const TOPIC_GROUPING_CONFIG = {
 // 최소 1개씩 포함되도록 한다(selectDiverseTopN.ts). 실제 고점 이슈가 없는 category는 억지로 채우지 않는다.
 export const DIVERSITY_CONFIG = {
   // 최종 Top N 안에서 동일 seedQuery가 등장할 수 있는 최대 횟수.
-  maxPerSeedQuery: 2,
+  // 2026-08-31: 2 -> 1. "며칠 운영 후 판단"하기로 했던 항목(CURRENT_STATE 알려진문제 #3).
+  // 같은 seed에서 파생된 키워드 2건이 Top 10 자리를 차지하는 사례가 반복돼 1로 내렸다.
+  maxPerSeedQuery: 1,
   // 최종 Top N 안에서 동일 topic이 등장할 수 있는 최대 횟수.
   //
   // "동일 topic"의 판정 기준이 2026-08-29에 바뀌었다. 이전에는 canonical keyword "문자열 완전 일치"
@@ -465,4 +467,11 @@ export const DIVERSITY_CONFIG = {
   targetCategories: ["ott", "parenting", "living", "entertainment", "community"] as string[],
   // true면 targetCategories 중 Top N에 대표가 없는 category를 candidate pool에서 backfill 시도한다.
   enableCategoryBackfill: true,
+  // category별 Top N 등장 상한(2026-08-31). 지정한 category만 적용, 나머지는 무제한. 기본은 비활성({}).
+  // 관측된 도배는 전부 "동일 seedQuery에서 같은 사건 기사 2건"이라 maxPerSeedQuery=1로 해소된다.
+  // living처럼 서로 다른 주제가 정상적으로 섞이는 grab-bag category까지 상한을 걸면 다양성을
+  // 오히려 해쳐서 지금은 켜지 않는다. 특정 category(예: 정책/지원금 전용 category가 생기면) 편중이
+  // 관측되면 코드 수정 없이 { living: 2 } 식으로 조절한다. 후보가 얕은 날은 selectDiverseTopN이
+  // 이 상한을 풀어 빈 자리를 메운다(1-1 pass).
+  maxPerCategory: {} as Record<string, number>,
 } as const;
