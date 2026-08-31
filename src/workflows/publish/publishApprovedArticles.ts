@@ -14,6 +14,7 @@ import { listImagesByArticleId } from "../../services/supabase/repositories/imag
 import { listPublicationsByArticleId } from "../../services/supabase/repositories/publicationRepository.js";
 import { publishArticleToNaver } from "../../services/publish/publishArticleToNaver.js";
 import { BLOGSPOT_PLATFORM, publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
+import { publishArticleToTistory } from "./publishArticleToTistory.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
 export type ChannelName = "naver" | "blogspot" | "tistory";
@@ -37,6 +38,7 @@ export type PublishApprovedArticlesOptions = {
   loadApprovedJobs?: () => Promise<ArticleJobRow[]>;
   publishNaver?: (jobId: string) => ReturnType<typeof publishArticleToNaver>;
   publishBlogspot?: (jobId: string) => ReturnType<typeof publishArticleToBlogspot>;
+  publishTistory?: (jobId: string) => ReturnType<typeof publishArticleToTistory>;
   markJobPublished?: (jobId: string) => Promise<unknown>;
   /** job이 발행 가능한 상태인지 사전 점검. 반환값이 문자열이면 그 사유로 job 전체를 건너뛴다(deferred). */
   preflight?: (job: ArticleJobRow) => Promise<string | null>;
@@ -98,6 +100,7 @@ export async function publishApprovedArticles(
   const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listByStatus("approved", 20));
   const publishNaver = options.publishNaver ?? ((jobId) => publishArticleToNaver(jobId));
   const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
+  const publishTistory = options.publishTistory ?? ((jobId) => publishArticleToTistory(jobId));
   const markJobPublished = options.markJobPublished ?? ((jobId) => ArticleJobRepository.updateStatus(jobId, "published"));
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
   const preflight = options.preflight ?? defaultPreflight;
@@ -154,8 +157,22 @@ export async function publishApprovedArticles(
             channels.push({ channel, status: "failed", reason: r.detail });
           }
         } else {
-          // tistory: Phase 5. 활성 채널에 있더라도 아직 구현 전이면 deferred.
-          channels.push({ channel, status: "deferred", reason: "티스토리 발행 미구현(Phase 5)" });
+          // tistory: 임시저장까지만(네이버와 동일 반자동).
+          const r = await publishTistory(job.id);
+          if (r.ok) {
+            channels.push(
+              r.alreadyDone
+                ? { channel, status: "already_done", url: r.draftUrl }
+                : { channel, status: "draft", url: r.draftUrl }
+            );
+          } else if (r.reason === "disabled" || r.reason === "job_not_approved") {
+            channels.push({ channel, status: "skipped", reason: r.detail });
+          } else if (r.reason === "daily_limit" || r.reason === "login_required") {
+            // login_required: 카카오 세션 만료. 재시도 대기(로그인은 사람이 setup:tistory로).
+            channels.push({ channel, status: "deferred", reason: r.detail });
+          } else {
+            channels.push({ channel, status: "failed", reason: r.detail });
+          }
         }
       } catch (error) {
         channels.push({
