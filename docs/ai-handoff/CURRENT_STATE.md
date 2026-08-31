@@ -1,6 +1,55 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-08-30 (Asia/Seoul)
+기준일: 2026-08-31 (Asia/Seoul)
+
+## 2026-08-31 세션 (오전/오후 2회 발송 + 자동 흐름 + 브랜치 통합)
+
+전체 계획: `/Users/wooahpapa/.claude/plans/adaptive-wibbling-abelson.md`
+
+**Phase 0 — 브랜치 통합 + 운영 고정 (완료)**
+- `claude/community-collector` + `claude/multi-platform-publish`를 `main`에 병합, `origin/main` push.
+  이제 Sprint 0~5(설계) + 구글트렌드 + 커뮤니티 + 주제중복제거가 전부 main에 있다.
+- **운영 worktree 분리**: `~/blog-automation-prod`가 `main` 고정. 세 launchd job의 `WorkingDirectory`가
+  여기다. `.env`/`.local`/`logs`는 개발 레포(`~/Documents/github/blog-automation`)로 심링크.
+  개발 레포에서 브랜치를 바꿔도 자동화는 영향 없다. 배포:
+  `git -C ~/blog-automation-prod pull && npm --prefix ~/blog-automation-prod ci && ... build`.
+  ⚠️ main이 prod worktree에 잡혀 있어 개발 레포에서 `git checkout main` 불가 - 병합은 prod에서 하거나
+  `git -C ~/blog-automation-prod merge` 사용.
+
+**Phase 1 — 오전/오후 키워드 발송 분리 (완료, 실측)**
+- 오전 09:00 `daily-keyword`: Creator Advisor + 구글 트렌드만. (커뮤니티 제거)
+- 오후 13:00 `community-keyword`(신규 job + plist): 더쿠 커뮤니티 유래 키워드만 별도 알림 1건.
+  `runDailyKeywordWorkflow({ collectionSources: ["community"], includeSeedQueries: false })`.
+  `discovery_runs.metadata.kind = "community"`. 알림 헤더 "📡 오후 커뮤니티 인기 키워드".
+  실측: run #26에서 Top 10 정상 발송(커뮤니티 후보 cap 12→18로 상향, per-topic sub-cap 제거).
+  ⚠️ 관찰 필요: 커뮤니티 Top 10이 정치·논란 편중(노란봉투법·김문수·부동산 정책 등), 점수 낮음(21~45),
+  유사 항목 일부 미병합(나혼산 전현무 x2). 며칠 관찰 후 community 전용 relevance/필터 조정.
+
+**Phase 2 — Go → 자료조사 자동 시작 (완료, launchd 반영. 실클릭 검증 대기)**
+- Go 버튼 → job 생성 + 제목 생성 + **자료조사 자동 실행**(runResearchStage) → notifyResearchReady가
+  요약 + 추천 제목 + `[✍️ 원고 작성][🗑 중단]` 발송. 사용자는 Go 한 번만 누르면 조사 요약이 온다.
+  `TelegramBot`에 `triggerResearch` 주입, `pollOnce`에서 `jobFromFreshSelection()`으로 대상 판정.
+- 확인 메시지는 제목 대신 "자료조사 시작"만 알림. 제목은 조사 완료 알림으로 이동.
+- **신규 `singleInstanceLock`**: telegram-poll 5분 주기 + 조사/집필(수 분)이 겹칠 때 다음 폴러가
+  같은 update를 두 번 처리하는 것을 파일 락으로 막는다(`logs/.telegram-poll.lock`, PID+mtime stale 판정).
+
+**Phase 3 — Top 10 중복 제거 (완료, 실측 기반)**
+- 실측(run #20/#22/#23)에서 Top 1·2가 같은 사건 기사로 채워지는 도배는 전부 "동일 seedQuery 2건"
+  (황재균 지연 x2, 상생페이백 x2, 비비 워터밤 x2). `DIVERSITY_CONFIG.maxPerSeedQuery: 2 → 1`.
+- 분류어 seedQuery(넷플릭스/티빙/지원금 + 그날의 seed_queries)는 seed cap 제외 - 다른 작품 2편이
+  플랫폼 이름 하나로 묶이면 안 되므로.
+- `DIVERSITY_CONFIG.maxPerCategory`(기본 비활성 {}) + 후보 얕은 날 상한 해제 fallback pass 추가.
+- 신규 `npm run debug:latest-rankings [n]` - 최근 run들의 Top N 출력(읽기 전용).
+
+**Phase 4 — 승인 → 다채널 자동 발행 (미착수, 승인 게이트 있음)**
+- `job.status = approved` 트리거로 네이버 임시저장 자동 + Blogspot OSMU 배리에이션 자동 발행(초기 draft).
+  티스토리는 그 다음(Phase 5, DOM 실측 선행). 상세는 계획 파일 Phase 4, `SPRINT_5_DESIGN.md`.
+- 승인 게이트: `articles.platform` migration(`supabase db push`), Blogspot 실측 발행 1건,
+  `pmset repeat` 12:55 추가(사용자 sudo).
+
+---
+
+기준일(이전): 2026-08-30 (Asia/Seoul)
 
 ## 한 줄 상태
 
