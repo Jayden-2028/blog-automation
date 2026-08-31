@@ -11,6 +11,7 @@ import { TISTORY_CONFIG } from "../../../config/publishTargets.js";
 import { listArticlesByJobId } from "../../supabase/repositories/articleRepository.js";
 import { convertArticleToHtml } from "../convertArticleToHtml.js";
 import { TelegramNotifier } from "../../../notifications/TelegramNotifier.js";
+import { TistoryPublisher } from "./TistoryPublisher.js";
 
 const OUT_DIR = ".local/dom-snapshots/tistory";
 
@@ -34,6 +35,29 @@ async function main(): Promise<void> {
   const title = `[실측] ${base.title ?? jobId}`;
   const bodyHtml = convertArticleToHtml(base.content ?? "");
   console.log(`▶ 대상: "${title}"  본문 ${bodyHtml.length}자, <img> ${(bodyHtml.match(/<img /g) ?? []).length}개\n`);
+
+  // --via-publisher: 진단 대신 실제 TistoryPublisher.saveDraft를 그대로 호출한다(최종 검증).
+  if (process.argv.includes("--via-publisher")) {
+    const started = Date.now();
+    const result = await new TistoryPublisher({ headless: false }).saveDraft({ title, bodyHtml, tags: ["실측"] });
+    console.log(`\n▶ saveDraft 결과 (${Math.round((Date.now() - started) / 1000)}초):`);
+    console.log(JSON.stringify(result, null, 2));
+    if (result.ok) {
+      await TelegramNotifier.fromEnv()
+        .sendMessages([
+          {
+            text: `🧪 <b>티스토리 saveDraft 최종 검증 OK</b>\n본문 ${result.bodyLength ?? "?"}자\n${result.draftUrl}`,
+            replyMarkup: { inline_keyboard: [[{ text: "임시저장 글 열기", url: result.draftUrl }]] },
+          },
+        ])
+        .catch(() => {});
+      console.log("\n✅ 텔레그램 알림 발송. 임시저장 글을 열어 제목/본문/이미지/태그를 확인하세요.");
+    } else {
+      console.error(`\n❌ [${result.stage}] ${result.error}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   mkdirSync(OUT_DIR, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
