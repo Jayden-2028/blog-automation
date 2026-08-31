@@ -2,6 +2,52 @@
 
 기준일: 2026-09-01 (Asia/Seoul)
 
+## 2026-09-01 세션 — 원고 파이프라인 재설계 (스펙 주도 파일 기반)
+
+전체 계획: `~/.claude/plans/serialized-spinning-feigenbaum.md`. 커밋 `0ba2368`(P1) →
+`c197a08`(P2) → `c107be7`(P3) → `68fd36d`(P4+5), 브랜치 `work`. **아직 라이브 미검증** —
+researcher/writer 에이전트가 실제로 규격대로 파일을 쓰는지는 다음 E2E에서 확인한다.
+
+**무엇이 바뀌었나**: 자료조사·집필이 Node 인라인 프롬프트 주도 → **스펙 문서 주도 + 파일 산출**로.
+Node는 조율만 한다(헤드리스 `claude -p` 호출 · 산출 파일 파싱 · DB 반영 · 알림).
+
+- **Phase 1 (비용 통제)**: `CLAUDE.md`에 "원고 파이프라인 운영 규칙" 절 신설. 원고 내 이미지
+  API 자동생성 **보류**(`ARTICLE_IMAGE_GENERATION` 기본 false, `src/config/articleImages.ts`) —
+  코드·provider는 유지, `[IMAGE: 설명]` 마커를 본문에 남겨 사용자가 직접 삽입. Blogspot는
+  `BLOGGER_PUBLISH_AS_DRAFT` 기본 true 유지(당분간 draft 고정). `notifyArticleReady`/
+  `notifyMultiPublish`에 "직접 삽입 후 발행" 안내.
+- **Phase 2 (자료조사)**: `runResearchStage` 하이브리드 재작성. Node가 NAVER API로 기준 sources
+  수집(감사 베이스라인) → 헤드리스 researcher가 `prompts/research/researcher.md` 계약대로
+  WebSearch/WebFetch로 보강해 `research/<슬러그>.md` 작성 → Node가 파싱(frontmatter verdict/
+  source_counts, §10 출처표에서 새 URL을 sources에 추가). 체크포인트 알림은 별도 LLM 요약 호출을
+  없애고 `research/*.md` §1 요약을 그대로 쓴다. verdict=blocked면 `[✍️ 원고 작성]` 버튼 제거.
+  신규 `src/config/pipelinePaths.ts`, `buildResearchPrompt.ts`, `parseResearchFile.ts`.
+  `runHeadlessClaude`에 `permissionMode` 옵션(`--permission-mode acceptEdits` — Write/WebSearch가
+  비대화형에서 동작하려면 필요, 2026-09-01 실측 확인).
+- **Phase 3 (집필)**: `runWritingStage` 재작성. 헤드리스 writer가 `prompts/writing/writer.md` +
+  `docs/seo-guide.md` 계약대로 `research/<슬러그>.md`를 읽고 `drafts/<슬러그>.md` 작성(웹 검색
+  없음 — 사실은 자료조사 파일뿐) → Node가 frontmatter+본문 파싱 → `articles` 행. 소제목 `## `
+  유지(다운스트림 변환기), `[IMAGE:]` 마커 유지. 신규 `buildWritingPrompt.ts`, `parseDraftFile.ts`.
+  상수 정렬: `TARGET_ARTICLE_LENGTH` `{2000,3000}`, `HASHTAG_COUNT` `10` (writer.md·seo-guide).
+  `buildArticlePrompt`/`parseArticleOutput`는 레거시로 남김(상수·톤 규칙·의학 고지 헬퍼 공유).
+- **Phase 4 (검수)**: `articleReviewChecks` 팩트 대조에 `research/<슬러그>.md` 전문 추가(에이전트
+  인용 웹 출처는 sources에 URL만 있어 오탐 방지). `[IMAGE:]` 마커는 변환기에서 문단 텍스트로 통과.
+- **Phase 5 (배리에이션)**: `generateArticleVariant` 프롬프트에 writer.md Read·준수 참조,
+  `allowedTools`에 `Read` 추가. 출력은 stdout 마커 유지, 사실은 기준 원고에서만.
+
+**산출 파일**: `research/`, `drafts/`는 `.gitignore`(repo 루트만 — `src/workflows/research/`는 소스라
+제외). job 1건 = 파일 1개, 재실행 시 덮어쓴다.
+
+**남은 것**:
+- ⬜ 라이브 E2E 1회 — 승인된 키워드 1건으로 조사(하이브리드, ~15분)→`research/*.md`→집필→
+  `drafts/*.md`→검수→승인→네이버·Blogspot draft. 이미지 유료 호출 없음. 파서가 실제 에이전트
+  산출 형식과 맞는지 확인(안 맞으면 프롬프트/파서 조정).
+- ⬜ researcher 웹조사로 조사 스테이지 소요 급증(~1분 → 10분+). launchd telegram-poll 5분 주기 ·
+  `singleInstanceLock` 상호작용 재점검.
+- ⬜ 이미지 재개 시 `generateArticleImages`를 `## 헤딩 뒤 삽입` → `[IMAGE:]` 마커 인식으로 변경.
+- ⬜ `prompts/writing/writer.md` §2 스킬 라우팅(anthropic-skills)은 헤드리스 미로드 — 프롬프트에서
+  content-blog로 오버라이드 중. writer.md 자체 정리는 사용자 WIP.
+
 ## 2026-09-01 세션 — 전체 워크플로우 라이브 E2E 시뮬레이션
 
 키워드 수집 → 3채널 발행까지 실제 프로덕션 조건에서 한 번 관통시켰다. 대상 키워드
