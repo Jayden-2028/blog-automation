@@ -7,6 +7,11 @@ dist/
 *.log
 npm-debug.log*
 
+# 로그 디렉터리 전체 + job 단일 인스턴스 락. 운영 worktree에서는 개발 레포로 심링크한다.
+logs/
+# 운영 worktree가 개발 레포로 거는 심링크(.env / .local / logs)
+/.local
+
 .DS_Store
 
 # Creator Advisor 전용 Playwright persistent profile (쿠키/로그인 세션 포함, 절대 커밋하지 않는다)
