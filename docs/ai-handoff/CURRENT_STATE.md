@@ -51,10 +51,23 @@
 - `articles.platform` 컬럼: **migration 20260831040000 적용 완료**(`supabase db push`, 2026-08-31).
   null=기준 원고(네이버), "blogspot"/"tistory"=배리에이션.
 - ✅ `supabase migration list` 10개 전부 local==remote.
-- 신규 CLI: `job:publish-poll`, `debug:approved-jobs`. 신규 plist `publish-poll`(RunAtLoad=false).
-- 테스트 6종: convert-article-html-generic / article-variant / blogger-client / publish-blogspot /
-  publish-approved.
-- ⏳ launchd `publish-poll` 등록은 라이브 Blogspot 발행 1건 검증 후.
+- 신규 CLI: `job:publish-poll`, `job:close`(대기열에서 제외), `debug:approved-jobs`,
+  `debug:check-preflight`. 테스트 7종.
+- ✅ **라이브 Blogspot 발행 검증**(2026-08-31): "맥도날드 감튀 홀더" → 배리에이션 원고 #10
+  (platform=blogspot) → Blogspot DRAFT(post 8185770171361608510, 이미지 3장, 라벨 "생활정보").
+- ✅ **`publish-poll` launchd 등록 완료**(10분 주기). 실측: 맥도날드 job → 두 채널 already_done →
+  `job.status=published` 전이. 보조금24 job → preflight 차단(deferred).
+- **preflight 가드**(`defaultPreflight`): 기준 원고 이미지가 전부 우리 Supabase Storage URL이 아니면
+  job 전체를 deferred(알림 없음)로 건너뛴다. "보조금24" job(Sprint 3 잔재, placeholder 이미지)이
+  이걸로 계속 걸린다 - `npm run job:close 753d9af8-... "..."`로 대기열에서 빼야 한다.
+
+**운영 노트 - launchd 4개 + pmset 기상 (2026-08-31)**
+- launchd: `daily-keyword`(09:00) / `community-keyword`(13:00) / `telegram-poll`(5분) / `publish-poll`(10분).
+  전부 `~/blog-automation-prod` worktree(main 고정)에서 실행, caffeinate -i 래핑.
+- ⚠️ **pmset repeat 기상은 하루 1개만 가능**. 사용자가 `12:55`로 바꿨다가 `08:55`(오전, 필수)로
+  복구. 오후 13:00 run은 맥이 그 시각에 깨어 있어야 정시 실행되고, 자고 있으면 다음 기상 시
+  지연 실행된다(맥 사용 중이면 문제 없음). watchdog(11:00 KST GitHub Actions)은 오전 run만 감지 -
+  오후 run 감지 추가는 TODO.
 
 ---
 
