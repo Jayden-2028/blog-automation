@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:ht="https://trends.google.com/trending/rss" version="2.0">
+  <channel>
+    <title>Daily Search Trends</title>
+    <description>Recent searches</description>
+    <link>https://trends.google.com/trending?geo=KR</link>
+    <language>ko</language>
+    <item>
+      <title>들쥐</title>
+      <ht:approx_traffic>50,000+</ht:approx_traffic>
+      <description>들쥐</description>
+      <link>https://trends.google.com/trending?geo=KR&amp;q=%EB%93%A4%EC%A5%90</link>
+      <pubDate>Fri, 29 Aug 2026 01:20:00 -0700</pubDate>
+      <ht:picture>https://t0.gstatic.com/images?q=tbn:sample1</ht:picture>
+      <ht:picture_source>연합뉴스</ht:picture_source>
+      <ht:news_item>
+        <ht:news_item_title>넷플릭스 &lt;들쥐&gt; 공개 첫날 국내 1위</ht:news_item_title>
+        <ht:news_item_url>https://example.com/news/1</ht:news_item_url>
+        <ht:news_item_picture>https://t0.gstatic.com/images?q=tbn:sample1a</ht:news_item_picture>
+        <ht:news_item_source>연합뉴스</ht:news_item_source>
+      </ht:news_item>
+      <ht:news_item>
+        <ht:news_item_title>&apos;들쥐&apos; 출연진 &amp; 원작 정보 총정리</ht:news_item_title>
+        <ht:news_item_url>https://example.com/news/2</ht:news_item_url>
+        <ht:news_item_source>스포츠조선</ht:news_item_source>
+      </ht:news_item>
+    </item>
+    <item>
+      <title>근로장려금 지급일</title>
+      <ht:approx_traffic>20,000+</ht:approx_traffic>
+      <description>근로장려금 지급일</description>
+      <link>https://trends.google.com/trending?geo=KR&amp;q=test2</link>
+      <pubDate>Fri, 29 Aug 2026 00:40:00 -0700</pubDate>
+      <ht:news_item>
+        <ht:news_item_title>근로장려금 반기 지급 시작</ht:news_item_title>
+        <ht:news_item_url>https://example.com/news/3</ht:news_item_url>
+        <ht:news_item_source>매일경제</ht:news_item_source>
+      </ht:news_item>
+    </item>
+    <item>
+      <!-- approx_traffic / news_item / pubDate가 전부 없는 항목. 파서는 여기서 죽으면 안 된다. -->
+      <title>아기 수족구</title>
+      <link>https://trends.google.com/trending?geo=KR&amp;q=test3</link>
+    </item>
+    <item>
+      <!-- title이 비어 있는 깨진 항목. 조용히 버려야 한다. -->
+      <title>   </title>
+      <ht:approx_traffic>1,000+</ht:approx_traffic>
+    </item>
+  </channel>
+</rss>

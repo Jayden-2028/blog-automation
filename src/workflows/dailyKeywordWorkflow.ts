@@ -13,7 +13,9 @@
 // 기록한 뒤 이후 단계를 "skipped" 처리하고 즉시 반환한다 — 그래서 호출자는 stageLog만 보면 정확히
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
+import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
+import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
@@ -31,6 +33,14 @@ import type {
   RunCreatorAdvisorCollectionOptions,
   RunCreatorAdvisorCollectionResult,
 } from "./creator-advisor/runCreatorAdvisorCollection.js";
+import type {
+  RunGoogleTrendsCollectionOptions,
+  RunGoogleTrendsCollectionResult,
+} from "./google-trends/runGoogleTrendsCollection.js";
+import type {
+  RunCommunityCollectionOptions,
+  RunCommunityCollectionResult,
+} from "./community/runCommunityCollection.js";
 import type { BuildDailyQueryPoolResult } from "./keyword-discovery/buildDailyQueryPool.js";
 import type {
   CollectNaverCandidatesOptions,
@@ -84,6 +94,11 @@ export type RankKeywordsOptions = {
   topN?: number;
   /** 대표 seedQuery 동률 판정에만 사용하는 query별 운영 priority. */
   priorityByQuery?: Record<string, number>;
+  /**
+   * Top N 주제 중복 판정에서 "분류어"로 취급할 단어(seed_queries 유래 상시 검색어).
+   * selectDiverseTopN -> topicGrouping의 extraCategoryTerms로 전달된다.
+   */
+  categoryTerms?: readonly string[];
 };
 
 export type RankKeywordsResult = {
@@ -153,7 +168,8 @@ export async function rankKeywords(
   // diversity 정책(동일 seedQuery/canonical topic 편중 방지 + category backfill)을 적용해 최종 Top N을 뽑는다.
   const diverseSelection = selectDiverseTopN(
     scoredSortedDesc.map((item) => item.ranked),
-    topN
+    topN,
+    { categoryTerms: options.categoryTerms }
   );
   const rankings: RankedKeyword[] = diverseSelection.map((item, index) => ({ rank: index + 1, ...item }));
 
@@ -201,6 +217,10 @@ export type DailyKeywordWorkflowOptions = {
   queries?: string[];
   /** Creator Advisor 수집 단계(trendCollect)에 그대로 전달된다. */
   trendCollectOptions?: RunCreatorAdvisorCollectionOptions;
+  /** 구글 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
+  googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
+  /** 커뮤니티(더쿠 등) 수집 단계(trendCollect)에 그대로 전달된다. */
+  communityOptions?: RunCommunityCollectionOptions;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -213,6 +233,10 @@ export type DailyKeywordWorkflowResult = {
   stageLog: DailyKeywordStageLogEntry[];
   /** Creator Advisor 수집 결과. options.queries를 명시적으로 넘긴 경우 null(수집 단계를 건너뜀). */
   trendCollection: RunCreatorAdvisorCollectionResult | null;
+  /** 구글 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
+  googleTrendsCollection: RunGoogleTrendsCollectionResult | null;
+  /** 커뮤니티 수집 결과. 위와 같다. disabled면 status="skipped". */
+  communityCollection: RunCommunityCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
   queryPool: BuildDailyQueryPoolResult | null;
   collected: CollectNaverCandidatesResult | null;
@@ -256,6 +280,8 @@ export async function runDailyKeywordWorkflow(
   const result: DailyKeywordWorkflowResult = {
     stageLog,
     trendCollection: null,
+    googleTrendsCollection: null,
+    communityCollection: null,
     queryPool: null,
     collected: null,
     relevance: null,
@@ -268,6 +294,9 @@ export async function runDailyKeywordWorkflow(
   let queries = options.queries;
   let seedCategoryByQuery: Record<string, string> | undefined;
   let seedPriorityByQuery: Record<string, number> | undefined;
+  // seed_queries(사람이 등록한 상시 검색어)만 모은다. Creator Advisor에서 온 그날의 화제 키워드는
+  // 주제 그 자체이므로 분류어로 취급하면 안 된다(topicGrouping.ts 참고).
+  let stableSeedTerms: string[] | undefined;
 
   if (!queries) {
     // Creator Advisor를 먼저 수집해 trend_candidates를 최신화한 뒤 query pool을 조립한다.
@@ -278,20 +307,61 @@ export async function runDailyKeywordWorkflow(
     // Creator Advisor는 seed_queries를 보강하는 enrichment source일 뿐 필수 의존성이 아니며,
     // runCreatorAdvisorCollection() 자체가 예외를 던지지 않고 status로 실패를 알린다.
     const trendStartedAt = Date.now();
+
+    // 소스별로 독립 수집한다. 하나가 실패해도 나머지는 계속 돌아야 하므로 순차 실행하되 서로의
+    // 결과를 참조하지 않는다. 각 러너는 throw하지 않고 status로만 알린다(각 파일 상단 주석).
     const trendCollection = await runCreatorAdvisorCollection(options.trendCollectOptions);
     result.trendCollection = trendCollection;
-    stageLog.push({
-      stage: "trendCollect",
-      status: trendCollection.status === "failed" ? "failed" : trendCollection.status === "skipped" ? "skipped" : "success",
-      durationMs: Date.now() - trendStartedAt,
-      error: trendCollection.error,
-    });
+
+    const googleTrendsCollection = await runGoogleTrendsCollection(options.googleTrendsOptions);
+    result.googleTrendsCollection = googleTrendsCollection;
+
+    const communityCollection = await runCommunityCollection(options.communityOptions);
+    result.communityCollection = communityCollection;
+
     if (trendCollection.status === "success") {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] Creator Advisor 수집: ${trendCollection.fetchedCount}건 조회 → ` +
           `${trendCollection.upsertedCount}건 저장 (trendDate: ${trendCollection.trendDate ?? "N/A"}, 만료 ${trendCollection.expiredCount}건)`
       );
     }
+    if (googleTrendsCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 구글 트렌드 수집: ${googleTrendsCollection.fetchedCount}건 조회 → ` +
+          `${googleTrendsCollection.upsertedCount}건 저장 (trendDate: ${googleTrendsCollection.trendDate ?? "N/A"}, 만료 ${googleTrendsCollection.expiredCount}건)`
+      );
+    }
+    if (communityCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 커뮤니티 수집: ${communityCollection.fetchedCount}건 조회 → ` +
+          `${communityCollection.upsertedCount}건 저장 (trendDate: ${communityCollection.trendDate ?? "N/A"}, 만료 ${communityCollection.expiredCount}건)`
+      );
+    }
+
+    // stage 하나에 여러 소스가 들어가므로 상태를 집계한다.
+    // - 하나라도 성공 -> success (나머지 실패는 error 문자열로만 남긴다)
+    // - 전부 skipped   -> skipped (소스가 전부 disabled인 정상 상태)
+    // - 그 외(성공 0 + 실패 1 이상) -> failed
+    // 어느 쪽이든 이 단계는 파이프라인을 멈추지 않는다 - 동적 소스는 전부 enrichment다.
+    const trendResults = [
+      { source: "creator_advisor", result: trendCollection },
+      { source: "google_trends", result: googleTrendsCollection },
+      { source: "community", result: communityCollection },
+    ];
+    const succeeded = trendResults.filter((entry) => entry.result.status === "success");
+    const failures = trendResults.filter((entry) => entry.result.status === "failed");
+    const trendStageStatus =
+      succeeded.length > 0 ? "success" : failures.length > 0 ? "failed" : "skipped";
+    const trendStageError = failures.length
+      ? failures.map((entry) => `${entry.source}: ${entry.result.error ?? "unknown"}`).join(" | ")
+      : undefined;
+
+    stageLog.push({
+      stage: "trendCollect",
+      status: trendStageStatus,
+      durationMs: Date.now() - trendStartedAt,
+      error: trendStageError,
+    });
 
     // seed_queries(static) + trend_candidates(dynamic, Creator Advisor)를 합친 daily query pool.
     // Creator Advisor가 disabled이거나 실패해도 buildDailyQueryPool()은 예외를 던지지 않고
@@ -304,12 +374,20 @@ export async function runDailyKeywordWorkflow(
     }
     result.queryPool = queryPool;
     if (queryPool.trendCount > 0) {
-      console.log(`ℹ️ [dailyKeywordWorkflow] query pool: seed ${queryPool.seedCount}건 + trend ${queryPool.trendCount}건`);
+      const bySource = Object.entries(queryPool.trendCountBySource)
+        .map(([source, count]) => `${source} ${count}`)
+        .join(", ");
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] query pool: seed ${queryPool.seedCount}건 + trend ${queryPool.trendCount}건 (${bySource})`
+      );
     }
 
     queries = queryPool.entries.map((entry) => entry.keyword);
     seedCategoryByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.category]));
     seedPriorityByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.priority]));
+    stableSeedTerms = queryPool.entries
+      .filter((entry) => entry.origin === "seed" || entry.origin === "merged")
+      .map((entry) => entry.keyword);
   }
 
   const collectOptions: CollectCandidatesOptions = {
@@ -348,6 +426,7 @@ export async function runDailyKeywordWorkflow(
       ...seedPriorityByQuery,
       ...options.rankOptions?.priorityByQuery,
     },
+    categoryTerms: options.rankOptions?.categoryTerms ?? stableSeedTerms,
   };
   const ranked = await runStage(stageLog, "rank", () => rankKeywords(clusters, queries!, rankOptions));
   if (!ranked) {

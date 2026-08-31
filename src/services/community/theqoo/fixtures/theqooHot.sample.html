@@ -1,0 +1,33 @@
+<!--
+  2026-08-30 실측(communityRecon.ts + communityProbe.ts)으로 확인한 실제 DOM 구조를 그대로
+  본떴지만, 제목 텍스트는 저작권이 있는 실제 게시글 원문이 아니라 임의로 지어낸 placeholder다
+  (.gitignore가 docs/ai-handoff/community-recon/의 실제 원문을 커밋하지 않는 것과 같은 이유).
+  구조상 확인해야 할 것: tr.notice(+ modifier class)는 공지라 제외, class 없는 tr만 인기글로
+  집계, td.title 안의 두 번째 anchor(추천수, 숫자만)는 제목으로 잡히면 안 된다.
+-->
+<html>
+<body>
+<table class="hotList">
+  <tbody>
+    <tr class="notice nofn">
+      <td class="title"><a href="/notice/1">공지 - 예시 운영 공지사항입니다</a><a href="/notice/1#count">12</a></td>
+    </tr>
+    <tr class="notice nofnhide nofn">
+      <td class="title"><a href="/notice/2">공지 - 예시 이용 규칙 안내</a><a href="/notice/2#count">3</a></td>
+    </tr>
+    <tr>
+      <td class="title"><a href="/hot/101">예시 제목 하나 - 여행 다녀온 후기 공유</a><a href="/hot/101#count">142</a></td>
+    </tr>
+    <tr>
+      <td class="title"><a href="/hot/102">예시 제목 둘 - 요즘 화제인 드라마 결말 이야기</a><a href="/hot/102#count">88</a></td>
+    </tr>
+    <tr>
+      <td class="empty"></td>
+    </tr>
+    <tr>
+      <td class="title"><a href="/hot/103">예시 제목 셋 - 날씨가 갑자기 추워졌다는 글</a><a href="/hot/103#count">57</a></td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

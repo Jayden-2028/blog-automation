@@ -1,6 +1,6 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-08-28 (Asia/Seoul)
+기준일: 2026-08-30 (Asia/Seoul)
 
 ## 한 줄 상태
 
@@ -16,12 +16,17 @@ Telegram으로 오고, Go/Pass 버튼으로 선택하면 `article_jobs`가 생�
 확인). 상세는 `docs/ai-handoff/SPRINT_2_DESIGN.md` 14절과 `docs/ai-handoff/SPRINT_3_DESIGN.md`
 13-1·14절.
 
-**다음 작업: Sprint 4(네이버 반자동 발행) 구현 — 설계는 끝났고 결정 대기 중.**
-`docs/ai-handoff/SPRINT_4_DESIGN.md` §9에 결정 항목 6건이 있다(트리거 방식, 발행 대상 블로그,
-일일 발행 상한값, 쓰기 세션 최초 로그인 시점, 이미지 위치 타협안, 실측 단계 승인 방식). 이
-스프린트는 처음으로 사람 계정으로 실제 쓰기 작업을 브라우저에서 하므로 §10의 1번(SmartEditor
-DOM 실측)부터가 실제 네이버 세션을 여는 작업이다 - Creator Advisor 프로필과는 분리된 새
-프로필(`.local/naver-publish-profile/`)로 사용자가 최초 1회 수동 로그인해야 한다.
+**다음 작업(2026-08-30 사용자 결정): 티스토리 + 블로그스팟(Blogspot) 자동 발행 — 원고 승인 후
+자동 업로드까지.** 별도 새 브랜치에서 진행한다. 네이버 반자동 발행(Sprint 4)이 참고 모델이지만,
+티스토리/블로그스팟은 공식 API가 있어(네이버 SmartEditor 브라우저 자동화와 달리) 접근이 다르다 -
+설계부터 시작. 승인된 원고(`job.status = approved`)를 트리거로 삼는다.
+
+**직전 진행 상황**:
+- `claude/community-collector` 브랜치에서 **커뮤니티(더쿠) 수집기 구현·실측·활성화 완료.**
+  머지는 2026-08-31 오전 09:00 run 결과 관찰 후 진행. 아래 "키워드 수집 확장" 절 §7-4.
+- Sprint 4(네이버 반자동 발행)는 §10 작업 1~7 완료 - 승인 원고가 `job:publish` 한 번으로
+  네이버 임시저장함까지 들어간다. 남은 사람 개입은 "발행" 버튼 클릭뿐.
+- `claude/keyword-collection-optimization-6ojcou` 브랜치도 아직 `main` 미머지.
 
 ## 지금 돌아가는 것
 
@@ -29,8 +34,8 @@ DOM 실측)부터가 실제 네이버 세션을 여는 작업이다 - Creator Ad
 
 ```
 pmset(08:55 자동 기상) -> launchd(09:00) -> caffeinate -i -> npm run job:daily-keyword
-  [trendCollect] Creator Advisor 크롤링 -> trend_candidates upsert  (~5초, 220건)
-  [seed]         seed_queries(44) + trend_candidates(40) = 84건
+  [trendCollect] Creator Advisor 크롤링 + 구글 트렌드 RSS -> trend_candidates upsert
+  [seed]         seed_queries(44) + trend_candidates(40, 다중 source) = 84건
   [collect]      NAVER 검색 API -> 후보 ~2100건                      (~70초)
   [relevance]    seed 관련성 필터 -> ~900건
   [cluster]      유사도 클러스터링 -> ~400개
@@ -356,9 +361,16 @@ npm run job:telegram-poll                # 신규, 버튼 클릭 1회 수신 처
    되돌리면 실제로 실패하는 것까지 확인했다.
    `TREND_MOMENTUM_CONFIG.neutralScoreRatio: 0.4`도 같은 패턴이라 확인했으나, `unknown`(12점)이
    관측된 모든 값(17~30)보다 낮아 실제 역전이 없어 손대지 않았다.
-3. **Top 10에 같은 주제가 2번씩 들어간다.** `DIVERSITY_CONFIG.maxPerSeedQuery = 2` 설정대로 동작
-   중이다. 1로 낮추면 10개 주제가 되지만, 후보가 얕은 날 품질 낮은 키워드가 밀려 들어올 수 있어
-   며칠 운영 후 판단하기로 했다.
+3. **~~Top 10에 같은 주제가 2번씩 들어간다~~ — 부분 해결됨(2026-08-29).**
+   실제로는 2번이 아니라 **4번**까지 들어갔다("넷플릭스 들쥐" 4건). 원인이 두 겹이었다:
+   (a) cross-seed clustering이 `excludeSeedQueryFromTokens` 때문에 구조적으로 병합 불가
+       (유사도가 정확히 0.000), (b) `maxPerCanonicalTopic=1`이 canonical 문자열 완전 일치로만 세서
+       cap이 발화하지 않음. seed 2개 × `maxPerSeedQuery=2` = 정확히 4건이었다.
+   (b)는 `topicGrouping.ts`(신규)로 해결 — 최종 선정 단계에서 희소 핵심 명사 공유/핵심 명사 overlap
+   으로 같은 주제를 판정한다. `npm run test:topic-grouping`이 고정한다.
+   **(a)는 그대로 남아 있다** — clustering 로직 변경이라 승인이 필요하다. 지금은 한 이슈가 여전히
+   cluster 4개로 쪼개져 있어 relatedCount/news/cross 점수를 손해 본다.
+   상세: `docs/ai-handoff/KEYWORD_SOURCE_EXPANSION.md`
 4. **맥이 09:00에 완전히 꺼져 있으면 여전히 실행되지 않는다.** `caffeinate`는 "도는 중에 잠들지
    않게" 할 뿐 "깨우지는" 못하고, `pmset repeat`도 전원이 차단된 상태에서는 한계가 있다.
    더 큰 문제는 **강제 종료 시 실패 알림이 나가지 않는다**는 점이다(위 운영 노트 참고).
@@ -564,6 +576,55 @@ npm run job:reject -- <jobId>     가치가 없다고 판단되면 여기서 끝
 만들어진 초안 2건("맥도날드 감튀 홀더..." 정상본 + "...[재검증]" 본문 검증용)은 실제 배포용이
 아니므로 사용자가 초안함에서 정리해도 된다. "임시저장" 성공 신호(토스트/URL 변화)는 여전히
 고정 시간 대기로 대체돼 있다 - 급하지 않으면 다음에 개선한다.
+
+## 키워드 수집 확장 (2026-08-29, `claude/keyword-collection-optimization-6ojcou`)
+
+설계·진단 상세는 `docs/ai-handoff/KEYWORD_SOURCE_EXPANSION.md`. 사용자 요청 4건 중 1·2·4번
+구현 완료. 3번(커뮤니티)은 2026-08-30에 더쿠 provider 실측 + 배선 + 활성화까지 완료(§7-4).
+
+1. **Top N 주제 중복 제거** - "넷플릭스 들쥐"가 Top 10 중 4칸을 차지하던 문제. 신규
+   `workflows/keyword-ranking/topicGrouping.ts`가 희소 핵심 명사 공유로 같은 주제를 판정해
+   최종 선정 단계에서 압축한다. `test:topic-grouping`이 고정. **근본 원인(cross-seed clustering이
+   구조적으로 병합 못 함, `excludeSeedQueryFromTokens` 때문)은 그대로 남아 있다** - clustering
+   로직 변경이라 승인 필요, 지금은 이 우회책으로 증상만 해결한 상태.
+2. **구글 트렌드 RSS 소스 추가 + 활성화(2026-08-29 사용자 승인)** - 인증/로그인 불필요, RSS만
+   조회. 코드 기본값(`TREND_SOURCE_CONFIGS.google_trends.enabled`)을 true로 바꿔서 켰다(`.env`
+   아님 - git pull만으로 적용됨, 끄려면 `GOOGLE_TRENDS_ENABLED=false`). 실측(KR TOP 10)에서
+   10건 중 9건이 category 어휘 규칙을 못 맞고 `living`으로 폴백하는 문제를 발견해, 뉴스 출처
+   기반 2차 분류(`config/newsOutletRules.ts`)로 보강했다. 1글자 키워드("션")는 관련성 필터를
+   무력화하는 것을 확인해 제외 처리(`MIN_TREND_KEYWORD_LENGTH=2`). 켜는 과정에서 실제 Supabase
+   조회로 결함 2건 발견·수정: (a) `buildDailyQueryPool`의 에러 직렬화가 `String(error)`라
+   PostgrestError가 `[object Object]`가 되던 문제(2026-08-26에 고쳤던 게 신규 경로에서 재발 -
+   `services/describeError.ts`로 통합), (b) `enabledSources` 옵션이 `creatorAdvisorEnabled:
+   false`를 덮어써 "disabled면 조회 안 함" 계약이 깨져 있던 문제.
+3. **`community` category + 수집기** - 분류 체계 편입 + 더쿠 provider + daily job 배선 + 활성화
+   완료(2026-08-30, §7-4). ⬜ 다음 아침 run에서 Top 10 유입 관찰.
+4. **`buildDailyQueryPool` 다중 source 지원** - source 하나가 실패해도 나머지로 진행(실패 격리),
+   스키마 변경 없음(`trend_candidates.source`가 text 컬럼이라 문자열만 추가하면 됨).
+
+**검증**: `npm run build` + offline 테스트(`test:google-trends`/`test:topic-grouping`/
+`test:daily-query-pool`/`test:keyword-category` 등) 전부 통과 확인(이 세션에서 재확인 완료,
+원격 컨테이너엔 `.env`가 없어 더미 Supabase 환경변수로 실행 - 실제 원격 접근 없음). `test:naver`/
+`test:keywords`/`test:ranking`처럼 실제 NAVER API를 호출하는 테스트는 이 세션에서 실행 안 함.
+
+**다음 단계(미완료)**:
+- ⬜ 내일 아침 09:00 run에서 구글 트렌드 유입 후 Top 10 변화 관찰(도배 해소 여부, 구글 트렌드
+  유래 키워드 품질, 블로그 무관 키워드 quota 잠식 여부) - `KEYWORD_SOURCE_EXPANSION.md` §8 참고.
+- ⬜ 다음 실시간 트렌드 provider - daum.net DOM 실측부터(원격 세션에서 불가, 맥에서 진행).
+- ✅ 커뮤니티 수집기 - 브랜치 `claude/community-collector`(2026-08-30). 파이프라인(LLM 엔티티
+  추출 + 매핑 + 워크플로우 + CLI) + 더쿠(theqoo.net/hot) provider. 네이트판/다음카페/네이버카페는
+  robots.txt가 목록 경로를 막아 제외, 더쿠만 유일 provider(공지/인기글은 class 유무로 구분).
+  **맥에서 `npm run collect:community` dry-run 20건 fetch 실측 완료**, `dailyKeywordWorkflow.ts`
+  배선 + `TREND_SOURCE_CONFIGS.community.enabled` 코드 기본값 `true`로 활성화(2026-08-30 사용자
+  승인, 구글 트렌드와 같은 방식 - 끄려면 `.env`에 `COMMUNITY_TRENDS_ENABLED=false`). 결함 있던
+  `test:community`가 prod에 남긴 테스트 row 1건은 삭제 완료. ⬜ 다음 아침 run에서 Top 10 유입
+  관찰. 상세는 `KEYWORD_SOURCE_EXPANSION.md` §7-2/§7-3/§7-4.
+- ⬜ (관찰 후 판단, 승인 필요) cross-seed clustering 근본 수정.
+- ⬜ (관찰 후 판단) 블로그와 무관한 키워드(반도체·노동·무기 등) 필터링 여부.
+- 두 브랜치(`claude/keyword-collection-optimization-6ojcou`, `claude/community-collector`) 모두
+  아직 `main`에 머지되지 않았다(PR 없음). **`claude/community-collector` 머지는 2026-08-31 오전
+  09:00 run 결과 관찰 후 진행**(2026-08-30 사용자 결정).
+- ~~네이트판/다음카페 대체 접근 경로 탐색~~ - 드롭(2026-08-30). 더쿠 단독 provider 유지.
 
 ## 인프라 정리 (2026-08-28, 중간 점검 후속)
 
