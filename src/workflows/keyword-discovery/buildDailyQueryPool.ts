@@ -81,6 +81,11 @@ export type BuildDailyQueryPoolOptions = {
   creatorAdvisorEnabled?: boolean;
   /** 이 목록에 있는 소스만 조회한다. 생략하면 TREND_SOURCE_CONFIGS의 enabled를 따른다. */
   enabledSources?: readonly TrendSource[];
+  /**
+   * false면 seed_queries(사람이 등록한 상시 검색어)를 pool에 넣지 않고 동적 소스만으로 구성한다.
+   * 오후 커뮤니티 전용 run이 오전 seed 44건을 다시 태우지 않도록 하기 위한 옵션(기본 true).
+   */
+  includeSeedQueries?: boolean;
   /** 실제 DB insert 없이 merge/fallback을 검증하기 위한 조회 함수 주입 지점. */
   loadActiveSeeds?: () => Promise<SeedQueryRow[]>;
   /** creator_advisor 전용 loader(하위 호환). loadCandidatesBySource보다 우선한다. */
@@ -229,9 +234,10 @@ function resolveLoader(source: TrendSource, options: BuildDailyQueryPoolOptions)
 export async function buildDailyQueryPool(
   options: BuildDailyQueryPoolOptions = {}
 ): Promise<BuildDailyQueryPoolResult> {
+  const includeSeedQueries = options.includeSeedQueries ?? true;
   const loadActiveSeeds = options.loadActiveSeeds ?? (() => SeedQueryRepository.getActiveSeeds());
 
-  const activeSeeds = await loadActiveSeeds();
+  const activeSeeds = includeSeedQueries ? await loadActiveSeeds() : [];
   const seedEntries = activeSeeds.map(buildSeedEntry);
 
   const enabledSources = resolveEnabledSources(options);

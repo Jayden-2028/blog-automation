@@ -21,7 +21,11 @@ const NON_FATAL_STAGES = new Set(["trendCollect"]);
 const job: SchedulerJob = {
   name: "daily-keyword",
   execute: async () => {
-    const result = await runDailyKeywordWorkflow();
+    // 오전 09:00 run은 Creator Advisor + 구글 트렌드까지만. 커뮤니티(더쿠)는 오후 13:00
+    // communityKeywordJob으로 분리했다(2026-08-31) - 오전/오후 알림이 각각 개별로 온다.
+    const result = await runDailyKeywordWorkflow({
+      collectionSources: ["creator_advisor", "google_trends"],
+    });
 
     console.log("\n▶ stage log");
     for (const entry of result.stageLog) {

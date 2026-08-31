@@ -233,6 +233,46 @@ async function testMultiSourceIsolatesFailures(): Promise<void> {
   console.log("✅ 소스 하나가 죽어도 나머지 진행 + 실패 원인 보존:", result.trendErrorBySource);
 }
 
+// 오후 커뮤니티 전용 run: includeSeedQueries=false면 seed_queries를 아예 조회하지 않고
+// 동적 소스(community)만으로 pool을 만든다.
+async function testIncludeSeedQueriesFalseUsesDynamicSourcesOnly(): Promise<void> {
+  let seedLookupCalled = false;
+  const result = await buildDailyQueryPool({
+    includeSeedQueries: false,
+    enabledSources: ["community"],
+    loadActiveSeeds: async () => {
+      seedLookupCalled = true;
+      return [makeSeed()];
+    },
+    loadCandidatesBySource: {
+      community: async () => ({
+        trendDate: "2026-08-31",
+        candidates: [
+          makeTrend({
+            id: "cm-1",
+            keyword: "더쿠 화제글",
+            keyword_normalized: "더쿠 화제글",
+            topic: "community",
+            topic_normalized: "community",
+            source: "community",
+            trend_date: "2026-08-31",
+            rank: 1,
+            candidate_score: 20,
+          }),
+        ],
+      }),
+    },
+  });
+
+  assert(!seedLookupCalled, "includeSeedQueries=false면 seed_queries를 조회하면 안 됩니다");
+  assert(result.seedCount === 0, `seedCount는 0이어야 합니다 (실제: ${result.seedCount})`);
+  assert(
+    result.entries.length === 1 && result.entries[0].source === "community",
+    "동적 소스(community) entry만 남아야 합니다"
+  );
+  console.log("✅ includeSeedQueries=false -> seed 조회 없이 동적 소스만");
+}
+
 async function main(): Promise<void> {
   console.log("▶ Daily Query Pool merge/fallback 테스트 시작");
   await testSeedAndCreatorAdvisorMerge();
@@ -240,6 +280,7 @@ async function main(): Promise<void> {
   await testCreatorAdvisorFailureFallsBackToSeeds();
   await testCreatorAdvisorDisabledUsesSeedsOnly();
   await testMultiSourceIsolatesFailures();
+  await testIncludeSeedQueriesFalseUsesDynamicSourcesOnly();
   console.log("\n✅ Daily Query Pool 테스트 완료");
 }
 
