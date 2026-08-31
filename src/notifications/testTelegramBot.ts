@@ -311,6 +311,7 @@ async function main(): Promise<void> {
             content: "본문",
             status: "review",
             ai_model: "claude-headless",
+            platform: null,
             created_at: "2026-08-28T00:00:00.000Z",
             updated_at: "2026-08-28T00:00:00.000Z",
           };
