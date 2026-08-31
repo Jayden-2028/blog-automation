@@ -55,7 +55,7 @@ function main(): void {
   assert(!normalPrompt.includes("전문의와 상담"), "일반 원고에는 의학 안내 규칙이 없어야 한다");
   assert(normalPrompt.includes("hometax.go.kr"), "팩트 카드의 출처 URL이 포함돼야 한다");
   assert(normalPrompt.includes(ARTICLE_OUTPUT_MARKERS.hashtags), "해시태그 마커 지시가 프롬프트에 있어야 한다");
-  assert(normalPrompt.includes("정확히 15개"), "해시태그 개수(15개) 지시가 프롬프트에 있어야 한다");
+  assert(normalPrompt.includes("정확히 10개"), "해시태그 개수(10개) 지시가 프롬프트에 있어야 한다");
   console.log("✅ 일반 프롬프트: 스킬 지시 + 팩트 카드 + 해시태그 지시 포함, 의학 규칙 없음");
 
   // 2) 의학 주제는 의학 전용 규칙이 추가돼야 한다.

@@ -24,8 +24,10 @@ const WRITTEN_AT = "2026-08-28T00:39:15.795Z";
  * (실제로 이 픽스처의 첫 버전이 그렇게 걸렸다 - 검사가 제대로 동작한다는 뜻이기도 하다).
  */
 function makeCleanBody(extra = ""): string {
+  // 분량 목표(공백 제외 2,000~3,000자, writer.md §6-5)를 채운다 - 짧으면 별개의 '분량 미달'
+  // 경고가 붙어 "깨끗한 원고" 테스트가 깨진다.
   const filler = Array.from(
-    { length: 40 },
+    { length: 62 },
     (_, i) => `경복궁 별빛야행 안내 문단 가나다라마바사아자차 ${"가".repeat(i % 7)}${i} 입니다.`
   ).join("\n");
   return `${filler}\n${extra}\n\n## 참고 자료\n\n- [국가유산진흥원](https://www.kh.or.kr/)`;
@@ -129,7 +131,7 @@ function main(): void {
   const plainUrl = checkQuality({
     title: "경복궁 별빛야행 안내",
     body: makeCleanBody().replace("- [국가유산진흥원](https://www.kh.or.kr/)", "- 나무위키: https://namu.wiki/w/x"),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: false,
   });
   assert(
@@ -142,7 +144,7 @@ function main(): void {
   const noRefs = checkQuality({
     title: "제목",
     body: "본문만 있고 출처가 없습니다.".repeat(100),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: false,
   });
   assert(noRefs.some((c) => c.message.includes("참고 자료") && c.severity === "error"), "출처 없음은 error여야 한다");
@@ -152,7 +154,7 @@ function main(): void {
   const tooLong = checkQuality({
     title: "제목",
     body: makeCleanBody("가".repeat(3000)),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: false,
   });
   assert(tooLong.some((c) => c.message.includes("분량")), "분량 초과를 경고해야 한다");
@@ -172,7 +174,7 @@ function main(): void {
   const medicalMissing = checkQuality({
     title: "제목",
     body: makeCleanBody(),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: true,
   });
   assert(
@@ -182,7 +184,7 @@ function main(): void {
   const medicalOk = checkQuality({
     title: "제목",
     body: makeCleanBody("정확한 진단은 반드시 전문의와 상담하세요."),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: true,
   });
   assert(!medicalOk.some((c) => c.message.includes("전문의")), "고지가 있으면 통과해야 한다");
@@ -193,7 +195,7 @@ function main(): void {
   const duplicated = checkQuality({
     title: "제목",
     body: makeCleanBody(`${dupSentence}\n${dupSentence}`),
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: false,
   });
   assert(duplicated.some((c) => c.message.includes("중복 문장")), "중복 문장을 경고해야 한다");
@@ -210,7 +212,7 @@ function main(): void {
       created_at: WRITTEN_AT,
     },
     sources: [{ content: "1매 60,000원" }],
-    hashtags: Array.from({ length: 15 }, (_, i) => `#태그${i}`),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
     isMedical: false,
   });
   assert(clean.passed, `깨끗한 원고는 통과해야 한다 (실제: ${JSON.stringify(clean.checks)})`);

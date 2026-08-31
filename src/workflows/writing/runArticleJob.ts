@@ -22,13 +22,14 @@
 // 단계마다 status를 전이시키는 이유: 어디서 멈췄는지 DB만 보고 알 수 있어야 한다. Sprint 0에서
 // 파이프라인이 조용히 죽었을 때 로그를 열어보고서야 알았던 문제를 반복하지 않는다.
 
+import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
-import { PIPELINE_ROOT, researchFilePath } from "../../config/pipelinePaths.js";
+import { PIPELINE_ROOT, draftFilePath, researchFilePath } from "../../config/pipelinePaths.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
@@ -39,7 +40,9 @@ import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
-import { buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
+import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
+import { buildWritingPrompt } from "./buildWritingPrompt.js";
+import { parseDraftFile } from "./parseDraftFile.js";
 import { generateArticleImages } from "./generateArticleImages.js";
 import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
@@ -220,15 +223,36 @@ function dedupeSourceInserts(items: SourceInsert[]): SourceInsert[] {
 // ---------- 2단계: 원고 생성 ----------
 
 export type RunWritingStageOptions = {
-  /** 테스트에서 실제 LLM 호출을 대체하는 주입 지점. */
-  generateArticle?: (prompt: string) => Promise<GenerateArticleResult>;
+  /** 테스트 주입: 헤드리스 writer 실행을 대체한다. */
+  runWriter?: (prompt: string, draftPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** 테스트 주입: draft 파일 읽기를 대체한다. */
+  readDraftFile?: (path: string) => Promise<string | null>;
   /** 이미 조사된 근거를 넘기면 재수집하지 않는다. 생략하면 DB에서 먼저 찾고, 없으면 조사부터 한다. */
   sources?: SourceRow[];
   /** sources 생략 시 내부에서 runResearchStage를 호출할 때 전달할 옵션. */
   researchOptions?: RunResearchStageOptions;
-  /** false로 주면 이미지 생성을 건너뛴다(테스트, 또는 비용을 아끼고 싶을 때). 기본은 생성한다. */
+  /** false로 주면 이미지 생성을 건너뛴다(테스트). 기본은 ARTICLE_IMAGE_GENERATION 플래그를 따른다. */
   generateImages?: boolean;
 };
+
+async function defaultRunWriter(prompt: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await runHeadlessClaude({
+    prompt,
+    allowedTools: ["Read", "Write", "Skill"],
+    permissionMode: "acceptEdits",
+    cwd: PIPELINE_ROOT,
+    timeoutMs: WRITE_TIMEOUT_MS,
+  });
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+async function defaultReadDraftFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 export type RunWritingStageResult =
   | {
@@ -263,23 +287,18 @@ export async function runWritingStage(
     return { status: "skipped", reason: `이미 처리된 job입니다 (상태: ${job.status})` };
   }
 
-  // 근거 확보: 주입된 것 -> DB에 이미 저장된 것(job:research를 먼저 돌린 경우) -> 없으면 지금 조사한다.
-  // 이 순서 덕분에 runWritingStage 하나만 불러도(=runArticleJob) 여전히 원샷으로 동작하고,
-  // job:research를 먼저 돌린 경우엔 같은 검색을 두 번 하지 않는다(중복 sources row 방지).
-  let sources = options.sources;
-  if (!sources) {
-    const existing = await listSourcesByJobId(jobId);
-    if (existing.length > 0) {
-      sources = existing;
-    } else {
-      const research = await runResearchStage(jobId, options.researchOptions);
-      if (research.status !== "success") {
-        return research.status === "skipped"
-          ? research
-          : { status: "failed", error: `[research] ${research.error}` };
-      }
-      sources = research.sources;
+  // 근거 + 자료조사 파일 확보. sources row가 없거나 research/[키워드].md가 없으면 조사부터 한다.
+  // 자동 흐름(Go -> 자동 research -> write)에서는 파일이 이미 있어 이 분기를 타지 않는다.
+  const researchPath = researchFilePath(job.keyword);
+  let sources = options.sources ?? (await listSourcesByJobId(jobId));
+  if (sources.length === 0 || !existsSync(researchPath)) {
+    const research = await runResearchStage(jobId, options.researchOptions);
+    if (research.status !== "success") {
+      return research.status === "skipped"
+        ? research
+        : { status: "failed", error: `[research] ${research.error}` };
     }
+    sources = research.sources;
   }
 
   const startedAt = Date.now();
@@ -288,52 +307,63 @@ export async function runWritingStage(
   // headline도 함께 본다 - 키워드가 짧게 정제돼 의학 어휘가 빠졌더라도 원문 제목에는 남아 있을 수 있다.
   const isMedical = isMedicalTopic(job.keyword) || (job.headline ? isMedicalTopic(job.headline) : false);
 
-  const prompt = buildArticlePrompt({ job, sources, isMedical });
+  // 헤드리스 writer 에이전트 - writer.md + seo-guide.md 계약대로 research 파일을 읽고
+  // drafts/<슬러그>.md를 쓴다. Node는 조율만 한다(CLAUDE.md 원고 파이프라인 운영 규칙).
+  const draftPath = draftFilePath(job.keyword);
+  await mkdir(dirname(draftPath), { recursive: true });
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  const prompt = buildWritingPrompt({
+    job,
+    researchFilePath: researchPath,
+    draftFilePath: draftPath,
+    isMedical,
+    today,
+  });
 
-  const generate: (prompt: string) => Promise<GenerateArticleResult> =
-    options.generateArticle ??
-    (async (p: string) => {
-      const result = await runHeadlessClaude({ prompt: p, allowedTools: ["Skill"], timeoutMs: WRITE_TIMEOUT_MS });
-      return result.ok ? { ok: true, output: result.output } : { ok: false, error: result.error };
-    });
-
-  const generated = await generate(prompt);
+  const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
+  const ran = await runWriter(prompt, draftPath);
   const durationMs = Date.now() - startedAt;
 
-  if (!generated.ok) {
-    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${generated.error}` });
-    // status는 되돌리지 않는다(writing 유지) - 이미 모은 sources는 재사용할 수 있다.
-    return { status: "failed", error: generated.error };
+  if (!ran.ok) {
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${ran.error}` });
+    // status는 되돌리지 않는다(writing 유지) - 이미 모은 근거·자료조사 파일은 재사용할 수 있다.
+    return { status: "failed", error: ran.error };
   }
 
-  const parsed = parseArticleOutput(generated.output, job.keyword);
+  const readDraftFile = options.readDraftFile ?? defaultReadDraftFile;
+  const draftText = await readDraftFile(draftPath);
+  if (!draftText || draftText.trim().length === 0) {
+    const error = `writer가 draft 파일을 만들지 않았습니다: ${draftPath}`;
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${error}` });
+    return { status: "failed", error };
+  }
+  const parsed = parseDraftFile(draftText);
+  const title = parsed.title ?? job.keyword;
 
-  // 이미지 자동 생성 + 본문 삽입(2026-08-28). 2026-09-01부터 기본 보류(CLAUDE.md 원고 파이프라인
-  // 운영 규칙): 시스템 안정화 전까지 유료 이미지 API 호출을 피한다. 보류 상태에서는 본문의
-  // `[IMAGE: 설명]` 마커를 그대로 두고(passthrough) 사용자가 직접 이미지를 만들어 삽입한다.
-  // 재개는 .env `ARTICLE_IMAGE_GENERATION=true`. 생성/삽입 코드 자체는 그대로 살아 있다.
-  // 실패해도 원고 텍스트는 이미 완성돼 있으므로 계속 진행한다(generateArticleImages는 예외를
-  // 던지지 않고 failures 배열로만 알린다).
+  // 이미지: 2026-09-01부터 API 자동생성 기본 보류(CLAUDE.md 운영 규칙). 보류면 writer가 남긴
+  // `[IMAGE: 설명]` 마커를 본문에 그대로 두고(passthrough) 사용자가 직접 삽입한다.
+  // ⚠️ 재개(ARTICLE_IMAGE_GENERATION=true) 시 generateArticleImages는 아직 `## 헤딩 뒤 삽입`
+  // 방식이라, 마커 인식 방식으로 바꿔야 한다(Phase 5 후속 TODO).
   const imageGenerationHeld = !ARTICLE_IMAGE_GENERATION_ENABLED;
   const imageGeneration: GenerateArticleImagesResult =
     options.generateImages === false || imageGenerationHeld
       ? { body: parsed.body, images: [], failures: [] }
       : await generateArticleImages({
           jobId,
-          title: parsed.title,
+          title,
           keyword: job.keyword,
           category: job.category,
-          seoDescription: parsed.seoDescription,
+          seoDescription: null,
           body: parsed.body,
         });
   if (imageGeneration.failures.length > 0) {
     console.error(`⚠️ 이미지 ${imageGeneration.failures.length}건 생성 실패 (원고는 계속 진행) -`, imageGeneration.failures.join(" / "));
   }
 
-  // 최종 본문 = (이미지 삽입된) body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
-  // 해시태그/고지를 body에 직접 섞지 않고 여기서 결정적으로 붙이는 이유(2026-08-28, 사용자 요청):
-  // 둘 다 "매번 정확히 지켜져야 하는" 항목이라 모델 출력에만 맡기면 빠뜨릴 수 있다.
-  // buildMedicalDisclaimer()는 실제 sources 등급을 보고 문구를 정하므로 모델이 지어낼 수 없다.
+  // 최종 본문 = body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
+  // 해시태그/고지를 여기서 결정적으로 붙이는 이유(2026-08-28): 둘 다 "매번 정확히 지켜져야 하는"
+  // 항목이라 모델 출력에만 맡기면 빠뜨릴 수 있다. buildMedicalDisclaimer()는 실제 sources 등급을
+  // 보고 문구를 정한다. parseDraftFile이 본문에서 해시태그 줄을 분리해 두므로 여기서 다시 붙인다.
   const disclaimer = buildMedicalDisclaimer(isMedical, sources);
   const content = [imageGeneration.body, parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null, disclaimer]
     .filter((part): part is string => Boolean(part))
@@ -341,10 +371,10 @@ export async function runWritingStage(
 
   const article = await createArticleForJob({
     job_id: jobId,
-    title: parsed.title,
+    title,
     content,
     status: "review",
-    ai_model: "claude-headless(content-blog+korean-humanize)",
+    ai_model: "claude-headless(writer.md+korean-humanize)",
   });
 
   // 생성된 이미지를 images 테이블에 기록한다(article.id가 생긴 뒤에만 가능하다).
@@ -388,8 +418,13 @@ export async function runWritingStage(
   }
 
   await ArticleJobRepository.mergeMetadata(jobId, {
-    seoDescription: parsed.seoDescription,
+    lastError: null,
     hashtags: parsed.hashtags,
+    draftFilePath: draftPath,
+    skillUsed: parsed.skillUsed,
+    verdictFromResearch: parsed.verdictFromResearch,
+    // writer가 남긴 <!-- 확인 필요 --> / <!-- 사용한 출처 --> 주석. 검수·감사용.
+    draftCheckNotes: parsed.checkNotes,
     isMedical,
     requiresMedicalReview: isMedical,
     telegraphUrl,
@@ -429,7 +464,8 @@ export async function runWritingStage(
 
 // ---------- 편의 함수: 조사 + 작성을 한 번에 ----------
 
-export type RunArticleJobOptions = RunResearchStageOptions & Pick<RunWritingStageOptions, "generateArticle">;
+export type RunArticleJobOptions = RunResearchStageOptions &
+  Pick<RunWritingStageOptions, "runWriter" | "readDraftFile" | "generateImages">;
 
 export type RunArticleJobResult =
   | {
@@ -459,7 +495,9 @@ export async function runArticleJob(
 
   const writing = await runWritingStage(jobId, {
     sources: research.sources,
-    generateArticle: options.generateArticle,
+    runWriter: options.runWriter,
+    readDraftFile: options.readDraftFile,
+    generateImages: options.generateImages,
   });
   if (writing.status !== "success") {
     return writing.status === "skipped" ? writing : { status: "failed", stage: "writing", error: writing.error };

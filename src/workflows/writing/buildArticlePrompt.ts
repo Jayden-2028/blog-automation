@@ -1,25 +1,21 @@
-// 원고 생성 프롬프트 조립.
+// 원고 생성 프롬프트 조립 (레거시).
 //
-// 스킬 선택(SPRINT_2_DESIGN.md 2절 - 설계 전제 변경): 원래 계획은 카테고리별로 다른 블로그 작성
-// 스킬(entertainment/parenting/trend-blog-writer)을 쓰는 것이었으나, 그 스킬들은
-// `anthropic-skills:*` 네임스페이스로 대화형 세션에만 있고 헤드리스 CLI(`claude -p`)에서는
-// 로드되지 않는 것이 실측 확인됐다. 대신 `moai-marketer:content-blog`(네이버 블로그를 명시적으로
-// 다루고 SEO 메타까지 만든다)를 카테고리 무관 단일 스킬로 쓰고, `moai-writer:korean-humanize`를
-// 후처리로 체이닝한다. 두 스킬 모두 헤드리스에서 사용 가능함을 확인했다.
+// 2026-09-01: 집필 스테이지가 파일 기반 스펙 주도로 바뀌었다(buildWritingPrompt.ts +
+// prompts/writing/writer.md). buildArticlePrompt()/parseArticleOutput()는 더 이상
+// runWritingStage가 쓰지 않지만, 아래 상수·톤 규칙·의학 고지 헬퍼는 buildWritingPrompt와 검수
+// (articleReviewChecks)가 공유하므로 이 파일에 남긴다.
 //
-// 웹 검색을 주지 않는 이유(§9 결정): 우리가 모은 sources가 곧 감사 기록이어야 한다. 원고 생성에
-// 웹 검색을 열면 내용은 풍부해지지만 무엇을 근거로 썼는지 추적할 수 없어지고, Sprint 3 검수가
-// 검증할 대상이 사라진다. runArticleJob이 이 프롬프트를 실행할 때 allowedTools를 Skill 하나로
-// 제한하는 것으로 강제한다(이 파일은 프롬프트 텍스트만 만들고, 도구 제한은 호출자 책임이다).
+// - TARGET_ARTICLE_LENGTH / HASHTAG_COUNT: writer.md·seo-guide 기준값(검수 경고가 스펙과 일치해야 한다)
+// - pickStyleRules(PERSONAL/EDITORIAL): 실제 네이버 블로그 샘플 7편 관찰로 고정한 카테고리별 톤
+// - buildMedicalDisclaimer: 실제 sources 등급을 보고 결정적으로 붙이는 면책 문구
 
 import { buildFactCard, summarizeSourcesByAuthority } from "../research/buildFactCard.js";
 import type { ArticleJobRow, SourceRow } from "../../types/database.js";
 
-/** 목표 본문 길이(자, 공백 포함). 네이버 블로그 기준 - 짧으면 저품질 판정 위험, 길면 비용·이탈률이 는다. */
-export const TARGET_ARTICLE_LENGTH = { min: 1500, max: 2500 } as const;
+/** 목표 본문 길이(자, 공백 포함). writer.md §6-5 / seo-guide 기준: 공백 제외 2,000~3,000자. */
+export const TARGET_ARTICLE_LENGTH = { min: 2000, max: 3000 } as const;
 
-// 응답을 결정적으로 파싱하기 위한 구분자. 모델이 자유 형식으로 답하면 title/body/seoDescription을
-// 나눌 수 없으므로 강하게 고정한다.
+// 레거시 마커 기반 파서용 구분자(buildArticlePrompt/parseArticleOutput 전용).
 export const ARTICLE_OUTPUT_MARKERS = {
   title: "### TITLE",
   body: "### BODY",
@@ -27,8 +23,8 @@ export const ARTICLE_OUTPUT_MARKERS = {
   hashtags: "### HASHTAGS",
 } as const;
 
-/** 해시태그 생성 개수(사용자 요청, 2026-08-28). 네이버 블로그 관례상 본문 끝에 붙인다. */
-export const HASHTAG_COUNT = 15;
+/** 해시태그 개수. writer.md §6-3 / seo-guide: 정확히 10개. */
+export const HASHTAG_COUNT = 10;
 
 const COMMON_RULES = [
   "제공된 근거(팩트 카드)를 벗어난 구체적인 수치·날짜·인용을 절대 지어내지 않는다. 근거에 없는" +
@@ -113,7 +109,7 @@ const EDITORIAL_STYLE_RULES = [
  * 다만 이건 임시 배치다 - `trend-blog-writer` 스킬의 실제 문체(찬반 양측 정리 + 화자의 개인적 견해)는
  * PERSONAL(개인 경험담)과 다르므로, 발행 표본이 쌓이면 전용 rule set을 따로 만들어야 한다.
  */
-function pickStyleRules(category: string | null): readonly string[] {
+export function pickStyleRules(category: string | null): readonly string[] {
   if (category === "living") return EDITORIAL_STYLE_RULES;
   return PERSONAL_STYLE_RULES;
 }
