@@ -1,0 +1,143 @@
+// approved인데 아직 발행되지 않은 job을 활성 채널로 fan-out하는 폴러. SPRINT_5_DESIGN.md §5.
+//
+// 승인 콜백 안에서 발행하지 않는 이유(§5): 티스토리 Playwright/배리에이션 LLM이 수 분 걸려
+// 콜백이 멈추고, 잠자기 중 죽으면 발행이 유실된다. approved는 "발행 완료"가 아니라 "발행 대기열"이고,
+// 이 폴러가 launchd 주기로 큐를 비운다. 재시도·부분성공·상한초과가 자연스럽게 처리된다.
+//
+// 채널 실패 격리: 한 채널이 실패해도 다른 채널을 막지 않는다. job.status는 활성 채널이 전부
+// "성공(또는 임시저장)"일 때만 published로 넘긴다.
+
+import { BLOGGER_CONFIG, TISTORY_CONFIG } from "../../config/publishTargets.js";
+import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
+import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
+import { listPublicationsByArticleId } from "../../services/supabase/repositories/publicationRepository.js";
+import { publishArticleToNaver } from "../../services/publish/publishArticleToNaver.js";
+import { BLOGSPOT_PLATFORM, publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
+import type { ArticleJobRow } from "../../types/database.js";
+
+export type ChannelName = "naver" | "blogspot" | "tistory";
+
+export type ChannelOutcome =
+  | { channel: ChannelName; status: "published"; url: string }
+  | { channel: ChannelName; status: "draft"; url: string }
+  | { channel: ChannelName; status: "already_done"; url: string }
+  | { channel: ChannelName; status: "skipped"; reason: string }
+  | { channel: ChannelName; status: "deferred"; reason: string }
+  | { channel: ChannelName; status: "failed"; reason: string };
+
+export type JobPublishResult = {
+  job: ArticleJobRow;
+  channels: ChannelOutcome[];
+  /** 이번 실행에서 job.status가 published로 넘어갔는지. */
+  markedPublished: boolean;
+};
+
+export type PublishApprovedArticlesOptions = {
+  loadApprovedJobs?: () => Promise<ArticleJobRow[]>;
+  publishNaver?: (jobId: string) => ReturnType<typeof publishArticleToNaver>;
+  publishBlogspot?: (jobId: string) => ReturnType<typeof publishArticleToBlogspot>;
+  markJobPublished?: (jobId: string) => Promise<unknown>;
+  /** 활성 채널 override(테스트). 생략하면 config로 판정. naver는 항상 활성(반자동 임시저장). */
+  activeChannels?: ChannelName[];
+  /** job당 처리 상한(한 번의 폴링이 너무 오래 돌지 않게). 기본 3. */
+  maxJobsPerRun?: number;
+};
+
+function resolveActiveChannels(override?: ChannelName[]): ChannelName[] {
+  if (override) return override;
+  const channels: ChannelName[] = ["naver"]; // 반자동 임시저장 - 항상 돈다
+  if (BLOGGER_CONFIG.enabled) channels.push("blogspot");
+  if (TISTORY_CONFIG.enabled) channels.push("tistory");
+  return channels;
+}
+
+export async function publishApprovedArticles(
+  options: PublishApprovedArticlesOptions = {}
+): Promise<JobPublishResult[]> {
+  const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listByStatus("approved", 20));
+  const publishNaver = options.publishNaver ?? ((jobId) => publishArticleToNaver(jobId));
+  const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
+  const markJobPublished = options.markJobPublished ?? ((jobId) => ArticleJobRepository.updateStatus(jobId, "published"));
+  const maxJobsPerRun = options.maxJobsPerRun ?? 3;
+  const activeChannels = resolveActiveChannels(options.activeChannels);
+
+  const jobs = (await loadApprovedJobs()).slice(0, maxJobsPerRun);
+  const results: JobPublishResult[] = [];
+
+  for (const job of jobs) {
+    const channels: ChannelOutcome[] = [];
+
+    for (const channel of activeChannels) {
+      try {
+        if (channel === "naver") {
+          const r = await publishNaver(job.id);
+          if (r.ok) {
+            channels.push(
+              r.alreadyDone
+                ? { channel, status: "already_done", url: r.draftUrl }
+                : { channel, status: "draft", url: r.draftUrl }
+            );
+          } else if (r.reason === "job_not_approved") {
+            channels.push({ channel, status: "skipped", reason: r.detail });
+          } else {
+            channels.push({ channel, status: "failed", reason: r.detail });
+          }
+        } else if (channel === "blogspot") {
+          const r = await publishBlogspot(job.id);
+          if (r.ok) {
+            channels.push(
+              r.alreadyDone
+                ? { channel, status: "already_done", url: r.url }
+                : r.isDraft
+                  ? { channel, status: "draft", url: r.url }
+                  : { channel, status: "published", url: r.url }
+            );
+          } else if (r.reason === "disabled" || r.reason === "job_not_approved") {
+            channels.push({ channel, status: "skipped", reason: r.detail });
+          } else if (r.reason === "daily_limit") {
+            channels.push({ channel, status: "deferred", reason: r.detail });
+          } else {
+            channels.push({ channel, status: "failed", reason: r.detail });
+          }
+        } else {
+          // tistory: Phase 5. 활성 채널에 있더라도 아직 구현 전이면 deferred.
+          channels.push({ channel, status: "deferred", reason: "티스토리 발행 미구현(Phase 5)" });
+        }
+      } catch (error) {
+        channels.push({
+          channel,
+          status: "failed",
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // job.status -> published 조건: 활성 채널 전부가 "성공/임시저장/이미완료"여야 한다.
+    // deferred(상한초과, 미구현)나 failed가 하나라도 있으면 approved로 남겨 다음 폴링에서 재시도한다.
+    const allSettled = channels.every(
+      (c) => c.status === "published" || c.status === "draft" || c.status === "already_done"
+    );
+    let markedPublished = false;
+    if (allSettled && channels.length > 0) {
+      await markJobPublished(job.id).catch(() => {});
+      markedPublished = true;
+    }
+
+    results.push({ job, channels, markedPublished });
+  }
+
+  return results;
+}
+
+/** publications 조회 헬퍼 - 알림에서 채널별 최종 URL을 다시 확인할 때 쓴다(현재는 미사용, 확장 지점). */
+export async function collectChannelUrls(jobId: string): Promise<Record<string, string>> {
+  const articles = await listArticlesByJobId(jobId);
+  const urls: Record<string, string> = {};
+  for (const article of articles) {
+    const pubs = await listPublicationsByArticleId(article.id);
+    for (const pub of pubs) {
+      if (pub.published_url && pub.platform) urls[pub.platform] = pub.published_url;
+    }
+  }
+  return urls;
+}

@@ -76,7 +76,8 @@ export async function publishArticleToNaver(
   }
 
   const articles = await loadArticles(jobId);
-  const article = articles[articles.length - 1];
+  // 기준 원고 = platform이 null인 것 중 가장 최근(다채널 발행 도입 후 배리에이션 row가 섞여 들어온다).
+  const article = [...articles].reverse().find((a) => a.platform == null) ?? articles[articles.length - 1];
   if (!article) {
     return { ok: false, reason: "article_not_found", detail: `job에 연결된 원고가 없습니다: ${jobId}` };
   }

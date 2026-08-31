@@ -40,6 +40,7 @@ const BASE_ARTICLE: ArticleRow = {
   content: "## 첫 섹션\n\n본문입니다.\n\n![대표 이미지](https://example.com/main.png)\n\n#태그1 #태그2",
   status: "approved",
   ai_model: "test",
+  platform: null,
   created_at: "2026-08-28T00:00:00.000Z",
   updated_at: "2026-08-28T00:00:00.000Z",
 };

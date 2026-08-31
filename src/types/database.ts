@@ -94,6 +94,8 @@ export type ArticleRow = {
   content: string | null;
   status: ArticleStatus;
   ai_model: string | null;
+  /** null = 기준 원고(네이버). "blogspot"/"tistory" = 그 채널용 OSMU 배리에이션(SPRINT_5_DESIGN.md §7 A1). */
+  platform: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -105,6 +107,7 @@ export type ArticleInsert = {
   content?: string | null;
   status?: ArticleStatus;
   ai_model?: string | null;
+  platform?: string | null;
 };
 
 export type ArticleUpdate = Partial<ArticleInsert>;
