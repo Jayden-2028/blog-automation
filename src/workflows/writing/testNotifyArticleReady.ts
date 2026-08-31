@@ -95,7 +95,7 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     durationMs: 185000,
     telegraphUrl: null,
     review: PASSED_REVIEW,
-    images: { succeeded: 0, failed: 0 },
+    images: { succeeded: 0, failed: 0, held: false },
     ...overrides,
   };
 }
@@ -128,6 +128,15 @@ function main(): void {
   const withoutReviewIssue = buildHeaderMessage(makeResult({ review: PASSED_REVIEW }));
   assert(withoutReviewIssue.text.includes("검수 통과"), "통과 시 '검수 통과' 문구가 있어야 한다");
   console.log("✅ 검수 결과가 헤더에 표시됨(통과/실패 모두)");
+
+  // 2-2) 이미지 자동생성 보류(2026-09-01): held면 "직접 제작·삽입" 안내가 뜨고, 생성 장수 문구는
+  // 뜨지 않는다.
+  const heldHeader = buildHeaderMessage(makeResult({ images: { succeeded: 0, failed: 0, held: true } }));
+  assert(heldHeader.text.includes("이미지 자동생성 보류"), "held면 보류 안내가 있어야 한다");
+  assert(!heldHeader.text.includes("장 생성됨"), "held면 생성 장수 문구가 없어야 한다");
+  const generatedHeader = buildHeaderMessage(makeResult({ images: { succeeded: 2, failed: 0, held: false } }));
+  assert(generatedHeader.text.includes("이미지 2장 생성됨"), "생성 완료 시 장수가 표시돼야 한다");
+  console.log("✅ 이미지 보류/생성 상태가 헤더에 반영됨");
 
   // 3) 의학 원고 + telegraphUrl 있음: 헤더에 경고 + 버튼 안내가 있어야 한다.
   const medicalHeader = buildHeaderMessage(

@@ -51,9 +51,12 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     `category: ${escapeTelegramHtml(job.category ?? "N/A")}`
   );
 
-  // 이미지 생성 요약(2026-08-28) - 실패가 있으면 알려서, "원고 보기"를 열었을 때 이미지 빠진
-  // 섹션이 있어도 놀라지 않게 한다. 이미지 자체는 본문에 이미 삽입돼 있어 URL은 따로 안 보여준다.
-  if (result.images.succeeded > 0 || result.images.failed > 0) {
+  // 이미지 요약(2026-08-28) - 실패가 있으면 알려서, "원고 보기"를 열었을 때 이미지 빠진 섹션이
+  // 있어도 놀라지 않게 한다. 2026-09-01부터 자동생성 기본 보류(held): 본문에 `[IMAGE: 설명]`
+  // 마커가 그대로 남아 있으니 사용자가 그 자리에 직접 이미지를 제작·삽입한 뒤 발행해야 한다.
+  if (result.images.held) {
+    lines.push("", "🖼 이미지 자동생성 보류 중 - 본문 [IMAGE: ...] 마커 위치에 직접 제작·삽입한 뒤 발행하세요.");
+  } else if (result.images.succeeded > 0 || result.images.failed > 0) {
     const imageLine =
       result.images.failed > 0
         ? `🖼 이미지 ${result.images.succeeded}장 생성됨 (${result.images.failed}장 실패 - 본문에서 빠진 자리가 있을 수 있습니다)`

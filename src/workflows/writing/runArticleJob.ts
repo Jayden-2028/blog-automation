@@ -23,6 +23,7 @@
 // 파이프라인이 조용히 죽었을 때 로그를 열어보고서야 알았던 문제를 반복하지 않는다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
+import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
@@ -125,8 +126,11 @@ export type RunWritingStageResult =
       telegraphUrl: string | null;
       /** 검수 규칙 4종 결과(SPRINT_3_DESIGN.md). 차단하지 않는다 - 사람이 참고만 한다. */
       review: ArticleReviewResult;
-      /** 생성 성공/실패 개수(2026-08-28). 이미지 자체는 본문에 이미 삽입돼 있다 - 이건 알림용 요약이다. */
-      images: { succeeded: number; failed: number };
+      /**
+       * 생성 성공/실패 개수(2026-08-28). `held`면 자동생성 보류 상태라 본문에 `[IMAGE:]` 마커가
+       * 그대로 남아 있고 사용자가 직접 이미지를 삽입해야 한다(2026-09-01, CLAUDE.md 운영 규칙).
+       */
+      images: { succeeded: number; failed: number; held: boolean };
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
@@ -187,11 +191,15 @@ export async function runWritingStage(
 
   const parsed = parseArticleOutput(generated.output, job.keyword);
 
-  // 이미지 자동 생성 + 본문 삽입(2026-08-28, 사용자 요청: "이미지가 첨부된 원고 풀세트").
-  // AI 생성이 기본(사용자 결정)이고, 실패해도 원고 텍스트 자체는 이미 완성돼 있으므로 계속
-  // 진행한다(generateArticleImages는 예외를 던지지 않고 failures 배열로만 알린다).
+  // 이미지 자동 생성 + 본문 삽입(2026-08-28). 2026-09-01부터 기본 보류(CLAUDE.md 원고 파이프라인
+  // 운영 규칙): 시스템 안정화 전까지 유료 이미지 API 호출을 피한다. 보류 상태에서는 본문의
+  // `[IMAGE: 설명]` 마커를 그대로 두고(passthrough) 사용자가 직접 이미지를 만들어 삽입한다.
+  // 재개는 .env `ARTICLE_IMAGE_GENERATION=true`. 생성/삽입 코드 자체는 그대로 살아 있다.
+  // 실패해도 원고 텍스트는 이미 완성돼 있으므로 계속 진행한다(generateArticleImages는 예외를
+  // 던지지 않고 failures 배열로만 알린다).
+  const imageGenerationHeld = !ARTICLE_IMAGE_GENERATION_ENABLED;
   const imageGeneration: GenerateArticleImagesResult =
-    options.generateImages === false
+    options.generateImages === false || imageGenerationHeld
       ? { body: parsed.body, images: [], failures: [] }
       : await generateArticleImages({
           jobId,
@@ -273,6 +281,7 @@ export async function runWritingStage(
     reviewChecks: review.checks,
     imageCounts: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
     imageFailures: imageGeneration.failures,
+    imageGenerationHeld,
     sourceCounts: {
       total: sources.length,
       official: sources.filter((s) => s.authority === "official").length,
@@ -293,7 +302,11 @@ export async function runWritingStage(
     requiresMedicalReview: isMedical,
     durationMs,
     review,
-    images: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
+    images: {
+      succeeded: imageGeneration.images.length,
+      failed: imageGeneration.failures.length,
+      held: imageGenerationHeld,
+    },
   };
 }
 
@@ -312,7 +325,7 @@ export type RunArticleJobResult =
       durationMs: { research: number; writing: number };
       telegraphUrl: string | null;
       review: ArticleReviewResult;
-      images: { succeeded: number; failed: number };
+      images: { succeeded: number; failed: number; held: boolean };
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; stage: "research" | "writing"; error: string };

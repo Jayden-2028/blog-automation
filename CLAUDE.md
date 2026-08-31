@@ -31,6 +31,20 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 5. 변경 후 Claude가 diff를 검토하고 필요한 안전 테스트를 실행한다.
 6. 완료·잔여 위험·다음 승인 지점을 사용자에게 보고한다.
 
+## 원고 파이프라인 운영 규칙
+
+- 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/writer.md`가
+  규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
+  헤드리스 실행(`claude -p`)도 이 스펙과 `docs/seo-guide.md`를 로드해 따른다. 산출물은 파일이다
+  (`research/[키워드].md`, `drafts/[키워드].md`).
+- 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
+  researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
+- 원고 내 이미지: API 자동생성은 **보류**다(`ARTICLE_IMAGE_GENERATION` 기본 false). 생성 코드·
+  provider는 유지하되, 당분간 사용자가 `[IMAGE: 설명]` 마커 위치에 직접 이미지를 제작·삽입한 뒤
+  발행한다. 시스템 안정화 후 재개. 불안정기 유료 호출 회피가 목적.
+- Blogspot: **임시저장(draft)까지만** 진행한다. 원고를 draft로 두면 사용자가 이미지 삽입 후 직접
+  발행한다. `BLOGGER_PUBLISH_AS_DRAFT=false`로 바꾸지 않는다. (네이버·티스토리도 임시저장까지만)
+
 ## 승인 없이는 금지
 
 - Supabase migration 적용 또는 migration history 변경
@@ -45,6 +59,9 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 ## 현재 핵심 문서
 
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
+- 자료조사 규격: `prompts/research/researcher.md`
+- 집필 규격: `prompts/writing/writer.md`
+- SEO/AEO/GEO 규칙집: `docs/seo-guide.md`
 - Codex 위임 양식: `docs/ai-handoff/CODEX_TASK_TEMPLATE.md`
 - Codex 위임 스킬: `.claude/skills/delegate-codex/SKILL.md`
 
