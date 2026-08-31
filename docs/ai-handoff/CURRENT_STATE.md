@@ -46,7 +46,7 @@
   - 네이버: 기존 반자동 임시저장(`publishArticleToNaver`) - 이제 수동 `job:publish` 대신 폴러가 자동 호출.
   - Blogspot: `generateArticleVariant`(claude -p, 팩트 보존)로 OSMU 배리에이션 원고 생성 →
     `BloggerClient.insertPost` → **초기 draft**(`BLOGGER_PUBLISH_AS_DRAFT=true` 기본). 일일 상한 5건 하드 가드.
-  - 티스토리: Phase 5(에디터 DOM 실측 선행). `publishTargets.ts`에 스텁만, `TISTORY_ENABLED=false`.
+  - 티스토리: **Phase 5 완료 + 활성화**(아래).
 - 채널 실패 격리. 전 채널 성공 시에만 `job.status=published`. `notifyMultiPublish`가 채널별 결과 알림.
 - `articles.platform` 컬럼: **migration 20260831040000 적용 완료**(`supabase db push`, 2026-08-31).
   null=기준 원고(네이버), "blogspot"/"tistory"=배리에이션.
@@ -58,8 +58,24 @@
 - ✅ **`publish-poll` launchd 등록 완료**(10분 주기). 실측: 맥도날드 job → 두 채널 already_done →
   `job.status=published` 전이. 보조금24 job → preflight 차단(deferred).
 - **preflight 가드**(`defaultPreflight`): 기준 원고 이미지가 전부 우리 Supabase Storage URL이 아니면
-  job 전체를 deferred(알림 없음)로 건너뛴다. "보조금24" job(Sprint 3 잔재, placeholder 이미지)이
-  이걸로 계속 걸린다 - `npm run job:close 753d9af8-... "..."`로 대기열에서 빼야 한다.
+  job 전체를 deferred(알림 없음)로 건너뛴다. "보조금24" job(Sprint 3 잔재)은 `job:close`로 정리 완료.
+
+**Phase 5 — 티스토리 반자동 발행 (완료 + 활성화, 2026-08-31)**
+- `setup:tistory` 실측: 티스토리 에디터 = KEditor 0.9.1(**TinyMCE**). 본문은 클립보드 합성 없이
+  `tinymce.get("editor-tistory").setContent(html)`. 제목 `#post-title-inp`, 태그 `#tagText`,
+  임시저장 `.btn-draft a.action`. "완료"(`#publish-layer-btn`)는 절대 안 누름.
+- `TistoryPublisher.saveDraft()`: 각 단계 되읽어 검증. "임시저장" 클릭 → `POST /manage/drafts` 응답 +
+  "임시저장 개수" 증가로 성공 확인(고정 대기 아님 - 1차 실측이 조용히 실패한 원인).
+  ✅ 라이브 검증: 제목/본문/외부 이미지(Supabase URL 그대로 렌더)/태그 반영 스크린샷 확인.
+- ⚠️ **카카오 세션이 짧아 자주 만료**된다. 만료 시 `login_required` → 폴러가 `deferred`(재시도 대기,
+  failed 기록·스팸 없음). `publish-poll`이 감지하면 **하루 1회** "티스토리 로그인 필요" 텔레그램
+  알림(`logs/.tistory-login-alerted` dedupe). 재로그인: `npm run setup:tistory`.
+- 티스토리 임시저장 글은 **직접 URL 없음** - 글쓰기 화면 하단 "임시저장 N" 버튼 → 목록 팝업.
+- `.env` `TISTORY_ENABLED=true` + `TISTORY_BLOG_URL=https://wooahpapa.tistory.com/`. 일일 상한 5.
+- 신규: `setup:tistory` / `inspect:tistory` / `debug:live-tistory [--via-publisher]` /
+  `test:publish-tistory`(7종). 프로필 `.local/tistory-publish-profile/`(네이버·CA와 분리).
+
+**이제 승인 1번 → 3채널**: 네이버 임시저장 + Blogspot OSMU 자동발행(draft) + 티스토리 OSMU 임시저장.
 
 **운영 노트 - launchd 4개 + pmset 기상 (2026-08-31)**
 - launchd: `daily-keyword`(09:00) / `community-keyword`(13:00) / `telegram-poll`(5분) / `publish-poll`(10분).
