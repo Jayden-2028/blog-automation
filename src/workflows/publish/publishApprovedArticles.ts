@@ -10,6 +10,7 @@
 import { BLOGGER_CONFIG, TISTORY_CONFIG } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
+import { listImagesByArticleId } from "../../services/supabase/repositories/imageRepository.js";
 import { listPublicationsByArticleId } from "../../services/supabase/repositories/publicationRepository.js";
 import { publishArticleToNaver } from "../../services/publish/publishArticleToNaver.js";
 import { BLOGSPOT_PLATFORM, publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
@@ -37,11 +38,51 @@ export type PublishApprovedArticlesOptions = {
   publishNaver?: (jobId: string) => ReturnType<typeof publishArticleToNaver>;
   publishBlogspot?: (jobId: string) => ReturnType<typeof publishArticleToBlogspot>;
   markJobPublished?: (jobId: string) => Promise<unknown>;
+  /** job이 발행 가능한 상태인지 사전 점검. 반환값이 문자열이면 그 사유로 job 전체를 건너뛴다(deferred). */
+  preflight?: (job: ArticleJobRow) => Promise<string | null>;
   /** 활성 채널 override(테스트). 생략하면 config로 판정. naver는 항상 활성(반자동 임시저장). */
   activeChannels?: ChannelName[];
   /** job당 처리 상한(한 번의 폴링이 너무 오래 돌지 않게). 기본 3. */
   maxJobsPerRun?: number;
 };
+
+/**
+ * 기본 preflight: 기준 원고의 이미지가 전부 우리 Supabase Storage URL인지 확인한다.
+ * example.com 플레이스홀더나 외부 URL이 섞인 job(테스트 잔재, 수동 편집 실수)은 발행하지 않는다 -
+ * 네이버 이미지 업로드가 404로 실패하며 무한 재시도에 빠지거나, Blogspot에 깨진 이미지가 올라간다.
+ */
+export async function defaultPreflight(job: ArticleJobRow): Promise<string | null> {
+  const supabaseHost = (() => {
+    try {
+      return new URL(process.env.SUPABASE_URL ?? "").host;
+    } catch {
+      return "";
+    }
+  })();
+
+  const articles = await listArticlesByJobId(job.id);
+  const baseArticle = [...articles].reverse().find((a) => a.platform == null);
+  if (!baseArticle) return "기준 원고 없음";
+
+  const images = await listImagesByArticleId(baseArticle.id);
+  for (const image of images) {
+    const url = image.image_url ?? "";
+    if (!url) continue;
+    let host = "";
+    try {
+      host = new URL(url).host;
+    } catch {
+      return `이미지 URL 형식 오류: ${url.slice(0, 60)}`;
+    }
+    if (supabaseHost && host !== supabaseHost) {
+      return `우리 스토리지가 아닌 이미지 URL(${host}) - 수동 정리 필요`;
+    }
+  }
+  if (/example\.com|placeholder/i.test(baseArticle.content ?? "")) {
+    return "본문에 placeholder/example.com 참조 - 수동 정리 필요";
+  }
+  return null;
+}
 
 function resolveActiveChannels(override?: ChannelName[]): ChannelName[] {
   if (override) return override;
@@ -59,6 +100,7 @@ export async function publishApprovedArticles(
   const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
   const markJobPublished = options.markJobPublished ?? ((jobId) => ArticleJobRepository.updateStatus(jobId, "published"));
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
+  const preflight = options.preflight ?? defaultPreflight;
   const activeChannels = resolveActiveChannels(options.activeChannels);
 
   const jobs = (await loadApprovedJobs()).slice(0, maxJobsPerRun);
@@ -66,6 +108,18 @@ export async function publishApprovedArticles(
 
   for (const job of jobs) {
     const channels: ChannelOutcome[] = [];
+
+    const blocker = await preflight(job);
+    if (blocker) {
+      // job 전체를 이번엔 건너뛴다. approved로 남으므로 다음 폴링에서 재시도하지만, 사람이
+      // 정리(job:close 또는 이미지 교체)하기 전까지는 계속 deferred다.
+      results.push({
+        job,
+        channels: activeChannels.map((channel) => ({ channel, status: "deferred" as const, reason: blocker })),
+        markedPublished: false,
+      });
+      continue;
+    }
 
     for (const channel of activeChannels) {
       try {

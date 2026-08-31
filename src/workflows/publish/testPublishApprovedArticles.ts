@@ -30,6 +30,8 @@ function job(id: string): ArticleJobRow {
 const naverOk = async () => ({ ok: true as const, publicationId: 1, draftUrl: "https://naver/d", imageCount: 2, alreadyDone: false as const });
 const blogspotPublished = async () => ({ ok: true as const, publicationId: 2, url: "https://blog/p", isDraft: false, variantCreated: true, alreadyDone: false });
 
+const noPreflight = async () => null;
+
 async function main(): Promise<void> {
   console.log("▶ publishApprovedArticles 테스트 시작\n");
 
@@ -38,6 +40,7 @@ async function main(): Promise<void> {
   const r1 = await publishApprovedArticles({
     loadApprovedJobs: async () => [job("a")],
     activeChannels: ["naver", "blogspot"],
+    preflight: noPreflight,
     publishNaver: naverOk,
     publishBlogspot: blogspotPublished,
     markJobPublished: async (id) => marks.push(id),
@@ -51,6 +54,7 @@ async function main(): Promise<void> {
   const r2 = await publishApprovedArticles({
     loadApprovedJobs: async () => [job("b")],
     activeChannels: ["naver", "blogspot"],
+    preflight: noPreflight,
     publishNaver: naverOk,
     publishBlogspot: async () => ({ ok: false as const, reason: "blogger_failed", detail: "quota", stage: "insert" }),
     markJobPublished: async (id) => marks2.push(id),
@@ -66,6 +70,7 @@ async function main(): Promise<void> {
   const r3 = await publishApprovedArticles({
     loadApprovedJobs: async () => [job("c")],
     activeChannels: ["naver", "blogspot"],
+    preflight: noPreflight,
     publishNaver: naverOk,
     publishBlogspot: async () => ({ ok: false as const, reason: "daily_limit", detail: "상한 도달" }),
     markJobPublished: async () => {},
@@ -78,6 +83,7 @@ async function main(): Promise<void> {
   const r4 = await publishApprovedArticles({
     loadApprovedJobs: async () => [job("d"), job("e"), job("f"), job("g")],
     activeChannels: ["naver"],
+    preflight: noPreflight,
     publishNaver: naverOk,
     maxJobsPerRun: 2,
     markJobPublished: async () => {},
@@ -91,6 +97,24 @@ async function main(): Promise<void> {
   assert(msg.text.includes("Blogspot: ⚠️ 실패 — quota"), `Blogspot 실패 줄 실패 (${msg.text})`);
   assert(msg.replyMarkup?.inline_keyboard.some((row) => row[0].text.includes("네이버")), "네이버 링크 버튼 실패");
   console.log("✅ 알림 메시지: 성공=링크버튼, 실패=사유텍스트");
+
+  // 6) preflight가 사유를 반환하면 job 전체를 건너뛴다(채널 발행 함수 호출 없음).
+  let naverCalled = 0;
+  const r6 = await publishApprovedArticles({
+    loadApprovedJobs: async () => [job("h")],
+    activeChannels: ["naver", "blogspot"],
+    preflight: async () => "본문에 placeholder 참조 - 수동 정리 필요",
+    publishNaver: async () => {
+      naverCalled++;
+      return naverOk();
+    },
+    publishBlogspot: blogspotPublished,
+    markJobPublished: async () => {},
+  });
+  assert(naverCalled === 0, "preflight가 막으면 채널 발행을 호출하면 안 된다");
+  assert(r6[0].channels.every((c) => c.status === "deferred"), "모든 채널이 deferred여야 한다");
+  assert(r6[0].markedPublished === false, "deferred job은 published로 안 넘어간다");
+  console.log("✅ preflight 차단 -> 전 채널 deferred, 발행 호출 없음");
 
   console.log("\n✅ 전체 테스트 통과");
 }
