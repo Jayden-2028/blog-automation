@@ -192,6 +192,36 @@ function main(): void {
   );
   console.log("  ✅ community(신규 category)가 backfill로 편입됨");
 
+  // ---------- 3. maxPerSeedQuery: 구체 seedQuery는 1건, 분류어 seedQuery는 제한 없음 ----------
+  // 실측(run #20/#22/#23): "황재균 지연", "상생페이백 사용" 같은 구체 seedQuery에서 같은 사건
+  // 기사 2건이 Top 1·2를 차지했다. maxPerSeedQuery=1로 이걸 막되, "넷플릭스"처럼 분류어인
+  // seedQuery는 서로 다른 작품을 담을 수 있어야 하므로 제외한다.
+  assert(DIVERSITY_CONFIG.maxPerSeedQuery === 1, "이 회귀 테스트는 maxPerSeedQuery=1 전제다");
+  {
+    const dupEventBatch = [
+      makeCandidate("황재균 18kg 감량 지연 달라진 얼굴", "황재균 지연", "entertainment", 69),
+      makeCandidate("이혼 근황 황재균 18kg 감량 지연 올블랙", "황재균 지연", "entertainment", 69),
+      makeCandidate("장동윤 결혼 발표 예비신부 화제", "연예", "entertainment", 60),
+      ...makeFillerCandidates(200),
+    ].sort((a, b) => b.totalScore - a.totalScore);
+    const dupTop = selectDiverseTopN(dupEventBatch, 10);
+    const hwang = dupTop.filter((item) => item.seedQuery === "황재균 지연");
+    assert(hwang.length === 1, `구체 seedQuery "황재균 지연"은 Top 10에 1건만 있어야 한다 (실제 ${hwang.length}건)`);
+    console.log('  ✅ 구체 seedQuery "황재균 지연" -> Top 10에 1건');
+  }
+  {
+    // 서로 다른 작품 2편, 같은 분류어 seedQuery "넷플릭스" - 둘 다 남아야 한다(과병합 방지).
+    const platformBatch = [
+      makeCandidate("넷플릭스 오징어게임 스핀오프 제작 발표", "넷플릭스", "ott", 70),
+      makeCandidate("넷플릭스 지금 뜨는 미드 원피스 시즌2 공개", "넷플릭스", "ott", 68),
+      ...makeFillerCandidates(200),
+    ].sort((a, b) => b.totalScore - a.totalScore);
+    const platformTop = selectDiverseTopN(platformBatch, 10, { categoryTerms: ["넷플릭스"] });
+    const netflix = platformTop.filter((item) => item.seedQuery === "넷플릭스");
+    assert(netflix.length === 2, `분류어 seedQuery "넷플릭스"는 서로 다른 작품 2건이 남아야 한다 (실제 ${netflix.length}건)`);
+    console.log('  ✅ 분류어 seedQuery "넷플릭스" -> 서로 다른 작품 2건 유지');
+  }
+
   console.log("\n✅ 전체 통과");
 }
 
