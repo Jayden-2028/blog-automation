@@ -10,6 +10,7 @@
 // 웹 검색을 주지 않는 이유는 runArticleJob과 같다 - 기준 원고가 감사 기록이고, 배리에이션이
 // 새 사실을 끌어오면 추적성이 깨진다. allowedTools를 Skill 하나로 제한한다.
 
+import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
@@ -67,6 +68,10 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `당신은 ${CHANNEL_LABEL[channel]}에 올릴 SEO 최적화 블로그 글을 쓴다.`,
     `아래 "기준 원고"(네이버 블로그용)를 소스로, ${CHANNEL_LABEL[channel]} 독자와 구글 검색에 맞춘`,
     `배리에이션 글을 만든다. moai-marketer:content-blog 스킬로 작성하고 moai-writer:korean-humanize로 마무리한다.`,
+    ``,
+    `먼저 prompts/writing/writer.md를 Read해 문체·구조·사실 태도(§4 확인/헤지 금지) 원칙을 따른다.`,
+    `단, 출력은 writer.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 하고, 사실은 기준 원고에서만`,
+    `가져온다(자료조사 파일·웹 검색 없음).`,
     ``,
     `## 절대 규칙 - 사실 보존`,
     `- 기준 원고에 있는 수치·날짜·금액·고유명사·인용·제도명은 한 글자도 바꾸지 않고 그대로 쓴다.`,
@@ -177,7 +182,16 @@ export async function generateArticleVariant(
 ): Promise<GenerateArticleVariantResult> {
   const generate =
     input.generate ??
-    ((prompt: string) => runHeadlessClaude({ prompt, allowedTools: ["Skill"], timeoutMs: VARIANT_TIMEOUT_MS }));
+    ((prompt: string) =>
+      runHeadlessClaude({
+        prompt,
+        // Skill(content-blog/korean-humanize) + Read(prompts/writing/writer.md). Write/WebSearch는
+        // 주지 않는다 - 배리에이션은 기준 원고가 유일 소스이고 stdout 마커로 결과를 돌려준다.
+        allowedTools: ["Skill", "Read"],
+        permissionMode: "acceptEdits",
+        cwd: PIPELINE_ROOT,
+        timeoutMs: VARIANT_TIMEOUT_MS,
+      }));
 
   const startedAt = Date.now();
   const result = await generate(buildPrompt(input));
