@@ -33,3 +33,6 @@ docs/ai-handoff/community-recon/
 # Claude -> Codex 기계 치환 때문에 역할이 뒤집혀 있어(예: "Codex remains project lead")
 # 커밋하면 안 된다. 원본은 .claude/skills/ 이다.
 .agents/
+
+# 커뮤니티 recon 원본 HTML (실제 게시글 제목 = 저작물, 커밋 금지)
+docs/ai-handoff/community-recon/
