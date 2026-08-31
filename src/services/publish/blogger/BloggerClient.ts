@@ -127,6 +127,10 @@ export class BloggerClient {
     if (!res.ok || !json.id) {
       return { ok: false, stage: "insert", error: `posts.insert 실패 (${res.status}): ${json.error?.message ?? ""}`.trim() };
     }
-    return { ok: true, postId: json.id, url: json.url ?? "", isDraft };
+    // draft는 아직 공개 URL이 없다(Blogger가 blog 루트를 돌려준다) - 편집 화면 링크를 준다.
+    const resultUrl = isDraft
+      ? `https://www.blogger.com/blog/post/edit/${this.blogId}/${json.id}`
+      : json.url ?? "";
+    return { ok: true, postId: json.id, url: resultUrl, isDraft };
   }
 }

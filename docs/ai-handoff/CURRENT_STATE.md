@@ -41,11 +41,20 @@
 - `DIVERSITY_CONFIG.maxPerCategory`(기본 비활성 {}) + 후보 얕은 날 상한 해제 fallback pass 추가.
 - 신규 `npm run debug:latest-rankings [n]` - 최근 run들의 Top N 출력(읽기 전용).
 
-**Phase 4 — 승인 → 다채널 자동 발행 (미착수, 승인 게이트 있음)**
-- `job.status = approved` 트리거로 네이버 임시저장 자동 + Blogspot OSMU 배리에이션 자동 발행(초기 draft).
-  티스토리는 그 다음(Phase 5, DOM 실측 선행). 상세는 계획 파일 Phase 4, `SPRINT_5_DESIGN.md`.
-- 승인 게이트: `articles.platform` migration(`supabase db push`), Blogspot 실측 발행 1건,
-  `pmset repeat` 12:55 추가(사용자 sudo).
+**Phase 4 — 승인 → 다채널 자동 발행 (코드 완료, Blogspot까지)**
+- `job.status = approved`가 발행 대기열. `publishPollJob`(신규, 10분 주기 plist)이 활성 채널로 fan-out.
+  - 네이버: 기존 반자동 임시저장(`publishArticleToNaver`) - 이제 수동 `job:publish` 대신 폴러가 자동 호출.
+  - Blogspot: `generateArticleVariant`(claude -p, 팩트 보존)로 OSMU 배리에이션 원고 생성 →
+    `BloggerClient.insertPost` → **초기 draft**(`BLOGGER_PUBLISH_AS_DRAFT=true` 기본). 일일 상한 5건 하드 가드.
+  - 티스토리: Phase 5(에디터 DOM 실측 선행). `publishTargets.ts`에 스텁만, `TISTORY_ENABLED=false`.
+- 채널 실패 격리. 전 채널 성공 시에만 `job.status=published`. `notifyMultiPublish`가 채널별 결과 알림.
+- `articles.platform` 컬럼: **migration 20260831040000 적용 완료**(`supabase db push`, 2026-08-31).
+  null=기준 원고(네이버), "blogspot"/"tistory"=배리에이션.
+- ✅ `supabase migration list` 10개 전부 local==remote.
+- 신규 CLI: `job:publish-poll`, `debug:approved-jobs`. 신규 plist `publish-poll`(RunAtLoad=false).
+- 테스트 6종: convert-article-html-generic / article-variant / blogger-client / publish-blogspot /
+  publish-approved.
+- ⏳ launchd `publish-poll` 등록은 라이브 Blogspot 발행 1건 검증 후.
 
 ---
 
