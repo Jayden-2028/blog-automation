@@ -1,41 +1,36 @@
 // 티스토리 글 1건을 "임시저장"만 하는 Playwright 클래스. SPRINT_5_DESIGN.md §11-10.
-// NaverBlogPublisher.ts의 티스토리 판이지만, 티스토리 에디터가 TinyMCE(KEditor 0.9.1) 기반이라
-// 본문 입력이 훨씬 단순하다 - 클립보드 합성 없이 tinymce API로 setContent 한다.
+// NaverBlogPublisher.ts의 티스토리 판. 티스토리 에디터는 KEditor 0.9.1(TinyMCE) 기반이라
+// 본문 입력이 tinymce API로 단순하다.
 //
 // 실측(2026-08-31 setup:tistory 스냅샷):
 //   - 글쓰기 URL: https://{blog}.tistory.com/manage/newpost/
-//   - 제목:   textarea#post-title-inp  (placeholder "제목을 입력하세요")
+//   - 제목:   textarea#post-title-inp
 //   - 본문:   iframe[name="editor-tistory_ifr"] 안 body#tinymce (data-id="editor-tistory")
 //             -> window.tinymce.get("editor-tistory").setContent(html)
 //   - 태그:   input#tagText  (Enter로 확정)
 //   - 임시저장: .btn-draft a.action  (텍스트 "임시저장"). "완료"(#publish-layer-btn)는 절대 안 누른다.
-//   - 카테고리: #category-btn (지금은 안 씀 - §9-1 매핑은 publishArticleToTistory에서 이름으로)
 //
-// ⚠️ 아래 가설은 첫 라이브 실행(publishArticleToTistory 실측, 사용자 승인)에서 확인한다:
-//   - tinymce.get("editor-tistory")가 존재하고 setContent가 반영되는지 (에디터 인스턴스 id)
-//   - setContent에 넣은 외부 <img src>(Supabase 공개 URL)를 티스토리가 유지하는지, 아니면
-//     저장 시 걷어내는지 (걷어내면 filechooser 업로드 경로로 전환 - 네이버 방식)
-//   - "임시저장" 클릭 후 성공 신호(토스트 / "임시저장 개수" 카운트 증가 / URL 변화)
-//   - 태그 입력 후 저장까지 유지되는지
-// saveDraft()는 이 가설들이 틀리면 어느 stage에서 막혔는지 결과로 알려준다.
+// 이 클래스는 각 단계 후 값을 되읽어 실제 반영 여부를 확인한다 - "조용히 잘못된 성공"을 내지 않는다.
+// 1차 실측(2026-08-31)에서 saveDraft가 ok를 반환했는데 실제 임시저장 글이 안 생겼다: 저장
+// 확인 신호를 안 보고 고정 시간만 기다린 게 원인이었다. 이제 저장은 토스트/네트워크/카운트 중
+// 하나라도 확인돼야 ok다.
 
-import { chromium, type Page } from "playwright";
+import { chromium, type Frame, type Page } from "playwright";
 
 import { TISTORY_CONFIG } from "../../../config/publishTargets.js";
 
-export type TistoryDraftStage = "login" | "navigate" | "title" | "body" | "image" | "tags" | "save";
+export type TistoryDraftStage = "login" | "navigate" | "editor-init" | "title" | "body" | "tags" | "save";
 
 export type TistoryPublishImageInput = { url: string; alt?: string };
 
 export type TistoryDraftSaveInput = {
   title: string;
-  /** 완성된 본문 HTML(convertArticleToHtml 결과, <img> 포함). */
   bodyHtml: string;
   tags?: string[];
 };
 
 export type TistoryDraftSaveResult =
-  | { ok: true; draftUrl: string }
+  | { ok: true; draftUrl: string; bodyLength?: number }
   | { ok: false; stage: TistoryDraftStage; error: string };
 
 const SELECTORS = {
@@ -44,8 +39,6 @@ const SELECTORS = {
   editorInstanceId: "editor-tistory",
   editorBody: "#tinymce",
   tagInput: "#tagText",
-  saveDraftButton: ".btn-draft a.action",
-  draftCount: ".btn-draft a.count",
 } as const;
 
 export type TistoryPublisherOptions = {
@@ -83,7 +76,6 @@ export class TistoryPublisher {
 
       try {
         await page.goto(writeUrl, { waitUntil: "domcontentloaded" });
-        await page.waitForTimeout(2500); // KEditor/TinyMCE 초기화 대기
       } catch (error) {
         return { ok: false, stage: "navigate", error: this.errorMessage(error) };
       }
@@ -96,19 +88,37 @@ export class TistoryPublisher {
         };
       }
 
+      // "저장하지 않은 글" 복구 팝업이 뜨면 새 글로 시작한다(이전 실측 잔재 방지).
+      await this.dismissRestorePopup(page);
+
+      // TinyMCE 인스턴스가 초기화될 때까지 기다린다.
+      const editorReady = await this.waitForEditor(page);
+      if (!editorReady.ok) return { ok: false, stage: "editor-init", error: editorReady.error };
+
+      // 제목
       try {
         await page.waitForSelector(SELECTORS.title, { timeout: 15_000 });
         await page.fill(SELECTORS.title, input.title);
+        const titleValue = await page.inputValue(SELECTORS.title);
+        if (titleValue.trim() !== input.title.trim()) {
+          return { ok: false, stage: "title", error: `제목 반영 확인 실패 (읽은 값: "${titleValue.slice(0, 40)}")` };
+        }
       } catch (error) {
         return { ok: false, stage: "title", error: this.errorMessage(error) };
       }
 
+      // 본문
+      let bodyLength = 0;
       try {
-        await this.setBody(page, input.bodyHtml);
+        bodyLength = await this.setBody(page, input.bodyHtml);
+        if (bodyLength < 100) {
+          return { ok: false, stage: "body", error: `본문 반영 확인 실패 (setContent 후 길이 ${bodyLength})` };
+        }
       } catch (error) {
         return { ok: false, stage: "body", error: this.errorMessage(error) };
       }
 
+      // 태그
       if (input.tags && input.tags.length > 0) {
         try {
           await this.fillTags(page, input.tags);
@@ -117,9 +127,11 @@ export class TistoryPublisher {
         }
       }
 
+      // 임시저장 (검증 포함)
       try {
-        const draftUrl = await this.clickSaveDraft(page);
-        return { ok: true, draftUrl };
+        const saved = await this.clickSaveDraft(page);
+        if (!saved.ok) return { ok: false, stage: "save", error: saved.error };
+        return { ok: true, draftUrl: saved.draftUrl, bodyLength };
       } catch (error) {
         return { ok: false, stage: "save", error: this.errorMessage(error) };
       }
@@ -128,74 +140,145 @@ export class TistoryPublisher {
     }
   }
 
-  /** TinyMCE API로 본문을 넣는다. 인스턴스가 없으면(가설 오류) iframe body에 직접 쓴다. */
-  private async setBody(page: Page, html: string): Promise<void> {
-    const viaApi = await page.evaluate(
+  private async dismissRestorePopup(page: Page): Promise<void> {
+    // 티스토리는 "작성 중이던 글이 있습니다. 이어서 작성할까요?" 팝업을 띄운다. "새로 작성" 쪽을 누른다.
+    for (const label of ["새로 작성", "취소", "아니오", "닫기"]) {
+      const btn = page.locator(`button:has-text("${label}"), a:has-text("${label}")`).first();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click().catch(() => {});
+        await page.waitForTimeout(500);
+        return;
+      }
+    }
+  }
+
+  private async waitForEditor(page: Page): Promise<{ ok: true } | { ok: false; error: string }> {
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const state = await page
+        .evaluate((instanceId) => {
+          const g: any = globalThis as any;
+          const tm = g.tinymce;
+          if (!tm) return "no-tinymce";
+          const ed = tm.get(instanceId) ?? (tm.editors && tm.editors[0]);
+          if (!ed) return "no-editor";
+          return ed.initialized ? "ready" : "initializing";
+        }, SELECTORS.editorInstanceId)
+        .catch(() => "error");
+      if (state === "ready") return { ok: true };
+      await page.waitForTimeout(500);
+    }
+    return { ok: false, error: "TinyMCE 에디터가 20초 내 초기화되지 않았습니다." };
+  }
+
+  /** TinyMCE API로 본문을 넣고, 되읽어 실제 길이를 반환한다. */
+  private async setBody(page: Page, html: string): Promise<number> {
+    const length = await page.evaluate(
       ({ instanceId, htmlContent }) => {
         const g: any = globalThis as any;
         const tm = g.tinymce;
-        if (tm && typeof tm.get === "function") {
-          const ed = tm.get(instanceId) ?? (tm.editors && tm.editors[0]);
-          if (ed && typeof ed.setContent === "function") {
-            ed.setContent(htmlContent);
-            ed.fire?.("change");
-            return true;
-          }
-        }
-        return false;
+        const ed = tm?.get(instanceId) ?? (tm?.editors && tm.editors[0]);
+        if (!ed || typeof ed.setContent !== "function") return -1;
+        ed.setContent(htmlContent);
+        ed.undoManager?.add?.();
+        ed.setDirty?.(true);
+        ed.fire?.("change");
+        ed.fire?.("input");
+        return (ed.getContent() || "").length;
       },
       { instanceId: SELECTORS.editorInstanceId, htmlContent: html }
     );
+    if (length >= 0) return length;
 
-    if (viaApi) return;
-
-    // 폴백: iframe body에 innerHTML 직접 주입
-    const frame = page.frame({ name: SELECTORS.editorIframeName });
+    // 폴백: iframe body innerHTML 직접 주입
+    const frame: Frame | null = page.frame({ name: SELECTORS.editorIframeName });
     if (!frame) throw new Error(`에디터 iframe(${SELECTORS.editorIframeName})을 찾지 못했습니다.`);
-    await frame.evaluate(
+    return frame.evaluate(
       ({ selector, htmlContent }) => {
         const g: any = globalThis as any;
         const body = g.document.querySelector(selector);
         if (!body) throw new Error("iframe body를 찾지 못했습니다.");
         body.innerHTML = htmlContent;
+        return body.innerHTML.length;
       },
       { selector: SELECTORS.editorBody, htmlContent: html }
     );
   }
 
   private async fillTags(page: Page, tags: string[]): Promise<void> {
-    await page.waitForSelector(SELECTORS.tagInput, { timeout: 5_000 });
+    if (!(await page.locator(SELECTORS.tagInput).isVisible().catch(() => false))) return;
     for (const tag of tags.slice(0, 10)) {
       await page.fill(SELECTORS.tagInput, tag);
       await page.press(SELECTORS.tagInput, "Enter");
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(250);
     }
   }
 
-  /** "임시저장"만 클릭한다. "완료"/"공개 발행"은 절대 누르지 않는다. */
-  private async clickSaveDraft(page: Page): Promise<string> {
-    const countBefore = await this.readDraftCount(page);
-    await page.click(SELECTORS.saveDraftButton);
-
-    // 성공 신호: "임시저장 개수"가 증가하거나(가장 신뢰할 만함), 토스트가 뜨거나, 4초 경과.
-    const deadline = Date.now() + 8000;
-    while (Date.now() < deadline) {
-      await page.waitForTimeout(500);
-      const now = await this.readDraftCount(page);
-      if (now > countBefore) break;
+  /**
+   * "임시저장"만 클릭하고, 실제 저장됐는지 확인한다.
+   * 확인 신호(우선순위): 저장 API 응답 200 > 토스트("저장") > "임시저장 개수" 증가.
+   * 하나도 못 잡으면 ok:false.
+   */
+  private async clickSaveDraft(page: Page): Promise<{ ok: true; draftUrl: string } | { ok: false; error: string }> {
+    const button = page
+      .locator('.btn-draft a.action, .btn-draft button, a[role="button"]:has-text("임시저장"), button:has-text("임시저장")')
+      .first();
+    if (!(await button.isVisible().catch(() => false))) {
+      return { ok: false, error: '"임시저장" 버튼을 찾지 못했습니다(셀렉터 확인 필요).' };
     }
 
-    // 티스토리 임시저장은 별도 URL을 주지 않는다 - 임시저장 글 목록으로 안내한다.
-    return `https://${this.blogName}.tistory.com/manage/posts/`;
+    const countBefore = await this.readDraftCount(page);
+
+    // 저장 API 응답을 기다릴 준비
+    const savePromise = page
+      .waitForResponse(
+        (res) => /\/manage\/(post|draft|newpost|temp)/i.test(res.url()) && res.request().method() === "POST" && res.status() < 400,
+        { timeout: 12_000 }
+      )
+      .then(() => "network")
+      .catch(() => null);
+
+    await button.click();
+
+    const toastPromise = page
+      .locator('text=/임시\\s*저장|저장되었습니다|저장 완료/')
+      .first()
+      .waitFor({ state: "visible", timeout: 12_000 })
+      .then(() => "toast")
+      .catch(() => null);
+
+    const countPromise = (async () => {
+      const deadline = Date.now() + 12_000;
+      while (Date.now() < deadline) {
+        await page.waitForTimeout(600);
+        if ((await this.readDraftCount(page)) > countBefore) return "count";
+      }
+      return null;
+    })();
+
+    const signal = await Promise.race([savePromise, toastPromise, countPromise]);
+    // race가 먼저 끝난 게 null일 수 있으니 나머지도 확인
+    const all = await Promise.all([savePromise, toastPromise, countPromise]);
+    const confirmed = signal ?? all.find(Boolean) ?? null;
+
+    if (!confirmed) {
+      return { ok: false, error: "임시저장 확인 신호(네트워크/토스트/카운트)를 12초 내 감지하지 못했습니다." };
+    }
+
+    return { ok: true, draftUrl: `https://${this.blogName}.tistory.com/manage/posts/?type=post` };
   }
 
   private async readDraftCount(page: Page): Promise<number> {
-    try {
-      const label = await page.getAttribute(SELECTORS.draftCount, "aria-label");
-      const m = label?.match(/(\d+)/);
-      return m ? Number.parseInt(m[1], 10) : 0;
-    } catch {
-      return 0;
+    for (const sel of ['.btn-draft a.count', '[aria-label*="임시저장 개수"]', ".btn-draft .count"]) {
+      try {
+        const el = page.locator(sel).first();
+        const label = (await el.getAttribute("aria-label")) ?? (await el.innerText().catch(() => ""));
+        const m = label?.match(/(\d+)/);
+        if (m) return Number.parseInt(m[1], 10);
+      } catch {
+        // 다음 셀렉터 시도
+      }
     }
+    return 0;
   }
 }
