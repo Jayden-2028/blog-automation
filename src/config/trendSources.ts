@@ -90,10 +90,12 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
   community: {
     // 기본 true(2026-08-30 사용자 승인 + 맥 dry-run 실측). 끄려면 COMMUNITY_TRENDS_ENABLED=false.
     enabled: parseBooleanEnv(process.env.COMMUNITY_TRENDS_ENABLED, true),
-    maxDailyCandidates: parseIntEnv(process.env.COMMUNITY_TRENDS_MAX_DAILY_CANDIDATES, 12),
-    // 커뮤니티는 사이트별로 성격이 달라 topic(=사이트)당 상한을 둔다. 한 사이트가 독식하면
-    // 그 사이트의 편향이 그대로 daily pool의 편향이 된다.
-    maxCandidatesPerTopic: parseIntEnv(process.env.COMMUNITY_TRENDS_MAX_CANDIDATES_PER_SITE, 4),
+    // 2026-08-31: 커뮤니티는 이제 오후 13:00 전용 run의 유일한 소스라(오전 pool과 분리) 상한을
+    // 12 -> 18로 올렸다. 관련성/클러스터링을 거치면 Top 10을 채우려면 후보가 넉넉해야 한다.
+    maxDailyCandidates: parseIntEnv(process.env.COMMUNITY_TRENDS_MAX_DAILY_CANDIDATES, 18),
+    // topic이 고정값("community")이라 per-topic sub-cap은 의미가 없다(google_trends와 동일 패턴).
+    // daily와 같은 값으로 둔다. 사이트가 여럿 붙어 사이트별 다양성이 필요해지면 그때 도입한다.
+    maxCandidatesPerTopic: parseIntEnv(process.env.COMMUNITY_TRENDS_MAX_DAILY_CANDIDATES, 18),
     candidateTtlHours: parseIntEnv(process.env.COMMUNITY_TRENDS_CANDIDATE_TTL_HOURS, 18),
   },
 };
