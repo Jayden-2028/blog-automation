@@ -135,6 +135,9 @@ export async function publishArticleToBlogspot(
     };
   }
 
+  // 갓 생성한 배리에이션의 메타데이터(검색 설명). articles에 metadata 컬럼이 없어 재사용 경로에서는
+  // 잃는다 - 첫 발행에서만 활용한다(대부분의 경우). 필요해지면 articles.metadata migration.
+  let freshSearchDescription: string | null = null;
   if (!variantArticle) {
     const result = await generateVariant({
       category: job.category,
@@ -144,6 +147,7 @@ export async function publishArticleToBlogspot(
     if (result.status !== "success") {
       return { ok: false, reason: "variant_failed", detail: result.error };
     }
+    freshSearchDescription = result.variant.searchDescription;
     variantArticle = await createVariantArticle({
       jobId,
       title: result.variant.title,
@@ -160,6 +164,7 @@ export async function publishArticleToBlogspot(
     title: variantArticle.title ?? job.keyword,
     contentHtml,
     labels: label ? [label] : undefined,
+    searchDescription: freshSearchDescription,
     isDraft: BLOGGER_CONFIG.publishAsDraft,
   });
 
