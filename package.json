@@ -24,6 +24,8 @@
     "test:medical-topic": "tsx src/config/testMedicalTopicRules.ts",
     "test:article-prompt": "tsx src/workflows/writing/testBuildArticlePrompt.ts",
     "test:collect-sources": "tsx src/workflows/research/testCollectSourcesForJob.ts",
+    "test:parse-research": "tsx src/workflows/research/testParseResearchFile.ts",
+    "test:research-prompt": "tsx src/workflows/research/testBuildResearchPrompt.ts",
     "test:official-content": "tsx src/workflows/research/testFetchOfficialSourceContent.ts",
     "test:research-preview": "tsx src/workflows/research/testNotifyResearchReady.ts",
     "test:summarize-research": "tsx src/workflows/research/testSummarizeResearchForReview.ts",

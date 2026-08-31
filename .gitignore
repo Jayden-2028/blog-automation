@@ -25,6 +25,12 @@ logs/
 # 티스토리 발행(쓰기) 전용 Playwright persistent profile (카카오 로그인 세션). 절대 커밋하지 않는다.
 .local/tistory-publish-profile/
 
+# 원고 파이프라인 산출물(job별 자료조사·원고 초안 파일). 헤드리스 에이전트가 매 실행 생성한다 -
+# 저작권 있는 원문 발췌를 담고, DB(sources/articles)가 정본이라 커밋하지 않는다.
+# repo 루트만 - src/workflows/research/ 같은 소스 디렉터리는 건드리지 않는다.
+/research/
+/drafts/
+
 # Supabase CLI 생성물
 supabase/.temp/
 

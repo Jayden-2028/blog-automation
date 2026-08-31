@@ -232,7 +232,7 @@ export class TelegramBot {
         const result = await runResearchStage(jobId);
         if (result.status === "success") {
           // 요약 + 추천 제목 + [✍️ 원고 작성][🗑 중단] 버튼이 붙은 진짜 다음 단계 메시지는 여기서 나간다.
-          await notifyResearchReady(result.job, result.sources);
+          await notifyResearchReady(result.job, result.researchFilePath, result.sources);
           return { status: "success", sourceCount: result.sources.length };
         }
         if (result.status === "skipped") return { status: "skipped", reason: result.reason };

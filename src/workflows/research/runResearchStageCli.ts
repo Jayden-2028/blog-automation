@@ -35,12 +35,12 @@ async function main(): Promise<void> {
   }
 
   console.log(`\n▶ 결과: success (${Math.round(result.durationMs / 1000)}초, 근거 ${result.sources.length}건)`);
-  const byAuthority: Record<string, number> = {};
-  for (const s of result.sources) byAuthority[s.authority ?? "unknown"] = (byAuthority[s.authority ?? "unknown"] ?? 0) + 1;
-  console.log(`   등급: ${JSON.stringify(byAuthority)}`);
+  console.log(`   verdict: ${result.verdict}`);
+  console.log(`   등급: ${JSON.stringify(result.sourceCounts)}`);
+  console.log(`   파일: ${result.researchFilePath}`);
 
   console.log("\n▶ Telegram으로 미리보기 발송 중...");
-  await notifyResearchReady(result.job, result.sources);
+  await notifyResearchReady(result.job, result.researchFilePath, result.sources);
   console.log("✅ 완료 - Telegram에서 확인 후 진행/중단을 결정해주세요");
   console.log(`   진행: npm run job:write -- ${jobId}`);
   console.log(`   중단: npm run job:reject -- ${jobId}`);
