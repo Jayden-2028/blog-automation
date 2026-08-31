@@ -81,8 +81,8 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `  실제로 다룬 소제목들을 1~2문장으로 새로 압축한다.`,
     `- 절차(번호 목록)와 고유명사 목록은 내용을 바꿀 수 없다 - 대신 그 앞뒤 설명 문장을 새로 쓰고,`,
     `  설명형 목록(절차가 아닌 것)은 항목을 묶거나 나눠 개수를 다르게 한다.`,
-    `- 마지막 점검: 배리에이션의 어떤 부분도 기준 원고와 연속 3어절 이상 똑같이 겹치면 안 된다`,
-    `  (숫자·날짜·제도명·URL은 예외).`,
+    `- (스스로 확인만 할 것, 글에는 쓰지 않는다) 배리에이션의 어떤 부분도 기준 원고와 연속 3어절 이상`,
+    `  똑같이 겹치면 안 된다 (숫자·날짜·제도명·URL은 예외).`,
     ``,
     `## 절대 규칙 - 구조/형식`,
     `- 제목은 기준 원고 제목과 완전히 다른 표현으로. 핵심 키워드를 앞쪽에 둔다.`,
@@ -104,6 +104,8 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `(쉼표로 구분한 태그 5~10개)`,
     `${M.body}`,
     `(마크다운 본문: ## 소제목 / **굵게** / - 목록 / [텍스트](URL) / ![alt](url) 이미지 / 빈 줄로 문단 구분)`,
+    `본문은 '참고 자료' 목록으로 끝낸다. 그 뒤에 점검 결과·작업 노트·요구사항 준수 설명 같은`,
+    `메타 텍스트를 절대 붙이지 않는다.`,
     ``,
     `## 기준 원고 (제목: ${baseTitle})`,
     baseBody,
@@ -148,9 +150,25 @@ export function parseVariantOutput(raw: string, channel: VariantChannel, fallbac
     .filter(Boolean)
     .slice(0, 10);
 
-  const body = sliceBetween(raw, M.body, []) || raw.trim();
+  const body = stripTrailingMeta(sliceBetween(raw, M.body, []) || raw.trim());
 
   return { title, searchDescription, slug, tags, body };
+}
+
+/**
+ * 본문 뒤에 모델이 덧붙이는 메타 텍스트를 잘라낸다. 관측(2026-09-01): "**점검 결과**", "**점검**",
+ * "## 점검", "---\n**점검..." 같은 준수 설명이 참고 자료 다음에 붙어 그대로 발행될 뻔했다.
+ */
+function stripTrailingMeta(body: string): string {
+  const patterns = [
+    /\n+-{3,}\s*\n+\**\s*점검[^\n]*[\s\S]*$/,
+    /\n+#{1,3}\s*점검[\s\S]*$/,
+    /\n+\**\s*점검\s*결과\**[\s\S]*$/,
+    /\n+\**\s*(확인|검토)\s*(결과|사항)\**\s*[:：][\s\S]*$/,
+  ];
+  let out = body;
+  for (const p of patterns) out = out.replace(p, "");
+  return out.trim();
 }
 
 export async function generateArticleVariant(

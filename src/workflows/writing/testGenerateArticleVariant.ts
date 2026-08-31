@@ -54,6 +54,15 @@ async function main(): Promise<void> {
   assert(tistoryParsed.slug === null, "tistory 슬러그는 null이어야 한다");
   console.log("✅ tistory -> 슬러그 null");
 
+  // 2-1) 본문 뒤에 모델이 붙이는 "**점검 결과**" 메타 텍스트를 잘라낸다(2026-09-01 관측).
+  const withMeta =
+    SAMPLE_OUTPUT +
+    "\n\n### 참고 자료\n- [링크](https://example.com)\n\n---\n\n**점검 결과**: 사실 보존 완료, 연속 3어절 겹침 없음.";
+  const cleaned = parseVariantOutput(withMeta, "blogspot", "폴백");
+  assert(!cleaned.body.includes("점검 결과"), `본문에서 점검 결과가 제거돼야 한다\n${cleaned.body.slice(-200)}`);
+  assert(cleaned.body.includes("참고 자료"), "참고 자료 목록까지는 남아야 한다");
+  console.log("✅ 본문 뒤 '점검 결과' 메타 텍스트 제거");
+
   // 3) generate 성공 -> variant 반환
   const ok = await generateArticleVariant({
     channel: "blogspot",
