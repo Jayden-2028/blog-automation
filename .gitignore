@@ -22,6 +22,9 @@ logs/
 # 의도적으로 분리한다(SPRINT_4_DESIGN.md 5절) - 절대 커밋하지 않는다.
 .local/naver-publish-profile/
 
+# 티스토리 발행(쓰기) 전용 Playwright persistent profile (카카오 로그인 세션). 절대 커밋하지 않는다.
+.local/tistory-publish-profile/
+
 # Supabase CLI 생성물
 supabase/.temp/
 
