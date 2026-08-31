@@ -67,6 +67,7 @@
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
     "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
     "recon:community": "tsx scripts/communityRecon.ts",
+    "job:close": "tsx scripts/closeJob.ts",
     "debug:trend": "tsx src/workflows/keyword-ranking/debug/trendMomentumDebug.ts",
     "debug:pipeline": "tsx src/workflows/keyword-ranking/debug/pipelineTrace.ts",
     "debug:compare-display": "tsx src/workflows/keyword-ranking/debug/compareDisplayCounts.ts",
