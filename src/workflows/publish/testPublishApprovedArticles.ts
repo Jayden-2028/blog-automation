@@ -116,6 +116,20 @@ async function main(): Promise<void> {
   assert(r6[0].markedPublished === false, "deferred job은 published로 안 넘어간다");
   console.log("✅ preflight 차단 -> 전 채널 deferred, 발행 호출 없음");
 
+  // 7) tistory 채널: 임시저장(draft)까지. naver+tistory 둘 다 draft/already면 published 이동.
+  const marks7: string[] = [];
+  const r7 = await publishApprovedArticles({
+    loadApprovedJobs: async () => [job("i")],
+    activeChannels: ["naver", "tistory"],
+    preflight: noPreflight,
+    publishNaver: naverOk,
+    publishTistory: async () => ({ ok: true as const, publicationId: 5, draftUrl: "https://t/x", variantCreated: true, alreadyDone: false }),
+    markJobPublished: async (id) => marks7.push(id),
+  });
+  assert(r7[0].channels.find((c) => c.channel === "tistory")?.status === "draft", "tistory -> draft");
+  assert(r7[0].markedPublished === true && marks7[0] === "i", "naver+tistory 임시저장 완료 -> published 이동");
+  console.log("✅ tistory 채널 -> draft, 전 채널 임시저장 시 published 이동");
+
   console.log("\n✅ 전체 테스트 통과");
 }
 
