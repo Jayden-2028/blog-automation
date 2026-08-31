@@ -1,5 +1,7 @@
-// buildDailyQueryPool의 seed + Creator Advisor merge와 seed-only fallback 회귀 테스트.
-// 조회 함수를 주입하므로 실제 Supabase 조회/insert/migration은 전혀 수행하지 않는다.
+// buildDailyQueryPool의 seed + 동적 소스 merge와 seed-only fallback 회귀 테스트.
+// 조회 함수를 주입하고 enabledSources를 명시하므로 실제 Supabase 조회/insert/migration은 전혀
+// 수행하지 않는다 - enabledSources를 생략하면 config 기본값(google_trends=true)을 따라가 실제
+// 네트워크를 건드리게 된다.
 
 import { buildDailyQueryPool } from "./buildDailyQueryPool.js";
 import type { SeedQueryRow, TrendCandidateRow } from "../../types/database.js";
@@ -71,6 +73,9 @@ async function testSeedAndCreatorAdvisorMerge(): Promise<void> {
   ];
 
   const result = await buildDailyQueryPool({
+    // enabledSources를 명시해 creator_advisor 외의 소스가 실제 Supabase를 조회하지 않게 한다.
+    // 이걸 빼면 google_trends가 기본 enabled라 테스트가 외부 네트워크를 건드린다.
+    enabledSources: ["creator_advisor"],
     creatorAdvisorEnabled: true,
     loadActiveSeeds: async () => seeds,
     loadLatestCreatorAdvisorCandidates: async () => ({
@@ -110,6 +115,9 @@ async function testCreatorAdvisorFailureFallsBackToSeeds(): Promise<void> {
   const seeds = [makeSeed(), makeSeed({ id: "seed-2", keyword: "육아 지원금", category: "parenting" })];
 
   const result = await buildDailyQueryPool({
+    // enabledSources를 명시해 creator_advisor 외의 소스가 실제 Supabase를 조회하지 않게 한다.
+    // 이걸 빼면 google_trends가 기본 enabled라 테스트가 외부 네트워크를 건드린다.
+    enabledSources: ["creator_advisor"],
     creatorAdvisorEnabled: true,
     loadActiveSeeds: async () => seeds,
     loadLatestCreatorAdvisorCandidates: async () => {
@@ -134,6 +142,9 @@ async function testCreatorAdvisorFailureFallsBackToSeeds(): Promise<void> {
 
 async function testSeedMergeKeepsHighestCreatorAdvisorSignal(): Promise<void> {
   const result = await buildDailyQueryPool({
+    // enabledSources를 명시해 creator_advisor 외의 소스가 실제 Supabase를 조회하지 않게 한다.
+    // 이걸 빼면 google_trends가 기본 enabled라 테스트가 외부 네트워크를 건드린다.
+    enabledSources: ["creator_advisor"],
     creatorAdvisorEnabled: true,
     loadActiveSeeds: async () => [makeSeed()],
     loadLatestCreatorAdvisorCandidates: async () => ({
@@ -157,6 +168,7 @@ async function testSeedMergeKeepsHighestCreatorAdvisorSignal(): Promise<void> {
 async function testCreatorAdvisorDisabledUsesSeedsOnly(): Promise<void> {
   let trendLookupCalled = false;
   const result = await buildDailyQueryPool({
+    enabledSources: ["creator_advisor"],
     creatorAdvisorEnabled: false,
     loadActiveSeeds: async () => [makeSeed()],
     loadLatestCreatorAdvisorCandidates: async () => {
@@ -171,12 +183,63 @@ async function testCreatorAdvisorDisabledUsesSeedsOnly(): Promise<void> {
   console.log("✅ Creator Advisor disabled -> 조회 없이 seed-only");
 }
 
+// 여러 소스를 동시에 켰을 때: 하나가 죽어도 나머지가 살아야 하고, 실패 원인이 소스별로 남아야 한다.
+async function testMultiSourceIsolatesFailures(): Promise<void> {
+  const result = await buildDailyQueryPool({
+    enabledSources: ["creator_advisor", "google_trends"],
+    creatorAdvisorEnabled: true,
+    loadActiveSeeds: async () => [makeSeed()],
+    loadLatestCreatorAdvisorCandidates: async () => {
+      // Supabase가 던지는 PostgrestError 형태(Error 인스턴스가 아닌 평범한 객체).
+      // String(error)로 감싸면 "[object Object]"가 되어 원인이 통째로 사라진다.
+      throw { message: "relation does not exist", code: "42P01", details: "trend_candidates" };
+    },
+    loadCandidatesBySource: {
+      google_trends: async () => ({
+        trendDate: "2026-08-29",
+        candidates: [
+          makeTrend({
+            id: "gt-1",
+            keyword: "유재석",
+            keyword_normalized: "유재석",
+            topic: "google_trends",
+            topic_normalized: "entertainment",
+            source: "google_trends",
+            trend_date: "2026-08-29",
+            rank: 1,
+            candidate_score: 45,
+          }),
+        ],
+      }),
+    },
+  });
+
+  assert(result.entries.length === 2, `seed 1 + google_trends 1 = 2건이어야 합니다 (실제: ${result.entries.length})`);
+
+  const fromGoogle = result.entries.find((entry) => entry.keyword === "유재석");
+  assert(fromGoogle, "한 소스가 실패해도 다른 소스 결과는 살아야 합니다");
+  assert(fromGoogle.source === "google_trends", `entry.source가 남아야 합니다 (실제: ${fromGoogle.source})`);
+  assert(fromGoogle.origin === "trend", `creator_advisor 외 소스의 origin은 trend여야 합니다 (실제: ${fromGoogle.origin})`);
+  assert(result.trendCountBySource.google_trends === 1, "소스별 기여 건수가 집계돼야 합니다");
+
+  const caError = result.trendErrorBySource.creator_advisor;
+  assert(caError, "실패한 소스의 오류가 소스별로 남아야 합니다");
+  assert(
+    caError.includes("relation does not exist") && caError.includes("42P01"),
+    `PostgrestError가 [object Object]가 되면 안 됩니다 (실제: ${caError})`
+  );
+  assert(!result.trendErrorBySource.google_trends, "성공한 소스는 오류가 없어야 합니다");
+
+  console.log("✅ 소스 하나가 죽어도 나머지 진행 + 실패 원인 보존:", result.trendErrorBySource);
+}
+
 async function main(): Promise<void> {
   console.log("▶ Daily Query Pool merge/fallback 테스트 시작");
   await testSeedAndCreatorAdvisorMerge();
   await testSeedMergeKeepsHighestCreatorAdvisorSignal();
   await testCreatorAdvisorFailureFallsBackToSeeds();
   await testCreatorAdvisorDisabledUsesSeedsOnly();
+  await testMultiSourceIsolatesFailures();
   console.log("\n✅ Daily Query Pool 테스트 완료");
 }
 
