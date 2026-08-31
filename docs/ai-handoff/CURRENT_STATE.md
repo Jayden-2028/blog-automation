@@ -1,6 +1,50 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-08-31 (Asia/Seoul)
+기준일: 2026-09-01 (Asia/Seoul)
+
+## 2026-09-01 세션 — 전체 워크플로우 라이브 E2E 시뮬레이션
+
+키워드 수집 → 3채널 발행까지 실제 프로덕션 조건에서 한 번 관통시켰다. 대상 키워드
+"한강 불꽃축제 2026"(run #28, job `9a34f7cf`). 결과: **8단계 중 7.5단계 통과.**
+
+| 단계 | 결과 | 비고 |
+|---|---|---|
+| 키워드 수집 | ✅ run #28, 텔레그램 10건 | CA 215 + 구글트렌드 9 |
+| Go 선택 → job 생성 | ✅ | job `9a34f7cf` |
+| 자료조사(자동) | ✅ 근거 6건 | |
+| 집필 | ✅ (1회 재시도) | article #12, 3,080자, 88초 |
+| 이미지 | ✅ 3/3장 | OpenAI, Storage 업로드, `images` #11~13 |
+| Telegraph | ✅ | 공개·영구 페이지 |
+| 검수 → 승인 | ✅ job/article `approved` | |
+| 네이버 발행 | ✅ 임시저장 | publication #5 pending |
+| Blogspot 발행 | ✅ OSMU 배리에이션 #13 → draft | publication #6 pending, post 1482945663230556163 |
+| 티스토리 발행 | ⚠️ deferred | 배리에이션 #14 생성됨, 카카오 세션 만료 → 재시도 대기 |
+
+job은 `approved` 유지(전 채널 성공 시에만 `published` — 실패 격리 정상 동작).
+
+**이번에 드러난 것:**
+1. **일시적**: 첫 집필이 usage limit으로 `claude` 종료코드 1 → job이 `writing`에 멈춤. 한도 리셋 후
+   `job:write` 재실행으로 복구(`writing`은 재시도 가능 상태). `metadata.lastError`에 옛 실패 문자열이
+   남는 것은 성공 시 안 지워짐 — 사소한 표시 버그.
+2. **검수 오탐**: 팩트 검사가 본문 `20:40~21:10` 시각 표기를 "40분·10분 근거 미확인"으로 잡음.
+   알려진 한계(차단 아님).
+3. **로그 문구 버그**: `telegramPollJob`이 비의학 원고의 confirm도 "⚕️ 의학 교차확인 confirm"으로
+   출력. `reviewResults` status가 `reviewed`면 무조건 의학으로 간주하는 로그 분기 탓. 기능 무관.
+4. **티스토리**: 예상대로 카카오 세션 만료 → `publish-poll`이 deferred 처리 + 하루 1회 로그인 알림.
+   재개: `npm run setup:tistory`.
+5. **원고 품질**: 날짜가 자료마다 9/5 vs 10/3로 엇갈리자 본문에서 명시적으로 헷지 + "공식 채널
+   재확인" 문구 삽입. Sprint 2 마감 이벤트 교훈이 반영된 동작.
+
+**시뮬레이션 테스트 잔재 정리(2026-09-01):**
+- `job:close 9a34f7cf` → job/article `published` 전이(발행 대기열 제외).
+- Blogspot draft(post 1482945663230556163) API로 삭제.
+- Supabase Storage `article-images/9a34f7cf.../{1,2,3}.png` 3장 삭제.
+- `publications` #5·#6, `images` #11~13, `articles` #12~14, `article_jobs` `9a34f7cf` 행 삭제.
+- **유지**: `discovery_run` #28 + `keyword_rankings`(실제 키워드 데이터, watchdog가 오늘 완료 run
+  집계에 씀). Telegraph 공개 페이지는 삭제 불가.
+- **사용자 수동**: 네이버 블로그 임시저장함의 "한강 불꽃축제..." 초안 1건 직접 삭제.
+
+---
 
 ## 2026-08-31 세션 (오전/오후 2회 발송 + 자동 흐름 + 브랜치 통합)
 
@@ -10,7 +54,7 @@
 - `claude/community-collector` + `claude/multi-platform-publish`를 `main`에 병합, `origin/main` push.
   이제 Sprint 0~5(설계) + 구글트렌드 + 커뮤니티 + 주제중복제거가 전부 main에 있다.
 - **운영 worktree 분리**: `~/blog-automation-prod`가 `main` 고정. 세 launchd job의 `WorkingDirectory`가
-  여기다. `.env`/`.local`/`logs`는 개발 레포(`~/Documents/github/blog-automation`)로 심링크.
+  여기다. `.env`/`.local`/`logs`는 개발 레포(`~/Documents/blog-automation`)로 심링크.
   개발 레포에서 브랜치를 바꿔도 자동화는 영향 없다. 배포:
   `git -C ~/blog-automation-prod pull && npm --prefix ~/blog-automation-prod ci && ... build`.
   ⚠️ main이 prod worktree에 잡혀 있어 개발 레포에서 `git checkout main` 불가 - 병합은 prod에서 하거나
