@@ -45,7 +45,9 @@ export const BLOGGER_CONFIG: BloggerConfig = {
   blogId: process.env.BLOGGER_BLOG_ID || undefined,
   scope: "https://www.googleapis.com/auth/blogger",
   dailyLimit: parseIntEnv(process.env.BLOGGER_DAILY_LIMIT, 5),
-  // 기본 true - 가동 첫 며칠은 비공개로 올려 형태 확인 후 BLOGGER_PUBLISH_AS_DRAFT=false로 공개 전환(§10-A).
+  // 기본 true. 당분간 draft 고정(2026-09-01, CLAUDE.md 원고 파이프라인 운영 규칙): 이미지
+  // 자동생성이 보류 상태라 원고에 이미지가 비어 있고, 사용자가 편집화면에서 이미지를 삽입한 뒤
+  // 직접 발행한다. 시스템 안정화 전까지 BLOGGER_PUBLISH_AS_DRAFT=false로 바꾸지 않는다.
   publishAsDraft: parseBooleanEnv(process.env.BLOGGER_PUBLISH_AS_DRAFT, true),
 };
 
