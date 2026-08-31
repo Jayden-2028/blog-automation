@@ -216,8 +216,9 @@ export class TistoryPublisher {
 
   /**
    * "임시저장"만 클릭하고, 실제 저장됐는지 확인한다.
-   * 확인 신호(우선순위): 저장 API 응답 200 > 토스트("저장") > "임시저장 개수" 증가.
-   * 하나도 못 잡으면 ok:false.
+   * 실측(2026-08-31): "임시저장" 클릭 시 POST https://{blog}.tistory.com/manage/drafts 가 발생한다.
+   * 이 응답(200)을 저장 성공 신호로 쓰고, 응답 본문에서 draft id를 뽑아 재편집 URL을 만든다.
+   * 응답을 못 잡으면 "임시저장 개수" 증가로 폴백하고, 그것도 없으면 ok:false.
    */
   private async clickSaveDraft(page: Page): Promise<{ ok: true; draftUrl: string } | { ok: false; error: string }> {
     const button = page
@@ -229,43 +230,44 @@ export class TistoryPublisher {
 
     const countBefore = await this.readDraftCount(page);
 
-    // 저장 API 응답을 기다릴 준비
     const savePromise = page
       .waitForResponse(
-        (res) => /\/manage\/(post|draft|newpost|temp)/i.test(res.url()) && res.request().method() === "POST" && res.status() < 400,
-        { timeout: 12_000 }
+        (res) =>
+          /\/manage\/drafts?(\?|$|\/)/i.test(res.url()) &&
+          res.request().method() === "POST" &&
+          res.status() >= 200 &&
+          res.status() < 400,
+        { timeout: 15_000 }
       )
-      .then(() => "network")
-      .catch(() => null);
+      .then(async (res) => {
+        const body = await res.text().catch(() => "");
+        // {"entryId": 123} / {"id": 123} / {"data":{"id":123}} 등 형태를 넓게 잡는다.
+        const m = body.match(/"(?:entryId|id|postId|draftId)"\s*:\s*"?(\d{2,})"?/);
+        return { hit: true as const, draftId: m ? m[1] : null };
+      })
+      .catch(() => ({ hit: false as const, draftId: null }));
 
     await button.click();
 
-    const toastPromise = page
-      .locator('text=/임시\\s*저장|저장되었습니다|저장 완료/')
-      .first()
-      .waitFor({ state: "visible", timeout: 12_000 })
-      .then(() => "toast")
-      .catch(() => null);
-
-    const countPromise = (async () => {
-      const deadline = Date.now() + 12_000;
+    const countConfirmed = (async () => {
+      const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
-        await page.waitForTimeout(600);
-        if ((await this.readDraftCount(page)) > countBefore) return "count";
+        await page.waitForTimeout(700);
+        if ((await this.readDraftCount(page)) > countBefore) return true;
       }
-      return null;
+      return false;
     })();
 
-    const signal = await Promise.race([savePromise, toastPromise, countPromise]);
-    // race가 먼저 끝난 게 null일 수 있으니 나머지도 확인
-    const all = await Promise.all([savePromise, toastPromise, countPromise]);
-    const confirmed = signal ?? all.find(Boolean) ?? null;
+    const [saveRes, countUp] = await Promise.all([savePromise, countConfirmed]);
 
-    if (!confirmed) {
-      return { ok: false, error: "임시저장 확인 신호(네트워크/토스트/카운트)를 12초 내 감지하지 못했습니다." };
+    if (!saveRes.hit && !countUp) {
+      return { ok: false, error: "임시저장 확인 신호(POST /manage/drafts 응답 / 임시저장 개수 증가)를 15초 내 감지하지 못했습니다." };
     }
 
-    return { ok: true, draftUrl: `https://${this.blogName}.tistory.com/manage/posts/?type=post` };
+    const draftUrl = saveRes.draftId
+      ? `https://${this.blogName}.tistory.com/manage/newpost/${saveRes.draftId}`
+      : `https://${this.blogName}.tistory.com/manage/posts/`;
+    return { ok: true, draftUrl };
   }
 
   private async readDraftCount(page: Page): Promise<number> {
