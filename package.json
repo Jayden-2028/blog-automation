@@ -46,6 +46,7 @@
     "setup:naver-publish": "tsx src/services/publish/setupNaverPublishSession.ts",
     "setup:tistory": "tsx src/services/publish/tistory/setupTistorySession.ts",
     "inspect:tistory": "tsx src/services/publish/tistory/inspectTistoryEditor.ts",
+    "debug:live-tistory": "tsx src/services/publish/tistory/liveTistoryTest.ts",
     "setup:blogger": "tsx src/services/publish/blogger/setupBloggerAuth.ts",
     "inspect:publish-layer": "tsx src/services/publish/inspectPublishLayer.ts",
     "test:naver-html": "tsx src/services/publish/testConvertArticleToNaverHtml.ts",
