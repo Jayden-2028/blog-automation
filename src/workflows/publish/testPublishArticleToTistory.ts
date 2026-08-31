@@ -103,6 +103,20 @@ async function main(): Promise<void> {
   assert(saveCalls === 0, "이미 임시저장된 배리에이션은 saveDraft를 호출하면 안 된다");
   console.log("✅ 멱등성 -> 이미 임시저장됨이면 재저장 없음");
 
+  // 로그인 만료(stage:login)는 failed publication을 남기지 않고 login_required로 돌린다.
+  let loginSavedFailed = false;
+  const loginNeeded = await publishArticleToTistory("job-1", {
+    ...base,
+    saveDraft: async () => ({ ok: false as const, stage: "login", error: "카카오 로그인 필요" }),
+    savePublication: async (i) => {
+      if (i.status === "failed") loginSavedFailed = true;
+      return base.savePublication(i);
+    },
+  });
+  assert(loginNeeded.ok === false && loginNeeded.reason === "login_required", "로그인 만료 -> login_required");
+  assert(!loginSavedFailed, "로그인 만료는 failed publication을 남기지 않는다(재시도 대기)");
+  console.log("✅ 로그인 만료 -> login_required, failed 기록 없음");
+
   let savedFailed = false;
   const failed = await publishArticleToTistory("job-1", {
     ...base,

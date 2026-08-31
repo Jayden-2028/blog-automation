@@ -31,6 +31,7 @@ export type PublishArticleToTistoryResult =
   | { ok: true; publicationId: number; draftUrl: string; variantCreated: boolean; alreadyDone: boolean }
   | { ok: false; reason: "disabled" | "job_not_found" | "job_not_approved" | "base_article_not_found"; detail: string }
   | { ok: false; reason: "daily_limit"; detail: string }
+  | { ok: false; reason: "login_required"; detail: string }
   | { ok: false; reason: "variant_failed"; detail: string }
   | { ok: false; reason: "tistory_save_failed"; detail: string; stage: string };
 
@@ -115,6 +116,11 @@ export async function publishArticleToTistory(
 
   const draftResult = await saveDraft({ title: variantArticle.title ?? job.keyword, bodyHtml, tags });
   if (!draftResult.ok) {
+    // 로그인 만료는 "실패"가 아니라 "재로그인 대기"다 - publications에 failed를 남기지 않고,
+    // 폴러가 deferred로 처리해 재시도 스팸을 막는다(카카오 세션이 짧아 자주 발생).
+    if (draftResult.stage === "login") {
+      return { ok: false, reason: "login_required", detail: draftResult.error };
+    }
     await savePublication({ articleId: variantArticle.id, status: "failed", publishedUrl: null }).catch(() => {});
     return { ok: false, reason: "tistory_save_failed", detail: `[${draftResult.stage}] ${draftResult.error}`, stage: draftResult.stage };
   }

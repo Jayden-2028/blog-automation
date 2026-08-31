@@ -167,7 +167,8 @@ export async function publishApprovedArticles(
             );
           } else if (r.reason === "disabled" || r.reason === "job_not_approved") {
             channels.push({ channel, status: "skipped", reason: r.detail });
-          } else if (r.reason === "daily_limit") {
+          } else if (r.reason === "daily_limit" || r.reason === "login_required") {
+            // login_required: 카카오 세션 만료. 재시도 대기(로그인은 사람이 setup:tistory로).
             channels.push({ channel, status: "deferred", reason: r.detail });
           } else {
             channels.push({ channel, status: "failed", reason: r.detail });
