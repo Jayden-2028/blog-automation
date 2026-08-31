@@ -239,13 +239,8 @@ export class TistoryPublisher {
           res.status() < 400,
         { timeout: 15_000 }
       )
-      .then(async (res) => {
-        const body = await res.text().catch(() => "");
-        // {"entryId": 123} / {"id": 123} / {"data":{"id":123}} 등 형태를 넓게 잡는다.
-        const m = body.match(/"(?:entryId|id|postId|draftId)"\s*:\s*"?(\d{2,})"?/);
-        return { hit: true as const, draftId: m ? m[1] : null };
-      })
-      .catch(() => ({ hit: false as const, draftId: null }));
+      .then(() => ({ hit: true as const }))
+      .catch(() => ({ hit: false as const }));
 
     await button.click();
 
@@ -264,10 +259,9 @@ export class TistoryPublisher {
       return { ok: false, error: "임시저장 확인 신호(POST /manage/drafts 응답 / 임시저장 개수 증가)를 15초 내 감지하지 못했습니다." };
     }
 
-    const draftUrl = saveRes.draftId
-      ? `https://${this.blogName}.tistory.com/manage/newpost/${saveRes.draftId}`
-      : `https://${this.blogName}.tistory.com/manage/posts/`;
-    return { ok: true, draftUrl };
+    // 티스토리 임시저장 글은 직접 URL이 없다 - 새 글쓰기 화면 하단 "임시저장 N" 버튼을 눌러야
+    // 목록 팝업이 뜬다(2026-08-31 사용자 확인). 그래서 글쓰기 화면 URL을 돌려준다.
+    return { ok: true, draftUrl: `https://${this.blogName}.tistory.com/manage/newpost/` };
   }
 
   private async readDraftCount(page: Page): Promise<number> {

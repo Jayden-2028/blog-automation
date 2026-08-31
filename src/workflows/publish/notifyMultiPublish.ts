@@ -50,6 +50,9 @@ export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutg
     lines.push("", "모든 활성 채널 처리 완료 — job을 published로 이동했습니다.");
   }
   lines.push("", "네이버·티스토리는 임시저장까지입니다. 앱에서 직접 '발행' 버튼을 눌러주세요.");
+  if (channels.some((c) => c.channel === "tistory" && (c.status === "draft" || c.status === "already_done"))) {
+    lines.push("(티스토리 임시저장 글은 글쓰기 화면 하단 '임시저장' 숫자 버튼을 눌러 목록에서 확인)");
+  }
 
   return {
     text: lines.join("\n"),
