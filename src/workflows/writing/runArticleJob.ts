@@ -22,9 +22,13 @@
 // 단계마다 status를 전이시키는 이유: 어디서 멈췄는지 DB만 보고 알 수 있어야 한다. Sprint 0에서
 // 파이프라인이 조용히 죽었을 때 로그를 열어보고서야 알았던 문제를 반복하지 않는다.
 
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname } from "node:path";
+
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
+import { PIPELINE_ROOT, researchFilePath } from "../../config/pipelinePaths.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
@@ -32,12 +36,15 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
+import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import { parseResearchFile } from "../research/parseResearchFile.js";
+import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildArticlePrompt, buildMedicalDisclaimer, parseArticleOutput } from "./buildArticlePrompt.js";
 import { generateArticleImages } from "./generateArticleImages.js";
 import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
 import type { ArticleReviewResult } from "../review/runArticleReview.js";
-import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
+import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, SourceRow } from "../../types/database.js";
 
 /** 원고 생성은 제목 생성(25초 실측)보다 훨씬 길다. 첫 실측(185초)의 3배 이상 여유를 둔다. */
 export const WRITE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -50,15 +57,51 @@ export type GenerateArticleResult = { ok: true; output: string } | { ok: false; 
 
 // ---------- 1단계: 자료조사 ----------
 
+/** researcher 에이전트는 WebSearch를 여러 번 돌리고 URL을 연다 - 원고 생성보다도 길게 잡는다. */
+export const RESEARCH_TIMEOUT_MS = 18 * 60 * 1000;
+
 export type RunResearchStageOptions = {
   /** 공공 도메인 본문 fetch를 건너뛴다(테스트/디버그용). 기본 활성화. */
   fetchOfficialContent?: boolean;
+  /** 테스트 주입: 헤드리스 researcher 실행을 대체한다. */
+  runResearcher?: (prompt: string, outputPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /** 테스트 주입: research 파일 읽기를 대체한다. */
+  readResearchFile?: (path: string) => Promise<string | null>;
 };
 
 export type RunResearchStageResult =
-  | { status: "success"; job: ArticleJobRow; sources: SourceRow[]; durationMs: number }
+  | {
+      status: "success";
+      job: ArticleJobRow;
+      sources: SourceRow[];
+      researchFilePath: string;
+      verdict: ResearchVerdict;
+      sourceCounts: Record<SourceAuthorityLevel, number>;
+      durationMs: number;
+    }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
+
+async function defaultRunResearcher(
+  prompt: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await runHeadlessClaude({
+    prompt,
+    allowedTools: ["Read", "Write", "WebSearch", "WebFetch"],
+    permissionMode: "acceptEdits",
+    cwd: PIPELINE_ROOT,
+    timeoutMs: RESEARCH_TIMEOUT_MS,
+  });
+  return result.ok ? { ok: true } : { ok: false, error: result.error };
+}
+
+async function defaultReadResearchFile(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 export async function runResearchStage(
   jobId: string,
@@ -74,30 +117,104 @@ export async function runResearchStage(
   const startedAt = Date.now();
   await ArticleJobRepository.updateStatus(jobId, "researching");
 
-  const research = await collectSourcesForJob(jobId, job.keyword);
-  if (research.sources.length === 0) {
-    const error =
-      Object.entries(research.sourceErrors)
-        .map(([source, message]) => `${source}: ${message}`)
-        .join(" / ") || "검색 결과가 비어 있습니다.";
-    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${error}` });
-    // status는 되돌리지 않는다(researching 유지) - 재실행 시 이 job을 다시 집을 수 있어야 한다.
-    return { status: "failed", error };
-  }
-
-  let enriched = research.sources;
-  if (options.fetchOfficialContent !== false) {
-    const result = await enrichOfficialSources(research.sources);
-    enriched = result.sources;
+  // 1) 기준 자료(baseline) - NAVER 검색 API. 하이브리드의 감사 베이스라인이다. 비어 있어도
+  //    바로 실패하지 않는다 - 에이전트가 WebSearch로 채울 수 있다(단, 그 사실을 프롬프트에 알린다).
+  const collected = await collectSourcesForJob(jobId, job.keyword);
+  let baseline = collected.sources;
+  if (options.fetchOfficialContent !== false && baseline.length > 0) {
+    const result = await enrichOfficialSources(baseline);
+    baseline = result.sources;
     if (result.enrichedCount > 0 || result.rejectedCount > 0) {
       console.log(
         `ℹ️ [research] official 본문 fetch: 교체 ${result.enrichedCount}건, 산문 아님(스니펫 유지) ${result.rejectedCount}건`
       );
     }
   }
+  const savedBaseline = await createSources(baseline);
+  if (savedBaseline.length === 0) {
+    const errText = Object.entries(collected.sourceErrors)
+      .map(([source, message]) => `${source}: ${message}`)
+      .join(" / ");
+    console.warn(`⚠️ [research] baseline이 비었습니다 (${errText || "검색 결과 없음"}) - 에이전트가 전부 조사합니다.`);
+  }
 
-  const savedSources = await createSources(enriched);
-  return { status: "success", job, sources: savedSources, durationMs: Date.now() - startedAt };
+  // 2) 헤드리스 researcher 에이전트 - researcher.md 계약대로 조사해 research/<슬러그>.md를 쓴다.
+  const outputPath = researchFilePath(job.keyword);
+  await mkdir(dirname(outputPath), { recursive: true });
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
+
+  const runResearcher = options.runResearcher ?? ((p) => defaultRunResearcher(p));
+  const ran = await runResearcher(prompt, outputPath);
+  if (!ran.ok) {
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
+    // status는 되돌리지 않는다(researching 유지) - 재실행 시 이 job을 다시 집을 수 있어야 한다.
+    return { status: "failed", error: ran.error };
+  }
+
+  // 3) 산출 파일 읽기 + 파싱
+  const readResearchFile = options.readResearchFile ?? defaultReadResearchFile;
+  const fileText = await readResearchFile(outputPath);
+  if (!fileText || fileText.trim().length === 0) {
+    const error = `researcher가 파일을 만들지 않았습니다: ${outputPath}`;
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${error}` });
+    return { status: "failed", error };
+  }
+  const parsed = parseResearchFile(fileText);
+
+  // 4) §10 출처 표에서 baseline에 없던 URL을 sources에 추가한다(감사기록 유지 - Sprint 3 검수가
+  //    본문 사실을 sources와 대조한다).
+  const baselineUrls = new Set(savedBaseline.map((s) => s.url).filter(Boolean) as string[]);
+  const agentSources: SourceInsert[] = parsed.sourceTable
+    .filter((row) => row.url && /^https?:\/\//.test(row.url) && !baselineUrls.has(row.url))
+    .map((row) => ({
+      job_id: jobId,
+      title: row.title,
+      url: row.url,
+      source_name: "researcher",
+      authority: row.authority,
+      published_at: row.publishedAt,
+      content: null,
+    }));
+  const savedAgent = agentSources.length > 0 ? await createSources(dedupeSourceInserts(agentSources)) : [];
+
+  const allSources = [...savedBaseline, ...savedAgent];
+  const sourceCounts: Record<SourceAuthorityLevel, number> = {
+    official: allSources.filter((s) => s.authority === "official").length,
+    medical: allSources.filter((s) => s.authority === "medical").length,
+    news: allSources.filter((s) => s.authority === "news").length,
+    community: allSources.filter((s) => s.authority === "community").length,
+  };
+
+  await ArticleJobRepository.mergeMetadata(jobId, {
+    lastError: null,
+    researchFilePath: outputPath,
+    researchVerdict: parsed.verdict,
+    sourceCounts,
+  });
+
+  return {
+    status: "success",
+    job,
+    sources: allSources,
+    researchFilePath: outputPath,
+    verdict: parsed.verdict,
+    sourceCounts,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+/** url(없으면 title) 기준 중복 제거. createSources 전에 배치 내부 중복을 막는다. */
+function dedupeSourceInserts(items: SourceInsert[]): SourceInsert[] {
+  const seen = new Set<string>();
+  const out: SourceInsert[] = [];
+  for (const item of items) {
+    const key = item.url ?? `no-url:${item.title ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 // ---------- 2단계: 원고 생성 ----------

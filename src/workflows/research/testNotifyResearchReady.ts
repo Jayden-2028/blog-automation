@@ -1,12 +1,12 @@
-// buildResearchPreviewMessages 테스트. 실제 Telegram 발송/LLM 호출은 하지 않는다.
+// buildResearchPreviewMessages 테스트. 실제 Telegram 발송/파일 읽기는 하지 않는다.
 //
-// 2026-08-27 두 번째 실측 피드백을 회귀로 고정한다: 첫 버전은 출처 발췌를 그대로 나열해 링크를
-// 일일이 열어봐야 했다("웹페이지 긁어온 형태") - 이제는 summarizeResearchForReview()가 만든 요약이
-// 본문이 되고, 요약 실패 시에만 출처 나열로 폴백한다.
+// 2026-09-01: summary는 이제 research/[키워드].md를 파싱한 ResearchSummary(또는 파일 읽기 실패 시
+// null)다. summary가 있으면 그 텍스트가 본문, null이면 sources 발췌로 폴백한다.
+// verdict === "blocked"면 [✍️ 원고 작성] 버튼을 빼고 [🗑 중단]만 남긴다.
 
 import { buildResearchPreviewMessages } from "./notifyResearchReady.js";
 import { TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
-import type { SummarizeResearchResult } from "./summarizeResearchForReview.js";
+import type { ResearchSummary } from "./summarizeResearchForReview.js";
 import type { ArticleJobRow, SourceRow } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -50,8 +50,7 @@ function makeSource(overrides: Partial<SourceRow> = {}): SourceRow {
   };
 }
 
-const okSummary = (summary: string): SummarizeResearchResult => ({ ok: true, summary, durationMs: 5000 });
-const failedSummary = (error: string): SummarizeResearchResult => ({ ok: false, error, durationMs: 1000 });
+const summary = (text: string, verdict: ResearchSummary["verdict"] = "ok"): ResearchSummary => ({ verdict, text });
 
 function main(): void {
   console.log("▶ buildResearchPreviewMessages 테스트 시작\n");
@@ -62,114 +61,107 @@ function main(): void {
     makeSource({ id: 3, authority: "community" }),
   ];
 
-  // 1) 등급별 건수 요약이 정확해야 한다(헤더는 요약 성공 여부와 무관하게 항상 나온다).
-  const messages = buildResearchPreviewMessages(
-    makeJob(),
-    sources,
-    okSummary("- 예매는 2026.08.20 마감됐습니다.")
-  );
+  // 1) 헤더의 등급별 건수 요약은 항상 나온다.
+  const messages = buildResearchPreviewMessages(makeJob(), sources, summary("예매는 2026.08.20 마감됐습니다."));
   const combined = messages.map((m) => m.text).join("\n");
-  assert(combined.includes("공공 2"), "공공 2건이 요약에 있어야 한다");
-  assert(combined.includes("커뮤니티 1"), "커뮤니티 1건이 요약에 있어야 한다");
+  assert(combined.includes("공공 2"), "공공 2건이 헤더에 있어야 한다");
+  assert(combined.includes("커뮤니티 1"), "커뮤니티 1건이 헤더에 있어야 한다");
   console.log("✅ 등급별 건수 요약 정확");
 
-  // 2) 회귀(2026-08-28 사용자 피드백): 진행/중단 명령어 안내 두 줄을 뺐다. 버튼이 붙기 전에는
-  // 유일한 진행 수단이라 필요했지만, 이제 같은 메시지에 버튼이 있어 긴 jobId 줄이 노출될 이유가 없다.
-  assert(!combined.includes("job:write --"), "진행 명령어 안내는 더 이상 없어야 한다(버튼으로 대체)");
-  assert(!combined.includes("job:reject --"), "중단 명령어 안내는 더 이상 없어야 한다(버튼으로 대체)");
+  // 2) 진행/중단 명령어 안내 텍스트는 없다(버튼으로 대체).
+  assert(!combined.includes("job:write --"), "진행 명령어 안내 없음");
+  assert(!combined.includes("job:reject --"), "중단 명령어 안내 없음");
   console.log("✅ 명령어 안내 제거됨(버튼으로 대체)");
 
-  // 3) 핵심 회귀: 요약이 성공하면 AI 요약 본문이 그대로 노출돼야 한다(출처 나열이 아니라).
-  const summaryText = "- ⚠️ 예매권 추첨 응모(8/14~8/20)와 당첨자 발표(8/24)가 모두 지났습니다.\n- 도슭수라상 가격은 1인 6만 원입니다.";
-  const summaryMessages = buildResearchPreviewMessages(makeJob(), sources, okSummary(summaryText));
-  const summaryCombined = summaryMessages.map((m) => m.text).join("\n");
+  // 3) summary가 있으면 그 텍스트가 그대로 본문에 노출된다(출처 나열 아님).
+  const summaryText = "⚠️ 예매권 추첨 응모(8/14~8/20)와 당첨자 발표(8/24)가 모두 지났습니다.\n- 도슭수라상 가격은 1인 6만 원입니다.";
+  const summaryCombined = buildResearchPreviewMessages(makeJob(), sources, summary(summaryText))
+    .map((m) => m.text)
+    .join("\n");
   assert(summaryCombined.includes("당첨자 발표"), "요약 내용이 미리보기에 그대로 포함돼야 한다");
   assert(summaryCombined.includes("⚠️"), "마감 경고 표시가 유지돼야 한다");
-  assert(!summaryCombined.includes("[공공]"), "요약이 성공하면 출처 나열 폴백 형식이 섞이면 안 된다");
-  console.log("✅ 요약 성공 -> AI 요약 본문이 그대로 노출됨(원문 나열 아님)");
+  assert(!summaryCombined.includes("[공공]"), "요약이 있으면 출처 나열 폴백 형식이 섞이면 안 된다");
+  console.log("✅ summary 있음 -> 요약 본문 그대로 노출");
 
-  // 4) 요약 실패 시에만 출처 나열로 폴백해야 한다("웹페이지 긁어온 형태" 문제 재현 방지 확인).
-  const fallbackMessages = buildResearchPreviewMessages(
-    makeJob(),
-    sources,
-    failedSummary("claude가 종료 코드 1로 끝났습니다")
-  );
-  const fallbackCombined = fallbackMessages.map((m) => m.text).join("\n");
-  assert(fallbackCombined.includes("요약 생성 실패"), "실패 사유 안내가 있어야 한다");
-  assert(fallbackCombined.includes("[공공]"), "요약 실패 시에는 출처 나열로 폴백해야 한다");
+  // 4) summary === null이면 출처 나열로 폴백한다.
+  const fallbackCombined = buildResearchPreviewMessages(makeJob(), sources, null)
+    .map((m) => m.text)
+    .join("\n");
+  assert(fallbackCombined.includes("요약 파일을 읽지 못"), "폴백 안내 문구가 있어야 한다");
+  assert(fallbackCombined.includes("[공공]"), "null이면 출처 나열로 폴백해야 한다");
   assert(fallbackCombined.includes("예매권 추첨 응모"), "폴백 발췌에도 핵심 정보가 잘리지 않아야 한다");
-  console.log("✅ 요약 실패 -> 출처 나열 폴백, 실패 사유 명시");
+  console.log("✅ summary null -> 출처 나열 폴백");
 
-  // 5) 폴백 발췌는 FALLBACK_EXCERPT_LENGTH를 넘는 원문을 자르고 말줄임표를 붙인다.
-  const longContent = "가".repeat(500);
-  const longFallback = buildResearchPreviewMessages(
-    makeJob(),
-    [makeSource({ content: longContent })],
-    failedSummary("실패")
-  );
-  const longCombined = longFallback.map((m) => m.text).join("\n");
-  assert(longCombined.includes("…"), "긴 발췌는 말줄임표로 잘려야 한다");
-  assert(!longCombined.includes("가".repeat(200)), "발췌가 원문 전체를 담으면 안 된다");
+  // 5) 폴백 발췌는 원문이 길면 자르고 말줄임표를 붙인다.
+  const longFallback = buildResearchPreviewMessages(makeJob(), [makeSource({ content: "가".repeat(500) })], null)
+    .map((m) => m.text)
+    .join("\n");
+  assert(longFallback.includes("…"), "긴 발췌는 말줄임표로 잘려야 한다");
+  assert(!longFallback.includes("가".repeat(200)), "발췌가 원문 전체를 담으면 안 된다");
   console.log("✅ 폴백 발췌는 짧게 자름 + 말줄임표");
 
-  // 6) url/content가 없어도(요약 실패 경로) 죽지 않는다.
-  const sparse = buildResearchPreviewMessages(
-    makeJob(),
-    [makeSource({ url: null, content: null, title: null })],
-    failedSummary("실패")
-  );
+  // 6) 필드가 비어도 폴백 경로가 죽지 않는다.
+  const sparse = buildResearchPreviewMessages(makeJob(), [makeSource({ url: null, content: null, title: null })], null);
   assert(sparse.length > 0, "필드가 비어 있어도 메시지는 만들어져야 한다");
   console.log("✅ 필드 누락에도 안전 처리(폴백 경로)");
 
-  // 7) 요약이 매우 길거나 출처가 많아 4000자를 넘으면 여러 메시지로 나뉜다.
+  // 7) 폴백 출처가 많으면 여러 메시지로 나뉜다.
   const manySources = Array.from({ length: 40 }, (_, i) =>
     makeSource({ id: i, title: `출처 제목 ${i}`, content: "내용 ".repeat(30) })
   );
-  const manyMessages = buildResearchPreviewMessages(makeJob(), manySources, failedSummary("실패"));
+  const manyMessages = buildResearchPreviewMessages(makeJob(), manySources, null);
   assert(manyMessages.length >= 2, `출처가 많으면 여러 메시지로 나뉘어야 한다 (실제: ${manyMessages.length}건)`);
   assert(
     manyMessages.every((m) => m.text.length <= TELEGRAM_MESSAGE_CHAR_LIMIT),
     "각 메시지는 글자 수 제한을 넘으면 안 된다"
   );
-  console.log(`✅ 출처 40건(요약 실패) -> ${manyMessages.length}개 메시지로 분할, 각각 제한 이내`);
+  console.log(`✅ 출처 40건(폴백) -> ${manyMessages.length}개 메시지로 분할, 각각 제한 이내`);
 
-  // 8) 회귀(2026-08-28 사용자 피드백): "진행하려면 npm run job:write --"가 텍스트로만 안내돼
-  // 폰에서 터미널로 명령어를 옮겨 쳐야 했다 - 마지막 메시지에 원고 작성/중단 버튼이 붙어야 한다.
-  const buttonMessages = buildResearchPreviewMessages(makeJob(), sources, okSummary("- 요약"));
-  const lastMessage = buttonMessages[buttonMessages.length - 1];
-  const buttonRows = lastMessage.replyMarkup?.inline_keyboard ?? [];
-  assert(buttonRows.length === 1 && buttonRows[0].length === 2, `버튼은 한 행에 2개(작성/중단)여야 한다 (실제: ${JSON.stringify(buttonRows)})`);
+  // 8) 마지막 메시지에 [✍️ 원고 작성][🗑 중단] 버튼(callback_data 정확).
+  const buttonMessages = buildResearchPreviewMessages(makeJob(), sources, summary("요약"));
+  const lastRows = buttonMessages[buttonMessages.length - 1].replyMarkup?.inline_keyboard ?? [];
+  assert(lastRows.length === 1 && lastRows[0].length === 2, `버튼은 한 행에 2개여야 한다 (실제: ${JSON.stringify(lastRows)})`);
   assert(
-    buttonRows[0].some((b) => "callback_data" in b && b.callback_data === `research:write:${makeJob().id}`),
-    "원고 작성 버튼의 callback_data가 정확해야 한다"
+    lastRows[0].some((b) => "callback_data" in b && b.callback_data === `research:write:${makeJob().id}`),
+    "원고 작성 버튼 callback_data"
   );
   assert(
-    buttonRows[0].some((b) => "callback_data" in b && b.callback_data === `research:reject:${makeJob().id}`),
-    "중단 버튼의 callback_data가 정확해야 한다"
+    lastRows[0].some((b) => "callback_data" in b && b.callback_data === `research:reject:${makeJob().id}`),
+    "중단 버튼 callback_data"
   );
-  console.log("✅ 마지막 메시지에 원고 작성/중단 버튼 부착(callback_data 정확)");
+  console.log("✅ 마지막 메시지에 원고 작성/중단 버튼 부착");
 
-  // 9) 다른 메시지들(마지막이 아닌)에는 버튼이 없어야 한다 - Telegram은 메시지당 버튼 세트가 하나다.
-  const earlierMessages = buttonMessages.slice(0, -1);
+  // 9) 마지막이 아닌 메시지에는 버튼이 없다.
   assert(
-    earlierMessages.every((m) => !m.replyMarkup),
+    buttonMessages.slice(0, -1).every((m) => !m.replyMarkup),
     "마지막이 아닌 메시지에는 버튼이 없어야 한다"
   );
   console.log("✅ 마지막 메시지에만 버튼 부착");
 
-  // 10) 자동 흐름(2026-08-31): Go 시점에 저장된 추천 제목(job.metadata.titleSuggestions)이
-  //     조사 완료 알림에 포함돼야 한다 - 여기가 제목을 처음 보여주는 자리다.
+  // 10) verdict === "blocked"면 원고 작성 버튼을 빼고 중단만 남긴다.
+  const blockedRows =
+    buildResearchPreviewMessages(makeJob(), sources, summary("근거 부족", "blocked"))
+      .slice(-1)[0].replyMarkup?.inline_keyboard ?? [];
+  assert(blockedRows.length === 1 && blockedRows[0].length === 1, `blocked면 버튼 1개(중단)만 (실제: ${JSON.stringify(blockedRows)})`);
+  assert(
+    blockedRows[0][0] && "callback_data" in blockedRows[0][0] && blockedRows[0][0].callback_data === `research:reject:${makeJob().id}`,
+    "blocked면 남는 버튼은 중단"
+  );
+  console.log("✅ verdict blocked -> 중단 버튼만");
+
+  // 11) 추천 제목(job.metadata.titleSuggestions)이 있으면 노출, 없으면 생략.
   const withTitles = buildResearchPreviewMessages(
     makeJob({ metadata: { titleSuggestions: ["제목 하나", "제목 둘"] } }),
     sources,
-    okSummary("- 요약")
-  );
-  const joined = withTitles.map((m) => m.text).join("\n");
-  assert(joined.includes("추천 제목"), "조사 완료 알림에 추천 제목 블록이 있어야 한다");
-  assert(joined.includes("제목 하나") && joined.includes("제목 둘"), "저장된 제목이 그대로 노출돼야 한다");
-  // 제목이 없으면 블록도 없다.
-  const noTitles = buildResearchPreviewMessages(makeJob({ metadata: {} }), sources, okSummary("- 요약"));
-  assert(!noTitles.map((m) => m.text).join("\n").includes("추천 제목"), "제목이 없으면 블록도 없어야 한다");
+    summary("요약")
+  )
+    .map((m) => m.text)
+    .join("\n");
+  assert(withTitles.includes("추천 제목") && withTitles.includes("제목 하나"), "저장된 제목이 노출돼야 한다");
+  const noTitles = buildResearchPreviewMessages(makeJob({ metadata: {} }), sources, summary("요약"))
+    .map((m) => m.text)
+    .join("\n");
+  assert(!noTitles.includes("추천 제목"), "제목이 없으면 블록도 없어야 한다");
   console.log("✅ 추천 제목: metadata에 있으면 노출, 없으면 생략");
 
   console.log("\n✅ buildResearchPreviewMessages 테스트 완료");

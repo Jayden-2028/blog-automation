@@ -57,7 +57,13 @@ export type RunHeadlessClaudeOptions = {
   timeoutMs?: number;
   /** 생략하면 도구를 전혀 허용하지 않는다. 원고 생성 단계에서 필요한 것만 명시적으로 넘긴다. */
   allowedTools?: string[];
-  /** 실행 디렉터리. 생략하면 현재 프로세스의 cwd. */
+  /**
+   * `--permission-mode` 값(예: "acceptEdits"). 비대화형 `claude -p`에서 Write/WebSearch/WebFetch를
+   * 실제로 쓰려면 필요하다 - 생략하면 도구 호출이 권한 프롬프트에서 조용히 막힐 수 있다(2026-09-01
+   * 실측). 순수 텍스트 작업(제목·요약)에는 넘기지 않는다.
+   */
+  permissionMode?: string;
+  /** 실행 디렉터리. 생략하면 현재 프로세스의 cwd. 파일을 쓰는 단계는 repo 루트를 넘긴다. */
   cwd?: string;
 };
 
@@ -77,6 +83,9 @@ export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Prom
   const args = ["-p", "--output-format", "text"];
   if (options.allowedTools && options.allowedTools.length > 0) {
     args.push("--allowed-tools", options.allowedTools.join(","));
+  }
+  if (options.permissionMode) {
+    args.push("--permission-mode", options.permissionMode);
   }
 
   return new Promise<RunHeadlessClaudeResult>((resolve) => {
