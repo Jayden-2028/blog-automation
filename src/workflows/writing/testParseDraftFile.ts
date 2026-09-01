@@ -23,6 +23,7 @@ verdict_from_research: ok
 지난주에 아이가 새벽마다 깨서 잠을 설쳤습니다.
 
 [IMAGE: 밤중 수유 중인 젖병과 수면등이 놓인 침대 옆 협탁, 어두운 조명]
+[IMAGE PROMPT: A soft flat illustration of a baby bottle and a dim night light on a bedside table. Muted blue palette, no text.]
 
 ## 밤중수유는 언제부터 끊나요
 
@@ -66,6 +67,11 @@ function main(): void {
   assert((p.body.match(/\[IMAGE:/g) ?? []).length === 2, "이미지 마커 2개 모두 유지");
   assert(!p.body.startsWith("# "), "본문 맨 앞의 # 제목 줄은 제거돼야 한다(articles.title로 분리)");
   console.log("✅ 본문: ## 소제목 + [IMAGE:] 마커 유지, 최상위 # 제목 제거");
+
+  assert(p.imagePrompts.length === 1, `[IMAGE PROMPT:] 1건 추출 (실제: ${p.imagePrompts.length})`);
+  assert(p.imagePrompts[0].startsWith("A soft flat illustration"), "이미지 프롬프트 내용");
+  assert(!p.body.includes("[IMAGE PROMPT:"), "[IMAGE PROMPT:] 줄은 본문에서 제거돼야 한다(장문·중복 유발)");
+  console.log("✅ [IMAGE PROMPT:] 줄 분리(본문에서 제거, imagePrompts로 보관)");
 
   assert(p.checkNotes.length === 2, `HTML 주석 2블록 (실제: ${p.checkNotes.length})`);
   assert(p.checkNotes[0].label.includes("확인 필요"), "첫 주석 라벨");

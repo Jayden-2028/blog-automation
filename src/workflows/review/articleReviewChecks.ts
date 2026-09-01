@@ -209,13 +209,19 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
     return [{ category: "quality", severity: "error", message: "본문이 비어 있습니다" }];
   }
 
-  // 분량
-  const length = body.length;
+  // 분량 - writer.md §6-5 기준은 "본문"이다. 참고 자료 목록·해시태그·이미지 마커·공백은 빼고
+  // 실제 산문 길이만 잰다(그것들을 포함하면 항상 목표를 넘는다).
+  const prose = stripReferencesSection(body)
+    .replace(/^#+\s.*$/gm, "") // ## 소제목
+    .replace(/^#[^\s#].*$/gm, "") // #해시태그 줄
+    .replace(/\[IMAGE[^\]]*\]/gi, "") // [IMAGE: ...] 마커
+    .replace(/\s+/g, "");
+  const length = prose.length;
   if (length < TARGET_ARTICLE_LENGTH.min || length > TARGET_ARTICLE_LENGTH.max) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()})`,
+      message: `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
     });
   }
 

@@ -25,10 +25,10 @@ const WRITTEN_AT = "2026-08-28T00:39:15.795Z";
  */
 function makeCleanBody(extra = ""): string {
   // 분량 목표(공백 제외 2,000~3,000자, writer.md §6-5)를 채운다 - 짧으면 별개의 '분량 미달'
-  // 경고가 붙어 "깨끗한 원고" 테스트가 깨진다.
+  // 경고가 붙어 "깨끗한 원고" 테스트가 깨진다. checkQuality가 공백을 빼고 세므로 넉넉히 잡는다.
   const filler = Array.from(
-    { length: 62 },
-    (_, i) => `경복궁 별빛야행 안내 문단 가나다라마바사아자차 ${"가".repeat(i % 7)}${i} 입니다.`
+    { length: 76 },
+    (_, i) => `경복궁 별빛야행 안내 문단 가나다라마바사아자차카타파하 ${"가".repeat(i % 7)}${i} 입니다.`
   ).join("\n");
   return `${filler}\n${extra}\n\n## 참고 자료\n\n- [국가유산진흥원](https://www.kh.or.kr/)`;
 }
