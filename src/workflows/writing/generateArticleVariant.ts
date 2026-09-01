@@ -14,7 +14,9 @@ import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
-export const VARIANT_TIMEOUT_MS = 8 * 60 * 1000;
+// 배리에이션도 writer.md(500줄+)를 읽고 content-blog·korean-humanize를 순서대로 돌린다 -
+// 원고 집필과 비슷한 부하다. 2026-09-01 E2E에서 8분 타임아웃에 걸려 20분으로 늘린다.
+export const VARIANT_TIMEOUT_MS = 20 * 60 * 1000;
 
 export const VARIANT_OUTPUT_MARKERS = {
   title: "### TITLE",
