@@ -18,7 +18,8 @@ import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
-import { parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
+import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
+import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
 import type { ResearchDecisionAction } from "./researchDecisionCallbackData.js";
@@ -111,12 +112,28 @@ export type HandleResearchDecisionOutcome =
   | { status: "already_final"; job: ArticleJobRow }
   | { status: "rejected"; job: ArticleJobRow }
   /** 집필을 detached로 띄웠다. 완료·실패 알림은 job:write CLI가 직접 보낸다. */
-  | { status: "write_started"; job: ArticleJobRow };
+  | { status: "write_started"; job: ArticleJobRow }
+  /** 오래 writing에 멈춰 있던 job을 재시도로 다시 detached 띄웠다. */
+  | { status: "retry_started"; job: ArticleJobRow }
+  /** retry 버튼을 눌렀지만 이미 정상 진행 중(임계값 미만)이거나 writing이 아니게 됐다 - 재시도 거부. */
+  | { status: "retry_rejected"; job: ArticleJobRow };
+
+export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
 export type HandleResearchDecisionResult = {
   outcome: HandleResearchDecisionOutcome;
   message: string;
+  /** message와 함께 보낼 버튼(현재는 재시도 버튼 하나뿐). 없으면 텍스트만 보낸다. */
+  replyMarkup?: TelegramInlineKeyboard;
 };
+
+/**
+ * writer 실패 시 job.status를 "writing"에서 되돌리지 않는 게 의도된 설계다(runArticleJob.ts
+ * runWritingStageInner 주석 - 이미 모은 근거·자료조사 파일 재사용). 대신 여기서 "이 정도 지나면
+ * 죽은 걸로 본다"는 임계값을 둔다. WRITE_TIMEOUT_MS(20분, runWriter 자체 타임아웃)보다 여유를 둬야
+ * 실제로 도는 작업에 재시도 버튼을 잘못 노출하지 않는다.
+ */
+const WRITE_STUCK_THRESHOLD_MS = WRITE_TIMEOUT_MS + 5 * 60 * 1000;
 
 export type TelegramBotOptions = {
   botToken: string;
@@ -490,6 +507,44 @@ export class TelegramBot {
     return job.status === "researching" || job.status === "selected";
   }
 
+  /** writing 상태로 머문 지 WRITE_STUCK_THRESHOLD_MS를 넘었는지(=이전 시도가 죽었다고 볼 수 있는지). */
+  private isWriteStuck(job: ArticleJobRow): boolean {
+    const elapsedMs = Date.now() - new Date(job.updated_at).getTime();
+    return elapsedMs >= WRITE_STUCK_THRESHOLD_MS;
+  }
+
+  private buildRetryKeyboard(jobId: string): TelegramInlineKeyboard {
+    return [[{ text: "🔄 다시 시도", callback_data: buildResearchDecisionCallbackData("retry", jobId) }]];
+  }
+
+  /**
+   * "research:retry:<jobId>" - writing에 오래 멈춰 죽은 것으로 보이는 job을 재시도한다. 상태를
+   * writing에서 되돌리지 않는 게 의도된 설계라(runArticleJob.ts 참고, 이미 모은 근거·자료조사
+   * 파일 재사용) 여기서는 상태를 바꾸지 않고 triggerWriting만 다시 띄운다.
+   */
+  private async handleWriteRetry(job: ArticleJobRow): Promise<HandleResearchDecisionResult> {
+    if (job.status !== "writing") {
+      return {
+        outcome: { status: "retry_rejected", job },
+        message: `⏭ 이미 다른 상태로 진행됐습니다 (상태: ${job.status})`,
+      };
+    }
+    if (!this.isWriteStuck(job)) {
+      // 두 번째 탭 등 경합 - 아직 임계값 전이면 실제로 도는 중일 수 있어 재시도를 거부한다.
+      return {
+        outcome: { status: "retry_rejected", job },
+        message: `⏳ 아직 진행 중일 수 있습니다. 조금 더 기다린 뒤에도 안 오면 다시 시도해주세요.`,
+      };
+    }
+    this.triggerWriting(job.id);
+    return {
+      outcome: { status: "retry_started", job },
+      message:
+        `🔄 <b>원고 작성을 다시 시작합니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+        `이전 시도가 응답 없이 멈춘 것으로 보입니다. 완료되면 원고가 도착합니다.`,
+    };
+  }
+
   /**
    * "research:<action>:<jobId>" callback을 처리한다. handleCallbackQuery/handleArticleReviewCallback과
    * 완전히 다른 대상·액션 집합이라 별도 메서드로 둔다 - pollOnce가 둘 다 실패했을 때만 이걸 시도한다.
@@ -510,15 +565,30 @@ export class TelegramBot {
       return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
     }
 
+    if (parsed.action === "retry") {
+      return this.handleWriteRetry(job);
+    }
+
     if (!this.isStillAtResearchCheckpoint(job)) {
       // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
       // 집필은 수 분 걸려 사용자가 여러 번 누르기 쉬우므로, 두 번째 탭에도 "지금 진행 중"이라고
-      // 분명히 알려준다(무음으로 넘기면 오히려 더 누른다).
-      const alreadyMsg =
-        job.status === "writing"
-          ? `⏳ 이미 원고를 작성 중입니다. 완료되면 원고가 도착합니다.`
-          : `⏭ 이미 처리된 job입니다 (상태: ${job.status})`;
-      return { outcome: { status: "already_final", job }, message: alreadyMsg };
+      // 분명히 알려준다(무음으로 넘기면 오히려 더 누른다). writing에 임계값 넘게 멈춰 있으면
+      // (=이전 시도가 죽은 것으로 보이면) 재시도 버튼을 함께 준다 - 예전엔 터미널로 jobId를 찾아
+      // `npm run job:write --`로만 복구할 수 있었다.
+      if (job.status === "writing") {
+        const stuck = this.isWriteStuck(job);
+        return {
+          outcome: { status: "already_final", job },
+          message: stuck
+            ? `⏳ 원고 작성이 오래 응답이 없습니다(이전 시도가 멈췄을 수 있습니다).`
+            : `⏳ 이미 원고를 작성 중입니다. 완료되면 원고가 도착합니다.`,
+          replyMarkup: stuck ? this.buildRetryKeyboard(job.id) : undefined,
+        };
+      }
+      return {
+        outcome: { status: "already_final", job },
+        message: `⏭ 이미 처리된 job입니다 (상태: ${job.status})`,
+      };
     }
 
     if (parsed.action === "reject") {
@@ -595,6 +665,7 @@ export class TelegramBot {
     const LABELS: Record<ResearchDecisionAction, string> = {
       write: "원고 작성",
       reject: "중단",
+      retry: "다시 시도",
     };
 
     const updated = keyboard.map((row) =>
@@ -723,7 +794,7 @@ export class TelegramBot {
     }
 
     if (result.message) {
-      await this.sendMessage(result.message);
+      await this.sendMessage(result.message, result.replyMarkup);
     }
   }
 
@@ -804,12 +875,13 @@ export class TelegramBot {
     await this.post("answerCallbackQuery", { callback_query_id: callbackQueryId, text });
   }
 
-  async sendMessage(text: string): Promise<void> {
+  async sendMessage(text: string, replyMarkup?: TelegramInlineKeyboard): Promise<void> {
     await this.post("sendMessage", {
       chat_id: this.chatId,
       text,
       parse_mode: "HTML",
       disable_web_page_preview: true,
+      ...(replyMarkup ? { reply_markup: { inline_keyboard: replyMarkup } } : {}),
     });
   }
 
