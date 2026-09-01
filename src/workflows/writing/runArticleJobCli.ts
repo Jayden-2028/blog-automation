@@ -19,15 +19,33 @@ import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js
 import { notifyArticleReady } from "./notifyArticleReady.js";
 import { runWritingStage } from "./runArticleJob.js";
 
+/** "Xm전" 형태로 짧게 표시한다. */
+function formatElapsed(updatedAt: string): string {
+  const elapsedMs = Date.now() - new Date(updatedAt).getTime();
+  const minutes = Math.floor(elapsedMs / 60000);
+  if (minutes < 60) return `${minutes}분 전`;
+  return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분 전`;
+}
+
 async function listCandidateJobs(): Promise<void> {
-  const [selected, researching] = await Promise.all([
+  const [selected, researching, writing] = await Promise.all([
     ArticleJobRepository.listByStatus("selected", 20),
     ArticleJobRepository.listByStatus("researching", 20),
+    ArticleJobRepository.listByStatus("writing", 20),
   ]);
 
-  if (selected.length === 0 && researching.length === 0) {
+  if (selected.length === 0 && researching.length === 0 && writing.length === 0) {
     console.log("현재 실행할 job이 없습니다. Telegram에서 키워드를 먼저 선택해주세요.");
     return;
+  }
+
+  if (writing.length > 0) {
+    console.log(`▶ 작성 중(status=writing) ${writing.length}건 - 텔레그램에서 "이미 작성 중"만 뜨고 원고가 안 오면 여기서 멈춘 것입니다\n`);
+    for (const job of writing) {
+      console.log(`  ${job.id}`);
+      console.log(`    ${job.keyword} (${job.category ?? "N/A"}) - 마지막 갱신 ${formatElapsed(job.updated_at)}`);
+    }
+    console.log(`\n  재시도(같은 근거 재사용): npm run job:write -- <jobId>\n`);
   }
 
   if (researching.length > 0) {

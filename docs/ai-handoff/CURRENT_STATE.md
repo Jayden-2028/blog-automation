@@ -2,6 +2,48 @@
 
 기준일: 2026-09-01 (Asia/Seoul)
 
+## 2026-09-01 세션(별도 창) — writing 멈춤 job 실사고 + 텔레그램 재시도 버튼
+
+**실사고**: 사용자가 두 job에 "✏️ 원고 작성"을 눌렀는데 둘 다 "⏳ 이미 원고를 작성 중입니다"만
+반복되고 원고가 안 왔다. `debug:approved-jobs`엔 안 잡힘(approved/published만 조회) - 실제로는
+`article_jobs.status='writing'`에 멈춰 있었다(job `87d25d04-...`, `1b7e635e-...`).
+
+**근본 원인**: `runWritingStage`(runArticleJob.ts:395-404, :437-441)는 writer 실패 시 **의도적으로**
+status를 `writing`에서 되돌리지 않는다(이미 모은 근거·조사 파일 재사용 목적). 문제는 텔레그램
+쪽(`isStillAtResearchCheckpoint`, `TelegramBot.ts`)이 `researching`/`selected`만 재시도 가능
+상태로 보고 `writing`은 무조건 "이미 작성 중"만 반복해, **버튼으로는 죽은 job을 복구할 방법이
+없었다.** 터미널로 jobId를 찾아 `npm run job:write -- <jobId>`를 직접 쳐야만 했다(CLI는
+`NON_RETRYABLE_STATUSES`에 `writing`이 없어 재시도 가능).
+
+이번 사고 자체는 이 원인 하나가 아니라, 오늘 커밋한 detached 실행 수정(`6a8efce`)이 **아직 이
+맥의 운영 코드에 배포되지 않은 상태**(`logs/job_write.detached.log` 없음 - 구버전 동기 실행 중
+사망 추정)에서 발생. 두 job은 사용자가 직접 `curl .../article_jobs?status=eq.writing`으로
+jobId를 찾아 `job:write`로 재실행해 복구함(2026-09-01, `research/*` 로그 재개 확인).
+
+**수정(`src/notifications/TelegramBot.ts` · `researchDecisionCallbackData.ts` ·
+`runArticleJobCli.ts`)**:
+- `research:retry:<jobId>` callback 신설. `writing`에 `WRITE_STUCK_THRESHOLD_MS`
+  (`WRITE_TIMEOUT_MS` 20분 + 5분 버퍼) 이상 멈춘 job에는 "이미 작성 중" 안내에 **🔄 다시 시도**
+  버튼을 함께 붙인다. 임계값 전이면(정상 진행 중일 수 있음) 버튼 없이 안내만 한다.
+- retry는 `triggerWriting`(detached `job:write` 재실행)만 다시 부른다 - status는 이미 writing이라
+  건드리지 않는다. writing이 아니게 됐거나 아직 임계값 전이면 `retry_rejected`로 거부(경합 방어).
+- `sendMessage`가 `reply_markup`(inline keyboard)을 받을 수 있게 확장.
+- `job:write`(jobId 없이 실행)가 이제 `status=writing` job도 목록에 보여준다(경과 시간 포함) -
+  전에는 approved/published만 보는 `debug:approved-jobs`나 직접 DB 조회 없이는 멈춘 job의 jobId를
+  찾을 방법이 없었다.
+- status를 writing에서 되돌리지 않는 기존 설계는 그대로 유지(근거·조사 파일 재사용 의도가
+  유효하므로) - 대신 사람이 "죽었다"고 판단할 신호(경과 시간)와 버튼만 추가했다.
+
+검증: `test:telegram-bot`(8-6a 갱신 + 8-7/8-8 신규 - 임계값 전/후, retry 성공/거부 3종) +
+`test:research-decision-callback` + `test:callback-data` + `npm run build` 전부 통과.
+
+**남은 것**:
+- ⬜ 오늘 detached 실행 커밋(`6a8efce`)이 이 맥 운영 코드에 아직 배포 안 됨 - `work`/현재 브랜치를
+  `main`에 병합 후 배포하면 "5분 무응답+15분 잠김" 구버전 증상 자체가 사라진다. 그 전까진 지금 추가한
+  재시도 버튼이 안전망 역할.
+- ⬜ writing 멈춤이 재발하면 `research:retry` 버튼으로 텔레그램에서 바로 복구 가능 - 터미널 접근
+  불필요해짐(단, 여전히 임계값 25분은 기다려야 버튼이 뜬다).
+
 ## 2026-09-01 세션 — 원고 파이프라인 재설계 (스펙 주도 파일 기반)
 
 전체 계획: `~/.claude/plans/serialized-spinning-feigenbaum.md`. 커밋 `0ba2368`(P1) →
