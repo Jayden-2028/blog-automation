@@ -598,18 +598,68 @@ async function main(): Promise<void> {
   }
 
   // 8-6a) reject·중복 write: reject는 onWriteStart를 부르지 않고, 이미 writing인 job의 write 재클릭은
-  //       집필을 다시 띄우지 않고 "이미 작성 중"만 안내한다.
+  //       집필을 다시 띄우지 않고 "이미 작성 중"만 안내한다(아직 정상 범위 - updated_at을 방금으로
+  //       둬서 재시도 버튼(8-7 참고)이 안 붙는 경로를 확인한다).
   {
     const calls = newResearchCalls();
     const bot = makeResearchBot({ job: makeResearchJob(), calls });
     await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
     assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "reject는 집필 관련 호출을 하지 않아야 한다");
-    const bot2 = makeResearchBot({ job: makeResearchJob({ status: "writing" }), calls });
+    const bot2 = makeResearchBot({
+      job: makeResearchJob({ status: "writing", updated_at: new Date().toISOString() }),
+      calls,
+    });
     const dup = await bot2.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
     assert(dup.outcome.status === "already_final", "이미 writing인 job의 write 재클릭은 already_final");
     assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "중복 write 클릭은 집필을 다시 띄우지 않아야 한다");
     assert(dup.message.includes("이미 원고를 작성 중"), "중복 클릭에는 '이미 작성 중' 안내가 나가야 한다");
-    console.log("✅ reject·중복 write -> 집필 미호출, 중복 클릭에 '작성 중' 안내");
+    assert(dup.replyMarkup === undefined, "아직 멈춘 게 아니면 재시도 버튼을 붙이지 않아야 한다");
+    console.log("✅ reject·중복 write -> 집필 미호출, 중복 클릭에 '작성 중' 안내(재시도 버튼 없음)");
+  }
+
+  // 8-7) writing에 오래(임계값 이상) 멈춘 job은 write 재클릭에 재시도 버튼을 함께 준다 - 실패해도
+  //      status가 writing에서 안 풀리는 설계(runArticleJob.ts) 때문에 버튼 없이는 텔레그램에서
+  //      영원히 복구할 방법이 없었다(2026-09-01 실사고 대응).
+  {
+    const calls = newResearchCalls();
+    const staleUpdatedAt = new Date(Date.now() - 40 * 60 * 1000).toISOString(); // 40분 전
+    const bot = makeResearchBot({ job: makeResearchJob({ status: "writing", updated_at: staleUpdatedAt }), calls });
+    const stuck = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(stuck.outcome.status === "already_final", "멈춘 job의 write 재클릭도 already_final(집필을 또 띄우지 않는다)");
+    assert(calls.triggerWriting === 0, "재클릭만으로는 집필을 다시 띄우지 않는다 - retry 버튼을 눌러야 한다");
+    assert(stuck.message.includes("응답이 없습니다"), "멈춘 job에는 별도 안내 문구가 나가야 한다");
+    assert(stuck.replyMarkup?.[0]?.[0]?.callback_data === `research:retry:${RESEARCH_JOB_ID}`, "재시도 버튼이 붙어야 한다");
+    console.log("✅ 오래 멈춘 writing job -> '응답 없음' 안내 + 재시도 버튼");
+  }
+
+  // 8-8) research:retry - 멈춘 job만 재시도를 허용하고, 아직 정상 범위거나 이미 다른 상태로
+  //      넘어간 job은 거부한다(경합/오클릭 방어).
+  {
+    const calls = newResearchCalls();
+    const staleUpdatedAt = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+    const bot = makeResearchBot({ job: makeResearchJob({ status: "writing", updated_at: staleUpdatedAt }), calls });
+    const retried = await bot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(retried.outcome.status === "retry_started", `멈춘 job의 retry는 retry_started여야 한다 (실제: ${retried.outcome.status})`);
+    assert(calls.triggerWriting === 1, "retry는 triggerWriting(detached 재실행)을 1회 호출해야 한다");
+    assert(retried.message.includes("다시 시작"), "재시작 확인 메시지가 나가야 한다");
+    console.log("✅ research:retry -> 멈춘 job만 triggerWriting 재실행");
+
+    const calls2 = newResearchCalls();
+    const freshBot = makeResearchBot({
+      job: makeResearchJob({ status: "writing", updated_at: new Date().toISOString() }),
+      calls: calls2,
+    });
+    const rejected = await freshBot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(rejected.outcome.status === "retry_rejected", "아직 임계값 전인 job의 retry는 거부해야 한다");
+    assert(calls2.triggerWriting === 0, "거부된 retry는 집필을 띄우면 안 된다");
+    console.log("✅ research:retry -> 아직 진행 중일 수 있는 job은 거부");
+
+    const calls3 = newResearchCalls();
+    const doneBot = makeResearchBot({ job: makeResearchJob({ status: "review" }), calls: calls3 });
+    const alreadyMoved = await doneBot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(alreadyMoved.outcome.status === "retry_rejected", "writing이 아닌 job의 retry는 거부해야 한다");
+    assert(calls3.triggerWriting === 0, "이미 다른 상태로 넘어간 job은 재실행하지 않아야 한다");
+    console.log("✅ research:retry -> writing이 아닌 job(이미 진행됨)은 거부");
   }
 
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.
