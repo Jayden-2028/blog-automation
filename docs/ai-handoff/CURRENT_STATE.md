@@ -38,10 +38,29 @@ Node는 조율만 한다(헤드리스 `claude -p` 호출 · 산출 파일 파싱
 **산출 파일**: `research/`, `drafts/`는 `.gitignore`(repo 루트만 — `src/workflows/research/`는 소스라
 제외). job 1건 = 파일 1개, 재실행 시 덮어쓴다.
 
+**라이브 E2E 1회 완료(2026-09-01, "가을장마" job `b374133f`, 커밋 `672bf1d`~`0a23c24`)**:
+파일 기반 research→write 파이프라인 검증됨. 진행: Go → 조사(하이브리드) → `research/*.md`(28KB,
+verdict ok, 근거 31건) → 체크포인트 → 원고 작성 → `drafts/*.md`(2760자) → 검수(경고 1건) →
+"수정 필요" → draft 트림 → 재작성(재검수 0건) → 승인 → 3채널 발행.
+- ✅ researcher/writer 에이전트가 규격(researcher.md §7 / writer.md §9)대로 파일 산출
+- ✅ 파서(parseResearchFile / parseDraftFile) 정상, verdict·§10 출처표·해시태그·HTML 주석 분리
+- ✅ "✏️ 수정 필요" → draft 편집 → `job:write` 재실행 사이클(신규)
+- ✅ Blogspot draft(본문 정상 6743자, OSMU 배리에이션 #19)
+- ⚠️ **네이버 임시저장: 제목만 들어가고 본문이 비어 있음** — `NaverBlogPublisher.focusAndPasteHtml`의
+  클립보드 paste가 조용히 실패(HTML 변환은 정상 5976자 확인). P1-5와 무관한 브라우저 자동화
+  버그(Sprint 4 §12에서 한 번 잡았던 증상 재발 또는 새 원인). paste 후 본문 되읽기 검증이 없어
+  실패를 못 잡는다. **헤디드 브라우저로 재현·수정 필요.**
+- ⚠️ 티스토리 deferred(카카오 세션 만료) — 변형 원고 #18은 생성됨, `npm run setup:tistory` 필요
+- 🐛 `telegramPollJob` 로그가 비의학 confirm/edit도 "⚕️ 의학 교차확인"으로 출력(문구만, 기능 무관)
+- E2E 중 파이프라인 무관 잠재 버그 8건 수정(커밋 참고): NUL 바이트, timestamp 파싱, 에러 직렬화
+  `[object Object]`, 헤드리스 타임아웃 3건(WRITE 20분/VARIANT 20분/재조사 재사용), `[IMAGE PROMPT:]`
+  검수 오발, `## 참고 자료` 복원, `_workspace/` gitignore.
+
 **남은 것**:
-- ⬜ 라이브 E2E 1회 — 승인된 키워드 1건으로 조사(하이브리드, ~15분)→`research/*.md`→집필→
-  `drafts/*.md`→검수→승인→네이버·Blogspot draft. 이미지 유료 호출 없음. 파서가 실제 에이전트
-  산출 형식과 맞는지 확인(안 맞으면 프롬프트/파서 조정).
+- ⬜ **네이버 본문 paste 버그** — 헤디드 브라우저로 재현. paste 후 본문 요소 텍스트 길이 검증 추가.
+- ⬜ 라이브 E2E 중 `launchctl bootout`으로 내렸던 launchd `telegram-poll`/`publish-poll`은
+  2026-09-01 세션 종료 시 `bootstrap`으로 복구함(prod worktree = main = 구 코드).
+- ⬜ `work` 브랜치(P1-5 + E2E fixes, 커밋 `0ba2368`~`0a23c24`)를 `main`에 병합할지 결정 후 prod 배포.
 - ⬜ researcher 웹조사로 조사 스테이지 소요 급증(~1분 → 10분+). launchd telegram-poll 5분 주기 ·
   `singleInstanceLock` 상호작용 재점검.
 - ⬜ 이미지 재개 시 `generateArticleImages`를 `## 헤딩 뒤 삽입` → `[IMAGE:]` 마커 인식으로 변경.
