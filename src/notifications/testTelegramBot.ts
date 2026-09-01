@@ -494,11 +494,7 @@ async function main(): Promise<void> {
     return makeJob({ id: RESEARCH_JOB_ID, status: "researching", ...overrides });
   }
 
-  function makeResearchBot(opts: {
-    job: ArticleJobRow | null;
-    calls: ResearchCalls;
-    writeOutcome?: { status: "success" } | { status: "skipped"; reason: string } | { status: "failed"; error: string };
-  }): TelegramBot {
+  function makeResearchBot(opts: { job: ArticleJobRow | null; calls: ResearchCalls }): TelegramBot {
     return new TelegramBot({
       botToken: "test-token",
       chatId: CHAT_ID,
@@ -506,9 +502,9 @@ async function main(): Promise<void> {
         opts.calls.loadJobById++;
         return opts.job;
       },
-      triggerWriting: async () => {
+      updateJobStatus: async (_id, status) => ({ ...(opts.job ?? makeResearchJob()), status }),
+      triggerWriting: () => {
         opts.calls.triggerWriting++;
-        return opts.writeOutcome ?? { status: "success" };
       },
       onWriteStart: async () => {
         opts.calls.onWriteStart++;
@@ -588,59 +584,32 @@ async function main(): Promise<void> {
     console.log("✅ reject -> rejectJob 호출, 중단 메시지");
   }
 
-  // 8-6) write 성공: triggerWriting을 호출하고, 실제 완료 알림은 triggerWriting 내부
-  //      (notifyArticleReady)에서 이미 나갔다는 전제로 여기서는 빈 메시지를 돌린다(중복 발송 방지).
+  // 8-6) write: 즉시 확인(onWriteStart) + 집필을 detached로 띄운다(triggerWriting). 완료·실패
+  //      알림은 detached CLI가 직접 보내므로 핸들러는 빈 메시지를 돌린다.
   {
     const calls = newResearchCalls();
-    const bot = makeResearchBot({ job: makeResearchJob(), calls, writeOutcome: { status: "success" } });
+    const bot = makeResearchBot({ job: makeResearchJob(), calls });
     const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
-    assert(result.outcome.status === "write_result", `write는 write_result여야 한다 (실제: ${result.outcome.status})`);
-    assert(calls.triggerWriting === 1, "write는 triggerWriting을 1회 호출해야 한다");
-    assert(calls.onWriteStart === 1, "write는 집필 시작 전 onWriteStart(즉시 확인 메시지)를 1회 호출해야 한다");
-    assert(result.message === "", "write 성공 시 중복 메시지를 보내면 안 된다(완료 알림은 triggerWriting 내부에서 나간다)");
-    console.log("✅ write 성공 -> onWriteStart(즉시 확인) + triggerWriting 호출, 중복 메시지 없음");
+    assert(result.outcome.status === "write_started", `write는 write_started여야 한다 (실제: ${result.outcome.status})`);
+    assert(calls.onWriteStart === 1, "write는 집필 띄우기 전 onWriteStart(즉시 확인)를 1회 호출해야 한다");
+    assert(calls.triggerWriting === 1, "write는 triggerWriting(detached 띄우기)을 1회 호출해야 한다");
+    assert(result.message === "", "핸들러는 빈 메시지 - 완료/실패 알림은 detached CLI가 보낸다");
+    console.log("✅ write -> onWriteStart(즉시 확인) + triggerWriting(detached), 핸들러 메시지 없음");
   }
 
-  // 8-6a) reject/already_final은 onWriteStart를 호출하지 않는다(집필 시작이 아니므로).
+  // 8-6a) reject·중복 write: reject는 onWriteStart를 부르지 않고, 이미 writing인 job의 write 재클릭은
+  //       집필을 다시 띄우지 않고 "이미 작성 중"만 안내한다.
   {
     const calls = newResearchCalls();
     const bot = makeResearchBot({ job: makeResearchJob(), calls });
     await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
-    assert(calls.onWriteStart === 0, "reject는 onWriteStart를 호출하지 않아야 한다");
+    assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "reject는 집필 관련 호출을 하지 않아야 한다");
     const bot2 = makeResearchBot({ job: makeResearchJob({ status: "writing" }), calls });
     const dup = await bot2.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
     assert(dup.outcome.status === "already_final", "이미 writing인 job의 write 재클릭은 already_final");
-    assert(calls.onWriteStart === 0, "중복 write 클릭은 onWriteStart/triggerWriting을 다시 호출하지 않아야 한다");
+    assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "중복 write 클릭은 집필을 다시 띄우지 않아야 한다");
     assert(dup.message.includes("이미 원고를 작성 중"), "중복 클릭에는 '이미 작성 중' 안내가 나가야 한다");
-    console.log("✅ reject·중복 write -> onWriteStart 미호출, 중복 클릭에 '작성 중' 안내");
-  }
-
-  // 8-7) write가 건너뜀(skipped)을 반환하면 그 사유를 그대로 안내한다.
-  {
-    const calls = newResearchCalls();
-    const bot = makeResearchBot({
-      job: makeResearchJob(),
-      calls,
-      writeOutcome: { status: "skipped", reason: "이미 처리된 job입니다 (상태: review)" },
-    });
-    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
-    assert(result.message.includes("건너뜀"), "건너뜀 안내가 있어야 한다");
-    assert(result.message.includes("상태: review"), "건너뛴 사유가 그대로 보여야 한다");
-    console.log("✅ write skipped -> 사유 그대로 안내");
-  }
-
-  // 8-8) write가 실패하면 에러 내용을 그대로 안내한다(원고 자체는 만들어지지 않은 상태다).
-  {
-    const calls = newResearchCalls();
-    const bot = makeResearchBot({
-      job: makeResearchJob(),
-      calls,
-      writeOutcome: { status: "failed", error: "claude가 종료 코드 1로 끝났습니다" },
-    });
-    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
-    assert(result.message.includes("원고 작성 실패"), "실패 안내가 있어야 한다");
-    assert(result.message.includes("종료 코드 1"), "실패 사유가 그대로 보여야 한다");
-    console.log("✅ write 실패 -> 실패 사유 그대로 안내");
+    console.log("✅ reject·중복 write -> 집필 미호출, 중복 클릭에 '작성 중' 안내");
   }
 
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.

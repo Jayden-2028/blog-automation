@@ -14,6 +14,7 @@
 //   npm run job:write                  # jobId 없이 실행하면 selected/researching job 목록을 보여준다
 import "dotenv/config";
 
+import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { notifyArticleReady } from "./notifyArticleReady.js";
 import { runWritingStage } from "./runArticleJob.js";
@@ -69,6 +70,9 @@ async function main(): Promise<void> {
 
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.error}`);
+    await TelegramNotifier.fromEnv()
+      .sendMessages([{ text: `❌ <b>원고 작성 실패</b>\n${escapeTelegramHtml(result.error)}\n\n다시 시도하려면 <code>npm run job:write -- ${jobId}</code>` }])
+      .catch(() => {});
     process.exitCode = 1;
     return;
   }

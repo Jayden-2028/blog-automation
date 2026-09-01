@@ -13,9 +13,7 @@ import {
 } from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
-import { runResearchStage, runWritingStage } from "../workflows/writing/runArticleJob.js";
-import { notifyArticleReady } from "../workflows/writing/notifyArticleReady.js";
-import { notifyResearchReady } from "../workflows/research/notifyResearchReady.js";
+import { spawnDetachedTask } from "../jobs/lib/spawnDetachedTask.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
@@ -89,21 +87,11 @@ export type HandleArticleReviewResult = {
 // 가벼운 상태 변경이 아니라 실제로 runWritingStage(최대 수 분)를 호출한다 - Go 버튼이 제목 생성
 // (약 25초)을 콜백 처리 안에서 그대로 실행하는 것과 같은 패턴을 그대로 확장한 것이다.
 
-export type TriggerWritingOutcome =
-  | { status: "success" }
-  | { status: "skipped"; reason: string }
-  | { status: "failed"; error: string };
-
-// ---------- Go -> 자료조사 자동 시작 ----------
-// SPRINT: 오전/오후 자동 흐름(2026-08-31). Go 버튼을 누르면 job 생성·제목 생성에 이어 자료조사까지
-// 콜백 처리 안에서 그대로 실행한다(triggerWriting과 같은 패턴). 조사가 끝나면 notifyResearchReady가
-// 요약 + 추천 제목 + [원고 작성][중단] 버튼을 보낸다.
-export type TriggerResearchOutcome =
-  | { status: "success"; sourceCount: number }
-  | { status: "skipped"; reason: string }
-  | { status: "failed"; error: string };
-
-export type ResearchTriggerResult = { job: ArticleJobRow; result: TriggerResearchOutcome };
+// ---------- Go -> 자료조사, 원고 작성 -> 집필 : 둘 다 detached 실행 ----------
+// 2026-09-01: 자료조사·집필은 각각 10~20분 걸린다. 예전에는 콜백 처리 안에서 동기 실행해서 그동안
+// 폴러가 통째로 막혔다(다른 버튼 무반응). 이제 job:research / job:write CLI를 detached 프로세스로
+// 띄우고 폴러는 즉시 끝난다. 완료·실패 알림은 그 CLI가 직접 Telegram으로 보낸다.
+export type ResearchTriggerResult = { job: ArticleJobRow };
 
 /**
  * 방금 selected가 된 job이면 반환한다(자료조사 자동 시작 대상). 신규 Go(created) 또는
@@ -122,7 +110,8 @@ export type HandleResearchDecisionOutcome =
   /** 이미 조사 단계를 벗어난 job(중복 클릭 등) - write/reject 둘 다 다시 실행하지 않는다. */
   | { status: "already_final"; job: ArticleJobRow }
   | { status: "rejected"; job: ArticleJobRow }
-  | { status: "write_result"; job: ArticleJobRow; result: TriggerWritingOutcome };
+  /** 집필을 detached로 띄웠다. 완료·실패 알림은 job:write CLI가 직접 보낸다. */
+  | { status: "write_started"; job: ArticleJobRow };
 
 export type HandleResearchDecisionResult = {
   outcome: HandleResearchDecisionOutcome;
@@ -154,25 +143,23 @@ export type TelegramBotOptions = {
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
   updateArticleStatus?: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   /**
-   * research:write 콜백에서 호출한다. 기본 구현은 job:write CLI와 동일하게 runWritingStage 후
-   * 성공하면 notifyArticleReady로 알린다(원고 보기 버튼이 붙은 진짜 완료 메시지는 거기서 나간다).
-   * 테스트에서는 실제 LLM/Telegram 호출 없이 결과만 주입한다.
+   * research:write 콜백에서 호출한다. 기본 구현은 job:write CLI를 detached 프로세스로 띄우고 즉시
+   * 반환한다(완료·실패 알림은 그 CLI가 직접 보낸다). 테스트에서는 호출 횟수만 세는 no-op를 주입한다.
    */
-  triggerWriting?: (jobId: string) => Promise<TriggerWritingOutcome>;
+  triggerWriting?: (jobId: string) => void;
   /**
-   * research:write에서 triggerWriting(수 분)을 시작하기 직전에 호출한다. 기본 구현은 버튼을
-   * "작성 중" 표시로 바꾸고 "원고를 작성합니다" 확인 메시지를 즉시 보낸다 - 클릭이 먹었는지
-   * 몰라 여러 번 누르는 실수를 막기 위해서다. 테스트에서는 no-op를 주입한다.
+   * research:write에서 triggerWriting을 띄우기 직전에 호출한다. 기본 구현은 버튼을 "작성 중"
+   * 표시로 바꾸고 "원고를 작성합니다" 확인 메시지를 즉시 보낸다 - 클릭이 먹었는지 몰라 여러 번
+   * 누르는 실수를 막기 위해서다. 테스트에서는 no-op를 주입한다.
    */
   onWriteStart?: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   /** research:reject 콜백에서 호출한다. rejectJobCli.ts와 같은 함수를 쓴다. */
   rejectJob?: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   /**
-   * Go로 새 job이 생겼을 때 곧바로 자료조사를 실행한다. 기본 구현은 job:research CLI와 동일하게
-   * runResearchStage 후 성공하면 notifyResearchReady(요약 + 원고 작성 버튼)를 보낸다.
-   * 테스트에서는 실제 조사/Telegram 호출 없이 결과만 주입한다.
+   * Go로 새 job이 생겼을 때 자료조사를 시작한다. 기본 구현은 job:research CLI를 detached 프로세스로
+   * 띄우고 즉시 반환한다. 테스트에서는 호출 횟수만 세는 no-op를 주입한다.
    */
-  triggerResearch?: (jobId: string) => Promise<TriggerResearchOutcome>;
+  triggerResearch?: (jobId: string) => void;
 };
 
 export class TelegramBot {
@@ -188,9 +175,9 @@ export class TelegramBot {
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
-  private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
+  private readonly triggerWriting: (jobId: string) => void;
   private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
-  private readonly triggerResearch: (jobId: string) => Promise<TriggerResearchOutcome>;
+  private readonly triggerResearch: (jobId: string) => void;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
   constructor(options: TelegramBotOptions) {
@@ -220,18 +207,7 @@ export class TelegramBot {
     this.updateArticleStatus =
       options.updateArticleStatus ?? ((articleId, status) => updateArticleStatusRepo(articleId, status));
     this.triggerWriting =
-      options.triggerWriting ??
-      (async (jobId) => {
-        const result = await runWritingStage(jobId);
-        if (result.status === "success") {
-          // 원고 보기 버튼이 붙은 진짜 완료 메시지는 여기서 나간다 - handleResearchDecisionCallback은
-          // 짧은 확인 문구만 추가로 보낸다(respondToResearchDecision 참고).
-          await notifyArticleReady(result);
-          return { status: "success" };
-        }
-        if (result.status === "skipped") return { status: "skipped", reason: result.reason };
-        return { status: "failed", error: result.error };
-      });
+      options.triggerWriting ?? ((jobId) => spawnDetachedTask("job:write", [jobId]));
     this.rejectJob = options.rejectJob ?? ((jobId, reason) => rejectArticleJob(jobId, reason, "telegram"));
     this.onWriteStart =
       options.onWriteStart ??
@@ -245,17 +221,7 @@ export class TelegramBot {
           .catch(() => {});
       });
     this.triggerResearch =
-      options.triggerResearch ??
-      (async (jobId) => {
-        const result = await runResearchStage(jobId);
-        if (result.status === "success") {
-          // 요약 + 추천 제목 + [✍️ 원고 작성][🗑 중단] 버튼이 붙은 진짜 다음 단계 메시지는 여기서 나간다.
-          await notifyResearchReady(result.job, result.researchFilePath, result.sources);
-          return { status: "success", sourceCount: result.sources.length };
-        }
-        if (result.status === "skipped") return { status: "skipped", reason: result.reason };
-        return { status: "failed", error: result.error };
-      });
+      options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
   }
 
   static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
@@ -406,8 +372,11 @@ export class TelegramBot {
     }
 
     // 추천 제목은 조사 완료 알림(notifyResearchReady)에서 요약과 함께 보여준다. 여기서는 조사가
-    // 돌고 있다는 것만 알린다 - 1~3분 뒤 요약 + 제목 + [원고 작성] 버튼이 온다.
-    lines.push(``, `🔍 자료조사 중입니다 (1~3분). 끝나면 요약과 추천 제목을 보내드립니다.`);
+    // 돌고 있다는 것만 알린다 - 웹 조사가 끝나면 요약 + 제목 + [원고 작성] 버튼이 온다.
+    lines.push(
+      ``,
+      `🔍 자료조사 중입니다 (약 10~20분). 끝나면 요약과 추천 제목을 보내드립니다. 이 버튼을 다시 누르지 않아도 됩니다.`
+    );
 
     return lines.join("\n");
   }
@@ -568,31 +537,16 @@ export class TelegramBot {
       };
     }
 
-    // write: 집필은 수 분이 걸린다. 클릭이 먹었는지 몰라 여러 번 누르는 실수를 막기 위해, 실제
-    // 집필(triggerWriting)을 시작하기 전에 onWriteStart로 (1) 버튼을 "작성 중" 표시로 바꾸고
-    // (2) 즉시 확인 메시지를 보낸다. 완료 메시지는 triggerWriting 안(notifyArticleReady)에서 별도로.
+    // write: 집필은 10~20분 걸린다. 폴러 안에서 동기 실행하면 그동안 다른 버튼이 전부 막히고,
+    // 사용자는 클릭이 먹었는지 몰라 여러 번 누른다. 그래서:
+    //  1) 상태를 즉시 writing으로 바꿔 중복 클릭(같은 배치 두 번째 탭)이 또 집필을 띄우지 못하게 하고
+    //  2) onWriteStart로 버튼을 "작성 중" 표시 + "원고를 작성합니다" 확인 메시지를 즉시 보내고
+    //  3) triggerWriting(job:write CLI)을 detached 프로세스로 띄우고 폴러는 즉시 끝낸다.
+    // 완료·실패 알림은 그 detached CLI가 직접 Telegram으로 보낸다.
+    await this.updateJobStatus(job.id, "writing");
     await this.onWriteStart(job, query);
-
-    // runWritingStage(최대 수 분)를 실제로 실행한다. 완료/실패와 무관하게 예외를 밖으로 던지지
-    // 않는다(triggerWriting의 기본 구현이 이미 그렇게 되어 있다) - pollOnce가 이 update 하나
-    // 때문에 죽으면 이후 update가 전부 막힌다.
-    const writeResult = await this.triggerWriting(job.id);
-
-    if (writeResult.status === "success") {
-      // 원고 보기 버튼이 붙은 진짜 완료 메시지는 triggerWriting 안에서 이미 발송됐다(notifyArticleReady).
-      // 여기서 또 보내면 중복이라 빈 메시지를 돌린다 - respondToResearchDecision이 빈 메시지는 안 보낸다.
-      return { outcome: { status: "write_result", job, result: writeResult }, message: "" };
-    }
-    if (writeResult.status === "skipped") {
-      return {
-        outcome: { status: "write_result", job, result: writeResult },
-        message: `⏭ 건너뜀: ${escapeTelegramHtml(writeResult.reason)}`,
-      };
-    }
-    return {
-      outcome: { status: "write_result", job, result: writeResult },
-      message: `❌ <b>원고 작성 실패</b>\n${escapeTelegramHtml(job.keyword)}\n${escapeTelegramHtml(writeResult.error)}`,
-    };
+    this.triggerWriting(job.id);
+    return { outcome: { status: "write_started", job }, message: "" };
   }
 
   /**
@@ -716,17 +670,14 @@ export class TelegramBot {
         results.push(result);
         await this.respondToCallback(update.callback_query, result);
 
-        // Go로 job이 새로 selected가 되면(신규 생성 또는 rejected -> selected 복구) 곧바로 자료조사를
-        // 시작한다. 확인 메시지는 위 respondToCallback에서 이미 나갔고, 여기서 조사(최대 수 분)를
-        // 돌린 뒤 notifyResearchReady가 요약 + 원고 작성 버튼을 보낸다. 중복 클릭 등으로 이미
-        // researching 이후로 넘어간 job은 runResearchStage가 skipped로 조용히 처리한다.
+        // Go로 job이 새로 selected가 되면(신규 생성 또는 rejected -> selected 복구) 자료조사를
+        // detached 프로세스로 띄운다. 확인 메시지("자료조사 중입니다")는 위 respondToCallback에서
+        // 이미 나갔고, 완료(요약 + 원고 작성 버튼)·실패 알림은 job:research CLI가 직접 보낸다.
+        // 중복 클릭 등으로 이미 researching 이후로 넘어간 job은 runResearchStage가 skipped로 처리한다.
         const selectedJob = jobFromFreshSelection(result.outcome);
         if (selectedJob) {
-          const triggered = await this.triggerResearch(selectedJob.id);
-          researchTriggerResults.push({ job: selectedJob, result: triggered });
-          if (triggered.status === "failed") {
-            await this.sendMessage(this.buildResearchFailedMessage(selectedJob, triggered.error));
-          }
+          this.triggerResearch(selectedJob.id);
+          researchTriggerResults.push({ job: selectedJob });
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -758,10 +709,9 @@ export class TelegramBot {
   }
 
   /**
-   * respondToArticleReview와 같은 원칙(§answerCallbackQuery 만료 무시)으로 조사 체크포인트
-   * 결정을 알린다. write는 처리에 최대 수 분이 걸리므로 answerCallbackQuery는 거의 항상 만료돼
-   * 있다 - 로딩 표시만 사라질 뿐이고, 실제 완료 알림은 triggerWriting 내부(notifyArticleReady)에서
-   * 별도로 나간다.
+   * 조사 체크포인트 결정(write/reject)을 알린다. write는 onWriteStart에서 이미 버튼 표시 + 확인
+   * 메시지를 보냈고 실제 집필은 detached CLI가 돌리므로, 여기서는 answerCallbackQuery(로딩 해제)만
+   * 한다. reject는 즉시라 버튼 표시 + "중단됨" 메시지를 여기서 보낸다.
    */
   private async respondToResearchDecision(query: TelegramCallbackQuery, result: HandleResearchDecisionResult): Promise<void> {
     if (result.outcome.status === "ignored") return;
@@ -770,9 +720,6 @@ export class TelegramBot {
 
     if (result.outcome.status === "rejected") {
       await this.markResearchButtonsDecided(query, "reject").catch(() => {});
-    }
-    if (result.outcome.status === "write_result") {
-      await this.markResearchButtonsDecided(query, "write").catch(() => {});
     }
 
     if (result.message) {

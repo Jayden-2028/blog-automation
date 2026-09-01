@@ -69,26 +69,16 @@ async function main(): Promise<void> {
     }
   }
 
-  for (const { job, result } of researchTriggerResults) {
-    if (result.status === "success") {
-      console.log(`   🔍 자료조사 완료(근거 ${result.sourceCount}건) -> job ${job.id} (${job.keyword})`);
-    } else if (result.status === "skipped") {
-      console.log(`   · 자료조사 건너뜀 -> job ${job.id} (${result.reason})`);
-    } else {
-      console.log(`   ⚠️ 자료조사 실패 -> job ${job.id} (${job.keyword}) - ${result.error}`);
-    }
+  for (const { job } of researchTriggerResults) {
+    console.log(`   🔍 자료조사 시작(detached) -> job ${job.id} (${job.keyword})`);
   }
 
   for (const result of researchDecisionResults) {
     const { outcome } = result;
     if (outcome.status === "rejected") {
       console.log(`   🗑 조사 후 중단 -> job ${outcome.job.id} (${outcome.job.keyword})`);
-    } else if (outcome.status === "write_result") {
-      // write는 이 for 루프가 끝나기 전에 이미 최대 수 분이 지났다는 뜻이다(동기 처리) - 정상이다.
-      console.log(
-        `   ✍️ 원고 작성(${outcome.result.status}) -> job ${outcome.job.id} (${outcome.job.keyword})` +
-          (outcome.result.status === "failed" ? ` - ${outcome.result.error}` : "")
-      );
+    } else if (outcome.status === "write_started") {
+      console.log(`   ✍️ 원고 작성 시작(detached) -> job ${outcome.job.id} (${outcome.job.keyword})`);
     } else if (outcome.status === "already_final") {
       console.log(`   ↩︎ 조사 체크포인트: 이미 처리됨 -> job ${outcome.job.id} (상태: ${outcome.job.status})`);
     } else if (outcome.status === "job_not_found") {
