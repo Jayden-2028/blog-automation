@@ -51,3 +51,7 @@ docs/ai-handoff/community-recon/
 
 # 커뮤니티 recon 원본 HTML (실제 게시글 제목 = 저작물, 커밋 금지)
 docs/ai-handoff/community-recon/
+
+# 헤드리스 에이전트/스킬이 만드는 작업 폴더
+_workspace/
+_e2e_check.mjs
