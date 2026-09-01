@@ -43,6 +43,35 @@ import { chromium, type Page } from "playwright";
 
 import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
 
+/** 공백을 뺀 실제 글자 수. 본문이 실제로 채워졌는지 판정하는 데 쓴다. */
+function nonWhitespaceLength(text: string): number {
+  return text.replace(/\s/g, "").length;
+}
+
+/**
+ * bodyHtml을 문단 구분이 살아 있는 평문으로 바꾼다(붙여넣기 실패 시 keyboard.type 폴백용).
+ * 블록 태그(</p>, </h2>, </li> 등)는 줄바꿈으로, 그 외 태그는 제거한다.
+ */
+function htmlToPlainWithBreaks(html: string): string {
+  return html
+    .replace(/<\/(p|h[1-6]|li|div|blockquote|tr)>/gi, "\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
+}
+
 export class NaverPublishLoginRequiredError extends Error {
   constructor(message: string) {
     super(message);
@@ -156,7 +185,7 @@ export class NaverBlogPublisher {
       }
 
       try {
-        await this.focusAndPasteHtml(page, SELECTORS.bodyParagraph, input.bodyHtml);
+        await this.fillBody(page, SELECTORS.bodyParagraph, input.bodyHtml);
       } catch (error) {
         return { ok: false, stage: "body", error: this.errorMessage(error) };
       }
@@ -196,17 +225,38 @@ export class NaverBlogPublisher {
   }
 
   /**
-   * 본문 HTML 붙여넣기. 실제 OS 클립보드에 HTML을 써넣고 Ctrl/Cmd+V를 눌러 "진짜" paste
-   * 이벤트를 발생시킨다(파일 상단 설명 참고 - 합성 이벤트 dispatch는 SmartEditor가 무시했다).
+   * 본문을 채운다. 1차로 OS 클립보드 + Ctrl/Cmd+V 붙여넣기를 시도하고(서식 보존), 붙여넣기 후
+   * 본문 요소 텍스트를 되읽어 실제로 들어갔는지 검증한다. 비어 있으면(2026-09-01 E2E에서 제목만
+   * 들어가고 본문이 통째로 빈 사례 발생) 제목 입력과 같은 방식인 page.keyboard.type()으로 평문을
+   * 다시 넣는다 - 서식은 잃지만 "본문 통째로 빈 초안"보다는 낫다(사용자가 발행 전 손보는 흐름).
    */
-  private async focusAndPasteHtml(page: Page, selector: string, html: string): Promise<void> {
-    // 태그를 걷어낸 순수 텍스트도 text/plain으로 같이 넣어둔다 - 붙여넣기 대상이 서식을 못
-    // 받아들이는 예외 상황에서도 최소한 텍스트는 남게 하기 위해서다.
-    const plainText = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  private async fillBody(page: Page, selector: string, html: string): Promise<void> {
+    const plainText = htmlToPlainWithBreaks(html);
 
-    // tsconfig에 "dom" lib이 없어(Node 전용 프로젝트) document/Blob/ClipboardItem을 프로젝트
-    // 코드에서 직접 참조할 수 없다 - trendDateNavigation.ts와 같은 패턴으로 globalThis를 any로
-    // 캐스팅해 우회한다(실제로는 브라우저 안에서 실행되므로 타입 체크 대상이 아니다).
+    await this.pasteHtml(page, html, plainText);
+    await page.click(selector);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    await page.waitForTimeout(1200);
+
+    const afterPaste = await this.readBodyText(page);
+    if (nonWhitespaceLength(afterPaste) >= 50) return;
+
+    console.warn("⚠️ [naver] 본문 붙여넣기 결과가 비어 있어 평문 타이핑으로 폴백합니다.");
+    await page.click(selector);
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.type(plainText, { delay: 1 });
+    await page.waitForTimeout(600);
+
+    const afterType = await this.readBodyText(page);
+    if (nonWhitespaceLength(afterType) < 50) {
+      throw new Error("본문 입력 실패 - 붙여넣기와 평문 타이핑 모두 본문 요소가 비어 있습니다.");
+    }
+  }
+
+  private async pasteHtml(page: Page, html: string, plainText: string): Promise<void> {
+    // tsconfig에 "dom" lib이 없어(Node 전용 프로젝트) Blob/ClipboardItem을 직접 참조할 수 없다 -
+    // globalThis를 any로 캐스팅해 우회한다(실제로는 브라우저 안에서 실행되므로 타입 체크 대상 아님).
     await page.evaluate(
       async ({ htmlContent, text }) => {
         const g: any = globalThis as any;
@@ -218,9 +268,14 @@ export class NaverBlogPublisher {
       },
       { htmlContent: html, text: plainText }
     );
+  }
 
-    await page.click(selector);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+  /** SmartEditor 본문 컴포넌트의 표시 텍스트를 읽는다. 붙여넣기·타이핑 결과 검증용. */
+  private async readBodyText(page: Page): Promise<string> {
+    return page
+      .locator('.se-component.se-text[data-a11y-title="본문"]')
+      .innerText()
+      .catch(() => "");
   }
 
   /**
