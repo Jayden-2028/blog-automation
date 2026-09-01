@@ -8,11 +8,16 @@
 // review 콜백은 이미 버튼으로 되는데 조사 체크포인트만 빠져 있었다.
 //
 // 형식: research:<action>:<job_id>
+//
+// "retry"(2026-09-01 추가): write 실패 후 job이 "writing"에 멈춰 재시도할 방법이 없던 문제
+// (runArticleJob.ts §runWritingStageInner 주석 참고 - writer 실패 시 status는 의도적으로
+// writing 유지) 대응. TelegramBot이 오래(WRITE_TIMEOUT_MS+버퍼) writing에 머문 job에만
+// 이 버튼을 붙여준다.
 
-export type ResearchDecisionAction = "write" | "reject";
+export type ResearchDecisionAction = "write" | "reject" | "retry";
 
 const RESEARCH_PREFIX = "research";
-const VALID_ACTIONS: readonly ResearchDecisionAction[] = ["write", "reject"];
+const VALID_ACTIONS: readonly ResearchDecisionAction[] = ["write", "reject", "retry"];
 
 // article_jobs.id는 gen_random_uuid()로 생성되는 표준 UUID다.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
