@@ -368,7 +368,13 @@ export async function runWritingStage(
   const job = await ArticleJobRepository.findById(jobId);
   if (!job) return { status: "skipped", reason: `job을 찾을 수 없습니다: ${jobId}` };
 
-  if (NON_RETRYABLE_STATUSES.includes(job.status)) {
+  // "✏️ 수정 필요"가 눌린 job(status=review, reviewDecision=needs_edit)은 재작성을 허용한다 -
+  // 사람이 drafts/<슬러그>.md를 손본 뒤 다시 돌리면 그 파일을 재사용해(재작성 생략) 새 article로
+  // 재수집·재검수한다. approved/published/rejected는 그대로 막는다.
+  const isNeedsEditRerun =
+    job.status === "review" &&
+    (job.metadata as Record<string, unknown> | null)?.reviewDecision === "needs_edit";
+  if (NON_RETRYABLE_STATUSES.includes(job.status) && !isNeedsEditRerun) {
     return { status: "skipped", reason: `이미 처리된 job입니다 (상태: ${job.status})` };
   }
 
@@ -540,6 +546,9 @@ async function runWritingStageInner(
 
   await ArticleJobRepository.mergeMetadata(jobId, {
     lastError: null,
+    // 재작성이 끝났으니 이전 검수 결정(needs_edit 등)을 지운다 - 새 원고는 다시 검수 대기다.
+    reviewDecision: null,
+    reviewedAt: null,
     hashtags: parsed.hashtags,
     draftFilePath: draftPath,
     // writer가 [IMAGE PROMPT:]로 남긴 이미지 제작 지시. 사용자가 이미지를 만들 때 참고.
