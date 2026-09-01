@@ -254,7 +254,19 @@ async function main(): Promise<void> {
     const result = await bot.handleCallbackQuery(makeQuery(`pass:${RUN_ID}:${RANK}`));
     assert(result.outcome.status === "locked", `진행 중 job은 locked여야 한다 (실제: ${result.outcome.status})`);
     assert(calls.updateStatus === 0, "진행 중 job의 상태를 바꾸면 안 된다");
-    console.log("✅ 진행 중(writing) job -> locked, 상태 변경 없음");
+    assert(result.message.length > 0, "Pass로 되돌리려는 시도는 '되돌릴 수 없다'고 알려야 한다");
+    console.log("✅ 진행 중(writing) job + Pass -> locked + 안내 메시지");
+  }
+
+  // 5-4) 선택 직후 Go 중복 탭(researching)은 조용히 넘긴다 - "변경할 수 없습니다"가 노이즈다.
+  {
+    const calls = newCalls();
+    const bot = makeBot({ ranking: makeRanking(), created: false, existingStatus: "researching", calls });
+    const result = await bot.handleCallbackQuery(makeQuery(`go:${RUN_ID}:${RANK}`));
+    assert(result.outcome.status === "locked", `진행 중 job은 locked여야 한다 (실제: ${result.outcome.status})`);
+    assert(result.message === "", `Go 중복 탭은 메시지를 보내지 않아야 한다 (실제: "${result.message}")`);
+    assert(calls.updateStatus === 0, "상태를 바꾸면 안 된다");
+    console.log("✅ 진행 중(researching) job + Go 중복 탭 -> locked + 무음");
   }
 
   // 6) 제목 생성이 실패해도 선택 자체는 성공해야 한다.

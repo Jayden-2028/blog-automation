@@ -305,9 +305,13 @@ export class TelegramBot {
 
     // 이미 조사/집필이 시작된 job은 되돌리지 않는다. 진행 중인 작업이 버튼 한 번에 사라지면 안 된다.
     if (job.status !== "selected" && job.status !== "rejected") {
+      // Go를 이미 선택된 키워드에 다시 누른 경우(중복 탭·재전송)는 조용히 넘긴다 - 방금 "선택 완료"
+      // 메시지를 받은 직후라 "변경할 수 없습니다"가 붙으면 불필요한 노이즈다. Pass로 되돌리려는
+      // 시도만 "이미 진행 중"이라고 알린다(사용자가 되돌릴 수 없다는 걸 알아야 하므로).
       return {
         outcome: { status: "locked", job },
-        message: `이미 진행 중이라 변경할 수 없습니다 (상태: ${job.status})`,
+        message:
+          parsed.action === "pass" ? `이미 진행 중이라 되돌릴 수 없습니다 (상태: ${job.status})` : "",
       };
     }
 
