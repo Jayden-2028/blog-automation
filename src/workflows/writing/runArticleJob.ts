@@ -22,7 +22,7 @@
 // 단계마다 status를 전이시키는 이유: 어디서 멈췄는지 DB만 보고 알 수 있어야 한다. Sprint 0에서
 // 파이프라인이 조용히 죽었을 때 로그를 열어보고서야 알았던 문제를 반복하지 않는다.
 
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -34,6 +34,7 @@ import { createArticleForJob } from "../../services/supabase/repositories/articl
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
@@ -49,8 +50,12 @@ import { runArticleReview } from "../review/runArticleReview.js";
 import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, SourceRow } from "../../types/database.js";
 
-/** 원고 생성은 제목 생성(25초 실측)보다 훨씬 길다. 첫 실측(185초)의 3배 이상 여유를 둔다. */
-export const WRITE_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * 헤드리스 writer는 writer.md(500줄+) + seo-guide.md(500줄+) + research 파일(20~30KB)을 읽고,
+ * content-blog·korean-humanize 스킬을 순서대로 돌린 뒤 2,000~3,000자 원고를 쓴다. 실측 10분+
+ * (2026-09-01 E2E에서 10분 타임아웃에 걸림) - 20분으로 늘린다.
+ */
+export const WRITE_TIMEOUT_MS = 20 * 60 * 1000;
 
 /** 이미 결정이 끝난 job은 재실행하지 않는다 - 재실행하면 승인된/발행된 원고 위에 새 원고가 덮어써진다. */
 const NON_RETRYABLE_STATUSES: ArticleJobRow["status"][] = ["review", "approved", "published", "rejected"];
@@ -106,6 +111,15 @@ async function defaultReadResearchFile(path: string): Promise<string | null> {
   }
 }
 
+/** 파일이 존재하고 maxAgeMs 안에 수정됐으면 true. 재조사 생략 판정에 쓴다. */
+function fileModifiedWithin(path: string, maxAgeMs: number): boolean {
+  try {
+    return Date.now() - statSync(path).mtimeMs < maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
 export async function runResearchStage(
   jobId: string,
   options: RunResearchStageOptions = {}
@@ -120,6 +134,23 @@ export async function runResearchStage(
   const startedAt = Date.now();
   await ArticleJobRepository.updateStatus(jobId, "researching");
 
+  try {
+    return await runResearchStageInner(job, jobId, options, startedAt);
+  } catch (error) {
+    // createSources(PostgrestError - Error 인스턴스 아님) 등 예외를 status:failed로 좁힌다.
+    // String(error)면 "[object Object]"가 되므로 describeError를 쓴다.
+    const message = describeError(error);
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${message}` });
+    return { status: "failed", error: message };
+  }
+}
+
+async function runResearchStageInner(
+  job: ArticleJobRow,
+  jobId: string,
+  options: RunResearchStageOptions,
+  startedAt: number
+): Promise<RunResearchStageResult> {
   // 1) 기준 자료(baseline) - NAVER 검색 API. 하이브리드의 감사 베이스라인이다. 비어 있어도
   //    바로 실패하지 않는다 - 에이전트가 WebSearch로 채울 수 있다(단, 그 사실을 프롬프트에 알린다).
   const collected = await collectSourcesForJob(jobId, job.keyword);
@@ -142,17 +173,24 @@ export async function runResearchStage(
   }
 
   // 2) 헤드리스 researcher 에이전트 - researcher.md 계약대로 조사해 research/<슬러그>.md를 쓴다.
+  //    최근(2시간 내)에 쓰인 파일이 이미 있으면 재조사하지 않는다 - parse 단계 버그로 재실행할 때
+  //    15분짜리 웹 조사를 다시 물리지 않기 위해서다(에이전트 조사 결과는 파일에 이미 있다).
   const outputPath = researchFilePath(job.keyword);
   await mkdir(dirname(outputPath), { recursive: true });
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
-  const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
 
-  const runResearcher = options.runResearcher ?? ((p) => defaultRunResearcher(p));
-  const ran = await runResearcher(prompt, outputPath);
-  if (!ran.ok) {
-    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
-    // status는 되돌리지 않는다(researching 유지) - 재실행 시 이 job을 다시 집을 수 있어야 한다.
-    return { status: "failed", error: ran.error };
+  const freshFile = fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
+  if (freshFile) {
+    console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
+  } else {
+    const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
+    const runResearcher = options.runResearcher ?? ((p) => defaultRunResearcher(p));
+    const ran = await runResearcher(prompt, outputPath);
+    if (!ran.ok) {
+      await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
+      // status는 되돌리지 않는다(researching 유지) - 재실행 시 이 job을 다시 집을 수 있어야 한다.
+      return { status: "failed", error: ran.error };
+    }
   }
 
   // 3) 산출 파일 읽기 + 파싱
@@ -176,7 +214,9 @@ export async function runResearchStage(
       url: row.url,
       source_name: "researcher",
       authority: row.authority,
-      published_at: row.publishedAt,
+      // published_at은 timestamptz 컬럼이다. 에이전트가 "발행일 미상" 같은 자유 텍스트를 쓰므로
+      // 파싱 가능한 날짜만 저장하고 나머지는 null(원문 표기는 research 파일에 그대로 남아 있다).
+      published_at: coerceTimestamp(row.publishedAt),
       content: null,
     }));
   const savedAgent = agentSources.length > 0 ? await createSources(dedupeSourceInserts(agentSources)) : [];
@@ -205,6 +245,51 @@ export async function runResearchStage(
     sourceCounts,
     durationMs: Date.now() - startedAt,
   };
+}
+
+/**
+ * parseDraftFile이 뽑은 "사용한 출처" 주석을 눈에 보이는 "## 참고 자료" 마크다운 섹션으로 되살린다.
+ * 주석 각 줄은 "1. [등급] 제목 (날짜) — https://..." 형태 - URL과 제목을 뽑아 "- [제목](URL)"로.
+ */
+function buildReferencesSection(notes: ReadonlyArray<{ label: string; body: string }>): string | null {
+  const sourcesNote = notes.find((n) => /사용한\s*출처|참고\s*자료|출처\s*목록/.test(n.label));
+  if (!sourcesNote) return null;
+
+  const items: string[] = [];
+  for (const raw of sourcesNote.body.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const urlMatch = line.match(/https?:\/\/\S+/);
+    if (!urlMatch) continue;
+    const url = urlMatch[0].replace(/[),.]+$/, "");
+    // 앞의 "1." 번호와 "[등급]"을 걷어내고, URL 앞의 " — "/" - "/"("까지를 제목으로.
+    let label = line
+      .slice(0, line.indexOf(urlMatch[0]))
+      .replace(/^\d+[.)]\s*/, "")
+      .replace(/^\[[^\]]*\]\s*/, "")
+      .replace(/[\s—\-·(]+$/, "")
+      .trim();
+    if (!label) label = url;
+    items.push(`- [${label}](${url})`);
+  }
+  if (items.length === 0) return null;
+  return ["## 참고 자료", "", ...items].join("\n");
+}
+
+/** 자유 텍스트 날짜 표기를 timestamptz에 넣을 수 있는 ISO 문자열로 좁힌다. 못 하면 null. */
+function coerceTimestamp(value: string | null): string | null {
+  if (!value) return null;
+  // "2025-11-20", "2025. 11. 20.", "2025/11/20", "2025년 11월 20일" 등에서 Y-M-D를 뽑는다.
+  const m = value.match(/(\d{4})\D{1,3}(\d{1,2})\D{1,3}(\d{1,2})/);
+  if (m) {
+    const [, y, mo, d] = m;
+    const iso = `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    if (!Number.isNaN(Date.parse(iso))) return iso;
+  }
+  // 연도만 있으면 1월 1일로.
+  const yearOnly = value.match(/^\s*(\d{4})\s*$/);
+  if (yearOnly) return `${yearOnly[1]}-01-01`;
+  return null;
 }
 
 /** url(없으면 title) 기준 중복 제거. createSources 전에 배치 내부 중복을 막는다. */
@@ -304,31 +389,52 @@ export async function runWritingStage(
   const startedAt = Date.now();
   await ArticleJobRepository.updateStatus(jobId, "writing");
 
+  try {
+    return await runWritingStageInner(job, jobId, options, sources, researchPath, startedAt);
+  } catch (error) {
+    const message = describeError(error);
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${message}` });
+    return { status: "failed", error: message };
+  }
+}
+
+async function runWritingStageInner(
+  job: ArticleJobRow,
+  jobId: string,
+  options: RunWritingStageOptions,
+  sources: SourceRow[],
+  researchPath: string,
+  startedAt: number
+): Promise<RunWritingStageResult> {
   // headline도 함께 본다 - 키워드가 짧게 정제돼 의학 어휘가 빠졌더라도 원문 제목에는 남아 있을 수 있다.
   const isMedical = isMedicalTopic(job.keyword) || (job.headline ? isMedicalTopic(job.headline) : false);
 
   // 헤드리스 writer 에이전트 - writer.md + seo-guide.md 계약대로 research 파일을 읽고
   // drafts/<슬러그>.md를 쓴다. Node는 조율만 한다(CLAUDE.md 원고 파이프라인 운영 규칙).
+  // 최근(2시간 내) draft가 이미 있으면 재작성하지 않는다(파싱/저장 버그로 재실행할 때 집필 비용 절약).
   const draftPath = draftFilePath(job.keyword);
   await mkdir(dirname(draftPath), { recursive: true });
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
-  const prompt = buildWritingPrompt({
-    job,
-    researchFilePath: researchPath,
-    draftFilePath: draftPath,
-    isMedical,
-    today,
-  });
 
-  const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
-  const ran = await runWriter(prompt, draftPath);
-  const durationMs = Date.now() - startedAt;
-
-  if (!ran.ok) {
-    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${ran.error}` });
-    // status는 되돌리지 않는다(writing 유지) - 이미 모은 근거·자료조사 파일은 재사용할 수 있다.
-    return { status: "failed", error: ran.error };
+  if (fileModifiedWithin(draftPath, 2 * 60 * 60 * 1000)) {
+    console.log(`ℹ️ [writing] 최근 draft 파일 재사용(재작성 생략): ${draftPath}`);
+  } else {
+    const prompt = buildWritingPrompt({
+      job,
+      researchFilePath: researchPath,
+      draftFilePath: draftPath,
+      isMedical,
+      today,
+    });
+    const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
+    const ran = await runWriter(prompt, draftPath);
+    if (!ran.ok) {
+      await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${ran.error}` });
+      // status는 되돌리지 않는다(writing 유지) - 이미 모은 근거·자료조사 파일은 재사용할 수 있다.
+      return { status: "failed", error: ran.error };
+    }
   }
+  const durationMs = Date.now() - startedAt;
 
   const readDraftFile = options.readDraftFile ?? defaultReadDraftFile;
   const draftText = await readDraftFile(draftPath);
@@ -360,12 +466,19 @@ export async function runWritingStage(
     console.error(`⚠️ 이미지 ${imageGeneration.failures.length}건 생성 실패 (원고는 계속 진행) -`, imageGeneration.failures.join(" / "));
   }
 
-  // 최종 본문 = body + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
-  // 해시태그/고지를 여기서 결정적으로 붙이는 이유(2026-08-28): 둘 다 "매번 정확히 지켜져야 하는"
-  // 항목이라 모델 출력에만 맡기면 빠뜨릴 수 있다. buildMedicalDisclaimer()는 실제 sources 등급을
-  // 보고 문구를 정한다. parseDraftFile이 본문에서 해시태그 줄을 분리해 두므로 여기서 다시 붙인다.
+  // 최종 본문 = body + ## 참고 자료 + 해시태그 한 줄 + (의학 주제면) 출처 신뢰도 고지.
+  // 참고 자료를 여기서 붙이는 이유(2026-09-01): writer.md §9는 출처를 <!-- 사용한 출처 --> 주석에만
+  // 남기지만(본문 노출 금지), 발행 글에는 독자·SEO·검수를 위해 눈에 보이는 참고 자료 섹션이
+  // 필요하다. parseDraftFile이 뽑아 둔 "사용한 출처" 주석을 마크다운 링크 목록으로 되살린다.
+  // 해시태그/고지도 매번 정확히 지켜져야 해 여기서 결정적으로 붙인다.
+  const references = buildReferencesSection(parsed.checkNotes);
   const disclaimer = buildMedicalDisclaimer(isMedical, sources);
-  const content = [imageGeneration.body, parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null, disclaimer]
+  const content = [
+    imageGeneration.body,
+    references,
+    parsed.hashtags.length > 0 ? parsed.hashtags.join(" ") : null,
+    disclaimer,
+  ]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
 
@@ -429,6 +542,8 @@ export async function runWritingStage(
     lastError: null,
     hashtags: parsed.hashtags,
     draftFilePath: draftPath,
+    // writer가 [IMAGE PROMPT:]로 남긴 이미지 제작 지시. 사용자가 이미지를 만들 때 참고.
+    imagePrompts: parsed.imagePrompts,
     skillUsed: parsed.skillUsed,
     verdictFromResearch: parsed.verdictFromResearch,
     // writer가 남긴 <!-- 확인 필요 --> / <!-- 사용한 출처 --> 주석. 검수·감사용.
