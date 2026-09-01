@@ -485,9 +485,9 @@ async function main(): Promise<void> {
 
   const RESEARCH_JOB_ID = "0d35cd81-94e6-49b9-b6d2-4917b548f971";
 
-  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number };
+  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number; onWriteStart: number };
   function newResearchCalls(): ResearchCalls {
-    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0 };
+    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0, onWriteStart: 0 };
   }
 
   function makeResearchJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
@@ -509,6 +509,9 @@ async function main(): Promise<void> {
       triggerWriting: async () => {
         opts.calls.triggerWriting++;
         return opts.writeOutcome ?? { status: "success" };
+      },
+      onWriteStart: async () => {
+        opts.calls.onWriteStart++;
       },
       rejectJob: async (_jobId, _reason) => {
         opts.calls.rejectJob++;
@@ -581,7 +584,7 @@ async function main(): Promise<void> {
     assert(result.outcome.status === "rejected", `reject는 rejected여야 한다 (실제: ${result.outcome.status})`);
     assert(calls.rejectJob === 1, "reject는 rejectJob을 1회 호출해야 한다");
     assert(calls.triggerWriting === 0, "reject에서 원고 작성을 호출하면 안 된다");
-    assert(result.message.includes("중단됨"), "중단 메시지가 있어야 한다");
+    assert(result.message.includes("중단"), "중단 메시지가 있어야 한다");
     console.log("✅ reject -> rejectJob 호출, 중단 메시지");
   }
 
@@ -593,8 +596,23 @@ async function main(): Promise<void> {
     const result = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
     assert(result.outcome.status === "write_result", `write는 write_result여야 한다 (실제: ${result.outcome.status})`);
     assert(calls.triggerWriting === 1, "write는 triggerWriting을 1회 호출해야 한다");
+    assert(calls.onWriteStart === 1, "write는 집필 시작 전 onWriteStart(즉시 확인 메시지)를 1회 호출해야 한다");
     assert(result.message === "", "write 성공 시 중복 메시지를 보내면 안 된다(완료 알림은 triggerWriting 내부에서 나간다)");
-    console.log("✅ write 성공 -> triggerWriting 호출, 중복 메시지 없음");
+    console.log("✅ write 성공 -> onWriteStart(즉시 확인) + triggerWriting 호출, 중복 메시지 없음");
+  }
+
+  // 8-6a) reject/already_final은 onWriteStart를 호출하지 않는다(집필 시작이 아니므로).
+  {
+    const calls = newResearchCalls();
+    const bot = makeResearchBot({ job: makeResearchJob(), calls });
+    await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(calls.onWriteStart === 0, "reject는 onWriteStart를 호출하지 않아야 한다");
+    const bot2 = makeResearchBot({ job: makeResearchJob({ status: "writing" }), calls });
+    const dup = await bot2.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(dup.outcome.status === "already_final", "이미 writing인 job의 write 재클릭은 already_final");
+    assert(calls.onWriteStart === 0, "중복 write 클릭은 onWriteStart/triggerWriting을 다시 호출하지 않아야 한다");
+    assert(dup.message.includes("이미 원고를 작성 중"), "중복 클릭에는 '이미 작성 중' 안내가 나가야 한다");
+    console.log("✅ reject·중복 write -> onWriteStart 미호출, 중복 클릭에 '작성 중' 안내");
   }
 
   // 8-7) write가 건너뜀(skipped)을 반환하면 그 사유를 그대로 안내한다.

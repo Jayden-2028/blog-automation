@@ -159,6 +159,12 @@ export type TelegramBotOptions = {
    * 테스트에서는 실제 LLM/Telegram 호출 없이 결과만 주입한다.
    */
   triggerWriting?: (jobId: string) => Promise<TriggerWritingOutcome>;
+  /**
+   * research:write에서 triggerWriting(수 분)을 시작하기 직전에 호출한다. 기본 구현은 버튼을
+   * "작성 중" 표시로 바꾸고 "원고를 작성합니다" 확인 메시지를 즉시 보낸다 - 클릭이 먹었는지
+   * 몰라 여러 번 누르는 실수를 막기 위해서다. 테스트에서는 no-op를 주입한다.
+   */
+  onWriteStart?: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   /** research:reject 콜백에서 호출한다. rejectJobCli.ts와 같은 함수를 쓴다. */
   rejectJob?: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   /**
@@ -183,6 +189,7 @@ export class TelegramBot {
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
   private readonly triggerWriting: (jobId: string) => Promise<TriggerWritingOutcome>;
+  private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   private readonly triggerResearch: (jobId: string) => Promise<TriggerResearchOutcome>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
 
@@ -226,6 +233,17 @@ export class TelegramBot {
         return { status: "failed", error: result.error };
       });
     this.rejectJob = options.rejectJob ?? ((jobId, reason) => rejectArticleJob(jobId, reason, "telegram"));
+    this.onWriteStart =
+      options.onWriteStart ??
+      (async (job, query) => {
+        await this.markResearchButtonsDecided(query, "write").catch(() => {});
+        await this
+          .sendMessage(
+            `✍️ <b>원고를 작성합니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+              `약 5~15분 뒤에 원고가 도착합니다. 그동안 이 버튼을 다시 누르지 않아도 됩니다.`
+          )
+          .catch(() => {});
+      });
     this.triggerResearch =
       options.triggerResearch ??
       (async (jobId) => {
@@ -525,10 +543,13 @@ export class TelegramBot {
 
     if (!this.isStillAtResearchCheckpoint(job)) {
       // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
-      return {
-        outcome: { status: "already_final", job },
-        message: `⏭ 이미 처리된 job입니다 (상태: ${job.status})`,
-      };
+      // 집필은 수 분 걸려 사용자가 여러 번 누르기 쉬우므로, 두 번째 탭에도 "지금 진행 중"이라고
+      // 분명히 알려준다(무음으로 넘기면 오히려 더 누른다).
+      const alreadyMsg =
+        job.status === "writing"
+          ? `⏳ 이미 원고를 작성 중입니다. 완료되면 원고가 도착합니다.`
+          : `⏭ 이미 처리된 job입니다 (상태: ${job.status})`;
+      return { outcome: { status: "already_final", job }, message: alreadyMsg };
     }
 
     if (parsed.action === "reject") {
@@ -543,13 +564,18 @@ export class TelegramBot {
       }
       return {
         outcome: { status: "rejected", job: result.job },
-        message: `🗑 <b>중단됨</b>\n${escapeTelegramHtml(job.keyword)}`,
+        message: `🗑 <b>원고 작성이 중단되었습니다.</b>\n${escapeTelegramHtml(job.keyword)}`,
       };
     }
 
-    // write: runWritingStage(최대 수 분)를 실제로 실행한다. 완료/실패와 무관하게 예외를 밖으로
-    // 던지지 않는다(triggerWriting의 기본 구현이 이미 그렇게 되어 있다) - pollOnce가 이 update
-    // 하나 때문에 죽으면 이후 update가 전부 막힌다.
+    // write: 집필은 수 분이 걸린다. 클릭이 먹었는지 몰라 여러 번 누르는 실수를 막기 위해, 실제
+    // 집필(triggerWriting)을 시작하기 전에 onWriteStart로 (1) 버튼을 "작성 중" 표시로 바꾸고
+    // (2) 즉시 확인 메시지를 보낸다. 완료 메시지는 triggerWriting 안(notifyArticleReady)에서 별도로.
+    await this.onWriteStart(job, query);
+
+    // runWritingStage(최대 수 분)를 실제로 실행한다. 완료/실패와 무관하게 예외를 밖으로 던지지
+    // 않는다(triggerWriting의 기본 구현이 이미 그렇게 되어 있다) - pollOnce가 이 update 하나
+    // 때문에 죽으면 이후 update가 전부 막힌다.
     const writeResult = await this.triggerWriting(job.id);
 
     if (writeResult.status === "success") {
