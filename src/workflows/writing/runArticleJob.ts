@@ -42,6 +42,7 @@ import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
+import { enforceGeminiGroundingUrls } from "../research/enforceGeminiGroundingUrls.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
@@ -147,7 +148,22 @@ async function runGeminiResearcherAndSave(
     return { ok: false, error: `[gemini] ${result.error}` };
   }
 
-  await writeFile(input.outputPath, `${stripMarkdownFence(result.text)}\n`, "utf8");
+  // 실측(2026-09-03)에서 Gemini가 official/medical 항목에 실제로 grounding되지 않은 URL(최상위
+  // 도메인 + 지어낸 인용문)을 붙인 사례가 나왔다 - 프롬프트 요청만으로는 안 막혀 코드로 강제한다.
+  // baseline(NAVER) URL과 이 응답의 실제 groundingChunks URL만 official/medical로 인정하고,
+  // 그 밖의 URL로 된 official/medical 항목은 community로 자동 강등한다(verdict도 재계산).
+  const allowedUrls = new Set<string>([
+    ...input.baselineSources.map((s) => s.url).filter((url): url is string => Boolean(url)),
+    ...result.groundingSources.map((s) => s.url),
+  ]);
+  const enforced = enforceGeminiGroundingUrls(stripMarkdownFence(result.text), allowedUrls);
+  if (enforced.downgradedCount > 0) {
+    console.warn(
+      `⚠️ [research][gemini] grounding 미확인 official/medical ${enforced.downgradedCount}건을 community로 자동 강등했습니다(재계산 verdict: ${enforced.recomputedVerdict}).`
+    );
+  }
+
+  await writeFile(input.outputPath, `${enforced.text.trim()}\n`, "utf8");
   return { ok: true };
 }
 

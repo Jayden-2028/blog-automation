@@ -79,16 +79,40 @@ groundingSources 추출은 §10 표 검증에 쓰이지 않는 참고용 필드�
 grounding된 것인지" 검증이 안 되는 사례가 나왔다 - 자동 채택하기엔 이르다.
 **`RESEARCH_PROVIDER=claude` 기본값 유지.**
 
+**grounding URL 강제 검증 구현 완료(2026-09-03, 같은 세션)**: 신규 `enforceGeminiGroundingUrls.ts`.
+Gemini 응답에서 §2/§3 "- [official]"/"- [medical]" 불릿과 §10 표를 훑어, 그 항목의 URL이
+(baseline URL + API가 실제로 돌려준 `groundingChunks` URL) 목록에 없으면 태그를 community로
+강등하고 강등 표시를 붙인다. 강등이 하나라도 있으면 frontmatter의 `verdict`/`source_counts`를
+researcher.md §7 공식대로 재계산해 다시 쓴다(안 그러면 강등 전 부풀려진 개수로 계산된 `ok`가
+강등 사실과 모순된 채로 남는다). `runArticleJob.ts`의 Gemini 경로, `debug:gemini-research`,
+`debug:compare-research` 전부 이 강제검증을 거친 텍스트를 저장하도록 배선. 신규
+`test:gemini-grounding-enforce` 통과, `npm run build` 통과.
+
+**실전 검증 중 발견한 더 큰 문제(2026-09-03)**: 같은 "2026년 추석 연휴 기간" 키워드로 새로
+Gemini를 호출했더니 **`groundingMetadata.groundingChunks`가 이번에도 0건**으로 돌아왔다(전에도
+한 번 이랬던 것과 동일 - 우연이 아니라 재현되는 패턴으로 보인다). §2에 적힌 URL들은 이번엔
+`kasi.re.kr/.../newsMaterial/12061`, `law.go.kr/.../lsiSeq=262900`, `korea.kr/news/...?newsId=...`
+처럼 이전보다 훨씬 그럴듯하고 구체적인 경로를 갖고 있었지만(진짜일 수도 있다), grounding 원시
+응답이 비어 있어 강제검증이 8건 전부(official/medical 전량)를 community로 강등했고 verdict는
+`thin`이 됐다. 즉 **researcher.md 규격에 맞는 긴 구조화 문서를 한 번에 생성하라고 시키면, Gemini가
+google_search 도구를 켰는데도 API의 grounding 메타데이터가 비어 오는 경우가 실제로 흔하다**(원인
+미확정 - 모델이 도구 결과 없이 학습 지식만으로 답했거나, 구조화된 긴 출력에서 API가 grounding
+메타데이터를 못 채우는 API 쪽 특성일 수 있다). 강제검증 장치 자체는 설계대로 안전하게 동작했지만
+(허위 "확인됨" 주장이 그대로 새 나가지 않는다), 실무적으로는 **지금 프롬프트 구조로는 Gemini가
+official/medical 등급을 사실상 못 딴다**는 뜻이라 - "빠르고 저렴하지만 검수 게이트를 거의 항상
+`thin`으로 통과한다"에 가깝다. Claude를 완전히 대체하기엔 이 상태로는 부족하다.
+
+**결론(갱신)**: 강제검증으로 "거짓 확신"은 막았지만, 그 대가로 Gemini 경로의 실질 신뢰도가
+기대보다 낮다는 게 드러났다. **`RESEARCH_PROVIDER=claude` 기본값 유지**하고, 아래 개선 없이는
+`gemini`로 전환 안 함.
+
 **남은 것**:
-- ⬜ **grounding URL 강제 검증(다음 설계 후보)**: `runGeminiResearch`가 이미 API의
-  `groundingChunks`(진짜 근거 URL 목록)를 `groundingSources`로 반환하고 있다 - §2/§10에 쓰인 URL이
-  이 목록(+baseline)에 실제로 있는지 코드에서 대조해, 없는 URL로 된 official/medical 등급 항목은
-  자동으로 community로 강등하거나 job을 blocked 처리하는 안전장치를 추가하면 위 문제를 프롬프트
-  요청이 아니라 코드로 막을 수 있다. 아직 미구현.
-- ⬜ 사용자 맥(WebFetch 정상 환경)에서 같은 키워드로 재비교 - 이 클라우드 세션의 Claude 결과는
-  WebFetch 불능 핸디캡이 있어 정상 비교가 아니다.
-- ⬜ `debug:gemini-research`의 groundingSources 카운트 0건으로 찍혔던 건(직전 세션 기록) - 이번
-  비교 스크립트에는 그 카운트 출력이 없어 이번엔 재현 여부 미확인.
+- ⬜ **grounding 실제 발동 여부 원인 규명/개선**: (a) 프롬프트를 "먼저 검색 결과를 그대로 나열하고
+  그다음 템플릿에 채워라"처럼 2단계로 쪼개거나, (b) 짧은 grounding 질의 여러 번 + Node가 결과를
+  조립하는 방식으로 바꾸면 grounding이 더 안정적으로 잡히는지 실험 필요. 지금 구조(긴 규격 문서
+  1콜 생성)에서는 grounding이 비어 오는 경우가 흔했다.
+- ⬜ 사용자 맥(WebFetch 정상 환경)에서 같은 키워드로 Claude 쪽 재비교 - 이 클라우드 세션의 Claude
+  결과는 WebFetch 불능 핸디캡이 있어 정상 비교가 아니다.
 - ⬜ 이 세션(클라우드 체크아웃)의 `.env`에는 GEMINI_API_KEY만 있고 NAVER/Supabase/Telegram 비밀값이
   없다 - 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
   운영에 반영된다(이 세션은 별도 환경).

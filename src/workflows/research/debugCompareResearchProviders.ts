@@ -16,6 +16,7 @@ import { buildResearchPrompt } from "./buildResearchPrompt.js";
 import { buildGeminiResearchPrompt } from "./buildGeminiResearchPrompt.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { enforceGeminiGroundingUrls } from "./enforceGeminiGroundingUrls.js";
 import { parseResearchFile } from "./parseResearchFile.js";
 import type { ParsedResearchFile } from "./parseResearchFile.js";
 
@@ -82,11 +83,22 @@ async function main(): Promise<void> {
   const geminiResult = await runGeminiResearch({ prompt: geminiPrompt });
   const geminiDurationMs = Date.now() - geminiStart;
 
+  let geminiEnforcedText = "";
+  let geminiDowngradedCount = 0;
   if (!geminiResult.ok) {
     console.error(`❌ Gemini 실패 (${Math.round(geminiDurationMs / 1000)}초): ${geminiResult.error}`);
   } else {
-    await writeFile(geminiPath, `${stripMarkdownFence(geminiResult.text)}\n`, "utf8");
-    console.log(`✅ Gemini 완료 (${Math.round(geminiDurationMs / 1000)}초)`);
+    const allowedUrls = new Set(geminiResult.groundingSources.map((s) => s.url));
+    const enforced = enforceGeminiGroundingUrls(stripMarkdownFence(geminiResult.text), allowedUrls);
+    geminiEnforcedText = enforced.text;
+    geminiDowngradedCount = enforced.downgradedCount;
+    await writeFile(geminiPath, `${geminiEnforcedText.trim()}\n`, "utf8");
+    console.log(
+      `✅ Gemini 완료 (${Math.round(geminiDurationMs / 1000)}초)` +
+        (enforced.downgradedCount > 0
+          ? ` — grounding 미확인 official/medical ${enforced.downgradedCount}건 community로 강등`
+          : " — official/medical 전부 grounding 확인됨")
+    );
   }
 
   console.log("\n════════════ 비교 요약 ════════════");
@@ -102,7 +114,10 @@ async function main(): Promise<void> {
   }
 
   if (geminiResult.ok) {
-    printSummary("Gemini", geminiDurationMs, geminiResult.text.length, parseResearchFile(geminiResult.text));
+    printSummary("Gemini", geminiDurationMs, geminiEnforcedText.length, parseResearchFile(geminiEnforcedText));
+    if (geminiDowngradedCount > 0) {
+      console.log(`   (grounding 강제검증으로 ${geminiDowngradedCount}건 community 강등됨 - 위 수치는 강등 반영 후)`);
+    }
   }
 
   console.log(`\n파일 위치:\n  ${claudePath}\n  ${geminiPath}`);
