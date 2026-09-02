@@ -15,6 +15,7 @@ import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
 import { spawnDetachedTask } from "../jobs/lib/spawnDetachedTask.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
+import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
@@ -160,6 +161,20 @@ export type TelegramBotOptions = {
    * 띄우고 즉시 반환한다. 테스트에서는 호출 횟수만 세는 no-op를 주입한다.
    */
   triggerResearch?: (jobId: string) => void;
+
+  // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
+  /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
+  getStoredOffset?: (receiverId: string) => Promise<number | null>;
+  /** offset 갱신. 기본은 TelegramOffsetRepository. */
+  advanceStoredOffset?: (updateId: number, receiverId: string) => Promise<unknown>;
+  /** 텔레그램 getUpdates 호출. 기본은 실제 API 호출. */
+  fetchUpdates?: (offset?: number) => Promise<TelegramUpdate[]>;
+  /**
+   * 텔레그램 API 실제 호출(sendMessage/answerCallbackQuery/editMessageReplyMarkup 등)을 대체한다.
+   * 기본은 실제 fetch. 테스트에서 pollOnce를 끝까지 돌리려면(응답 메시지 발송까지 포함) 이걸
+   * 주입해 네트워크 호출을 막는다.
+   */
+  sendTelegramRequest?: <T = unknown>(method: string, body: Record<string, unknown>) => Promise<T | null>;
 };
 
 export class TelegramBot {
@@ -179,6 +194,10 @@ export class TelegramBot {
   private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   private readonly triggerResearch: (jobId: string) => void;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
+  private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
+  private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
+  private readonly fetchUpdates: (offset?: number) => Promise<TelegramUpdate[]>;
+  private readonly sendTelegramRequest: <T = unknown>(method: string, body: Record<string, unknown>) => Promise<T | null>;
 
   constructor(options: TelegramBotOptions) {
     this.botToken = options.botToken;
@@ -222,6 +241,33 @@ export class TelegramBot {
       });
     this.triggerResearch =
       options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
+    this.getStoredOffset =
+      options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
+    this.advanceStoredOffset =
+      options.advanceStoredOffset ??
+      ((updateId, receiverId) => TelegramOffsetRepository.setLastUpdateId(updateId, receiverId));
+    this.fetchUpdates = options.fetchUpdates ?? ((offset) => this.getUpdates(offset));
+    this.sendTelegramRequest =
+      options.sendTelegramRequest ??
+      (async <T = unknown>(method: string, body: Record<string, unknown>): Promise<T | null> => {
+        const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.botToken}/${method}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (!response.ok) {
+          // 오류 응답 본문에는 credential이 포함되지 않으므로 그대로 노출해도 안전하다.
+          const bodyText = await response.text().catch(() => "");
+          throw new Error(
+            `Telegram ${method} 실패: ${response.status} ${response.statusText}${bodyText ? ` - ${bodyText}` : ""}`
+          );
+        }
+
+        const json = (await response.json()) as { ok: boolean; result?: T; description?: string };
+        if (!json.ok) throw new Error(`Telegram ${method} 실패: ${json.description ?? "알 수 없는 오류"}`);
+        return json.result ?? null;
+      });
   }
 
   static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
@@ -620,8 +666,11 @@ export class TelegramBot {
    * 저장된 offset 이후의 update를 한 번 받아 처리한다. launchd가 이 함수를 주기적으로 호출한다.
    *
    * update 하나가 실패해도 나머지를 계속 처리한다. 하나의 깨진 update가 이후 모든 클릭을 막으면
-   * 안 되기 때문이다. 다만 offset은 성공/실패와 무관하게 전진시킨다 - 실패한 update를 영원히
-   * 재시도하면 같은 지점에서 계속 막힌다.
+   * 안 되기 때문이다. offset 전진 여부는 실패 원인에 따라 다르다:
+   * - 코드/데이터 문제(만료된 callback_data 등)는 재시도해도 똑같이 실패하므로 건너뛰고 전진시킨다.
+   * - DNS/네트워크 같은 인프라 장애(isTransientNetworkError)는 재시도하면 성공할 수 있으므로 이
+   *   update 이후로는 전진시키지 않는다. 그래야 텔레그램이 다음 폴링에서 그대로 다시 배달한다
+   *   (2026-09-02: 이 구분이 없어서 Supabase DNS 장애 중 GO 클릭 3건이 영구 유실됐다).
    */
   async pollOnce(): Promise<{
     processed: number;
@@ -631,8 +680,8 @@ export class TelegramBot {
     researchTriggerResults: ResearchTriggerResult[];
     errors: string[];
   }> {
-    const lastUpdateId = await TelegramOffsetRepository.getLastUpdateId(this.receiverId);
-    const updates = await this.getUpdates(lastUpdateId === null ? undefined : lastUpdateId + 1);
+    const lastUpdateId = await this.getStoredOffset(this.receiverId);
+    const updates = await this.fetchUpdates(lastUpdateId === null ? undefined : lastUpdateId + 1);
 
     const results: HandleCallbackResult[] = [];
     const reviewResults: HandleArticleReviewResult[] = [];
@@ -642,9 +691,10 @@ export class TelegramBot {
     let maxUpdateId = lastUpdateId ?? -1;
 
     for (const update of updates) {
-      maxUpdateId = Math.max(maxUpdateId, update.update_id);
-
-      if (!update.callback_query) continue;
+      if (!update.callback_query) {
+        maxUpdateId = Math.max(maxUpdateId, update.update_id);
+        continue;
+      }
 
       try {
         const result = await this.handleCallbackQuery(update.callback_query);
@@ -656,6 +706,7 @@ export class TelegramBot {
           if (reviewResult.outcome.status !== "ignored") {
             reviewResults.push(reviewResult);
             await this.respondToArticleReview(update.callback_query, reviewResult);
+            maxUpdateId = Math.max(maxUpdateId, update.update_id);
             continue;
           }
 
@@ -663,6 +714,7 @@ export class TelegramBot {
           if (researchResult.outcome.status !== "ignored") {
             researchDecisionResults.push(researchResult);
             await this.respondToResearchDecision(update.callback_query, researchResult);
+            maxUpdateId = Math.max(maxUpdateId, update.update_id);
             continue;
           }
         }
@@ -679,15 +731,25 @@ export class TelegramBot {
           this.triggerResearch(selectedJob.id);
           researchTriggerResults.push({ job: selectedJob });
         }
+
+        maxUpdateId = Math.max(maxUpdateId, update.update_id);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         console.error(`⚠️ update ${update.update_id} 처리 실패 -`, reason);
         errors.push(`update ${update.update_id}: ${reason}`);
+
+        if (isTransientNetworkError(error)) {
+          // 인프라 장애로 보인다 - 이 update와 이후 update는 offset을 전진시키지 않고 배치를
+          // 끝낸다. 텔레그램이 다음 폴링에서 이 지점부터 다시 배달한다.
+          break;
+        }
+
+        maxUpdateId = Math.max(maxUpdateId, update.update_id);
       }
     }
 
-    if (updates.length > 0 && maxUpdateId >= 0) {
-      await TelegramOffsetRepository.setLastUpdateId(maxUpdateId, this.receiverId);
+    if (maxUpdateId > (lastUpdateId ?? -1)) {
+      await this.advanceStoredOffset(maxUpdateId, this.receiverId);
     }
 
     return { processed: updates.length, results, reviewResults, researchDecisionResults, researchTriggerResults, errors };
@@ -814,22 +876,6 @@ export class TelegramBot {
   }
 
   private async post<T = unknown>(method: string, body: Record<string, unknown>): Promise<T | null> {
-    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.botToken}/${method}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      // 오류 응답 본문에는 credential이 포함되지 않으므로 그대로 노출해도 안전하다.
-      const bodyText = await response.text().catch(() => "");
-      throw new Error(
-        `Telegram ${method} 실패: ${response.status} ${response.statusText}${bodyText ? ` - ${bodyText}` : ""}`
-      );
-    }
-
-    const json = (await response.json()) as { ok: boolean; result?: T; description?: string };
-    if (!json.ok) throw new Error(`Telegram ${method} 실패: ${json.description ?? "알 수 없는 오류"}`);
-    return json.result ?? null;
+    return this.sendTelegramRequest<T>(method, body);
   }
 }
