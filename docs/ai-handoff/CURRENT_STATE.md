@@ -1,6 +1,49 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-01 (Asia/Seoul)
+기준일: 2026-09-02 (Asia/Seoul)
+
+## 2026-09-02 세션(메인 윈도우) — 자료조사 provider 분리(Claude → Gemini, 기본 off)
+
+**목적**: 자료조사 단계(researcher 에이전트)가 파이프라인에서 Claude 사용량을 가장 많이 먹는다
+(WebSearch 반복, ~10분+). 집필/OSMU 배리에이션은 블로그 스킬(entertainment/parenting/
+trend-blog-writer) 의존이 강해 Claude를 유지하지만, 자료조사는 스킬 의존이 없어 분리 가능
+하다고 판단 — Gemini(Google Search grounding)로 이 단계만 분리했다.
+
+**구현**: `RESEARCH_PROVIDER` env(`claude`|`gemini`, 기본 `claude` — 안 건드리면 기존 동작 그대로).
+- `src/config/researchProvider.ts` — provider/모델/폴백 설정
+- `src/services/llm/runGeminiResearch.ts` — Gemini REST 호출(SDK 없이 fetch, `tools:[{google_search:{}}]`).
+  Node 22 전역 fetch/AbortController 사용, 새 npm 의존성 추가 안 함.
+- `src/workflows/research/buildGeminiResearchPrompt.ts` — `researcher.md` 전문을 Node가 직접
+  읽어 프롬프트에 인라인(Gemini는 Read 도구가 없음). 파일 저장도 Node가 직접 함(Write 도구 없음).
+- `runArticleJob.ts`의 `runResearchStageInner`: `options.runResearcher`(테스트 주입)가 없을 때만
+  `runDefaultResearcher`가 provider 분기. Gemini 실패 시 `RESEARCH_FALLBACK_TO_CLAUDE`(기본 true)로
+  같은 job에 한해 Claude로 자동 폴백.
+- 출력 계약(`research/<슬러그>.md`, researcher.md §7 템플릿)은 그대로라 `parseResearchFile.ts`
+  이하 전부 무변경.
+- 신규 `npm run debug:gemini-research -- "키워드"` — DB 안 건드리고 실제 Gemini 호출 1회 스모크
+  테스트(`research/<슬러그>-gemini-smoketest.md`에 저장).
+
+**실측(2026-09-02, 이 세션 = 별도 클라우드 체크아웃, 프로덕션 .env 아님)**:
+- `gemini-2.5-flash`는 신규 사용자에게 404(퇴역, `gemini-3.6-flash` 권장 — API가 직접 안내) → 기본
+  모델을 `gemini-3.6-flash`로 변경.
+- `gemini-3.6-flash` + `google_search` grounding 호출 시 **429 RESOURCE_EXHAUSTED**(quota/billing
+  안내 링크 포함). API 키 자체는 유효(404/429 둘 다 인증 통과 후의 응답). **Google Search grounding이
+  이 키의 현재 플랜에서 막혀 있을 가능성이 높다** — Google AI Studio 콘솔에서 결제 활성화 여부 확인
+  필요(다음 세션 확인 사항).
+- `RESEARCH_PROVIDER` 기본값이 `claude`라 이 상태로도 운영에는 영향 없음. `RESEARCH_FALLBACK_TO_CLAUDE`
+  덕에 나중에 `gemini`로 켜도 quota 문제 시 자동으로 Claude로 넘어간다.
+
+**검증**: `npm run build`, `test:gemini-research-prompt`(신규), `test:research-prompt`,
+`test:parse-research` 전부 통과. `debug:gemini-research`로 실측(위 429 확인).
+
+**남은 것**:
+- ⬜ Google AI Studio 콘솔에서 결제/quota 확인 → grounding 활성화되면 `debug:gemini-research`로
+  재검증(§9 완료 조건 체크리스트 대조).
+- ⬜ 품질 검증: Claude WebSearch+WebFetch 대비 Gemini grounding의 근거 신뢰도(researcher.md §2)가
+  동등한지 실제 job 1건으로 비교 확인 필요 — 확인 전엔 `RESEARCH_PROVIDER=gemini`로 기본 전환하지 않는다.
+- ⬜ 이 세션(클라우드 체크아웃)의 `.env`에는 GEMINI_API_KEY만 있고 NAVER/Supabase/Telegram 비밀값이
+  없다 — 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
+  운영에 반영된다(이 세션은 별도 환경).
 
 ## 2026-09-01 세션(별도 창) — writing 멈춤 job 실사고 + 텔레그램 재시도 버튼
 

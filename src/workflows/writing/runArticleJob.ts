@@ -23,22 +23,25 @@
 // 파이프라인이 조용히 죽었을 때 로그를 열어보고서야 알았던 문제를 반복하지 않는다.
 
 import { existsSync, statSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
 import { PIPELINE_ROOT, draftFilePath, researchFilePath } from "../../config/pipelinePaths.js";
+import { RESEARCH_PROVIDER, RESEARCH_FALLBACK_TO_CLAUDE } from "../../config/researchProvider.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
 import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
@@ -109,6 +112,68 @@ async function defaultReadResearchFile(path: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Gemini는 지시해도 가끔 ```markdown 코드펜스로 감싼다 - 방어적으로 벗겨낸다. */
+function stripMarkdownFence(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:markdown|md)?\r?\n([\s\S]*?)\r?\n```$/);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+type DefaultResearcherInput = {
+  job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
+  baselineSources: SourceInsert[];
+  outputPath: string;
+  today: string;
+};
+
+/**
+ * Gemini는 Write 도구가 없다 - 응답 텍스트를 직접 outputPath에 쓴다. runResearcher 계약(파일이
+ * outputPath에 저장돼 있으면 ok)은 그대로 지킨다.
+ */
+async function runGeminiResearcherAndSave(
+  input: DefaultResearcherInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  let prompt: string;
+  try {
+    prompt = buildGeminiResearchPrompt({ job: input.job, baselineSources: input.baselineSources, today: input.today });
+  } catch (error) {
+    return { ok: false, error: `[gemini] researcher.md 로드 실패: ${describeError(error)}` };
+  }
+
+  const result = await runGeminiResearch({ prompt });
+  if (!result.ok) {
+    return { ok: false, error: `[gemini] ${result.error}` };
+  }
+
+  await writeFile(input.outputPath, `${stripMarkdownFence(result.text)}\n`, "utf8");
+  return { ok: true };
+}
+
+/**
+ * RESEARCH_PROVIDER에 따라 researcher를 고른다(config/researchProvider.ts). 기본은 claude라
+ * 이 함수를 안 건드리면 기존 동작과 동일하다. gemini 선택 시 실패하면 RESEARCH_FALLBACK_TO_CLAUDE
+ * (기본 true)에 따라 같은 job에 한해 claude로 1회 폴백한다 - Gemini 쿼터/네트워크 장애가 job
+ * 전체를 막지 않게 하기 위해서다.
+ */
+async function runDefaultResearcher(
+  input: DefaultResearcherInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (RESEARCH_PROVIDER === "gemini") {
+    const geminiResult = await runGeminiResearcherAndSave(input);
+    if (geminiResult.ok) return geminiResult;
+    if (!RESEARCH_FALLBACK_TO_CLAUDE) return geminiResult;
+    console.warn(`⚠️ [research] Gemini 실패, Claude로 폴백합니다: ${geminiResult.error}`);
+  }
+
+  const prompt = buildResearchPrompt({
+    job: input.job,
+    baselineSources: input.baselineSources,
+    outputPath: input.outputPath,
+    today: input.today,
+  });
+  return defaultRunResearcher(prompt);
 }
 
 /** 파일이 존재하고 maxAgeMs 안에 수정됐으면 true. 재조사 생략 판정에 쓴다. */
@@ -183,9 +248,14 @@ async function runResearchStageInner(
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
   } else {
-    const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
-    const runResearcher = options.runResearcher ?? ((p) => defaultRunResearcher(p));
-    const ran = await runResearcher(prompt, outputPath);
+    let ran: { ok: true } | { ok: false; error: string };
+    if (options.runResearcher) {
+      // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
+      ran = await options.runResearcher(prompt, outputPath);
+    } else {
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today });
+    }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
       // status는 되돌리지 않는다(researching 유지) - 재실행 시 이 job을 다시 집을 수 있어야 한다.
