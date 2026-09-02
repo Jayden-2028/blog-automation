@@ -79,6 +79,12 @@ function main(): void {
   assert(noFm.verdict === "thin" && noFm.sourceTable.length === 0, "frontmatter 없어도 안전");
   console.log("✅ verdict 누락/frontmatter 없음 -> 안전한 기본값");
 
+  // researcher.md §7 템플릿의 `verdict: ok        # ok | thin | blocked`처럼 인라인 주석을
+  // 남기는 실제 사례가 있었다(2026-09-03, Claude 실측) - 주석 때문에 ok가 thin으로 오분류됐었다.
+  const inlineComment = parseResearchFile("---\nkeyword: x\nverdict: ok        # ok | thin | blocked\n---\n## 1. 요약\n내용");
+  assert(inlineComment.verdict === "ok", `verdict 인라인 주석 무시 (실제: ${inlineComment.verdict})`);
+  console.log("✅ verdict 인라인 주석(# ...) 무시하고 값만 파싱");
+
   console.log("\n✅ parseResearchFile 테스트 완료");
 }
 
