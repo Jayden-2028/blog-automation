@@ -36,13 +36,25 @@ trend-blog-writer) 의존이 강해 Claude를 유지하지만, 자료조사는 �
 **검증**: `npm run build`, `test:gemini-research-prompt`(신규), `test:research-prompt`,
 `test:parse-research` 전부 통과. `debug:gemini-research`로 실측(위 429 확인).
 
+**후속(같은 날, 결제 활성화 후 재검증)**: 사용자가 Google AI Studio에 결제를 연결한 뒤 429가
+사라짐 — `debug:gemini-research`로 재실측 성공(테스트 키워드 "테스트 키워드 삭제예정", 31초,
+5784자). `groundingChunks` 원시 응답 구조도 별도 확인(`candidate.groundingMetadata.groundingChunks[].web.{uri,title}`
+— 코드의 추출 로직과 일치, 진짜 조선일보/연합뉴스TV 등 실제 언론사 도메인이 리다이렉트 URL로
+확인됨 = 실제 grounding이지 환각 아님). §10 출처 표에도 같은 형식의 URL이 정상적으로 채워졌고,
+verdict 판정도 §7 규칙대로 정확히 계산됨(blocked — official+medical 합계 1 < 2, news 1 <3).
+다만 `debug:gemini-research`가 출력하는 "grounding 출처 N건" 카운트는 이 특정 호출에서 0으로
+찍혔는데, 실제 응답 텍스트(§10 표)에는 grounding 형식 URL이 정상적으로 있었다 — 코드의
+groundingSources 추출은 §10 표 검증에 쓰이지 않는 참고용 필드라 기능적으로 막힌 건 아니지만
+원인 불명(사소한 버그로 남겨둠, 다음에 재현되면 조사).
+
 **남은 것**:
-- ⬜ Google AI Studio 콘솔에서 결제/quota 확인 → grounding 활성화되면 `debug:gemini-research`로
-  재검증(§9 완료 조건 체크리스트 대조).
-- ⬜ 품질 검증: Claude WebSearch+WebFetch 대비 Gemini grounding의 근거 신뢰도(researcher.md §2)가
-  동등한지 실제 job 1건으로 비교 확인 필요 — 확인 전엔 `RESEARCH_PROVIDER=gemini`로 기본 전환하지 않는다.
+- ⬜ 품질 검증: 위 실측은 일부러 만든 무의미한 테스트 키워드라 "API가 도는가"만 확인됐다.
+  Claude WebSearch+WebFetch 대비 Gemini grounding의 근거 신뢰도(researcher.md §2)가 동등한지
+  **실제 키워드로 job 1건**을 놓고 비교해야 한다 — 그 전엔 `RESEARCH_PROVIDER=gemini`로 기본
+  전환하지 않는다.
+- ⬜ `debug:gemini-research`의 groundingSources 카운트 0건 버그(위 문단) - 재현되면 원인 파악.
 - ⬜ 이 세션(클라우드 체크아웃)의 `.env`에는 GEMINI_API_KEY만 있고 NAVER/Supabase/Telegram 비밀값이
-  없다 — 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
+  없다 - 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
   운영에 반영된다(이 세션은 별도 환경).
 
 ## 2026-09-01 세션(별도 창) — writing 멈춤 job 실사고 + 텔레그램 재시도 버튼
