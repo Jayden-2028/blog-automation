@@ -47,12 +47,48 @@ verdict 판정도 §7 규칙대로 정확히 계산됨(blocked — official+medi
 groundingSources 추출은 §10 표 검증에 쓰이지 않는 참고용 필드라 기능적으로 막힌 건 아니지만
 원인 불명(사소한 버그로 남겨둠, 다음에 재현되면 조사).
 
+**실제 키워드 A/B 비교(2026-09-03, "2026년 추석 연휴 기간", `npm run debug:compare-research`)**:
+신규 `debugCompareResearchProviders.ts` — 실전과 동일한 `buildResearchPrompt`/`buildGeminiResearchPrompt`
++ `runHeadlessClaude`/`runGeminiResearch`를 그대로 재사용해 같은 키워드를 두 경로로 순서대로 실행.
+
+- **환경 주의(중요, 결과 해석에 영향)**: 이 클라우드 세션에서는 Claude의 WebFetch가 **전 도메인에서
+  예외 없이 실패**했다("proxy refused the connection" - 이 세션의 아웃바운드 프록시 제약으로 추정,
+  사용자 맥 프로덕션 환경과 다름). Claude는 이 사실을 파일 최상단에 스스로 명시하고, §2 확인됨
+  등급을 한 건도 안 쓰며 전부 보도됨/미확인으로 보수적으로 낮춰 기록했다 — researcher.md §2가
+  요구하는 정직한 한계 고지를 정확히 따른 것. 즉 이 비교는 Claude가 정상 컨디션(WebFetch 가능)일
+  때의 품질이 아니라 "핸디캡을 진 상태에서도 규칙을 지키는가"를 본 셈이라, 사용자 맥에서 재검증하면
+  Claude 쪽 결과가 더 좋아질 가능성이 높다.
+- **Claude**: 475초, 14,443자, 40개 출처(§10), verdict `ok`(파서 버그로 한때 `thin` 오표시 - 아래
+  버그 수정). URL이 전부 구체적 경로(article ID·게시글 번호 등)를 가진 실제 검색결과 형태.
+- **Gemini**: 35초, 5,240자, 12개 출처, verdict `ok`. 핵심 사실(9/25 추석, 9/24~27 연휴, 대체공휴일
+  없음)은 Claude와 일치 - 여기까지는 문제없음. **다만 "확인된 사실"(§2, official 등급) 3건 중 2건이
+  `https://www.msit.go.kr`, `https://www.law.go.kr`처럼 특정 게시물 경로 없는 최상위 도메인에
+  구체적인 원문 인용문("원문 근거")을 붙여놨다** - 이 URL로는 그 인용문을 확인할 수 없다(researcher.md
+  §2 규칙 2·4 위반 소지 - 추측/미열람 확인). 하나는 "우주항공청이 발표"라고 써놓고 URL은 과기정통부
+  (msit.go.kr)라 출처 자체도 안 맞는다. 실제 grounding API가 반환하는 URL은 전부
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/...` 형태인데(별도 확인 완료), 이 파일의
+  §2/§10에 나온 저 두 URL은 그 형태가 아니다 - grounding된 실제 URL이 아니라 모델이 "그럴듯한
+  공식 도메인"을 기억으로 채운 것으로 보인다.
+- **버그 발견 + 수정**: `parseResearchFile.ts`의 frontmatter 파서가 `verdict: ok        # 주석`처럼
+  인라인 주석이 붙으면(researcher.md §7 템플릿이 예시로 보여주는 형태) 값 전체를 "ok # 주석"으로
+  읽어 무엇과도 안 맞아 `thin`으로 조용히 오분류했다. Claude가 실제로 이 형태를 남겨 재현됨 -
+  checkpoint 알림의 "원고 작성" 버튼 노출을 좌우하는 값이라 실제 job 진행을 막을 수 있었던 문제.
+  주석을 무시하도록 수정 + 회귀 테스트 추가, `test:parse-research` 통과.
+
+**결론(현재)**: Gemini는 핵심 사실은 맞히지만 이번 실측에서 "official 등급 출처의 URL이 실제로
+grounding된 것인지" 검증이 안 되는 사례가 나왔다 - 자동 채택하기엔 이르다.
+**`RESEARCH_PROVIDER=claude` 기본값 유지.**
+
 **남은 것**:
-- ⬜ 품질 검증: 위 실측은 일부러 만든 무의미한 테스트 키워드라 "API가 도는가"만 확인됐다.
-  Claude WebSearch+WebFetch 대비 Gemini grounding의 근거 신뢰도(researcher.md §2)가 동등한지
-  **실제 키워드로 job 1건**을 놓고 비교해야 한다 — 그 전엔 `RESEARCH_PROVIDER=gemini`로 기본
-  전환하지 않는다.
-- ⬜ `debug:gemini-research`의 groundingSources 카운트 0건 버그(위 문단) - 재현되면 원인 파악.
+- ⬜ **grounding URL 강제 검증(다음 설계 후보)**: `runGeminiResearch`가 이미 API의
+  `groundingChunks`(진짜 근거 URL 목록)를 `groundingSources`로 반환하고 있다 - §2/§10에 쓰인 URL이
+  이 목록(+baseline)에 실제로 있는지 코드에서 대조해, 없는 URL로 된 official/medical 등급 항목은
+  자동으로 community로 강등하거나 job을 blocked 처리하는 안전장치를 추가하면 위 문제를 프롬프트
+  요청이 아니라 코드로 막을 수 있다. 아직 미구현.
+- ⬜ 사용자 맥(WebFetch 정상 환경)에서 같은 키워드로 재비교 - 이 클라우드 세션의 Claude 결과는
+  WebFetch 불능 핸디캡이 있어 정상 비교가 아니다.
+- ⬜ `debug:gemini-research`의 groundingSources 카운트 0건으로 찍혔던 건(직전 세션 기록) - 이번
+  비교 스크립트에는 그 카운트 출력이 없어 이번엔 재현 여부 미확인.
 - ⬜ 이 세션(클라우드 체크아웃)의 `.env`에는 GEMINI_API_KEY만 있고 NAVER/Supabase/Telegram 비밀값이
   없다 - 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
   운영에 반영된다(이 세션은 별도 환경).
