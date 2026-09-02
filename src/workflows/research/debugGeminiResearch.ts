@@ -14,6 +14,7 @@ import { dirname, resolve } from "node:path";
 import { PIPELINE_ROOT, keywordSlug } from "../../config/pipelinePaths.js";
 import { buildGeminiResearchPrompt } from "./buildGeminiResearchPrompt.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { enforceGeminiGroundingUrls } from "./enforceGeminiGroundingUrls.js";
 import { parseResearchFile } from "./parseResearchFile.js";
 
 async function main(): Promise<void> {
@@ -47,15 +48,25 @@ async function main(): Promise<void> {
   }
 
   console.log(`✅ 응답 수신 (${Math.round(result.durationMs / 1000)}초, ${result.text.length}자)`);
-  console.log(`   grounding 출처 ${result.groundingSources.length}건`);
+  console.log(`   API가 돌려준 grounding 출처(원시) ${result.groundingSources.length}건`);
+
+  const allowedUrls = new Set(result.groundingSources.map((s) => s.url));
+  const enforced = enforceGeminiGroundingUrls(result.text, allowedUrls);
+  if (enforced.downgradedCount > 0) {
+    console.log(
+      `   ⚠️ grounding 미확인 official/medical ${enforced.downgradedCount}건을 community로 강등함(재계산 verdict: ${enforced.recomputedVerdict})`
+    );
+  } else {
+    console.log("   ✅ official/medical 항목 전부 grounding 확인됨(강등 없음)");
+  }
 
   const outputPath = resolve(PIPELINE_ROOT, "research", `${keywordSlug(keyword)}-gemini-smoketest.md`);
   await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, `${result.text.trim()}\n`, "utf8");
-  console.log(`   저장: ${outputPath}`);
+  await writeFile(outputPath, `${enforced.text.trim()}\n`, "utf8");
+  console.log(`   저장(강제검증 적용본): ${outputPath}`);
 
-  const parsed = parseResearchFile(result.text);
-  console.log("\n▶ researcher.md 규격 파싱 결과");
+  const parsed = parseResearchFile(enforced.text);
+  console.log("\n▶ researcher.md 규격 파싱 결과(강제검증 적용 후)");
   console.log(`   keyword 일치: ${parsed.keyword === keyword ? "✅" : `❌ (파일: "${parsed.keyword}")`}`);
   console.log(`   verdict: ${parsed.verdict}`);
   console.log(`   source_counts: ${JSON.stringify(parsed.sourceCounts)}`);
