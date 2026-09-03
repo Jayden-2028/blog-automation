@@ -35,8 +35,20 @@
 //   - "임시저장" 성공을 알리는 정확한 신호(토스트/URL 변화 등) - 아직 고정 시간 대기로 대체.
 // 이 가설들이 틀렸다면 saveDraft()가 stage별 실패로 알려준다(어느 단계에서 막혔는지는 알 수
 // 있다) - 조용히 잘못된 결과를 성공으로 보고하지는 않는다.
+//
+// 재진입 오버레이 방어 (2026-09-03, §12에서 문서만 되고 코드에는 없던 것): 실제 job:publish
+// 실행에서 제목 클릭이 30초 타임아웃으로 실패하는 사례가 나왔다 - §12에서 관찰된
+// `se-popup-dim` dim 오버레이(재진입 시 "이어서 작성" 류 확인창이 짧게 떴다 사라지는 것으로
+// 추정)가 title 클릭 시점에 떠 있으면 page.click()이 "다른 요소에 가려짐" 판정으로 기본 30초
+// 액션너빌리티 타임아웃을 그대로 소진하고 실패한다는 가설로 dismissRecoveryOverlay()/
+// safeClick()을 추가했다 - 모든 클릭 지점에서 오버레이를 먼저 걷어내고(Escape), 그래도 막히면
+// 한 번 더 걷어낸 뒤 짧은 타임아웃으로 재시도한다. 오버레이의 정확한 트리거 조건은 여전히
+// 미확인이다(원격 세션은 실제 로그인 프로필에 접근할 수 없어 headed 재현이 불가능) - 이 가설이
+// 틀렸을 경우를 대비해 stage 실패 시 saveFailureSnapshot()이 HTML+스크린샷을
+// `.local/dom-snapshots/naver-publish/`에 남기므로, 다음 실패의 실제 화면 상태를 사후에 볼 수
+// 있다.
 
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium, type Page } from "playwright";
@@ -122,6 +134,13 @@ const DEFAULT_CATEGORY_NO = 32;
 const SAVE_WAIT_MS = 3000;
 const IMAGE_UPLOAD_WAIT_MS = 3000;
 const FILE_CHOOSER_TIMEOUT_MS = 10_000;
+// 재진입 dim 오버레이(아래 dismissRecoveryOverlay 참고)가 사라지길 기다리는 상한. §12에서
+// 관찰된 건 "몇 초"였다 - page.click()의 기본 30초 액션너빌리티 타임아웃보다 훨씬 짧게 잡아서,
+// 오버레이가 실제로 안 걷히는 다른 문제일 때 stage 전체가 30초씩 두 번(safeClick 1차+재시도)
+// 이상 걸리지 않게 한다.
+const RECOVERY_DIM_WAIT_MS = 8_000;
+const CLICK_TIMEOUT_MS = 10_000;
+const FAILURE_SNAPSHOT_DIR = ".local/dom-snapshots/naver-publish";
 
 // 셀렉터 상수 (SPRINT_4_DESIGN.md §6-2 실측 기반, 2026-08-28). data-click-area는 네이버 자체
 // 클릭 추적 속성으로, CSS 모듈 해시 클래스(예: save_btn__bzc5B)보다 배포에 안정적이라 우선한다.
@@ -131,6 +150,10 @@ const SELECTORS = {
   titleParagraph: ".se-component.se-documentTitle .se-text-paragraph",
   bodyParagraph: '.se-component.se-text[data-a11y-title="본문"] .se-text-paragraph',
   imageToolbarButton: ".se-toolbar-item-image",
+  // SPRINT_4_DESIGN.md §12 - 임시저장된 초안이 있는 상태로 글쓰기 화면에 들어가면(또는 이 파일이
+  // 실행한 이전 세션이 저장 없이 중간에 끊겨 미저장 초안이 남으면) 이 클래스의 dim 오버레이가
+  // 짧게 뜨며 클릭을 막는다. 정확한 트리거는 미확인이지만 셀렉터 자체는 §12 실측에서 확인됨.
+  recoveryDim: ".se-popup-dim",
 } as const;
 
 export class NaverBlogPublisher {
@@ -177,16 +200,22 @@ export class NaverBlogPublisher {
       await page.waitForSelector(SELECTORS.titleParagraph, { timeout: 15_000 }).catch(() => {
         // 못 찾아도 여기서 던지지 않는다 - 아래 클릭 단계에서 더 구체적인 에러가 난다.
       });
+      // §12 재진입 오버레이는 화면이 뜨자마자 나타났다 사라지는 것으로 추정된다 - 첫 클릭(제목)
+      // 전에 한 번 통과시켜 둔다. safeClick도 각 클릭 직전에 다시 확인하므로 여기서는 놓쳐도
+      // 안전망이 하나 더 있다.
+      await this.dismissRecoveryOverlay(page);
 
       try {
         await this.focusAndType(page, SELECTORS.titleParagraph, input.title);
       } catch (error) {
+        await this.saveFailureSnapshot(page, "title");
         return { ok: false, stage: "title", error: this.errorMessage(error) };
       }
 
       try {
         await this.fillBody(page, SELECTORS.bodyParagraph, input.bodyHtml);
       } catch (error) {
+        await this.saveFailureSnapshot(page, "body");
         return { ok: false, stage: "body", error: this.errorMessage(error) };
       }
 
@@ -194,6 +223,7 @@ export class NaverBlogPublisher {
         try {
           await this.uploadImages(page, input.images);
         } catch (error) {
+          await this.saveFailureSnapshot(page, "image");
           return { ok: false, stage: "image", error: this.errorMessage(error) };
         }
       }
@@ -202,6 +232,7 @@ export class NaverBlogPublisher {
         const draftUrl = await this.clickSave(page);
         return { ok: true, draftUrl };
       } catch (error) {
+        await this.saveFailureSnapshot(page, "save");
         return { ok: false, stage: "save", error: this.errorMessage(error) };
       }
     } finally {
@@ -215,12 +246,63 @@ export class NaverBlogPublisher {
   }
 
   /**
+   * SPRINT_4_DESIGN.md §12 - 재진입 dim 오버레이(SELECTORS.recoveryDim)가 떠 있으면 그 아래
+   * 요소를 향한 클릭이 "다른 요소에 가려짐" 판정을 받아 page.click()의 기본 30초 액션너빌리티
+   * 타임아웃을 그대로 다 쓰고 실패한다 - 이게 문서화된 "제목 클릭 30초 타임아웃"의 실제 경로로
+   * 추정된다. 오버레이는 아마 "이어서 작성하시겠습니까" 류 확인창이 짧게 떴다 사라지는 것인데,
+   * 이 파일은 항상 새 제목/본문을 채우므로 남아있던 내용을 이어서 쓸 이유가 없다 - Escape로
+   * 닫아 버리는 게 안전한 기본값이다(발행 확정 버튼 등 다른 요소를 클릭하지 않는다).
+   * 오버레이가 없으면 즉시 반환한다(정상 경로에서는 대기가 추가되지 않는다).
+   */
+  private async dismissRecoveryOverlay(page: Page): Promise<void> {
+    const dim = page.locator(SELECTORS.recoveryDim).first();
+    if ((await dim.count().catch(() => 0)) === 0) return;
+    await page.keyboard.press("Escape").catch(() => {});
+    await dim.waitFor({ state: "hidden", timeout: RECOVERY_DIM_WAIT_MS }).catch(() => {});
+  }
+
+  /**
+   * page.click()을 오버레이 방해로부터 방어한다. 먼저 오버레이를 통과시키고(정상 경로에서는
+   * no-op), 그래도 클릭이 막히면(오버레이가 재클릭 사이에 다시 떴거나 첫 통과가 늦었을 경우)
+   * 한 번 더 통과를 시도한 뒤 재시도한다. 타임아웃을 기본 30초보다 짧게 잡아서, 오버레이가
+   * 아닌 다른 이유로 막혔을 때도 두 번 합쳐 30초 안에 실패가 확정되게 한다.
+   */
+  private async safeClick(page: Page, selector: string): Promise<void> {
+    await this.dismissRecoveryOverlay(page);
+    try {
+      await page.click(selector, { timeout: CLICK_TIMEOUT_MS });
+    } catch (error) {
+      await this.dismissRecoveryOverlay(page);
+      await page.click(selector, { timeout: CLICK_TIMEOUT_MS });
+    }
+  }
+
+  /**
+   * stage 실패 시 HTML+스크린샷을 남긴다(inspectPublishLayer.ts와 같은 패턴). 원격 세션에서는
+   * 실제 로그인 프로필로 headed 재현이 불가능해 근본 원인(오버레이의 정확한 트리거)을 그 자리에서
+   * 못 잡으므로, 다음 실패 때 화면에 뭐가 떠 있었는지 사후에라도 볼 수 있게 최소한의 증거를
+   * 남긴다. 스냅샷 저장 자체가 실패해도 원래 stage 실패를 가리면 안 되므로 예외를 삼킨다.
+   */
+  private async saveFailureSnapshot(page: Page, stage: NaverDraftSaveStage): Promise<void> {
+    try {
+      mkdirSync(FAILURE_SNAPSHOT_DIR, { recursive: true });
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const base = `${FAILURE_SNAPSHOT_DIR}/${timestamp}_${stage}-failed`;
+      const html = await page.content().catch(() => "");
+      if (html) writeFileSync(`${base}.html`, html, "utf-8");
+      await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
+    } catch {
+      // 증거 저장 실패는 원래 stage 실패를 가리지 않는다 - 조용히 무시한다.
+    }
+  }
+
+  /**
    * 제목/본문 클릭 후 실제 키 입력을 보낸다. 파일 상단 설명대로, "보이는 영역을 클릭하면 앱이
    * 알아서 숨겨진 입력 proxy로 포커스를 옮긴다"는 가정 하에 page.keyboard.type()으로 사람이
    * 타이핑하는 것과 동일한 이벤트 경로를 쓴다 - 어떤 요소가 실제로 포커스를 받는지 몰라도 된다.
    */
   private async focusAndType(page: Page, selector: string, text: string): Promise<void> {
-    await page.click(selector);
+    await this.safeClick(page, selector);
     await page.keyboard.type(text, { delay: 10 });
   }
 
@@ -234,7 +316,7 @@ export class NaverBlogPublisher {
     const plainText = htmlToPlainWithBreaks(html);
 
     await this.pasteHtml(page, html, plainText);
-    await page.click(selector);
+    await this.safeClick(page, selector);
     await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
     await page.waitForTimeout(1200);
 
@@ -242,7 +324,7 @@ export class NaverBlogPublisher {
     if (nonWhitespaceLength(afterPaste) >= 50) return;
 
     console.warn("⚠️ [naver] 본문 붙여넣기 결과가 비어 있어 평문 타이핑으로 폴백합니다.");
-    await page.click(selector);
+    await this.safeClick(page, selector);
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
     await page.keyboard.press("Backspace");
     await page.keyboard.type(plainText, { delay: 1 });
@@ -285,6 +367,9 @@ export class NaverBlogPublisher {
   private async uploadImages(page: Page, images: ReadonlyArray<NaverPublishImageInput>): Promise<void> {
     for (const image of images) {
       const localPath = await this.downloadToTempFile(image.url);
+      // filechooser 대기와 클릭을 동시에 걸어야 하므로 safeClick을 그대로 못 쓴다 - 오버레이만
+      // 먼저 통과시켜 둔다(§12).
+      await this.dismissRecoveryOverlay(page);
       const [fileChooser] = await Promise.all([
         page.waitForEvent("filechooser", { timeout: FILE_CHOOSER_TIMEOUT_MS }),
         page.click(SELECTORS.imageToolbarButton),
@@ -312,7 +397,7 @@ export class NaverBlogPublisher {
    * ([data-click-area="tpb*i.publish"])은 이 파일 어디에서도 참조하지 않는다.
    */
   private async clickSave(page: Page): Promise<string> {
-    await page.click(SELECTORS.saveButton);
+    await this.safeClick(page, SELECTORS.saveButton);
     await page.waitForTimeout(SAVE_WAIT_MS);
     // 저장 성공을 알리는 정확한 신호(토스트 메시지, URL 변화 등)는 아직 실측 못함(§10 item 7) -
     // 우선 현재 URL을 draftUrl로 돌려준다.
