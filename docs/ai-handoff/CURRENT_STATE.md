@@ -27,6 +27,121 @@
 필요** — 특히 임시저장된 기존 초안이 있는 상태에서 재진입시켜 오버레이가 실제로 뜨는지, 뜬다면
 Escape로 닫히는지 확인. 실패하면 스냅샷 디렉터리에서 화면 상태를 먼저 확인한다.
 
+## 2026-09-02 세션(메인 윈도우) — 자료조사 provider 분리(Claude → Gemini, 기본 off)
+
+**목적**: 자료조사 단계(researcher 에이전트)가 파이프라인에서 Claude 사용량을 가장 많이 먹는다
+(WebSearch 반복, ~10분+). 집필/OSMU 배리에이션은 블로그 스킬(entertainment/parenting/
+trend-blog-writer) 의존이 강해 Claude를 유지하지만, 자료조사는 스킬 의존이 없어 분리 가능
+하다고 판단 — Gemini(Google Search grounding)로 이 단계만 분리했다.
+
+**구현**: `RESEARCH_PROVIDER` env(`claude`|`gemini`, 기본 `claude` — 안 건드리면 기존 동작 그대로).
+- `src/config/researchProvider.ts` — provider/모델/폴백 설정
+- `src/services/llm/runGeminiResearch.ts` — Gemini REST 호출(SDK 없이 fetch, `tools:[{google_search:{}}]`).
+  Node 22 전역 fetch/AbortController 사용, 새 npm 의존성 추가 안 함.
+- `src/workflows/research/buildGeminiResearchPrompt.ts` — `researcher.md` 전문을 Node가 직접
+  읽어 프롬프트에 인라인(Gemini는 Read 도구가 없음). 파일 저장도 Node가 직접 함(Write 도구 없음).
+- `runArticleJob.ts`의 `runResearchStageInner`: `options.runResearcher`(테스트 주입)가 없을 때만
+  `runDefaultResearcher`가 provider 분기. Gemini 실패 시 `RESEARCH_FALLBACK_TO_CLAUDE`(기본 true)로
+  같은 job에 한해 Claude로 자동 폴백.
+- 출력 계약(`research/<슬러그>.md`, researcher.md §7 템플릿)은 그대로라 `parseResearchFile.ts`
+  이하 전부 무변경.
+- 신규 `npm run debug:gemini-research -- "키워드"` — DB 안 건드리고 실제 Gemini 호출 1회 스모크
+  테스트(`research/<슬러그>-gemini-smoketest.md`에 저장).
+
+**실측(2026-09-02, 이 세션 = 별도 클라우드 체크아웃, 프로덕션 .env 아님)**:
+- `gemini-2.5-flash`는 신규 사용자에게 404(퇴역, `gemini-3.6-flash` 권장 — API가 직접 안내) → 기본
+  모델을 `gemini-3.6-flash`로 변경.
+- `gemini-3.6-flash` + `google_search` grounding 호출 시 **429 RESOURCE_EXHAUSTED**(quota/billing
+  안내 링크 포함). API 키 자체는 유효(404/429 둘 다 인증 통과 후의 응답). **Google Search grounding이
+  이 키의 현재 플랜에서 막혀 있을 가능성이 높다** — Google AI Studio 콘솔에서 결제 활성화 여부 확인
+  필요(다음 세션 확인 사항).
+- `RESEARCH_PROVIDER` 기본값이 `claude`라 이 상태로도 운영에는 영향 없음. `RESEARCH_FALLBACK_TO_CLAUDE`
+  덕에 나중에 `gemini`로 켜도 quota 문제 시 자동으로 Claude로 넘어간다.
+
+**검증**: `npm run build`, `test:gemini-research-prompt`(신규), `test:research-prompt`,
+`test:parse-research` 전부 통과. `debug:gemini-research`로 실측(위 429 확인).
+
+**후속(같은 날, 결제 활성화 후 재검증)**: 사용자가 Google AI Studio에 결제를 연결한 뒤 429가
+사라짐 — `debug:gemini-research`로 재실측 성공(테스트 키워드 "테스트 키워드 삭제예정", 31초,
+5784자). `groundingChunks` 원시 응답 구조도 별도 확인(`candidate.groundingMetadata.groundingChunks[].web.{uri,title}`
+— 코드의 추출 로직과 일치, 진짜 조선일보/연합뉴스TV 등 실제 언론사 도메인이 리다이렉트 URL로
+확인됨 = 실제 grounding이지 환각 아님). §10 출처 표에도 같은 형식의 URL이 정상적으로 채워졌고,
+verdict 판정도 §7 규칙대로 정확히 계산됨(blocked — official+medical 합계 1 < 2, news 1 <3).
+다만 `debug:gemini-research`가 출력하는 "grounding 출처 N건" 카운트는 이 특정 호출에서 0으로
+찍혔는데, 실제 응답 텍스트(§10 표)에는 grounding 형식 URL이 정상적으로 있었다 — 코드의
+groundingSources 추출은 §10 표 검증에 쓰이지 않는 참고용 필드라 기능적으로 막힌 건 아니지만
+원인 불명(사소한 버그로 남겨둠, 다음에 재현되면 조사).
+
+**실제 키워드 A/B 비교(2026-09-03, "2026년 추석 연휴 기간", `npm run debug:compare-research`)**:
+신규 `debugCompareResearchProviders.ts` — 실전과 동일한 `buildResearchPrompt`/`buildGeminiResearchPrompt`
++ `runHeadlessClaude`/`runGeminiResearch`를 그대로 재사용해 같은 키워드를 두 경로로 순서대로 실행.
+
+- **환경 주의(중요, 결과 해석에 영향)**: 이 클라우드 세션에서는 Claude의 WebFetch가 **전 도메인에서
+  예외 없이 실패**했다("proxy refused the connection" - 이 세션의 아웃바운드 프록시 제약으로 추정,
+  사용자 맥 프로덕션 환경과 다름). Claude는 이 사실을 파일 최상단에 스스로 명시하고, §2 확인됨
+  등급을 한 건도 안 쓰며 전부 보도됨/미확인으로 보수적으로 낮춰 기록했다 — researcher.md §2가
+  요구하는 정직한 한계 고지를 정확히 따른 것. 즉 이 비교는 Claude가 정상 컨디션(WebFetch 가능)일
+  때의 품질이 아니라 "핸디캡을 진 상태에서도 규칙을 지키는가"를 본 셈이라, 사용자 맥에서 재검증하면
+  Claude 쪽 결과가 더 좋아질 가능성이 높다.
+- **Claude**: 475초, 14,443자, 40개 출처(§10), verdict `ok`(파서 버그로 한때 `thin` 오표시 - 아래
+  버그 수정). URL이 전부 구체적 경로(article ID·게시글 번호 등)를 가진 실제 검색결과 형태.
+- **Gemini**: 35초, 5,240자, 12개 출처, verdict `ok`. 핵심 사실(9/25 추석, 9/24~27 연휴, 대체공휴일
+  없음)은 Claude와 일치 - 여기까지는 문제없음. **다만 "확인된 사실"(§2, official 등급) 3건 중 2건이
+  `https://www.msit.go.kr`, `https://www.law.go.kr`처럼 특정 게시물 경로 없는 최상위 도메인에
+  구체적인 원문 인용문("원문 근거")을 붙여놨다** - 이 URL로는 그 인용문을 확인할 수 없다(researcher.md
+  §2 규칙 2·4 위반 소지 - 추측/미열람 확인). 하나는 "우주항공청이 발표"라고 써놓고 URL은 과기정통부
+  (msit.go.kr)라 출처 자체도 안 맞는다. 실제 grounding API가 반환하는 URL은 전부
+  `vertexaisearch.cloud.google.com/grounding-api-redirect/...` 형태인데(별도 확인 완료), 이 파일의
+  §2/§10에 나온 저 두 URL은 그 형태가 아니다 - grounding된 실제 URL이 아니라 모델이 "그럴듯한
+  공식 도메인"을 기억으로 채운 것으로 보인다.
+- **버그 발견 + 수정**: `parseResearchFile.ts`의 frontmatter 파서가 `verdict: ok        # 주석`처럼
+  인라인 주석이 붙으면(researcher.md §7 템플릿이 예시로 보여주는 형태) 값 전체를 "ok # 주석"으로
+  읽어 무엇과도 안 맞아 `thin`으로 조용히 오분류했다. Claude가 실제로 이 형태를 남겨 재현됨 -
+  checkpoint 알림의 "원고 작성" 버튼 노출을 좌우하는 값이라 실제 job 진행을 막을 수 있었던 문제.
+  주석을 무시하도록 수정 + 회귀 테스트 추가, `test:parse-research` 통과.
+
+**결론(현재)**: Gemini는 핵심 사실은 맞히지만 이번 실측에서 "official 등급 출처의 URL이 실제로
+grounding된 것인지" 검증이 안 되는 사례가 나왔다 - 자동 채택하기엔 이르다.
+**`RESEARCH_PROVIDER=claude` 기본값 유지.**
+
+**grounding URL 강제 검증 구현 완료(2026-09-03, 같은 세션)**: 신규 `enforceGeminiGroundingUrls.ts`.
+Gemini 응답에서 §2/§3 "- [official]"/"- [medical]" 불릿과 §10 표를 훑어, 그 항목의 URL이
+(baseline URL + API가 실제로 돌려준 `groundingChunks` URL) 목록에 없으면 태그를 community로
+강등하고 강등 표시를 붙인다. 강등이 하나라도 있으면 frontmatter의 `verdict`/`source_counts`를
+researcher.md §7 공식대로 재계산해 다시 쓴다(안 그러면 강등 전 부풀려진 개수로 계산된 `ok`가
+강등 사실과 모순된 채로 남는다). `runArticleJob.ts`의 Gemini 경로, `debug:gemini-research`,
+`debug:compare-research` 전부 이 강제검증을 거친 텍스트를 저장하도록 배선. 신규
+`test:gemini-grounding-enforce` 통과, `npm run build` 통과.
+
+**실전 검증 중 발견한 더 큰 문제(2026-09-03)**: 같은 "2026년 추석 연휴 기간" 키워드로 새로
+Gemini를 호출했더니 **`groundingMetadata.groundingChunks`가 이번에도 0건**으로 돌아왔다(전에도
+한 번 이랬던 것과 동일 - 우연이 아니라 재현되는 패턴으로 보인다). §2에 적힌 URL들은 이번엔
+`kasi.re.kr/.../newsMaterial/12061`, `law.go.kr/.../lsiSeq=262900`, `korea.kr/news/...?newsId=...`
+처럼 이전보다 훨씬 그럴듯하고 구체적인 경로를 갖고 있었지만(진짜일 수도 있다), grounding 원시
+응답이 비어 있어 강제검증이 8건 전부(official/medical 전량)를 community로 강등했고 verdict는
+`thin`이 됐다. 즉 **researcher.md 규격에 맞는 긴 구조화 문서를 한 번에 생성하라고 시키면, Gemini가
+google_search 도구를 켰는데도 API의 grounding 메타데이터가 비어 오는 경우가 실제로 흔하다**(원인
+미확정 - 모델이 도구 결과 없이 학습 지식만으로 답했거나, 구조화된 긴 출력에서 API가 grounding
+메타데이터를 못 채우는 API 쪽 특성일 수 있다). 강제검증 장치 자체는 설계대로 안전하게 동작했지만
+(허위 "확인됨" 주장이 그대로 새 나가지 않는다), 실무적으로는 **지금 프롬프트 구조로는 Gemini가
+official/medical 등급을 사실상 못 딴다**는 뜻이라 - "빠르고 저렴하지만 검수 게이트를 거의 항상
+`thin`으로 통과한다"에 가깝다. Claude를 완전히 대체하기엔 이 상태로는 부족하다.
+
+**결론(갱신)**: 강제검증으로 "거짓 확신"은 막았지만, 그 대가로 Gemini 경로의 실질 신뢰도가
+기대보다 낮다는 게 드러났다. **`RESEARCH_PROVIDER=claude` 기본값 유지**하고, 아래 개선 없이는
+`gemini`로 전환 안 함.
+
+**남은 것**:
+- ⬜ **grounding 실제 발동 여부 원인 규명/개선**: (a) 프롬프트를 "먼저 검색 결과를 그대로 나열하고
+  그다음 템플릿에 채워라"처럼 2단계로 쪼개거나, (b) 짧은 grounding 질의 여러 번 + Node가 결과를
+  조립하는 방식으로 바꾸면 grounding이 더 안정적으로 잡히는지 실험 필요. 지금 구조(긴 규격 문서
+  1콜 생성)에서는 grounding이 비어 오는 경우가 흔했다.
+- ⬜ 사용자 맥(WebFetch 정상 환경)에서 같은 키워드로 Claude 쪽 재비교 - 이 클라우드 세션의 Claude
+  결과는 WebFetch 불능 핸디캡이 있어 정상 비교가 아니다.
+- ⬜ 이 세션(클라우드 체크아웃)의 `.env`에는 GEMINI_API_KEY만 있고 NAVER/Supabase/Telegram 비밀값이
+  없다 - 사용자 맥 프로덕션 `.env`에도 동일한 `GEMINI_API_KEY`/`RESEARCH_PROVIDER` 값을 넣어야 실제
+  운영에 반영된다(이 세션은 별도 환경).
+
 ## 2026-09-01 세션(별도 창) — writing 멈춤 job 실사고 + 텔레그램 재시도 버튼
 
 **실사고**: 사용자가 두 job에 "✏️ 원고 작성"을 눌렀는데 둘 다 "⏳ 이미 원고를 작성 중입니다"만
