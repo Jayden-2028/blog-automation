@@ -52,8 +52,16 @@ Read하라고 지시하도록 변경. **계정 스킬 원본이 바뀌면 이 3�
 - ⬜ `buildArticlePrompt.ts`의 legacy `pickStyleRules`(PERSONAL/EDITORIAL 2분류)는 `scripts/
   generateSampleArticle.ts`(수동 샘플 생성 스크립트)에서만 쓰인다 - 손대지 않았다. 그 스크립트도
   같은 톤 문제를 겪을 수 있으니, 쓸 일이 있으면 같이 손볼 것.
-- ⬜ 계정 레벨 스킬(`entertainment-blog-writer` 등)과 `prompts/writing/style/*.md` 사본의 동기화
-  절차가 없다 - 스킬을 고칠 때 리포도 같이 고치는 걸 잊기 쉽다.
+- ✅ 계정 레벨 스킬 3개도 오늘 정한 정책과 맞춰 고쳤다(trend-blog-writer의 "정직하게 헤지합니다"
+  문구 2곳 제거, "결론부터 말씀드리면" 고정 문구 완화, 뉴스 반복 인용 완화). 각 스킬 상단에
+  "고치면 리포도 갱신" 경고 배너 추가.
+- ✅ `scripts/syncWriterStyle.ts`(`npm run sync:writer-style [-- --apply]`) 신설 - 계정 스킬과
+  `prompts/writing/style/.snapshots/*.skill.md`(마지막 동기화 시점 원문, git 추적)를 비교해 drift를
+  diff로 보여준다. **자동으로 파생본을 덮어쓰지 않는다** - 파생본은 원본을 그대로 베낀 게 아니라
+  일부러 고친 버전이라, 맹목적 자동 복사는 오늘 고친 내용을 원본의 옛 표현으로 되돌릴 위험이 있다.
+  diff를 보고 `prompts/writing/style/<카테고리>.md`를 직접(또는 Claude에게 요청해) 반영한 뒤
+  `--apply`로 스냅샷만 갱신한다. 이 저장소가 아닌 다른 머신(계정 스킬이 없는 곳)에서는 "못 찾음"만
+  뜬다 - 원고 자동화가 실제로 도는 머신에서 실행해야 의미가 있다.
 
 ## 2026-09-01 세션 — 원고 파이프라인 재설계 (스펙 주도 파일 기반)
 
