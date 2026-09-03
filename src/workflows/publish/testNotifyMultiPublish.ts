@@ -61,6 +61,20 @@ async function main(): Promise<void> {
   assert(hasReportableChange(resolved), "실패가 draft로 해소되면 알려야 한다");
   console.log("✅ 실패 해소(draft) -> reportable");
 
+  // 4-1) Playwright 콜 로그(매번 다른 랜덤 엘리먼트 id 포함)만 다르고 실제 사유는 같은 반복 실패 -
+  //      원문 문자열은 매번 다르지만 정규화하면 같으므로 조용히 넘어가야 한다(네이버 SmartEditor
+  //      "SE-<uuid>" 케이스 재현).
+  const naverTimeoutReason = (id: string) =>
+    `[title] page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('.se-component.se-documentTitle .se-text-paragraph')\n    - locator resolved to <p id="SE-${id}">…</p>`;
+  const firstAttempt = result(job("g"), [{ channel: "naver", status: "failed", reason: naverTimeoutReason("769ac12f-374d-4135-8eea-71f5") }]);
+  assert(hasReportableChange(firstAttempt), "첫 타임아웃은 알려야 한다");
+  const retryWithDifferentId = result(
+    job("g", { notifiedFailures: { naver: "[title] page.click: Timeout 30000ms exceeded." } }),
+    [{ channel: "naver", status: "failed", reason: naverTimeoutReason("aa11bb22-cc33-dd44-ee55-ff6677889900") }]
+  );
+  assert(!hasReportableChange(retryWithDifferentId), "콜 로그의 랜덤 id만 다른 반복 타임아웃은 조용히 넘어가야 한다");
+  console.log("✅ 랜덤 엘리먼트 id만 다른 반복 실패(네이버 SE-<uuid>) -> 정규화 후 dedup");
+
   // 5) 전체 채널이 QUIET(already_done/skipped/deferred)면 조용히 넘어간다(기존 동작 유지).
   const allQuiet = result(job("e"), [
     { channel: "naver", status: "already_done", url: "https://n/x" },
@@ -119,6 +133,22 @@ async function main(): Promise<void> {
   );
   assert(sent.length === 1, "해소 후 재발생은 새 문제로 다시 발송해야 한다");
   console.log("✅ notifyMultiPublish: 해소 후 재발생 -> 다시 발송");
+
+  // 6-5) 콜 로그 랜덤 id만 다른 네이버 타임아웃 반복 -> 발송도 기록도 없어야 한다(정규화된 값은
+  //      이미 기록돼 있어 JSON 비교로 skip).
+  sent.length = 0;
+  merged.length = 0;
+  await notifyMultiPublish(
+    [
+      result(job("h", { notifiedFailures: { naver: "[title] page.click: Timeout 30000ms exceeded." } }), [
+        { channel: "naver", status: "failed", reason: naverTimeoutReason("aa11bb22-cc33-dd44-ee55-ff6677889900") },
+      ]),
+    ],
+    { sendMessages, mergeMetadata }
+  );
+  assert(sent.length === 0, "콜 로그 랜덤 id만 다른 반복은 발송하면 안 된다");
+  assert(merged.length === 0, "콜 로그 랜덤 id만 다른 반복은 DB도 다시 쓰면 안 된다");
+  console.log("✅ notifyMultiPublish: 랜덤 id만 다른 반복 -> 발송·기록 둘 다 생략");
 
   console.log("\n✅ 전체 테스트 통과");
 }
