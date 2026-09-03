@@ -60,6 +60,7 @@
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
     "test:publish-blogspot": "tsx src/workflows/publish/testPublishArticleToBlogspot.ts",
     "test:publish-approved": "tsx src/workflows/publish/testPublishApprovedArticles.ts",
+    "test:notify-multi-publish": "tsx src/workflows/publish/testNotifyMultiPublish.ts",
     "test:publish-tistory": "tsx src/workflows/publish/testPublishArticleToTistory.ts",
     "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "debug:live-blogspot": "tsx src/workflows/publish/debug/liveBlogspotTest.ts",

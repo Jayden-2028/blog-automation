@@ -12,7 +12,6 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
-import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { TelegramNotifier } from "../notifications/TelegramNotifier.js";
 import { publishApprovedArticles } from "../workflows/publish/publishApprovedArticles.js";
 import { notifyMultiPublish } from "../workflows/publish/notifyMultiPublish.js";
@@ -74,12 +73,13 @@ async function main(): Promise<void> {
   if (tistoryLoginNeeded) await alertTistoryLoginOncePerDay();
 
   if (hadFailure) {
+    // Telegram 알림은 notifyMultiPublish가 채널별로 이미 더 자세히 보냈다(위에서 호출).
+    // 여기서는 launchd 로그에만 남긴다 - 중복 알림 방지.
     const failedLines = results.flatMap(({ job, channels }) =>
       channels
         .filter((c) => c.status === "failed")
         .map((c) => `${job.keyword} / ${c.channel}: ${"reason" in c ? c.reason : ""}`)
     );
-    await notifyPipelineFailure(`다채널 발행 실패 ${failedLines.length}건`, []).catch(() => {});
     console.error(failedLines.join("\n"));
     process.exitCode = 1;
   }
