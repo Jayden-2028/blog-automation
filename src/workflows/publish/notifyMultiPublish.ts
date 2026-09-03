@@ -6,9 +6,10 @@
 //  - 티스토리(Phase 5): 임시저장 -> 사람이 발행
 // 그래서 결정 버튼은 없고, 각 채널 URL을 여는 링크 버튼만 붙인다.
 
+import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
-import type { JobPublishResult } from "./publishApprovedArticles.js";
+import type { ChannelName, JobPublishResult } from "./publishApprovedArticles.js";
 
 const CHANNEL_LABEL: Record<string, string> = {
   naver: "네이버",
@@ -63,13 +64,61 @@ export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutg
   };
 }
 
-export async function notifyMultiPublish(results: JobPublishResult[]): Promise<void> {
-  const QUIET: ReadonlyArray<string> = ["already_done", "skipped", "deferred"];
-  const messages = results
-    // 이번 실행에서 실제로 뭔가 일어난 job만 알린다. 전부 already_done/skipped/deferred면 조용히
-    // 넘어간다 - deferred(상한초과, 정리 필요)는 10분마다 반복되므로 매번 알리면 소음이 된다.
-    .filter((r) => r.channels.some((c) => !QUIET.includes(c.status)))
-    .map(buildMultiPublishMessage);
-  if (messages.length === 0) return;
-  await TelegramNotifier.fromEnv().sendMessages(messages);
+const QUIET: ReadonlyArray<string> = ["already_done", "skipped", "deferred"];
+
+type NotifiedFailures = Partial<Record<ChannelName, string>>;
+
+function getNotifiedFailures(job: JobPublishResult["job"]): NotifiedFailures {
+  const raw = job.metadata?.notifiedFailures;
+  return raw && typeof raw === "object" ? (raw as NotifiedFailures) : {};
+}
+
+/**
+ * 이번 실행이 알림을 보낼 가치가 있는지 판정한다. QUIET 상태는 원래도 무시하고, "failed"는
+ * job.metadata.notifiedFailures에 기록된 직전 알림 사유와 같으면 이미 알린 것으로 보고 무시한다
+ * (사유가 다르면 새 문제, 채널이 그새 성공/draft로 바뀌었다가 다시 실패해도 새 문제 - 아래
+ * recordNotifiedFailures가 실패 아닌 상태에서 기록을 지우므로 자동으로 처리된다).
+ */
+export function hasReportableChange(result: JobPublishResult): boolean {
+  const notified = getNotifiedFailures(result.job);
+  return result.channels.some((c) => {
+    if (QUIET.includes(c.status)) return false;
+    if (c.status !== "failed") return true;
+    return notified[c.channel] !== c.reason;
+  });
+}
+
+type MergeMetadataFn = (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
+
+/** 이번 실행의 채널별 상태로 notifiedFailures를 다시 만든다 - failed가 아닌 채널은 빠지므로 자동으로 "해소" 처리된다. */
+async function recordNotifiedFailures(result: JobPublishResult, mergeMetadata: MergeMetadataFn): Promise<void> {
+  const previous = getNotifiedFailures(result.job);
+  const next: NotifiedFailures = {};
+  for (const c of result.channels) {
+    if (c.status === "failed") next[c.channel] = c.reason;
+  }
+  if (JSON.stringify(previous) === JSON.stringify(next)) return;
+  await mergeMetadata(result.job.id, { notifiedFailures: next }).catch(() => {});
+}
+
+export type NotifyMultiPublishOptions = {
+  sendMessages?: (messages: TelegramOutgoingMessage[]) => Promise<void>;
+  mergeMetadata?: MergeMetadataFn;
+};
+
+export async function notifyMultiPublish(
+  results: JobPublishResult[],
+  options: NotifyMultiPublishOptions = {}
+): Promise<void> {
+  const sendMessages = options.sendMessages ?? ((messages) => TelegramNotifier.fromEnv().sendMessages(messages));
+  const mergeMetadata = options.mergeMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
+
+  // 이번 실행에서 실제로 알릴 가치가 있는 job만 남긴다. 전부 already_done/skipped/deferred거나
+  // failed가 직전과 똑같은 사유면 조용히 넘어간다(중복 알림 방지).
+  const reportable = results.filter(hasReportableChange);
+  if (reportable.length === 0) return;
+
+  const messages = reportable.map(buildMultiPublishMessage);
+  await sendMessages(messages);
+  await Promise.all(reportable.map((r) => recordNotifiedFailures(r, mergeMetadata)));
 }
