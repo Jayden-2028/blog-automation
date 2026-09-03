@@ -12,8 +12,9 @@
 // 6. 이미 진행 중인 job은 버튼으로 되돌려지지 않는다
 
 import { jobFromFreshSelection, TelegramBot } from "./TelegramBot.js";
+import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import type { ArticleJobRow, ArticleRow, KeywordRankingRow } from "../types/database.js";
-import type { TelegramCallbackQuery } from "./TelegramBot.js";
+import type { TelegramCallbackQuery, TelegramUpdate } from "./TelegramBot.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -680,6 +681,94 @@ async function main(): Promise<void> {
       `research: 데이터는 원고 검수 핸들러에서 무시돼야 한다 (실제: ${JSON.stringify(reviewResult.outcome)})`
     );
     console.log("✅ research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않음");
+  }
+
+  // ---------- 9) isTransientNetworkError: 인프라 장애 판정 ----------
+  {
+    const supabaseNetworkError = Object.assign(new Error("TypeError: fetch failed"), {
+      details:
+        "TypeError: fetch failed\n\nCaused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+    });
+    assert(isTransientNetworkError(supabaseNetworkError), "Supabase 스타일 DNS 실패는 인프라 장애로 판정해야 한다");
+    assert(isTransientNetworkError(new Error("connect ECONNREFUSED 127.0.0.1:5432")), "ECONNREFUSED는 인프라 장애다");
+    assert(!isTransientNetworkError(new Error("null value violates not-null constraint")), "일반 DB 제약 위반은 인프라 장애가 아니다");
+    assert(!isTransientNetworkError(new Error("job not found")), "일반 로직 에러는 인프라 장애가 아니다");
+    console.log("✅ isTransientNetworkError -> 네트워크/DNS만 인프라 장애로 판정");
+  }
+
+  // ---------- 10) pollOnce: offset 전진 안전성(인프라 장애 시 유실 방지) ----------
+  // 2026-09-02 실측 버그: Supabase DNS 장애 중 GO 클릭 3건이 "실패해도 offset은 전진시킨다"는
+  // 설계 때문에 영구 유실됐다. 인프라 장애는 offset을 전진시키지 않아 다음 폴링에서 텔레그램이
+  // 그대로 다시 배달하게 해야 하고, 코드/데이터 문제는 재시도해도 똑같이 실패하니 건너뛰어야 한다.
+  {
+    function makeUpdate(updateId: number, rank: number): TelegramUpdate {
+      return { update_id: updateId, callback_query: makeQuery(`go:${RUN_ID}:${rank}`) };
+    }
+
+    function makePollOnceBot(opts: {
+      updates: TelegramUpdate[];
+      storedOffset: number | null;
+      failRank: number;
+      failError: unknown;
+    }): { bot: TelegramBot; advancedTo: number[] } {
+      const advancedTo: number[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        fetchUpdates: async () => opts.updates,
+        getStoredOffset: async () => opts.storedOffset,
+        advanceStoredOffset: async (updateId) => {
+          advancedTo.push(updateId);
+          return null;
+        },
+        loadRanking: async (_runId, rank) => ({ ...makeRanking(), rank }),
+        createJob: async (ranking, status) => {
+          if (ranking.rank === opts.failRank) throw opts.failError;
+          return { job: makeJob({ status }), created: true };
+        },
+        saveTitles: async () => {},
+        generateTitles: async () => [],
+        triggerResearch: () => {},
+        sendTelegramRequest: async () => null,
+      });
+      return { bot, advancedTo };
+    }
+
+    // 10-1) 인프라 장애(DNS 등)로 실패한 update는 offset을 전진시키지 않는다 - 재시도 대상으로 남는다.
+    {
+      const updates = [makeUpdate(101, 1), makeUpdate(102, 2), makeUpdate(103, 3)];
+      const networkError = Object.assign(new Error("TypeError: fetch failed"), {
+        details: "Caused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+      });
+      const { bot, advancedTo } = makePollOnceBot({ updates, storedOffset: 100, failRank: 2, failError: networkError });
+      const result = await bot.pollOnce();
+      assert(result.errors.length === 1, `실패 1건이 기록돼야 한다 (실제: ${result.errors.length})`);
+      assert(result.results.length === 1, `102 이후는 처리를 멈춰야 한다 (실제 처리: ${result.results.length}건)`);
+      assert(
+        advancedTo.length === 1 && advancedTo[0] === 101,
+        `offset은 마지막 성공(101)까지만 전진해야 한다 (실제: ${JSON.stringify(advancedTo)})`
+      );
+      console.log("✅ 인프라 장애 update -> offset 미전진(재시도 대상으로 남음), 이후 update 중단");
+    }
+
+    // 10-2) 코드/데이터 문제로 실패한 update는 건너뛰고 offset을 전진시킨다 - 영원히 막히면 안 된다.
+    {
+      const updates = [makeUpdate(201, 1), makeUpdate(202, 2), makeUpdate(203, 3)];
+      const { bot, advancedTo } = makePollOnceBot({
+        updates,
+        storedOffset: 200,
+        failRank: 2,
+        failError: new Error("제약 조건 위반"),
+      });
+      const result = await bot.pollOnce();
+      assert(result.errors.length === 1, `실패 1건이 기록돼야 한다 (실제: ${result.errors.length})`);
+      assert(result.results.length === 2, `202를 건너뛰고 203까지 처리해야 한다 (실제: ${result.results.length}건)`);
+      assert(
+        advancedTo.length === 1 && advancedTo[0] === 203,
+        `offset은 마지막(203)까지 전진해야 한다 (실제: ${JSON.stringify(advancedTo)})`
+      );
+      console.log("✅ 코드/데이터 문제 update -> 건너뛰고 offset 전진, 이후 update 계속 처리");
+    }
   }
 
   console.log("\n✅ TelegramBot callback 핸들러 테스트 완료");
