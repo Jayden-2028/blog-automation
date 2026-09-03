@@ -26,6 +26,9 @@ import { CompositeSimilarityClusterer } from "./keyword-ranking/clustering/Compo
 import type { KeywordCluster, KeywordClusterer } from "./keyword-ranking/clustering/KeywordClusterer.js";
 import { computeBatchPercentiles } from "./keyword-ranking/computeBatchPercentiles.js";
 import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.js";
+import { BLOG_COMPETITION_CONFIG } from "../config/keywordCompetition.js";
+import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
+import { probeBlogCompetition } from "./keyword-ranking/probeBlogCompetition.js";
 import { saveRankingHistory as saveRankingHistoryStage } from "./keyword-ranking/saveRankingHistory.js";
 import { scoreKeyword } from "./keyword-ranking/scoreKeyword.js";
 import { selectDiverseTopN } from "./keyword-ranking/selectDiverseTopN.js";
@@ -48,6 +51,7 @@ import type {
   CollectNaverCandidatesResult,
 } from "./keyword-discovery/collectNaverCandidates.js";
 import type { FilterCandidatesByRelevanceResult } from "./keyword-discovery/seedRelevance.js";
+import type { ProbeBlogCompetitionResult } from "./keyword-ranking/probeBlogCompetition.js";
 import type { KeywordCandidate } from "../types/keywordDiscovery.js";
 import type { RankedKeyword } from "../types/keywordScoring.js";
 import type {
@@ -203,6 +207,7 @@ export type DailyKeywordStageName =
   | "relevance"
   | "cluster"
   | "rank"
+  | "competition"
   | "save"
   | "notify";
 
@@ -254,6 +259,11 @@ export type DailyKeywordWorkflowResult = {
   relevance: FilterCandidatesByRelevanceResult | null;
   clusters: KeywordCluster<KeywordCandidate>[] | null;
   ranked: RankKeywordsResult | null;
+  /**
+   * 최종 Top N의 블로그 경쟁도(문서 총 개수) 관측 결과. disabled면 null.
+   * Phase A에서는 점수에 반영하지 않고 metadata 기록/로그로만 남긴다(config/keywordCompetition.ts).
+   */
+  competition: ProbeBlogCompetitionResult | null;
   saved: SaveRankingHistoryResult | null;
   notification: SendKeywordNotificationResult | null;
 };
@@ -298,6 +308,7 @@ export async function runDailyKeywordWorkflow(
     relevance: null,
     clusters: null,
     ranked: null,
+    competition: null,
     saved: null,
     notification: null,
   };
@@ -398,7 +409,7 @@ export async function runDailyKeywordWorkflow(
       })
     );
     if (!queryPool) {
-      skipRemaining(stageLog, ["collect", "relevance", "cluster", "rank", "save", "notify"]);
+      skipRemaining(stageLog, ["collect", "relevance", "cluster", "rank", "competition", "save", "notify"]);
       return result;
     }
     result.queryPool = queryPool;
@@ -426,7 +437,7 @@ export async function runDailyKeywordWorkflow(
 
   const collected = await runStage(stageLog, "collect", () => collectCandidates(queries!, collectOptions));
   if (!collected) {
-    skipRemaining(stageLog, ["relevance", "cluster", "rank", "save", "notify"]);
+    skipRemaining(stageLog, ["relevance", "cluster", "rank", "competition", "save", "notify"]);
     return result;
   }
   result.collected = collected;
@@ -435,7 +446,7 @@ export async function runDailyKeywordWorkflow(
     filterRelevantCandidates(collected.candidates)
   );
   if (!relevance) {
-    skipRemaining(stageLog, ["cluster", "rank", "save", "notify"]);
+    skipRemaining(stageLog, ["cluster", "rank", "competition", "save", "notify"]);
     return result;
   }
   result.relevance = relevance;
@@ -444,7 +455,7 @@ export async function runDailyKeywordWorkflow(
     clusterKeywords(relevance.candidates, options.clusterer)
   );
   if (!clusters) {
-    skipRemaining(stageLog, ["rank", "save", "notify"]);
+    skipRemaining(stageLog, ["rank", "competition", "save", "notify"]);
     return result;
   }
   result.clusters = clusters;
@@ -459,10 +470,38 @@ export async function runDailyKeywordWorkflow(
   };
   const ranked = await runStage(stageLog, "rank", () => rankKeywords(clusters, queries!, rankOptions));
   if (!ranked) {
-    skipRemaining(stageLog, ["save", "notify"]);
+    skipRemaining(stageLog, ["competition", "save", "notify"]);
     return result;
   }
   result.ranked = ranked;
+
+  // ---------- competition (관측 전용) ----------
+  // 최종 Top N의 "블로그 문서 총 개수"를 측정한다. Phase A에서는 점수에 반영하지 않는다 -
+  // 임계값(몇 건부터 포화인가)을 정할 근거가 아직 없어 실제 분포를 먼저 모으는 단계다.
+  // 실패해도 파이프라인을 멈추지 않는다(보조 관측 신호). config/keywordCompetition.ts 참고.
+  const competitionStartedAt = Date.now();
+  if (BLOG_COMPETITION_CONFIG.enabled && ranked.rankings.length > 0) {
+    const competition = await probeBlogCompetition(ranked.rankings.map((item) => item.keyword));
+    result.competition = competition;
+
+    for (const item of ranked.rankings) {
+      const blogTotal = competition.totalByKeyword.get(item.keyword) ?? null;
+      const saturation = computeSaturation(blogTotal);
+      console.log(
+        `ℹ️ [경쟁도] #${item.rank} ${item.keyword} — 블로그 ${blogTotal ?? "?"}건 ` +
+          `(${describeSaturation(saturation)}${saturation === null ? "" : `, ${saturation.toFixed(2)}`})`
+      );
+    }
+
+    stageLog.push({
+      stage: "competition",
+      status: competition.status === "failed" ? "failed" : "success",
+      durationMs: Date.now() - competitionStartedAt,
+      error: competition.failedCount > 0 ? `${competition.failedCount}건 조회 실패` : undefined,
+    });
+  } else {
+    stageLog.push({ stage: "competition", status: "skipped", durationMs: 0 });
+  }
 
   const apiErrors: Partial<Record<string, string>> = { ...collected.sourceErrors };
   if (ranked.trendError) apiErrors.naver_trend = ranked.trendError;
@@ -478,6 +517,18 @@ export async function runDailyKeywordWorkflow(
           totalAfter: relevance.totalAfter,
           droppedCount: relevance.droppedCount,
         },
+        // Phase A 관측 데이터. 며칠치가 쌓이면 이 분포로 포화도 임계값을 확정한다
+        // (config/keywordCompetition.ts의 low/highTotalThreshold는 그때까지 잠정치).
+        ...(result.competition
+          ? {
+              blogCompetition: {
+                status: result.competition.status,
+                probedCount: result.competition.probedCount,
+                failedCount: result.competition.failedCount,
+                totals: Object.fromEntries(result.competition.totalByKeyword),
+              },
+            }
+          : {}),
         ...options.metadata,
       },
       candidatesCount: collected.candidates.length,
