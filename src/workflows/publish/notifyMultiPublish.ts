@@ -74,9 +74,23 @@ function getNotifiedFailures(job: JobPublishResult["job"]): NotifiedFailures {
 }
 
 /**
+ * 실패 사유를 dedup 비교용으로 정규화한다. Playwright 에러 메시지는 "Call log:" 아래에 매 시도마다
+ * 새로 생성되는 엘리먼트 id(예: 네이버 SmartEditor의 `SE-<uuid>`)를 포함해서, 원문 그대로 비교하면
+ * 같은 실패가 매번 "새 문제"로 오인돼 dedup이 무력화된다. 콜 로그는 잘라내고, 남은 텍스트에서도
+ * uuid류 패턴은 지운다. 알림에 실제로 보여주는 텍스트(c.reason)는 원문 그대로 쓴다 - 이건 비교
+ * 목적 전용이다.
+ */
+function normalizeFailureReason(reason: string): string {
+  return reason
+    .split("\nCall log:")[0]
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4,}/gi, "<id>")
+    .trim();
+}
+
+/**
  * 이번 실행이 알림을 보낼 가치가 있는지 판정한다. QUIET 상태는 원래도 무시하고, "failed"는
- * job.metadata.notifiedFailures에 기록된 직전 알림 사유와 같으면 이미 알린 것으로 보고 무시한다
- * (사유가 다르면 새 문제, 채널이 그새 성공/draft로 바뀌었다가 다시 실패해도 새 문제 - 아래
+ * job.metadata.notifiedFailures에 기록된 직전 알림 사유(정규화 후)와 같으면 이미 알린 것으로 보고
+ * 무시한다(사유가 다르면 새 문제, 채널이 그새 성공/draft로 바뀌었다가 다시 실패해도 새 문제 - 아래
  * recordNotifiedFailures가 실패 아닌 상태에서 기록을 지우므로 자동으로 처리된다).
  */
 export function hasReportableChange(result: JobPublishResult): boolean {
@@ -84,7 +98,7 @@ export function hasReportableChange(result: JobPublishResult): boolean {
   return result.channels.some((c) => {
     if (QUIET.includes(c.status)) return false;
     if (c.status !== "failed") return true;
-    return notified[c.channel] !== c.reason;
+    return notified[c.channel] !== normalizeFailureReason(c.reason);
   });
 }
 
@@ -95,7 +109,7 @@ async function recordNotifiedFailures(result: JobPublishResult, mergeMetadata: M
   const previous = getNotifiedFailures(result.job);
   const next: NotifiedFailures = {};
   for (const c of result.channels) {
-    if (c.status === "failed") next[c.channel] = c.reason;
+    if (c.status === "failed") next[c.channel] = normalizeFailureReason(c.reason);
   }
   if (JSON.stringify(previous) === JSON.stringify(next)) return;
   await mergeMetadata(result.job.id, { notifiedFailures: next }).catch(() => {});
