@@ -69,6 +69,67 @@ jobId를 찾아 `job:write`로 재실행해 복구함(2026-09-01, `research/*` �
 - ⬜ writing 멈춤이 재발하면 `research:retry` 버튼으로 텔레그램에서 바로 복구 가능 - 터미널 접근
   불필요해짐(단, 여전히 임계값 25분은 기다려야 버튼이 뜬다).
 
+## 2026-09-03 세션 — 원고 퀄리티 컨트롤: 책임 회피 문장·톤 불일치 수정
+
+별도 세션(`claude/manuscript-quality-control-oasnpf`)에서 사용자가 발행 전 검수 중 지적한 4가지
+문제를 원인까지 추적해 고쳤다. `prompts/writing/writer.md`, 신규 `prompts/writing/style/*.md`,
+`src/workflows/writing/buildWritingPrompt.ts`(+테스트) 변경.
+
+**문제 1·2·3 — 헤지·책임 회피·과잉 불확실성 표기·"결론부터 말씀드리면" 남발**: writer.md 자체가
+원인이었다. §4 "등급별 서술 강도" 표가 `news`(뉴스 출처) 등급을 매번 "~라고 보도됐다" 식으로
+쓰라고 못박아 두고 있었다 — 그런데 트렌드·연예 카테고리는 대부분 사실이 news 등급이라 문장마다
+헤지가 반복됐다. §6 충돌1은 "결론부터 말씀드리면"을 오프닝 직후 **고정 문구로 매번 삽입**하라고
+명시하고 있었다. 리서치의 `확인되지 않은 통설`/`확인 실패`를 다룰 때 disclaimer를 붙이라는 규칙은
+있었지만 애초에 "굳이 다루지 않는다"는 원칙이 없어, 애매한 내용을 disclaimer와 함께 원고에 그대로
+옮기는 패턴이 나왔다. 세 가지 모두 writer.md를 수정해 해결했다:
+- §4: `## 3. 보도로만 확인된 내용`(뉴스 2곳 이상 교차확인)은 이제 단정 가능. "보도에 따르면"류
+  반복 금지, 처음 1회만 자연스러운 표시 허용.
+- §4-1(신규): `확인되지 않은 통설`/`확인 실패`/`등급 판정 보류`는 검색 의도상 꼭 필요한 경우가
+  아니면 원고에 넣지 않는다. 미확정 값은 참고값 + 기준 시점을 짧게 괄호로 붙이고, "이건 확인 안
+  됐다"는 사실 자체를 별도 문장으로 늘어놓지 않는다.
+- §6 충돌1: "결론부터 말씀드리면"은 선택지 중 하나로 격하(정책·안내형 글에서만 자연스럽게).
+  구조(오프닝 → 직답)는 유지하되 고정 문구 요구는 제거.
+- §7 구조도, §11 체크리스트에 위 내용 반영.
+
+**문제 4 — 톤이 "우아 아빠" 개인 블로그가 아니라 기사 톤**: 근본 원인은 설계와 실행의 괴리였다.
+계정 레벨 스킬 `entertainment-blog-writer`/`parenting-blog-writer`/`trend-blog-writer`가 실제 발행
+최종본을 분석해 만든 정교한 문체 가이드를 갖고 있었는데, `buildWritingPrompt.ts`는 "헤드리스에서
+Skill 라우팅이 로드 안 된다"는 이유로 이 세 스킬을 완전히 우회하고 legacy
+`pickStyleRules`(PERSONAL/EDITORIAL 2분류, 얕은 요약)로만 대체하고 있었다 — 그래서 세 스킬의
+디테일(제목 공식, 흐름 7단계, 문체 관찰 근거)이 파이프라인에 전혀 반영되지 않았다. 사용자가 준
+실제 발행 최종본 5편(네이버 블로그, mobile 페이지로 확보)을 확인해 계정 스킬 내용이 정확함을
+검증한 뒤, 세 스킬을 리포 안 파일로 복제했다: `prompts/writing/style/{parenting,entertainment,
+trend}.md`(web_search 지시는 제거, 리서치 파일 참조로 교체, 위 헤지 수정사항 반영). `Skill`
+호출과 달리 `Read`는 헤드리스에서 항상 로드되므로(runArticleJob.ts의 allowedTools에 Read 포함,
+실측 확인됨) 이 경로가 확실하다. `buildWritingPrompt.ts`가 category(entertainment/ott →
+entertainment.md, parenting → parenting.md, living/community/미분류 → trend.md)에 맞는 파일을
+Read하라고 지시하도록 변경. **계정 스킬 원본이 바뀌면 이 3개 사본도 같이 갱신해야 한다** — 동기화
+안 하면 다시 벌어진다.
+
+**검증**: `npm run build` 통과(이 세션 컨테이너에 `node_modules` 없어서 `npm ci` 먼저 실행).
+`testBuildWritingPrompt`(카테고리별 문체 파일 분기 3케이스 추가) / `testBuildArticlePrompt` /
+`testArticleReview` / `testParseDraftFile` 전부 green. **라이브 E2E 미실행** — 다음 원고 생성 때
+실제 톤 개선을 실측 확인해야 한다.
+
+**남은 것**:
+- ⬜ 다음 실제 원고 생성으로 톤 개선 실측 검증(이번 수정은 정적 검증만 마침).
+- ⬜ `generateArticleVariant.ts`(OSMU 배리에이션)는 writer.md §4를 Read하라고만 지시하고 스타일
+  파일은 안 가리킨다 — 기준 원고 톤을 베이스로 재구성하므로 우선순위는 낮지만, 배리에이션에서도
+  같은 문제가 재현되면 `category ? "- 카테고리: ..."` 줄에 스타일 파일 참조를 추가해야 한다.
+- ⬜ `buildArticlePrompt.ts`의 legacy `pickStyleRules`(PERSONAL/EDITORIAL 2분류)는 `scripts/
+  generateSampleArticle.ts`(수동 샘플 생성 스크립트)에서만 쓰인다 - 손대지 않았다. 그 스크립트도
+  같은 톤 문제를 겪을 수 있으니, 쓸 일이 있으면 같이 손볼 것.
+- ✅ 계정 레벨 스킬 3개도 오늘 정한 정책과 맞춰 고쳤다(trend-blog-writer의 "정직하게 헤지합니다"
+  문구 2곳 제거, "결론부터 말씀드리면" 고정 문구 완화, 뉴스 반복 인용 완화). 각 스킬 상단에
+  "고치면 리포도 갱신" 경고 배너 추가.
+- ✅ `scripts/syncWriterStyle.ts`(`npm run sync:writer-style [-- --apply]`) 신설 - 계정 스킬과
+  `prompts/writing/style/.snapshots/*.skill.md`(마지막 동기화 시점 원문, git 추적)를 비교해 drift를
+  diff로 보여준다. **자동으로 파생본을 덮어쓰지 않는다** - 파생본은 원본을 그대로 베낀 게 아니라
+  일부러 고친 버전이라, 맹목적 자동 복사는 오늘 고친 내용을 원본의 옛 표현으로 되돌릴 위험이 있다.
+  diff를 보고 `prompts/writing/style/<카테고리>.md`를 직접(또는 Claude에게 요청해) 반영한 뒤
+  `--apply`로 스냅샷만 갱신한다. 이 저장소가 아닌 다른 머신(계정 스킬이 없는 곳)에서는 "못 찾음"만
+  뜬다 - 원고 자동화가 실제로 도는 머신에서 실행해야 의미가 있다.
+
 ## 2026-09-01 세션 — 원고 파이프라인 재설계 (스펙 주도 파일 기반)
 
 전체 계획: `~/.claude/plans/serialized-spinning-feigenbaum.md`. 커밋 `0ba2368`(P1) →
