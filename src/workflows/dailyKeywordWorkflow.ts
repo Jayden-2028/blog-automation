@@ -29,6 +29,7 @@ import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.
 import { BLOG_COMPETITION_CONFIG, TOPIC_MERGE_CONFIG } from "../config/keywordCompetition.js";
 import { buildCompetitionQuery } from "./keyword-ranking/buildCompetitionQuery.js";
 import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
+import { extractTopicQueries } from "./keyword-ranking/extractTopicQueries.js";
 import { mergeSameTopicClusters } from "./keyword-ranking/mergeSameTopicClusters.js";
 import { probeBlogCompetition } from "./keyword-ranking/probeBlogCompetition.js";
 import { saveRankingHistory as saveRankingHistoryStage } from "./keyword-ranking/saveRankingHistory.js";
@@ -514,16 +515,30 @@ export async function runDailyKeywordWorkflow(
   // 최종 Top N의 "블로그 문서 총 개수"를 측정한다. Phase A에서는 점수에 반영하지 않는다 -
   // 임계값(몇 건부터 포화인가)을 정할 근거가 아직 없어 실제 분포를 먼저 모으는 단계다.
   // 실패해도 파이프라인을 멈추지 않는다(보조 관측 신호). config/keywordCompetition.ts 참고.
-  let competitionTargets: { rank: number; keyword: string; query: string; total: number | null }[] = [];
+  let competitionTargets: {
+    rank: number;
+    keyword: string;
+    query: string;
+    querySource: string;
+    total: number | null;
+  }[] = [];
   const competitionStartedAt = Date.now();
   if (BLOG_COMPETITION_CONFIG.enabled && ranked.rankings.length > 0) {
     // canonical keyword를 그대로 조회하면 문장 전체를 검색하게 되어 "주제 포화도"가 아니라
-    // "이 어투를 쓴 블로그 수"를 재게 된다(buildCompetitionQuery.ts 상단 실측 근거).
-    // 핵심 명사 2개로 줄여 조회한다.
-    const targets = ranked.rankings.map((item) => ({
+    // "이 어투를 쓴 블로그 수"를 재게 된다. 규칙 기반 축약도 한국어 head-final 구조 때문에
+    // 실패했다(extractTopicQueries.ts 상단 실측 근거). LLM으로 주제구를 뽑는다 - 호출 1회.
+    const extraction = await extractTopicQueries(
+      ranked.rankings.map((item) => ({ keyword: item.keyword, headline: item.headline }))
+    );
+    if (extraction.error) {
+      console.log(`ℹ️ [주제어 추출] ${extraction.status} - ${extraction.error}`);
+    }
+
+    const targets = ranked.rankings.map((item, index) => ({
       rank: item.rank,
       keyword: item.keyword,
-      query: buildCompetitionQuery(item.keyword),
+      query: extraction.queries[index]?.query ?? buildCompetitionQuery(item.keyword),
+      querySource: extraction.queries[index]?.source ?? "fallback",
     }));
 
     const competition = await probeBlogCompetition(targets.map((target) => target.query));
@@ -537,7 +552,7 @@ export async function runDailyKeywordWorkflow(
     for (const target of competitionTargets) {
       const saturation = computeSaturation(target.total);
       console.log(
-        `ℹ️ [경쟁도] #${target.rank} [${target.query}] — 블로그 ${target.total ?? "?"}건 ` +
+        `ℹ️ [경쟁도] #${target.rank} [${target.query}]${target.querySource === "fallback" ? "(폴백)" : ""} — 블로그 ${target.total ?? "?"}건 ` +
           `(${describeSaturation(saturation)}${saturation === null ? "" : `, ${saturation.toFixed(2)}`}) ` +
           `← ${target.keyword}`
       );
