@@ -1,11 +1,15 @@
 // 블로그 경쟁도 측정(Phase A)의 순수 로직 테스트.
 //
-// 검증 대상 둘:
+// 검증 대상 넷:
 // 1) computeSaturation / computeOpportunityRatio — log10 정규화와 수요 게이트가 의도대로 동작하는지.
 //    특히 "수요 낮음 + 공급 없음"(아무도 안 찾는 키워드)이 만점을 받지 않아야 한다는 것이
 //    이 지표를 도입한 이유의 핵심이라 불변식으로 고정한다.
 // 2) probeBlogCompetition — 개별 실패가 격리되는지, 중복/공백 키워드를 걸러내는지, 상한을 지키는지.
 //    fetchTotal을 주입해 외부 API 호출 없이 검증한다.
+// 3) buildCompetitionQuery — 규칙 기반 축약. **지금은 LLM 추출 실패 시의 폴백 경로다**
+//    (실측에서 한국어 head-final 구조 때문에 주 경로로는 쓸 수 없다고 판명됐다 -
+//    extractTopicQueries.ts 상단 참고). 폴백이라도 동작은 고정해둔다.
+// 4) parseTopicQueryOutput — LLM 출력 파싱. 형식 변형 허용과 번호 누락 시 밀림 방지가 핵심이다.
 //
 // 외부 호출/DB 접근 없이 순수 함수만 검증한다. 실행: npm run test:blog-competition
 
@@ -15,6 +19,7 @@ import {
   computeSaturation,
   describeSaturation,
 } from "./computeCompetitionScore.js";
+import { parseTopicQueryOutput } from "./extractTopicQueries.js";
 import { probeBlogCompetition } from "./probeBlogCompetition.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -179,6 +184,50 @@ async function main(): Promise<void> {
     `분류어는 경쟁도 질의에 남아야 한다 (실제 "${ottQuery}")`
   );
   console.log(`   "넷플릭스 들쥐 출연진 총정리" -> "${ottQuery}"`);
+
+  // ---------- 5. parseTopicQueryOutput ----------
+  // LLM 출력 파싱. 번호를 붙이게 한 이유가 여기 있다: 줄 순서만으로 맞추면 모델이 한 줄을
+  // 빠뜨렸을 때 뒤가 전부 밀려 엉뚱한 키워드에 엉뚱한 주제가 붙는다.
+  console.log("\n[5] parseTopicQueryOutput (LLM 출력 파싱)");
+
+  const clean = parseTopicQueryOutput(
+    "1|부산 오피스텔 추락사\n2|여의도 불꽃축제\n3|민생지원금 추석 지급",
+    3
+  );
+  assert(clean.size === 3, `정상 출력 3줄을 모두 파싱해야 한다 (실제 ${clean.size})`);
+  assert(clean.get(1) === "부산 오피스텔 추락사", "1번 주제어 파싱");
+
+  // 모델이 형식을 조금씩 어기는 경우들.
+  const messy = parseTopicQueryOutput(
+    [
+      "다음은 결과입니다:", // 머리말
+      "1. | 부산 오피스텔 추락사", // 점 + 공백
+      '2 | "여의도 불꽃축제"', // 따옴표
+      "3|", // 빈 주제
+      "5|범위 밖", // expectedCount 초과
+      "abc|형식 위반",
+    ].join("\n"),
+    4
+  );
+  assert(messy.get(1) === "부산 오피스텔 추락사", "번호 뒤 점/공백 변형을 받아야 한다");
+  assert(messy.get(2) === "여의도 불꽃축제", "따옴표를 벗겨야 한다");
+  assert(!messy.has(3), "빈 주제어는 버려야 한다(호출자가 폴백)");
+  assert(!messy.has(5), "expectedCount 범위 밖 번호는 버려야 한다");
+  assert(messy.size === 2, `유효한 2건만 남아야 한다 (실제 ${messy.size})`);
+
+  // 문장을 그대로 돌려준 경우는 주제어가 아니므로 버린다.
+  const sentence = parseTopicQueryOutput(
+    "1|이 기사는 부산 오피스텔에서 발생한 추락사 사건을 다루고 있습니다",
+    1
+  );
+  assert(sentence.size === 0, "어절 수가 과한 출력(문장)은 버려야 한다");
+
+  // 누락된 번호가 있어도 나머지가 밀리지 않아야 한다 - 이게 번호를 쓰는 이유다.
+  const withGap = parseTopicQueryOutput("1|첫번째 주제\n3|세번째 주제", 3);
+  assert(withGap.get(1) === "첫번째 주제", "1번은 그대로");
+  assert(!withGap.has(2), "빠진 2번은 없어야 한다(폴백 대상)");
+  assert(withGap.get(3) === "세번째 주제", "3번이 2번 자리로 밀리면 안 된다");
+  console.log("   형식 변형 허용 / 무효 항목 폐기 / 번호 누락 시 밀림 없음");
 
   console.log("\n✅ 전체 통과");
 }
