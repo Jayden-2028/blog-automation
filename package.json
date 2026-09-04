@@ -82,6 +82,8 @@
     "job:close": "tsx scripts/closeJob.ts",
     "report:jobs": "tsx src/workflows/reports/runJobsReportCli.ts",
     "purge:jobs": "tsx scripts/purgeJobData.ts",
+    "status:all": "tsx scripts/statusDashboard.ts",
+    "test:status-report": "tsx src/workflows/reports/testBuildStatusReportHtml.ts",
     "test:jobs-report": "tsx src/workflows/reports/testBuildJobsReportHtml.ts",
     "debug:check-preflight": "tsx scripts/checkPreflight.ts",
     "review:dump-articles": "tsx scripts/dumpArticlesForReview.ts",
