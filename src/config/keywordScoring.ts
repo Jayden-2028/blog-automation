@@ -464,6 +464,11 @@ export const DIVERSITY_CONFIG = {
   // "community"는 2026-08-29 추가(커뮤니티/다음/구글 소스 확장). backfill은 pool에 해당 category
   // 후보가 실제로 있을 때만 동작하므로(selectDiverseTopN 3번 규칙), 커뮤니티 수집이 붙기 전까지는
   // 이 항목이 있어도 동작이 달라지지 않는다.
+  //
+  // "incident"(사건·사고, 2026-09-04 추가)는 **의도적으로 넣지 않았다.** backfill은 "대표가 없으면
+  // 점수가 낮아도 한 자리를 만들어준다"는 규칙인데, 사망·범죄 기사에 그걸 적용하면 매일 사건사고
+  // 하나를 억지로 Top 10에 올리게 된다. 그런 글을 쓸지는 사용자가 Go/Pass로 결정할 일이지
+  // 다양성 정책이 밀어 넣을 일이 아니다. 점수가 높으면 backfill 없이도 정상적으로 올라온다.
   targetCategories: ["ott", "parenting", "living", "entertainment", "community"] as string[],
   // true면 targetCategories 중 Top N에 대표가 없는 category를 candidate pool에서 backfill 시도한다.
   enableCategoryBackfill: true,

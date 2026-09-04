@@ -13,6 +13,7 @@
     "test:naver": "tsx src/workflows/keyword-discovery/testNaverKeywordDiscovery.ts",
     "test:ranking": "tsx src/workflows/keyword-ranking/testKeywordRanking.ts",
     "test:blog-competition": "tsx src/workflows/keyword-ranking/testBlogCompetition.ts",
+    "test:merge-same-topic": "tsx src/workflows/keyword-ranking/testMergeSameTopicClusters.ts",
     "test:score-keyword": "tsx src/workflows/keyword-ranking/testScoreKeyword.ts",
     "test:topic-grouping": "tsx src/workflows/keyword-ranking/testTopicGrouping.ts",
     "test:seed-query": "tsx src/repositories/testSeedQueryRepository.ts",

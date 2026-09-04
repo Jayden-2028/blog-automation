@@ -69,3 +69,22 @@ export const BLOG_COMPETITION_CONFIG = {
    */
   neutralScoreRatio: 0.5,
 } as const;
+
+// 같은 주제 cluster 2차 병합(mergeSameTopicClusters.ts) 설정.
+//
+// 왜 별도 게이트인가: clustering 결과를 바꾸는 것은 CLAUDE.md "승인 없이는 금지" 항목이다.
+// 그래서 기본값은 **preview만**이다 - 무엇이 합쳐질지 로그로만 남기고 실제 cluster는 그대로 둔다.
+// 실측 로그를 사용자가 확인하고 승인한 뒤에만 applyToClusters를 켠다.
+export const TOPIC_MERGE_CONFIG = {
+  /**
+   * 병합 대상을 계산해 로그로 남길지. 계산 자체는 순수 함수이고 외부 호출이 없어 비용이 사실상
+   * 없다(400개 cluster 기준 밀리초 단위). 끄려면 TOPIC_MERGE_PREVIEW_ENABLED=false.
+   */
+  previewEnabled: parseBooleanEnv(process.env.TOPIC_MERGE_PREVIEW_ENABLED, true),
+
+  /**
+   * 계산된 병합을 실제 cluster에 적용할지. **기본 false를 유지한다.**
+   * true로 바꾸는 것은 clustering 로직 변경이므로 사용자 승인 없이 하지 않는다.
+   */
+  applyToClusters: parseBooleanEnv(process.env.TOPIC_MERGE_APPLY, false),
+} as const;

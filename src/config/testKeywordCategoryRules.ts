@@ -94,6 +94,35 @@ function main(): void {
   );
   console.log("✅ 규칙 우선순위 유지 (entertainment > ott > parenting > living)");
 
+  // incident 회귀(2026-09-04 run #34 실측): 부산 오피스텔 추락사 기사가 제목에 "드라마"가
+  // 들어 있다는 이유로 ott가 됐고, 같은 사건의 다른 기사는 "청원" 때문에 community가 됐다.
+  // 사건·사고는 어떤 어휘가 섞여 있어도 사건·사고여야 하므로 incident가 맨 앞이다.
+  assert(
+    classifyKeywordCategory('"가해자 누나는 KBS 드라마 출연 중" 부산 오피스텔 추락사 사건 전말') ===
+      "incident",
+    "사건·사고가 ott 어휘(드라마)보다 우선해야 한다"
+  );
+  assert(
+    classifyKeywordCategory('"내 딸은 죽었는데..." 부산 오피스텔 추락사 유족, KBS에 청원 올려') ===
+      "incident",
+    "사건·사고가 community 어휘(청원)보다 우선해야 한다"
+  );
+  assert(
+    classifyKeywordCategory("연예인 음주운전 입건") === "incident",
+    "사건·사고가 entertainment 어휘(연예인)보다 우선해야 한다"
+  );
+
+  // 반대 방향: 사건 어휘가 없는 평범한 키워드까지 incident로 빨려들면 안 된다.
+  assert(
+    classifyKeywordCategory("양준모 재혼 상대 양지원, 임신 소식") === "entertainment",
+    "사건 어휘가 없는 연예 뉴스는 그대로 entertainment여야 한다"
+  );
+  assert(
+    classifyKeywordCategory("아동수당 신청방법") === "parenting",
+    "사건 어휘가 없는 육아 정보는 그대로 parenting이어야 한다"
+  );
+  console.log("✅ incident가 최우선 (사건·사고 > 나머지 전부), 과매칭 없음");
+
   console.log("\n✅ 키워드 category 분류 테스트 완료");
 }
 
