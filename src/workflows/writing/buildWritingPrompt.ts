@@ -48,6 +48,12 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- writer.md §9 frontmatter(keyword·title·char_count·hashtags·verdict_from_research 등)를 그대로 채운다.",
     "- writer.md §2 스킬 라우팅 대신 moai-marketer:content-blog 스킬로 초안을 쓰고, §10대로",
     "  moai-writer:korean-humanize로 마무리한다. §2의 문체 표는 참고만 한다.",
+    // "§2 문체 표는 참고만"이 §2-1(사건·사고)까지 삼키면 안 된다. §2-1은 문체 취향이 아니라
+    // 무죄추정·신원보호·자극적 묘사 금지 규칙이라 반드시 구속력이 있어야 한다.
+    job.category === "incident"
+      ? "- **예외: 이 job은 category=incident(사건·사고)다. writer.md §2-1은 '참고'가 아니라 반드시" +
+        " 지켜야 하는 규칙이며, §5 후킹 제목 기법과 충돌하면 §2-1이 이긴다.**"
+      : null,
     "- 소제목은 `## ` 마크다운 헤더로 쓴다(writer.md의 '# 기호 금지'는 네이버 붙여넣기용이며,",
     "  이 파이프라인의 변환 단계가 처리한다). 본문 맨 위 제목은 `# ` 한 줄로 둔다.",
     "- 본문에 `[IMAGE: 설명]` 마커를 섹션 전환마다 최소 5개 넣는다(writer.md §8). 실제 이미지는",
