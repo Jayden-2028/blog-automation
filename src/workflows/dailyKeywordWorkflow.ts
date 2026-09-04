@@ -26,9 +26,10 @@ import { CompositeSimilarityClusterer } from "./keyword-ranking/clustering/Compo
 import type { KeywordCluster, KeywordClusterer } from "./keyword-ranking/clustering/KeywordClusterer.js";
 import { computeBatchPercentiles } from "./keyword-ranking/computeBatchPercentiles.js";
 import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.js";
-import { BLOG_COMPETITION_CONFIG } from "../config/keywordCompetition.js";
+import { BLOG_COMPETITION_CONFIG, TOPIC_MERGE_CONFIG } from "../config/keywordCompetition.js";
 import { buildCompetitionQuery } from "./keyword-ranking/buildCompetitionQuery.js";
 import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
+import { mergeSameTopicClusters } from "./keyword-ranking/mergeSameTopicClusters.js";
 import { probeBlogCompetition } from "./keyword-ranking/probeBlogCompetition.js";
 import { saveRankingHistory as saveRankingHistoryStage } from "./keyword-ranking/saveRankingHistory.js";
 import { scoreKeyword } from "./keyword-ranking/scoreKeyword.js";
@@ -52,6 +53,7 @@ import type {
   CollectNaverCandidatesResult,
 } from "./keyword-discovery/collectNaverCandidates.js";
 import type { FilterCandidatesByRelevanceResult } from "./keyword-discovery/seedRelevance.js";
+import type { MergeSameTopicClustersResult } from "./keyword-ranking/mergeSameTopicClusters.js";
 import type { ProbeBlogCompetitionResult } from "./keyword-ranking/probeBlogCompetition.js";
 import type { KeywordCandidate } from "../types/keywordDiscovery.js";
 import type { RankedKeyword } from "../types/keywordScoring.js";
@@ -259,6 +261,11 @@ export type DailyKeywordWorkflowResult = {
   collected: CollectNaverCandidatesResult | null;
   relevance: FilterCandidatesByRelevanceResult | null;
   clusters: KeywordCluster<KeywordCandidate>[] | null;
+  /**
+   * 같은 주제 cluster 2차 병합 결과. preview가 꺼져 있으면 null.
+   * 기본 설정에서는 계산만 하고 clusters에는 반영하지 않는다(TOPIC_MERGE_CONFIG.applyToClusters).
+   */
+  topicMerge: MergeSameTopicClustersResult<KeywordCandidate> | null;
   ranked: RankKeywordsResult | null;
   /**
    * 최종 Top N의 블로그 경쟁도(문서 총 개수) 관측 결과. disabled면 null.
@@ -308,6 +315,7 @@ export async function runDailyKeywordWorkflow(
     collected: null,
     relevance: null,
     clusters: null,
+    topicMerge: null,
     ranked: null,
     competition: null,
     saved: null,
@@ -461,6 +469,32 @@ export async function runDailyKeywordWorkflow(
   }
   result.clusters = clusters;
 
+  // 같은 이슈가 여러 cluster로 쪼개진 것을 합친다. 기본은 **preview만** - 무엇이 합쳐질지
+  // 로그로 남기고 실제 cluster는 그대로 둔다(clustering 변경은 승인 필요 항목).
+  // mergeSameTopicClusters.ts 상단에 실측 근거가 있다.
+  let effectiveClusters = clusters;
+  if (TOPIC_MERGE_CONFIG.previewEnabled && clusters.length > 1) {
+    const topicMerge = mergeSameTopicClusters(clusters, { categoryTerms: stableSeedTerms });
+    result.topicMerge = topicMerge;
+
+    if (topicMerge.mergedGroups.length > 0) {
+      const mode = TOPIC_MERGE_CONFIG.applyToClusters ? "적용" : "preview";
+      console.log(
+        `ℹ️ [주제병합/${mode}] ${clusters.length}개 cluster 중 ${topicMerge.mergedGroups.length}개 그룹이 ` +
+          `같은 주제로 판정됨 (${clusters.length} -> ${topicMerge.clusters.length}개)`
+      );
+      for (const group of topicMerge.mergedGroups) {
+        console.log(`   • ${group.representativeKeyword} (항목 ${group.mergedItemCount}건)`);
+        for (const member of group.memberKeywords) console.log(`     - ${member}`);
+      }
+    }
+
+    if (TOPIC_MERGE_CONFIG.applyToClusters) {
+      effectiveClusters = topicMerge.clusters;
+      result.clusters = topicMerge.clusters;
+    }
+  }
+
   const rankOptions: RankKeywordsOptions = {
     ...options.rankOptions,
     priorityByQuery: {
@@ -469,7 +503,7 @@ export async function runDailyKeywordWorkflow(
     },
     categoryTerms: options.rankOptions?.categoryTerms ?? stableSeedTerms,
   };
-  const ranked = await runStage(stageLog, "rank", () => rankKeywords(clusters, queries!, rankOptions));
+  const ranked = await runStage(stageLog, "rank", () => rankKeywords(effectiveClusters, queries!, rankOptions));
   if (!ranked) {
     skipRemaining(stageLog, ["competition", "save", "notify"]);
     return result;
