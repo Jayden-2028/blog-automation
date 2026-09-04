@@ -40,8 +40,11 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
   researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
 - 원고 내 이미지: API 자동생성은 **보류**다(`ARTICLE_IMAGE_GENERATION` 기본 false). 생성 코드·
-  provider는 유지하되, 당분간 사용자가 `[IMAGE: 설명]` 마커 위치에 직접 이미지를 제작·삽입한 뒤
-  발행한다. 시스템 안정화 후 재개. 불안정기 유료 호출 회피가 목적.
+  provider는 유지하되, 당분간 writer가 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍을 남기고
+  사용자가 그 프롬프트를 그대로 복사해 AI 생성 도구나 이미지 검색창에 붙여넣어 이미지를 구해
+  삽입한 뒤 발행한다(`prompts/writing/writer.md` §8). `IMAGE PROMPT`는 획득 방식에 따라 AI 생성
+  프롬프트(영어) 또는 웹 검색 검색어(한국어)이며, 두 경우 모두 지시문이 아니라 그대로 붙여넣을
+  수 있는 완성된 문자열이어야 한다. 시스템 안정화 후 자동생성 재개. 불안정기 유료 호출 회피가 목적.
 - Blogspot: **임시저장(draft)까지만** 진행한다. 원고를 draft로 두면 사용자가 이미지 삽입 후 직접
   발행한다. `BLOGGER_PUBLISH_AS_DRAFT=false`로 바꾸지 않는다. (네이버·티스토리도 임시저장까지만)
 
