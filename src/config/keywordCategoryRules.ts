@@ -25,7 +25,13 @@
 // 이 category가 별도로 존재하는 이유는 저장소에 이미 `trend-blog-writer` 스킬이 있기 때문이다 -
 // "화제가 된 인터넷 트렌드, 사회 이슈, 논쟁적 사안"은 이미 별개의 글 유형으로 쓰고 있다.
 
-export type KeywordCategory = "entertainment" | "ott" | "parenting" | "living" | "community";
+export type KeywordCategory =
+  | "incident"
+  | "entertainment"
+  | "ott"
+  | "parenting"
+  | "living"
+  | "community";
 
 export type KeywordCategoryRule = {
   category: KeywordCategory;
@@ -35,6 +41,30 @@ export type KeywordCategoryRule = {
 
 // 순서가 곧 우선순위다. 위에서부터 첫 매칭이 이긴다.
 export const KEYWORD_CATEGORY_RULES: readonly KeywordCategoryRule[] = [
+  {
+    // **반드시 맨 앞이다.** 사건·사고는 다른 어떤 어휘가 섞여 있어도 사건·사고다.
+    //
+    // 왜 추가했나(2026-09-04 실측, run #34): 부산 오피스텔 추락사 기사가
+    // "가해자 누나는 KBS 드라마 출연 중"이라는 제목 때문에 "드라마"가 ott 규칙에 걸려
+    // category=ott가 됐다. 같은 사건의 다른 기사는 "청원"이 걸려 community가 됐다.
+    // 사망 사건이 OTT 콘텐츠로 분류되면 프롬프트에 잘못된 맥락이 들어가고, diversity backfill의
+    // 카테고리 슬롯도 왜곡된다.
+    //
+    // 기존 5개 카테고리에 사회·사건이 아예 없었던 것이 근본 원인이다. 사건사고 기사는
+    // 우연히 걸리는 단어에 따라 아무 카테고리로나 배정됐다.
+    //
+    // 어휘 선정 기준: 그 단어가 등장하면 글의 성격이 사건·사고로 확정되는 것들만 넣는다.
+    // "사고"는 넣지 않았다 - "사고방식", "생각의 사고"처럼 부분 문자열 오탐이 크다.
+    // "논란"도 뺐다 - 연예 가십에 너무 흔해서 entertainment를 통째로 삼킨다.
+    category: "incident",
+    terms: [
+      "추락사", "사망", "숨진", "숨져", "피살", "살해", "살인", "시신", "유족",
+      "실종", "납치", "감금", "학대", "폭행", "성폭행", "성추행", "몰카",
+      "음주운전", "뺑소니", "참사", "붕괴", "화재", "폭발", "침수 사망",
+      "구속", "기소", "송치", "체포", "압수수색", "구속영장", "징역", "선고",
+      "고소", "고발", "피의자", "가해자", "피해자",
+    ],
+  },
   {
     // 인물 신변 이벤트. "임신/결혼"이 들어가도 육아 정보가 아니라 연예 뉴스인 경우를 잡는다.
     category: "entertainment",

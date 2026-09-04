@@ -49,6 +49,23 @@ export async function listArticlesByJobId(
   return data ?? [];
 }
 
+/**
+ * 여러 job의 원고를 한 번에 가져온다. job 목록 리포트(report:jobs)처럼 job N건의 제목이
+ * 필요할 때 listArticlesByJobId를 N번 부르지 않기 위한 배치 조회다.
+ */
+export async function listArticlesByJobIds(jobIds: string[]): Promise<ArticleRow[]> {
+  if (jobIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("articles")
+    .select("*")
+    .in("job_id", jobIds)
+    .order("created_at", { ascending: true });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function updateArticle(
   id: number,
   patch: ArticleUpdate
