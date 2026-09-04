@@ -24,12 +24,16 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 
 ## 작업 시작 순서
 
-1. `docs/ai-handoff/CURRENT_STATE.md`를 읽는다.
-2. `git status --short --branch`와 최근 커밋을 확인해 문서 이후 변경을 재구성한다.
-3. 현재 마일스톤과 이번 작업의 완료 조건을 사용자에게 짧게 알린다.
-4. 설계·승인 판단은 직접 수행하고, 반복 작업만 `delegate-codex` 스킬로 위임한다.
-5. 변경 후 Claude가 diff를 검토하고 필요한 안전 테스트를 실행한다.
-6. 완료·잔여 위험·다음 승인 지점을 사용자에게 보고한다.
+1. `npm run status:all`로 미병합 브랜치와 미배포 상태를 먼저 확인한다. 세션이 여러 개라
+   다른 창의 작업이 이미 main에 들어와 있을 수 있다(`docs/ai-handoff/WORKFLOW.md`).
+2. `docs/ai-handoff/CURRENT_STATE.md`를 읽는다.
+3. `git status --short --branch`와 최근 커밋을 확인해 문서 이후 변경을 재구성한다.
+4. 현재 마일스톤과 이번 작업의 완료 조건을 사용자에게 짧게 알린다.
+5. 설계·승인 판단은 직접 수행하고, 반복 작업만 `delegate-codex` 스킬로 위임한다.
+6. 변경 후 Claude가 diff를 검토하고 필요한 안전 테스트를 실행한다.
+7. 작업이 끝나면 그날 안에 `main`에 병합한다. 병합하지 않은 변경은 다른 세션에도, 운영(prod)에도
+   반영되지 않는다. 브랜치가 오래 살수록 main과 벌어져 병합 비용만 커진다.
+8. 완료·잔여 위험·다음 승인 지점을 사용자에게 보고한다. 배포가 필요하면 그 사실을 함께 알린다.
 
 ## 원고 파이프라인 운영 규칙
 
@@ -59,6 +63,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 ## 현재 핵심 문서
 
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
+- 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`
 - 집필 규격: `prompts/writing/writer.md`
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md`
