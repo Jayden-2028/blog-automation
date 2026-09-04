@@ -27,7 +27,6 @@ import type { KeywordCluster, KeywordClusterer } from "./keyword-ranking/cluster
 import { computeBatchPercentiles } from "./keyword-ranking/computeBatchPercentiles.js";
 import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.js";
 import { BLOG_COMPETITION_CONFIG, TOPIC_MERGE_CONFIG } from "../config/keywordCompetition.js";
-import { buildCompetitionQuery } from "./keyword-ranking/buildCompetitionQuery.js";
 import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
 import { extractTopicQueries } from "./keyword-ranking/extractTopicQueries.js";
 import { mergeSameTopicClusters } from "./keyword-ranking/mergeSameTopicClusters.js";
@@ -55,7 +54,6 @@ import type {
 } from "./keyword-discovery/collectNaverCandidates.js";
 import type { FilterCandidatesByRelevanceResult } from "./keyword-discovery/seedRelevance.js";
 import type { MergeSameTopicClustersResult } from "./keyword-ranking/mergeSameTopicClusters.js";
-import type { ProbeBlogCompetitionResult } from "./keyword-ranking/probeBlogCompetition.js";
 import type { KeywordCandidate } from "../types/keywordDiscovery.js";
 import type { RankedKeyword } from "../types/keywordScoring.js";
 import type {
@@ -108,6 +106,34 @@ export type RankKeywordsOptions = {
    * selectDiverseTopN -> topicGrouping의 extraCategoryTerms로 전달된다.
    */
   categoryTerms?: readonly string[];
+  /**
+   * 경쟁도 측정기. 생략하면 측정 자체를 하지 않는다(순수 채점만 - 기존 테스트가 이 경로를 쓴다).
+   * 주입식으로 둔 이유: 실제 구현은 헤드리스 LLM + NAVER API를 타므로, 테스트에서 fake로 바꿔
+   * 외부 호출 없이 재정렬 로직만 검증할 수 있어야 한다.
+   */
+  competition?: {
+    /** 상위 몇 건을 잴지. 400개 전부는 못 재고, 하위권은 어차피 Top N에 못 든다. */
+    probeTopN: number;
+    run: (
+      items: { keyword: string; headline: string }[]
+    ) => Promise<Map<string, { query: string; total: number | null; source: string }>>;
+  };
+};
+
+/** 경쟁도 측정 결과 1건. applied=false여도 scoreAfter를 채워 "반영하면 어떻게 되는지"를 보여준다. */
+export type RankCompetitionEntry = {
+  keyword: string;
+  query: string | null;
+  querySource: string | null;
+  blogTotal: number | null;
+  scoreBefore: number;
+  scoreAfter: number;
+};
+
+export type RankCompetitionInfo = {
+  entries: RankCompetitionEntry[];
+  /** 이번 run에서 실제로 점수에 반영했는지(BLOG_COMPETITION_CONFIG.applyToScore). */
+  applied: boolean;
 };
 
 export type RankKeywordsResult = {
@@ -119,6 +145,8 @@ export type RankKeywordsResult = {
   mergedClusterCount: number;
   /** trend momentum 조회 단계에서 발생한 오류(있으면). saveRankingHistory의 error_count 집계에 쓰인다. */
   trendError?: string;
+  /** 경쟁도 측정 결과. options.competition을 넘기지 않았으면 null. */
+  competition: RankCompetitionInfo | null;
 };
 
 export async function rankKeywords(
@@ -168,7 +196,60 @@ export async function rankKeywords(
         )
       : null;
 
-  const scoredSortedDesc = scored.slice().sort((a, b) => b.totalScore - a.totalScore);
+  let scoredSortedDesc = scored.slice().sort((a, b) => b.totalScore - a.totalScore);
+
+  // ---------- 경쟁도 측정 + (설정 시) 재채점 ----------
+  // **다양성 선정 전에 해야 한다.** 최종 Top N이 정해진 뒤에 재면 순위를 바꿀 수 없다.
+  // 상위 후보만 잰다 - 400개 cluster를 전부 조회할 수는 없고, 하위권은 어차피 Top N에 못 든다.
+  //
+  // applyToScore가 꺼져 있으면(기본) 측정만 하고 점수에는 반영하지 않는다. 그때도 프로브는 도는데,
+  // 관측 데이터를 모으고 "반영하면 어떻게 바뀌는지" preview를 보여주기 위해서다.
+  let competition: RankCompetitionInfo | null = null;
+  if (options.competition) {
+    const probeCount = Math.min(options.competition.probeTopN, scoredSortedDesc.length);
+    const probeTargets = scoredSortedDesc.slice(0, probeCount);
+
+    const measured = await options.competition.run(
+      probeTargets.map((item) => ({
+        keyword: item.ranked.keyword,
+        headline: item.ranked.headline,
+      }))
+    );
+
+    const entries: RankCompetitionEntry[] = [];
+    for (const item of probeTargets) {
+      const found = measured.get(item.ranked.keyword);
+      // 측정된 항목만 blogDocumentTotal을 채운다. 프로브 범위 밖 후보는 undefined로 남아
+      // scoreKeyword가 기존 로직을 쓴다(같은 잣대로 비교하기 위함 - scoreKeyword 주석 참고).
+      const input = inputsWithPercentiles.find((i) => i.keyword === item.ranked.keyword);
+      // 전역 플래그와 무관하게 "기회도를 쓰면 몇 점인지"를 계산한다 - 이 값이 preview의 내용이다.
+      // 실제 채택 여부는 아래 applyToScore가 정한다.
+      const rescored =
+        input && found
+          ? scoreKeyword({ ...input, blogDocumentTotal: found.total }, { useContentOpportunity: true })
+          : null;
+
+      entries.push({
+        keyword: item.ranked.keyword,
+        query: found?.query ?? null,
+        querySource: found?.source ?? null,
+        blogTotal: found?.total ?? null,
+        scoreBefore: item.totalScore,
+        scoreAfter: rescored?.total ?? item.totalScore,
+      });
+
+      if (BLOG_COMPETITION_CONFIG.applyToScore && rescored) {
+        item.totalScore = rescored.total;
+        item.ranked = { ...item.ranked, totalScore: rescored.total, scoreBreakdown: rescored };
+      }
+    }
+
+    competition = { entries, applied: BLOG_COMPETITION_CONFIG.applyToScore };
+
+    if (BLOG_COMPETITION_CONFIG.applyToScore) {
+      scoredSortedDesc = scoredSortedDesc.slice().sort((a, b) => b.totalScore - a.totalScore);
+    }
+  }
 
   const preDiversityRankings: RankedKeyword[] = scoredSortedDesc
     .slice(0, topN)
@@ -184,7 +265,7 @@ export async function rankKeywords(
 
   const mergedClusterCount = clusters.filter((cluster) => cluster.items.length > 1).length;
 
-  return { rankings, preDiversityRankings, scoreRange, mergedClusterCount, trendError };
+  return { rankings, preDiversityRankings, scoreRange, mergedClusterCount, trendError, competition };
 }
 
 // ---------- 4) saveRankingHistory ----------
@@ -267,12 +348,11 @@ export type DailyKeywordWorkflowResult = {
    * 기본 설정에서는 계산만 하고 clusters에는 반영하지 않는다(TOPIC_MERGE_CONFIG.applyToClusters).
    */
   topicMerge: MergeSameTopicClustersResult<KeywordCandidate> | null;
-  ranked: RankKeywordsResult | null;
   /**
-   * 최종 Top N의 블로그 경쟁도(문서 총 개수) 관측 결과. disabled면 null.
-   * Phase A에서는 점수에 반영하지 않고 metadata 기록/로그로만 남긴다(config/keywordCompetition.ts).
+   * 경쟁도 측정 결과는 `ranked.competition`에 들어 있다 - 측정이 다양성 선정 전에 일어나야
+   * 순위에 반영될 수 있어 rankKeywords 안으로 옮겼기 때문이다.
    */
-  competition: ProbeBlogCompetitionResult | null;
+  ranked: RankKeywordsResult | null;
   saved: SaveRankingHistoryResult | null;
   notification: SendKeywordNotificationResult | null;
 };
@@ -318,7 +398,6 @@ export async function runDailyKeywordWorkflow(
     clusters: null,
     topicMerge: null,
     ranked: null,
-    competition: null,
     saved: null,
     notification: null,
   };
@@ -496,6 +575,40 @@ export async function runDailyKeywordWorkflow(
     }
   }
 
+  // 경쟁도 측정기. 다양성 선정 전에 상위 후보를 재도록 rankKeywords에 주입한다 -
+  // 최종 Top N이 정해진 뒤에 재면 순위를 바꿀 수 없기 때문이다.
+  // 실패해도 예외를 던지지 않는다(보조 신호). 측정 못 한 항목은 blogDocumentTotal이 비어
+  // scoreKeyword가 기존 로직을 쓴다.
+  const competitionRunner: NonNullable<RankKeywordsOptions["competition"]> = {
+    probeTopN: BLOG_COMPETITION_CONFIG.probeMaxKeywords,
+    run: async (items) => {
+      const measured = new Map<string, { query: string; total: number | null; source: string }>();
+
+      // canonical keyword를 그대로 조회하면 문장 전체를 검색해 "주제 포화도"가 아니라
+      // "이 어투를 쓴 블로그 수"를 재게 된다. 규칙 기반 축약도 한국어 head-final 구조 때문에
+      // 실패했다(extractTopicQueries.ts 상단 실측). LLM으로 주제구를 뽑는다 - 호출 1회.
+      const extraction = await extractTopicQueries(items);
+      if (extraction.error) {
+        console.log(`ℹ️ [주제어 추출] ${extraction.status} - ${extraction.error}`);
+      }
+
+      const probe = await probeBlogCompetition(extraction.queries.map((q) => q.query));
+      if (probe.failedCount > 0) {
+        console.log(`ℹ️ [경쟁도] ${probe.failedCount}건 조회 실패(해당 항목은 기존 채점 유지)`);
+      }
+
+      extraction.queries.forEach((entry, index) => {
+        measured.set(items[index].keyword, {
+          query: entry.query,
+          total: probe.totalByKeyword.get(entry.query) ?? null,
+          source: entry.source,
+        });
+      });
+
+      return measured;
+    },
+  };
+
   const rankOptions: RankKeywordsOptions = {
     ...options.rankOptions,
     priorityByQuery: {
@@ -503,6 +616,9 @@ export async function runDailyKeywordWorkflow(
       ...options.rankOptions?.priorityByQuery,
     },
     categoryTerms: options.rankOptions?.categoryTerms ?? stableSeedTerms,
+    competition:
+      options.rankOptions?.competition ??
+      (BLOG_COMPETITION_CONFIG.enabled ? competitionRunner : undefined),
   };
   const ranked = await runStage(stageLog, "rank", () => rankKeywords(effectiveClusters, queries!, rankOptions));
   if (!ranked) {
@@ -511,58 +627,34 @@ export async function runDailyKeywordWorkflow(
   }
   result.ranked = ranked;
 
-  // ---------- competition (관측 전용) ----------
-  // 최종 Top N의 "블로그 문서 총 개수"를 측정한다. Phase A에서는 점수에 반영하지 않는다 -
-  // 임계값(몇 건부터 포화인가)을 정할 근거가 아직 없어 실제 분포를 먼저 모으는 단계다.
-  // 실패해도 파이프라인을 멈추지 않는다(보조 관측 신호). config/keywordCompetition.ts 참고.
-  let competitionTargets: {
-    rank: number;
-    keyword: string;
-    query: string;
-    querySource: string;
-    total: number | null;
-  }[] = [];
+  // ---------- competition 로그 ----------
+  // 실제 측정은 rankKeywords 안에서 끝났다(다양성 선정 전이어야 순위에 반영될 수 있으므로).
+  // 여기서는 결과를 사람이 읽을 수 있게 남긴다. applied=false면 "반영하면 어떻게 되는지"만 보여준다.
   const competitionStartedAt = Date.now();
-  if (BLOG_COMPETITION_CONFIG.enabled && ranked.rankings.length > 0) {
-    // canonical keyword를 그대로 조회하면 문장 전체를 검색하게 되어 "주제 포화도"가 아니라
-    // "이 어투를 쓴 블로그 수"를 재게 된다. 규칙 기반 축약도 한국어 head-final 구조 때문에
-    // 실패했다(extractTopicQueries.ts 상단 실측 근거). LLM으로 주제구를 뽑는다 - 호출 1회.
-    const extraction = await extractTopicQueries(
-      ranked.rankings.map((item) => ({ keyword: item.keyword, headline: item.headline }))
+  if (ranked.competition) {
+    const { entries, applied } = ranked.competition;
+    const changed = entries.filter((entry) => entry.scoreAfter !== entry.scoreBefore);
+
+    console.log(
+      `ℹ️ [경쟁도/${applied ? "적용" : "preview"}] ${entries.length}건 측정, ` +
+        `점수가 달라지는 항목 ${changed.length}건`
     );
-    if (extraction.error) {
-      console.log(`ℹ️ [주제어 추출] ${extraction.status} - ${extraction.error}`);
-    }
-
-    const targets = ranked.rankings.map((item, index) => ({
-      rank: item.rank,
-      keyword: item.keyword,
-      query: extraction.queries[index]?.query ?? buildCompetitionQuery(item.keyword),
-      querySource: extraction.queries[index]?.source ?? "fallback",
-    }));
-
-    const competition = await probeBlogCompetition(targets.map((target) => target.query));
-    result.competition = competition;
-
-    competitionTargets = targets.map((target) => ({
-      ...target,
-      total: competition.totalByKeyword.get(target.query) ?? null,
-    }));
-
-    for (const target of competitionTargets) {
-      const saturation = computeSaturation(target.total);
+    for (const entry of entries.slice(0, 15)) {
+      const saturation = computeSaturation(entry.blogTotal);
+      const delta =
+        entry.scoreAfter === entry.scoreBefore
+          ? ""
+          : ` | ${entry.scoreBefore}점 → ${entry.scoreAfter}점`;
       console.log(
-        `ℹ️ [경쟁도] #${target.rank} [${target.query}]${target.querySource === "fallback" ? "(폴백)" : ""} — 블로그 ${target.total ?? "?"}건 ` +
-          `(${describeSaturation(saturation)}${saturation === null ? "" : `, ${saturation.toFixed(2)}`}) ` +
-          `← ${target.keyword}`
+        `   [${entry.query ?? "?"}]${entry.querySource === "fallback" ? "(폴백)" : ""} ` +
+          `블로그 ${entry.blogTotal ?? "?"}건 (${describeSaturation(saturation)})${delta}  ← ${entry.keyword}`
       );
     }
 
     stageLog.push({
       stage: "competition",
-      status: competition.status === "failed" ? "failed" : "success",
+      status: "success",
       durationMs: Date.now() - competitionStartedAt,
-      error: competition.failedCount > 0 ? `${competition.failedCount}건 조회 실패` : undefined,
     });
   } else {
     stageLog.push({ stage: "competition", status: "skipped", durationMs: 0 });
@@ -582,17 +674,13 @@ export async function runDailyKeywordWorkflow(
           totalAfter: relevance.totalAfter,
           droppedCount: relevance.droppedCount,
         },
-        // Phase A 관측 데이터. 며칠치가 쌓이면 이 분포로 포화도 임계값을 확정한다
-        // (config/keywordCompetition.ts의 low/highTotalThreshold는 그때까지 잠정치).
-        ...(result.competition
+        // 경쟁도 관측 데이터. keyword(원문)·query(실제 조회한 주제어)·출처·전후 점수를 함께
+        // 남긴다 - 나중에 임계값을 재검토할 때 어떤 추출이 적용됐는지 알아야 하기 때문이다.
+        ...(ranked.competition
           ? {
               blogCompetition: {
-                status: result.competition.status,
-                probedCount: result.competition.probedCount,
-                failedCount: result.competition.failedCount,
-                // keyword(원문)와 query(실제 조회한 핵심어)를 함께 남긴다 - 나중에 임계값을
-                // 재검토할 때 어떤 축약이 적용됐는지 알아야 하기 때문이다.
-                entries: competitionTargets,
+                applied: ranked.competition.applied,
+                entries: ranked.competition.entries,
               },
             }
           : {}),

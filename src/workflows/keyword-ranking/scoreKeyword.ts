@@ -10,6 +10,8 @@ import {
   NEWS_VELOCITY_CONFIG,
   TREND_MOMENTUM_CONFIG,
 } from "../../config/keywordScoring.js";
+import { BLOG_COMPETITION_CONFIG } from "../../config/keywordCompetition.js";
+import { computeOpportunityRatio } from "./computeCompetitionScore.js";
 import type { KeywordScoreBreakdown, KeywordScoreInput } from "../../types/keywordScoring.js";
 
 function clamp(value: number, min: number, max: number): number {
@@ -90,6 +92,9 @@ function scoreNewsVelocity(input: KeywordScoreInput, now: Date): number {
 
 // C. Content Demand (기본 15점): 블로그+웹문서 발생량의 절대 신호 + batch 내 percentile을 합산하고,
 // 최근 window 내 활동이면 가점.
+//
+// ⚠️ BLOG_COMPETITION_CONFIG.applyToScore가 켜지면 이 항목의 **의미가 뒤집힌다**
+// (scoreContentOpportunity 참고). 기본값은 false라 아래 기존 로직이 그대로 돈다.
 function scoreContentDemand(input: KeywordScoreInput, now: Date): number {
   const weight = KEYWORD_SCORE_WEIGHTS.contentDemand;
   const totalCount = input.blogCount + input.webCount;
@@ -108,6 +113,26 @@ function scoreContentDemand(input: KeywordScoreInput, now: Date): number {
   const boostRatio = isRecent ? 1 + CONTENT_DEMAND_CONFIG.recentBoostRatio : 1;
 
   return Math.round(clamp(weight * combinedRatio * boostRatio, 0, weight));
+}
+
+// C'. Content Opportunity (contentDemand 자리를 대체, 기본 15점).
+//
+// 왜 뒤집는가: contentDemand는 "블로그 문서가 많을수록 가점"인데, 개인 블로그가 상위노출을 노리는
+// 입장에서는 정반대 신호다 - 문서가 많다는 건 이미 포화됐다는 뜻이다. 6-factor 중 55점이
+// "이미 많이 다뤄지고 있는가"를 재고 있었고, 그래서 시스템이 레드오션 키워드를 우대했다.
+//
+// 공식: weight x (1 - 포화도) x 수요신호
+// - 포화도: 이 주제의 블로그 문서 총 개수를 log10 정규화(computeCompetitionScore.ts).
+// - 수요신호: 이미 계산돼 있는 contentCountPercentile(batch 내 상대 활동성)을 재사용한다.
+//   추가 API 호출이 필요 없고, "이번 배치 안에서 실제로 논의되고 있는가"를 그대로 나타낸다.
+//   이 게이트가 없으면 아무도 찾지 않는 키워드(공급 0)가 만점을 받는다.
+//
+// blogDocumentTotal이 null(측정 실패)이면 computeOpportunityRatio가 중립값을 돌려준다 -
+// 측정 실패를 완전 포화와 같게 취급하지 않기 위함이다.
+function scoreContentOpportunity(input: KeywordScoreInput): number {
+  const weight = KEYWORD_SCORE_WEIGHTS.contentDemand;
+  const ratio = computeOpportunityRatio(input.blogDocumentTotal ?? null, input.contentCountPercentile);
+  return Math.round(clamp(weight * ratio, 0, weight));
 }
 
 // D. Freshness (기본 15점): 최근 발행 시각 기준 지수 감쇠(halfLifeHours마다 절반).
@@ -147,12 +172,35 @@ function scoreClickPotential(input: KeywordScoreInput): number {
   return Math.round(clamp(raw, 0, weight));
 }
 
-export function scoreKeyword(input: KeywordScoreInput): KeywordScoreBreakdown {
+export type ScoreKeywordOptions = {
+  /**
+   * contentDemand 자리에 경쟁도 기반 기회도를 쓸지. 생략하면 전역 설정
+   * (BLOG_COMPETITION_CONFIG.applyToScore)을 따른다.
+   *
+   * 명시적으로 넘길 수 있게 둔 이유: 설정이 꺼져 있어도 "켜면 몇 점이 되는지"를 계산해
+   * preview로 보여줘야 하기 때문이다. 전역 플래그만 읽으면 preview가 항상 현재 점수와
+   * 같아져서 승인 판단에 쓸 수 없다(테스트 작성 중 실제로 이 결함이 잡혔다).
+   */
+  useContentOpportunity?: boolean;
+};
+
+export function scoreKeyword(
+  input: KeywordScoreInput,
+  options?: ScoreKeywordOptions
+): KeywordScoreBreakdown {
   const now = input.now ?? new Date();
 
   const trendMomentum = scoreTrendMomentum(input);
   const newsVelocity = scoreNewsVelocity(input, now);
-  const contentDemand = scoreContentDemand(input, now);
+  // contentDemand 자리는 설정에 따라 의미가 바뀐다. 경쟁도를 측정하지 못한 항목(undefined)은
+  // 플래그가 켜져 있어도 기존 로직을 쓴다 - 측정된 것과 안 된 것을 같은 잣대로 비교하면
+  // 프로브 범위 밖 후보가 일괄로 유리/불리해지기 때문이다.
+  const useOpportunity =
+    (options?.useContentOpportunity ?? BLOG_COMPETITION_CONFIG.applyToScore) &&
+    input.blogDocumentTotal !== undefined;
+  const contentDemand = useOpportunity
+    ? scoreContentOpportunity(input)
+    : scoreContentDemand(input, now);
   const freshness = scoreFreshness(input, now);
   const crossSourceSignal = scoreCrossSourceSignal(input);
   const clickPotential = scoreClickPotential(input);
