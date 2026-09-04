@@ -9,6 +9,7 @@
 //
 // 외부 호출/DB 접근 없이 순수 함수만 검증한다. 실행: npm run test:blog-competition
 
+import { buildCompetitionQuery } from "./buildCompetitionQuery.js";
 import {
   computeOpportunityRatio,
   computeSaturation,
@@ -139,6 +140,45 @@ async function main(): Promise<void> {
   assert(empty.status === "skipped", `빈 입력은 skipped여야 한다 (실제 ${empty.status})`);
 
   console.log("   실패 격리 / 중복 제거 / 상한 / 빈 입력 처리 확인");
+
+  // ---------- 4. buildCompetitionQuery ----------
+  // run #32~34 Top 10 실측에서 나온 실제 키워드로 고정한다. canonical keyword를 그대로 조회하면
+  // 같은 이슈가 표현 차이만으로 385배(3,081 vs 8) 갈렸다 - 그 회귀를 막는 것이 이 테스트의 목적이다.
+  console.log("\n[4] buildCompetitionQuery (실측 키워드 회귀)");
+
+  const fireworksA = buildCompetitionQuery("2026 여의도 불꽃축제 일정·시간·명당·교통통제");
+  const fireworksB = buildCompetitionQuery("2026 여의도 불꽃축제 시간 헷갈리면 손해! 일정·명당·귀가");
+  assert(
+    fireworksA === fireworksB,
+    `같은 행사는 같은 질의여야 한다 (실제 "${fireworksA}" vs "${fireworksB}")`
+  );
+  assert(
+    fireworksA === "여의도 불꽃축제",
+    `핵심 명사 2개만 남아야 한다 (실제 "${fireworksA}")`
+  );
+  console.log(`   불꽃축제 두 표현 -> 동일 질의 "${fireworksA}"`);
+
+  const fallA = buildCompetitionQuery("가해자 누나는 드라마 출연 중 부산 오피스텔 추락사");
+  const fallB = buildCompetitionQuery("내 딸은 죽었는데 부산 오피스텔 추락사 유족 에");
+  console.log(`   추락사 두 표현 -> "${fallA}" / "${fallB}"`);
+
+  // 연도/회차 같은 숫자 시작 토큰은 주제를 가리키지 않으므로 앞자리를 차지하면 안 된다.
+  const subsidy = buildCompetitionQuery("4차 민생지원금 추석 전 신청 일정과 지급 지역은");
+  assert(!subsidy.startsWith("4차"), `숫자 토큰이 앞에 오면 안 된다 (실제 "${subsidy}")`);
+  assert(subsidy.includes("민생지원금"), `핵심 명사가 남아야 한다 (실제 "${subsidy}")`);
+  console.log(`   "4차 민생지원금 ..." -> "${subsidy}"`);
+
+  // 범용 수식어만으로 이루어진 입력은 축약할 게 없으므로 원문을 그대로 쓴다(측정 포기보다 낫다).
+  const genericOnly = buildCompetitionQuery("결말 해석");
+  assert(genericOnly.length > 0, "핵심 명사가 없어도 빈 문자열을 반환하면 안 된다");
+
+  // 분류어(넷플릭스 등)는 걷어내지 않는다 - 경쟁도 측정에서는 오히려 필요한 한정어다.
+  const ottQuery = buildCompetitionQuery("넷플릭스 들쥐 출연진 총정리");
+  assert(
+    ottQuery.includes("넷플릭스"),
+    `분류어는 경쟁도 질의에 남아야 한다 (실제 "${ottQuery}")`
+  );
+  console.log(`   "넷플릭스 들쥐 출연진 총정리" -> "${ottQuery}"`);
 
   console.log("\n✅ 전체 통과");
 }
