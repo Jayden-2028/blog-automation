@@ -27,6 +27,7 @@ import type { KeywordCluster, KeywordClusterer } from "./keyword-ranking/cluster
 import { computeBatchPercentiles } from "./keyword-ranking/computeBatchPercentiles.js";
 import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.js";
 import { BLOG_COMPETITION_CONFIG } from "../config/keywordCompetition.js";
+import { buildCompetitionQuery } from "./keyword-ranking/buildCompetitionQuery.js";
 import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
 import { probeBlogCompetition } from "./keyword-ranking/probeBlogCompetition.js";
 import { saveRankingHistory as saveRankingHistoryStage } from "./keyword-ranking/saveRankingHistory.js";
@@ -479,17 +480,32 @@ export async function runDailyKeywordWorkflow(
   // 최종 Top N의 "블로그 문서 총 개수"를 측정한다. Phase A에서는 점수에 반영하지 않는다 -
   // 임계값(몇 건부터 포화인가)을 정할 근거가 아직 없어 실제 분포를 먼저 모으는 단계다.
   // 실패해도 파이프라인을 멈추지 않는다(보조 관측 신호). config/keywordCompetition.ts 참고.
+  let competitionTargets: { rank: number; keyword: string; query: string; total: number | null }[] = [];
   const competitionStartedAt = Date.now();
   if (BLOG_COMPETITION_CONFIG.enabled && ranked.rankings.length > 0) {
-    const competition = await probeBlogCompetition(ranked.rankings.map((item) => item.keyword));
+    // canonical keyword를 그대로 조회하면 문장 전체를 검색하게 되어 "주제 포화도"가 아니라
+    // "이 어투를 쓴 블로그 수"를 재게 된다(buildCompetitionQuery.ts 상단 실측 근거).
+    // 핵심 명사 2개로 줄여 조회한다.
+    const targets = ranked.rankings.map((item) => ({
+      rank: item.rank,
+      keyword: item.keyword,
+      query: buildCompetitionQuery(item.keyword),
+    }));
+
+    const competition = await probeBlogCompetition(targets.map((target) => target.query));
     result.competition = competition;
 
-    for (const item of ranked.rankings) {
-      const blogTotal = competition.totalByKeyword.get(item.keyword) ?? null;
-      const saturation = computeSaturation(blogTotal);
+    competitionTargets = targets.map((target) => ({
+      ...target,
+      total: competition.totalByKeyword.get(target.query) ?? null,
+    }));
+
+    for (const target of competitionTargets) {
+      const saturation = computeSaturation(target.total);
       console.log(
-        `ℹ️ [경쟁도] #${item.rank} ${item.keyword} — 블로그 ${blogTotal ?? "?"}건 ` +
-          `(${describeSaturation(saturation)}${saturation === null ? "" : `, ${saturation.toFixed(2)}`})`
+        `ℹ️ [경쟁도] #${target.rank} [${target.query}] — 블로그 ${target.total ?? "?"}건 ` +
+          `(${describeSaturation(saturation)}${saturation === null ? "" : `, ${saturation.toFixed(2)}`}) ` +
+          `← ${target.keyword}`
       );
     }
 
@@ -525,7 +541,9 @@ export async function runDailyKeywordWorkflow(
                 status: result.competition.status,
                 probedCount: result.competition.probedCount,
                 failedCount: result.competition.failedCount,
-                totals: Object.fromEntries(result.competition.totalByKeyword),
+                // keyword(원문)와 query(실제 조회한 핵심어)를 함께 남긴다 - 나중에 임계값을
+                // 재검토할 때 어떤 축약이 적용됐는지 알아야 하기 때문이다.
+                entries: competitionTargets,
               },
             }
           : {}),
