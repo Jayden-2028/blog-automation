@@ -23,6 +23,9 @@ import type { ArticleJobRow } from "../../types/database.js";
  * 에피소드를, entertainment는 작품명 노출을 전제하므로 무관한 주제에 강제하면 오히려 어긋난다.
  */
 function pickStyleFile(category: string | null): string {
+  // incident(사건·사고)는 반드시 맨 앞이다. 다른 카테고리로 폴백되면 사망 사건 기사에
+  // "저도 궁금해서 찾아봤어요" 같은 개인 블로거 톤이 적용된다(writer.md §2-1).
+  if (category === "incident") return "prompts/writing/style/incident.md";
   if (category === "parenting") return "prompts/writing/style/parenting.md";
   if (category === "entertainment" || category === "ott") return "prompts/writing/style/entertainment.md";
   return "prompts/writing/style/trend.md";
@@ -64,6 +67,12 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- writer.md §2의 Skill 호출(/parenting-blog-writer 등) 대신 moai-marketer:content-blog 스킬로",
     `  초안을 쓰되, 문체·구조는 위에서 Read한 ${styleFile}를 그대로 따른다(§2의 문체 표보다 이 파일이`,
     "  우선 - 더 구체적이고 실제 발행본 기반이다). §10대로 moai-writer:korean-humanize로 마무리한다.",
+    // 사건·사고는 문체 선택의 문제가 아니라 무죄추정·신원보호·자극적 묘사 금지 규칙이라,
+    // "문체는 style 파일을 따른다"에 묻히면 안 된다. 구속력을 따로 못박는다.
+    job.category === "incident"
+      ? "- **예외: 이 job은 category=incident(사건·사고)다. writer.md §2-1과 위 문체 파일의 규칙은" +
+        " '참고'가 아니라 반드시 지켜야 하며, §5 후킹 제목 기법과 충돌하면 §2-1이 이긴다.**"
+      : null,
     "- 소제목은 `## ` 마크다운 헤더로 쓴다(writer.md의 '# 기호 금지'는 네이버 붙여넣기용이며,",
     "  이 파이프라인의 변환 단계가 처리한다). 본문 맨 위 제목은 `# ` 한 줄로 둔다.",
     "- 본문에 `[IMAGE: 설명]` 마커를 섹션 전환마다 최소 5개 넣는다(writer.md §8). 실제 이미지는",

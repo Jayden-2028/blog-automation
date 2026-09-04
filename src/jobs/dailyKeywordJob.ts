@@ -16,7 +16,11 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 
 // Creator Advisor 수집(trendCollect)은 enrichment 단계다 - 실패해도 seed_queries만으로 파이프라인이
 // 정상 완주하므로 job 전체를 실패로 처리하지 않는다(buildDailyQueryPool.ts의 fallback 설계와 동일).
-const NON_FATAL_STAGES = new Set(["trendCollect"]);
+//
+// competition(블로그 경쟁도 프로브)도 같은 이유로 비치명적이다 - 점수/순위/알림에 아무 영향이 없는
+// 관측 전용 단계이므로(config/keywordCompetition.ts), 실패했다고 사용자에게 실패 알림을 보내거나
+// 이미 만들어진 Top 10 발송을 막으면 안 된다.
+const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
 const job: SchedulerJob = {
   name: "daily-keyword",
