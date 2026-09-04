@@ -102,6 +102,23 @@ export class ArticleJobRepository {
     return data ?? [];
   }
 
+  /**
+   * status와 무관하게 최근 선택된 job을 최신순으로 반환한다.
+   *
+   * listByStatus는 "다음 단계 워커가 집어갈 job"을 찾는 용도라 status가 고정이다. 이 메서드는
+   * 사람이 "그 원고 jobId가 뭐였지"를 찾을 때(report:jobs)를 위한 것이라 전 status를 훑는다.
+   */
+  static async listRecent(limit = 200): Promise<ArticleJobRow[]> {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("*")
+      .order("selected_at", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data ?? [];
+  }
+
   /** 특정 run에서 이미 선택된 job 목록. 알림 메시지의 버튼 상태를 복원할 때 쓴다. */
   static async listByRunId(runId: number): Promise<ArticleJobRow[]> {
     const { data, error } = await supabase
