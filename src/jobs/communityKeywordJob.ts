@@ -20,7 +20,9 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 // 커뮤니티 수집(trendCollect)은 enrichment 단계다 - 실패해도 job 전체를 실패로 처리하지 않는다
 // (daily-keyword와 동일). 단 오후 job은 커뮤니티가 유일한 소스라, 수집이 완전히 실패하면
 // 아래 "candidatesCount 0" 경로에서 알림이 나간다.
-const NON_FATAL_STAGES = new Set(["trendCollect"]);
+// competition(블로그 경쟁도 프로브)은 관측 전용이라 실패해도 job을 실패시키지 않는다
+// (dailyKeywordJob과 동일 - config/keywordCompetition.ts 참고).
+const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
 const NOTIFICATION_HEADER = "📡 <b>오후 커뮤니티 인기 키워드</b>";
 
