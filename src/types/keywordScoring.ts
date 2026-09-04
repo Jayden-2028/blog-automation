@@ -63,6 +63,12 @@ export type KeywordScoreInput = {
    * freshness 계산에서 "정보 없음"과 "실제로 오래됨"을 구분하는 데 사용한다.
    */
   hasTimestampData: boolean;
+  /**
+   * 이 주제로 이미 존재하는 네이버 블로그 문서 총 개수(경쟁도 프로브 결과).
+   * undefined면 측정하지 않았다는 뜻이고, null이면 측정을 시도했으나 실패했다는 뜻이다 - 둘을
+   * 구분해야 scoreContentDemand가 "기존 로직 유지"와 "중립값 적용"을 다르게 처리할 수 있다.
+   */
+  blogDocumentTotal?: number | null;
   /** 테스트에서 시각을 고정하기 위한 override. 기본은 현재 시각(new Date()). */
   now?: Date;
 };

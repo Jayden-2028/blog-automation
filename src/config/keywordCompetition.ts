@@ -55,12 +55,20 @@ export const BLOG_COMPETITION_CONFIG = {
    * total <= low  -> saturation 0 (공급 희소 = 선점 기회)
    * total >= high -> saturation 1 (포화)
    *
-   * ⚠️ 아래 값은 **잠정치**다. Phase A 관측 전까지 근거가 없으므로 점수에 반영하지 않는다
-   * (applyToScore=false). 관측 리포트(debug:blog-competition)가 실제 분포를 출력하면
-   * 그 분포를 보고 확정한다.
+   * 2026-09-04 확정. run #34~35 Top 18의 LLM 주제어 조회 분포로 정했다
+   * (최소 30 / 25% 301 / 중앙값 1,277 / 75% 18,266 / 최대 142,812).
+   *
+   * 100 / 100,000을 고른 이유:
+   * - 잠정치(300/50,000)는 하단 4건이 전부 0.00으로 뭉개졌다. "301건"과 "30건"은 10배 차이인데
+   *   구분이 안 됐다.
+   * - 더 넓히면(50/150,000) 뭉개짐은 사라지지만 상단에서 142,812와 98,477을 0.99 vs 0.95로
+   *   구분하려 든다. 10만 건이 넘으면 어차피 승산이 없으므로 거기서 clamp되는 편이 옳다.
+   * - 자릿수 기준(10^2 / 10^5)이라 18건짜리 표본에 과적합되지 않는다.
+   *
+   * 표본이 아직 작으므로 데이터가 쌓이면 재검토한다. env로 조정 가능하다.
    */
-  lowTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_LOW_TOTAL, 300),
-  highTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_HIGH_TOTAL, 50000),
+  lowTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_LOW_TOTAL, 100),
+  highTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_HIGH_TOTAL, 100000),
 
   /**
    * 프로브 실패(API 오류 등)로 total을 모르는 경우 적용할 중립 비율(0~1).
