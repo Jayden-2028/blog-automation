@@ -28,22 +28,12 @@ const AUTHORITY_TAG: Record<SourceAuthorityLevel, string> = {
   community: "커뮤니티",
 };
 
-function buildSourceCountLine(sources: SourceRow[]): string {
-  const counts = { official: 0, medical: 0, news: 0, community: 0 };
-  for (const source of sources) {
-    if (source.authority) counts[source.authority]++;
-  }
-  return `근거 ${sources.length}건 — 공공 ${counts.official} · 의료 ${counts.medical} · 뉴스 ${counts.news} · 커뮤니티 ${counts.community}`;
-}
-
-function buildHeaderLines(job: ArticleJobRow, sources: SourceRow[]): string[] {
+function buildHeaderLines(job: ArticleJobRow): string[] {
   return [
     "🔍 <b>자료조사 완료 — 원고를 쓸까요?</b>",
     "",
     `<b>${escapeTelegramHtml(job.keyword)}</b>`,
     `category: ${escapeTelegramHtml(job.category ?? "N/A")} · ${job.total_score ?? "?"}점`,
-    "",
-    buildSourceCountLine(sources),
   ];
 }
 
@@ -76,7 +66,7 @@ export function buildResearchPreviewMessages(
   sources: SourceRow[],
   summary: ResearchSummary | null
 ): TelegramOutgoingMessage[] {
-  const header = buildHeaderLines(job, sources);
+  const header = buildHeaderLines(job);
   const footer = buildFooterLines(job);
 
   const body: string[] = summary
