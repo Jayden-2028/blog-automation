@@ -31,7 +31,8 @@ export type ReviewCheck = {
  * 팩트 검사도 마찬가지로 링크 제목의 숫자("2026~2027 신제품")를 우리 주장으로 오인한다.
  */
 function stripReferencesSection(body: string): string {
-  const match = body.match(/^#{1,3}\s*참고\s*자료/m);
+  // 헤더가 "## 참고 자료"(구식)와 "**참고 자료**"(2026-09-06부터, writer.md §6) 둘 다 나올 수 있다.
+  const match = body.match(/^(#{1,3}\s*|\*\*)참고\s*자료(\*\*)?/m);
   return match?.index === undefined ? body : body.slice(0, match.index);
 }
 
@@ -212,7 +213,8 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
   // 분량 - writer.md §6-5 기준은 "본문"이다. 참고 자료 목록·해시태그·이미지 마커·공백은 빼고
   // 실제 산문 길이만 잰다(그것들을 포함하면 항상 목표를 넘는다).
   const prose = stripReferencesSection(body)
-    .replace(/^#+\s.*$/gm, "") // ## 소제목
+    .replace(/^#+\s.*$/gm, "") // ## 소제목(구식)
+    .replace(/^\*\*[^*]+\*\*$/gm, "") // **소제목** 볼드 단독 줄(2026-09-06부터)
     .replace(/^#[^\s#].*$/gm, "") // #해시태그 줄
     .replace(/\[IMAGE[^\]]*\]/gi, "") // [IMAGE: ...] 마커
     .replace(/\s+/g, "");

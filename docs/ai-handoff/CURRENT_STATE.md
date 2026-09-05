@@ -2,6 +2,46 @@
 
 기준일: 2026-09-06 (Asia/Seoul)
 
+## 2026-09-06 세션 — 원고 서식 규격 재정의(`##` 폐지) + 배리에이션 마커 검증 버그 수정
+
+**계기**: 채널 원고 페이지를 실제로 써보니 서식 문제가 여러 개 겹쳐 있었다 - `writer.md`는 원래
+"소제목에 `#` 안 씀"이라 정해뒀지만 실제 코드(HTML 변환기·배리에이션 프롬프트)는 `##`를 쓰도록
+방치돼 있었고, "복사" 버튼은 서식 없는 plain text만 복사해 붙여넣으면 `**`/`[]()` 기호가 그대로
+보였다.
+
+**변경**: 소제목을 `**볼드**` 한 줄로 통일(앞에 빈 줄 1개, 바로 다음 줄엔 빈 줄 없이 문단이 붙음),
+이미지 마커 앞뒤 빈 줄 2개 + HTML/CSS 여백. 이 규칙을 `writer.md`, 카테고리별 스타일 파일 4개,
+`generateArticleVariant.ts`, `runArticleJob.ts`(참고 자료 헤더), HTML 변환기 2종
+(`convertArticleToHtml.ts`/`convertArticleToNaverHtml.ts`), 텔레그래프 변환기
+(`markdownToTelegraphNodes.ts`), 이미지 삽입 위치 판정(`generateArticleImages.ts`), 리뷰 검사
+(`articleReviewChecks.ts`), 매니페스트 파서(`parseManuscriptBlocks.ts`)까지 전부 동기화했다.
+`renderManuscriptPage.ts`의 "복사" 버튼은 이제 `ClipboardItem`으로 `text/html`+`text/plain`을
+함께 복사해 세 채널 모두 실제 굵게·링크가 살아있는 서식으로 붙여넣힌다(참고자료 링크는 텍스트에
+임베딩된 `<a>` 태그). 네이버 채널은 FAQ·참고자료 섹션을 표시 단계에서 제외(`stripFaqAndReferencesForNaver`).
+`.md` 파일에는 쓰기 직전에 `[IMAGE PROMPT:]`를 마커 바로 아래 재삽입(`reinsertImagePrompts`).
+티스토리 해시태그는 10개 이상이 나오도록 상한(`.slice(0,10)`)을 없앴다.
+
+**부수 발견 + 수정**: 계정 레벨 스킬(parenting/entertainment/trend-blog-writer) 드리프트
+감지 스크립트(`scripts/syncWriterStyle.ts`)가 macOS 경로 결함으로 항상 "못 찾음"만 출력하던 것을
+고쳐 실행 - **3개 스킬 전부 헤지 금지 문구가 예전 버전으로 롤백돼 있음을 확인**(헤드리스 파이프라인은
+이 스킬을 안 읽어 자동화 결과엔 영향 없음 - 계정 스킬 자체를 고칠지는 미결정, 사용자 확인 대기).
+스냅샷은 갱신함(`--apply`).
+
+실제 job(영화 옵세션, `d7d8f131`, 근거 얇음)으로 배리에이션을 생성해보다가 **더 심각한 기존 버그를
+발견**: 근거가 얇으면 모델이 정해진 `### TITLE/BODY/...` 마커 형식 대신 "정보가 부족합니다"류
+대화체로 되묻는데, 기존 파서가 이걸 걸러내지 못하고 성공으로 오판해 제목만 있고 태그·검색설명이
+빈 원고가 그대로 나갔다. `generateArticleVariant.ts`에 마커 존재 여부 검증을 추가해 이제
+`failed`로 정확히 처리된다(테스트 추가).
+
+**정리 필요(승인 대기)**: 위 버그로 만들어진 나쁜 데이터가 DB에 남아 있음 - `articles` 테이블
+#50(job d7d8f131, platform=tistory)·#51(같은 job, platform=blogspot) 2건, 태그·검색설명
+없이 저장됨. 삭제해야 다음 `manuscripts:build` 실행 때 정상 재생성된다. 원격 DB 삭제라 사용자
+승인 필요 - 아직 답변 대기 중.
+
+**검증**: 관련 12개 테스트 스위트 + `npm run build` 전부 통과. 브라우저로 합성 원고 렌더링
+실측(소제목 볼드+문단 밀착, 이미지 여백, "복사" 버튼의 실제 클립보드 HTML까지 JS로 직접 확인).
+실제 LLM 호출 2건으로 새 포맷 정상 생성 확인 + 위 버그 재현.
+
 ## 2026-09-06 세션 — 채널 원고 페이지 Cloudflare Pages 자동 배포 + 텔레그램 링크아웃
 
 **계기**: `manuscripts/index.html`이 로컬 파일이라 모바일에서 못 봄. Claude 아티팩트 자동 재게시를

@@ -17,11 +17,12 @@ function isTag(node: TelegraphNode, tag: string): node is { tag: string; attrs?:
 function main(): void {
   console.log("▶ markdownToTelegraphNodes 테스트 시작\n");
 
-  // 1) ## 소제목 -> h3.
-  const withHeader = markdownToTelegraphNodes("## 2026년 일정과 가격\n\n본문 내용입니다.");
+  // 1) **소제목** 볼드 한 줄 -> h3, 바로 다음 줄(빈 줄 없음)은 이어지는 p.
+  const withHeader = markdownToTelegraphNodes("**2026년 일정과 가격**\n본문 내용입니다.");
   assert(isTag(withHeader[0], "h3"), `첫 블록은 h3여야 한다 (실제: ${JSON.stringify(withHeader[0])})`);
   assert(withHeader[0].children?.[0] === "2026년 일정과 가격", "h3 텍스트가 정확해야 한다");
-  console.log("✅ ## 소제목 -> h3 변환");
+  assert(isTag(withHeader[1], "p"), "소제목 바로 다음 줄은 p로 이어져야 한다");
+  console.log("✅ **소제목** -> h3(+바로 이어지는 p) 변환");
 
   // 2) 일반 문단 -> p.
   const withParagraph = markdownToTelegraphNodes("가을 저녁 경복궁을 걸으며 궁중음식을 맛보는 별빛야행입니다.");
@@ -113,15 +114,12 @@ function main(): void {
   );
   console.log("✅ alt 없는 이미지 -> figcaption 없이 img만");
 
-  // 6) 회귀: 실제 원고 구조(헤더 -> 문단 -> 목록 -> 문단 순서)를 그대로 변환했을 때 순서가 보존돼야 한다.
+  // 6) 회귀: 실제 원고 구조(헤더+문단 붙임 -> 목록 순서)를 그대로 변환했을 때 순서가 보존돼야 한다.
   const fullArticle = [
     "가을 저녁 경복궁을 걸으며 궁중음식을 맛보는 별빛야행이 올해도 열립니다.",
-    "## 경복궁 별빛야행은 어떤 프로그램인가",
-    "경복궁 별빛야행은 경복궁 북측 권역을 전문 해설과 함께 걷는 야간 탐방 프로그램입니다.",
-    "## 자주 묻는 질문",
-    "**가격은 얼마인가요?** 1인 6만 원이고 도슭수라상 체험이 포함됩니다.",
-    "## 참고 자료",
-    "- [경복궁 별빛야행](https://www.kh.or.kr/program/view/menu/527?idx=576)\n- [국가유산진흥원](https://www.kh.or.kr/)",
+    "**경복궁 별빛야행은 어떤 프로그램인가**\n경복궁 별빛야행은 경복궁 북측 권역을 전문 해설과 함께 걷는 야간 탐방 프로그램입니다.",
+    "**자주 묻는 질문**\n가격은 1인 6만 원이고 도슭수라상 체험이 포함됩니다.",
+    "**참고 자료**\n- [경복궁 별빛야행](https://www.kh.or.kr/program/view/menu/527?idx=576)\n- [국가유산진흥원](https://www.kh.or.kr/)",
   ].join("\n\n");
 
   const nodes = markdownToTelegraphNodes(fullArticle);

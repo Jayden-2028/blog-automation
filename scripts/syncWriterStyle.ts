@@ -20,19 +20,34 @@ type Category = "parenting" | "entertainment" | "trend";
 
 const CATEGORIES: Category[] = ["parenting", "entertainment", "trend"];
 
-const SKILLS_ROOT = join(homedir(), ".claude", "skills", "synced");
+// 2026-09-06: 실제 위치를 찾아 고쳤다 - 예전 경로(~/.claude/skills/synced)는 이 macOS 버전에
+// 존재하지 않아 늘 "못 찾음"만 출력했다(748f514 실측 결함). 실제로는 Claude 데스크톱 앱의
+// 로컬 에이전트 세션 저장소 아래, 세션 UUID 두 겹을 거쳐 있다:
+//   ~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<uuid1>/<uuid2>/skills/<category>-blog-writer/SKILL.md
+const SKILLS_ROOT = join(
+  homedir(),
+  "Library",
+  "Application Support",
+  "Claude",
+  "local-agent-mode-sessions",
+  "skills-plugin"
+);
 const SNAPSHOT_DIR = join("prompts", "writing", "style", ".snapshots");
 const STYLE_FILE = (c: Category) => join("prompts", "writing", "style", `${c}.md`);
 const SNAPSHOT_FILE = (c: Category) => join(SNAPSHOT_DIR, `${c}.skill.md`);
 const SKILL_DIR_NAME = (c: Category) => `${c}-blog-writer`;
 
-/** ~/.claude/skills/synced/<임의 uuid>/<카테고리>-blog-writer/SKILL.md 를 찾는다. */
+/** SKILLS_ROOT/<uuid1>/<uuid2>/skills/<category>-blog-writer/SKILL.md 를 찾는다(세션 UUID 두 겹). */
 function findSkillFile(category: Category): string | null {
   if (!existsSync(SKILLS_ROOT)) return null;
-  for (const entry of readdirSync(SKILLS_ROOT, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const candidate = join(SKILLS_ROOT, entry.name, SKILL_DIR_NAME(category), "SKILL.md");
-    if (existsSync(candidate)) return candidate;
+  for (const outer of readdirSync(SKILLS_ROOT, { withFileTypes: true })) {
+    if (!outer.isDirectory()) continue;
+    const outerDir = join(SKILLS_ROOT, outer.name);
+    for (const inner of readdirSync(outerDir, { withFileTypes: true })) {
+      if (!inner.isDirectory()) continue;
+      const candidate = join(outerDir, inner.name, "skills", SKILL_DIR_NAME(category), "SKILL.md");
+      if (existsSync(candidate)) return candidate;
+    }
   }
   return null;
 }

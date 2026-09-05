@@ -158,8 +158,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .edited-badge { font-size:12px; color:#b45309; margin-left:4px; }
   .body-block { margin-bottom:14px; }
   .text-block { white-space:pre-wrap; }
-  .text-block[contenteditable="true"] { outline:2px dashed var(--accent); outline-offset:4px; padding:4px; border-radius:6px; }
-  .image-card { border:1px dashed var(--line); border-radius:8px; padding:10px 12px; background:var(--card); }
+  .heading-block { font-weight:700; margin-bottom:0; white-space:pre-wrap; }
+  .editable[contenteditable="true"] { outline:2px dashed var(--accent); outline-offset:4px; padding:4px; border-radius:6px; }
+  .image-card { border:1px dashed var(--line); border-radius:8px; padding:10px 12px; background:var(--card); margin:2em 0; }
   .image-card .label { font-size:12px; color:var(--muted); margin-bottom:4px; }
   .image-card .desc { font-size:13px; margin-bottom:8px; }
   .image-card .prompt { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px;
@@ -278,9 +279,16 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
             html += '<div class="prompt" style="color:var(--muted);">프롬프트 미상 - 원본 원고(drafts/*.md)를 확인하세요.</div>';
           }
           html += "</div>";
+        } else if (block.type === "heading") {
+          var headingText = savedEdits && savedEdits[i + ":h"] != null ? savedEdits[i + ":h"] : block.heading;
+          html += '<div class="body-block heading-block editable" data-block-index="' + i + '" data-field="h">' + escapeHtmlJs(headingText) + "</div>";
+          if (block.body) {
+            var headingBody = savedEdits && savedEdits[i + ":b"] != null ? savedEdits[i + ":b"] : block.body;
+            html += '<div class="body-block text-block editable" data-block-index="' + i + '" data-field="b">' + escapeHtmlJs(headingBody) + "</div>";
+          }
         } else {
           var text = savedEdits && savedEdits[i] != null ? savedEdits[i] : block.content;
-          html += '<div class="body-block text-block" data-block-index="' + i + '">' + escapeHtmlJs(text) + "</div>";
+          html += '<div class="body-block text-block editable" data-block-index="' + i + '">' + escapeHtmlJs(text) + "</div>";
         }
       });
       html += "</div>";
@@ -296,10 +304,127 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
     function currentBlockTexts() {
       var texts = {};
-      document.querySelectorAll(".text-block").forEach(function (el) {
-        texts[el.dataset.blockIndex] = el.innerText;
+      document.querySelectorAll(".editable").forEach(function (el) {
+        var key = el.dataset.blockIndex + (el.dataset.field ? ":" + el.dataset.field : "");
+        texts[key] = el.innerText;
       });
       return texts;
+    }
+
+    function findEditable(i, field) {
+      var sel = '.editable[data-block-index="' + i + '"]';
+      sel += field ? '[data-field="' + field + '"]' : ':not([data-field])';
+      return document.querySelector(sel);
+    }
+
+    function isListLine(line) { return /^\\s*[-*]\\s+/.test(line); }
+    function stripListMarker(line) { return line.replace(/^\\s*[-*]\\s+/, ""); }
+
+    // 굵게/이탤릭/링크 표기를 실제 태그로 바꾼다 - convertArticleToHtml.ts와 같은 규칙.
+    function inlineHtml(text) {
+      return escapeHtmlJs(text)
+        .replace(/\\*\\*(.+?)\\*\\*/g, "<b>$1</b>")
+        .replace(/\\*(.+?)\\*/g, "<i>$1</i>")
+        .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, '<a href="$2">$1</a>');
+    }
+
+    function linesToHtml(lines) {
+      if (lines.length > 0 && lines.every(isListLine)) {
+        return "<ul>" + lines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + "</ul>";
+      }
+      return "<p>" + lines.map(inlineHtml).join("<br>") + "</p>";
+    }
+
+    /** 블록 하나(수정 중이면 편집된 값)를 rich HTML로. 이미지 카드는 복사 대상에서 뺀다. */
+    function blockHtml(block, i) {
+      if (block.type === "image") return "";
+      if (block.type === "heading") {
+        var hEl = findEditable(i, "h"), bEl = findEditable(i, "b");
+        var headingText = (hEl ? hEl.innerText : block.heading).trim();
+        var bodyLines = (bEl ? bEl.innerText : block.body || "").split("\\n").map(function (l) { return l.trim(); }).filter(Boolean);
+        if (bodyLines.length === 0) return "<p><b>" + inlineHtml(headingText) + "</b></p>";
+        if (bodyLines.every(isListLine)) {
+          return (
+            '<p style="margin-bottom:0"><b>' + inlineHtml(headingText) + "</b></p>" +
+            '<ul style="margin-top:0">' + bodyLines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + "</ul>"
+          );
+        }
+        return "<p><b>" + inlineHtml(headingText) + "</b><br>" + bodyLines.map(inlineHtml).join("<br>") + "</p>";
+      }
+      var el = findEditable(i, null);
+      var text = (el ? el.innerText : block.content).trim();
+      return linesToHtml(text.split("\\n").map(function (l) { return l.trim(); }).filter(Boolean));
+    }
+
+    /** 블록 하나를 plain text로(이미지 제외). 소제목-문단은 줄바꿈 1개, 블록 사이는 2개(writer.md §6). */
+    function blockPlainText(block, i) {
+      if (block.type === "image") return null;
+      if (block.type === "heading") {
+        var hEl = findEditable(i, "h"), bEl = findEditable(i, "b");
+        var headingText = (hEl ? hEl.innerText : block.heading).trim();
+        var bodyText = (bEl ? bEl.innerText : block.body || "").trim();
+        return bodyText ? headingText + "\\n" + bodyText : headingText;
+      }
+      var el = findEditable(i, null);
+      return (el ? el.innerText : block.content).trim();
+    }
+
+    function collectRichHtml(ch) {
+      var parts = [];
+      ch.blocks.forEach(function (block, i) {
+        var html = blockHtml(block, i);
+        if (html) parts.push(html);
+      });
+      return parts.join("\\n");
+    }
+
+    function collectPlainText(ch) {
+      var parts = [];
+      ch.blocks.forEach(function (block, i) {
+        var text = blockPlainText(block, i);
+        if (text) parts.push(text);
+      });
+      return parts.join("\\n\\n");
+    }
+
+    /** rich HTML을 text/html + text/plain 둘 다로 복사한다. file:// 등에서 Clipboard API가 막히면
+     *  contenteditable에 선택 영역을 만들어 execCommand("copy")로 폴백, 그마저 안 되면 plain text만. */
+    function copyRich(html, text) {
+      if (navigator.clipboard && window.ClipboardItem) {
+        try {
+          var item = new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([text], { type: "text/plain" }),
+          });
+          navigator.clipboard.write([item]).then(
+            function () { toast("복사했습니다(서식 포함)"); },
+            function () { copyRichFallback(html, text); }
+          );
+          return;
+        } catch (e) { /* fall through */ }
+      }
+      copyRichFallback(html, text);
+    }
+
+    function copyRichFallback(html, text) {
+      try {
+        var container = document.createElement("div");
+        container.setAttribute("contenteditable", "true");
+        container.style.position = "fixed";
+        container.style.left = "-9999px";
+        container.innerHTML = html;
+        document.body.appendChild(container);
+        var range = document.createRange();
+        range.selectNodeContents(container);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        var ok = document.execCommand("copy");
+        sel.removeAllRanges();
+        document.body.removeChild(container);
+        if (ok) { toast("복사했습니다(서식 포함)"); return; }
+      } catch (e) { /* fall through to plain text */ }
+      copyText(text);
     }
 
     function wireChannelEvents(topic, ch) {
@@ -315,7 +440,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         editing = !editing;
         editToggle.classList.toggle("active", editing);
         editToggle.textContent = editing ? "✅ 편집 종료" : "✏️ 수정";
-        document.querySelectorAll(".text-block").forEach(function (el) {
+        document.querySelectorAll(".editable").forEach(function (el) {
           el.setAttribute("contenteditable", editing ? "true" : "false");
         });
         if (!editing) {
@@ -334,9 +459,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       }
 
       document.getElementById("copy-body").addEventListener("click", function () {
-        var parts = [];
-        document.querySelectorAll(".text-block").forEach(function (el) { parts.push(el.innerText.trim()); });
-        copyText(parts.filter(Boolean).join("\\n\\n"));
+        copyRich(collectRichHtml(ch), collectPlainText(ch));
       });
     }
 

@@ -4,7 +4,7 @@
 // 요청하면서 API 키(OPENAI_API_KEY)를 직접 제공해, 생성부터 삽입까지 전 과정을 자동화한다.
 //
 // 왜 여러 지점에 나눠 넣는가: 대표 이미지 1장만으로는 "이미지가 첨부된 원고"라는 요청에 못 미친다.
-// 본문 섹션(## 소제목)에 맞춰 장면을 다르게 기획해 섹션마다 다른 이미지를 넣는다.
+// 본문 섹션(**소제목** 볼드 한 줄, writer.md §6)에 맞춰 장면을 다르게 기획해 섹션마다 다른 이미지를 넣는다.
 //
 // best-effort인 이유: 이미지 생성/업로드가 실패해도 원고 자체(텍스트)는 이미 완성돼 있다. 이미지
 // 하나가 실패했다고 원고 전체를 버리면 안 된다 - 실패한 지점은 그냥 이미지 없이 넘어가고,
@@ -23,14 +23,16 @@ export const DEFAULT_MAX_IMAGES = 3;
 export type ArticleImageInsertionPoint = {
   /** 사람이 읽을 위치 설명(로그·실패 메시지용). */
   label: string;
-  /** null이면 도입부(첫 문단) 바로 뒤에 넣는다. 그 외에는 정확히 일치하는 "## 제목" 블록 뒤에 넣는다. */
+  /** null이면 도입부(첫 문단) 바로 뒤에 넣는다. 그 외에는 정확히 일치하는 "**제목**" 볼드 블록 뒤에 넣는다. */
   insertAfterHeading: string | null;
 };
 
+const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
+
 /**
  * 본문에서 이미지를 넣을 지점을 고른다. 첫 지점은 항상 도입부(대표 이미지)이고, 나머지는
- * "## " 소제목 중 '참고 자료'를 제외한 것에서 앞쪽부터 간격을 두고 고른다 - 뒤로 갈수록 다음
- * 소제목이 없을 수 있으므로 실제로 찾은 개수만큼만 돌려준다(요청한 개수를 못 채워도 실패가 아니다).
+ * `**소제목**` 볼드 한 줄 중 '참고 자료'를 제외한 것에서 앞쪽부터 간격을 두고 고른다 - 뒤로 갈수록
+ * 다음 소제목이 없을 수 있으므로 실제로 찾은 개수만큼만 돌려준다(요청한 개수를 못 채워도 실패가 아니다).
  */
 export function pickInsertionPoints(body: string, maxImages: number): ArticleImageInsertionPoint[] {
   if (maxImages <= 0) return [];
@@ -40,8 +42,8 @@ export function pickInsertionPoints(body: string, maxImages: number): ArticleIma
 
   const headings = body
     .split("\n")
-    .filter((line) => /^##\s+/.test(line.trim()))
     .map((line) => line.trim())
+    .filter((line) => HEADING_LINE_RE.test(line))
     .filter((line) => !/참고\s*자료/.test(line));
 
   const remaining = maxImages - 1;
@@ -49,13 +51,17 @@ export function pickInsertionPoints(body: string, maxImages: number): ArticleIma
   // 이미지가 어울리지 않는 경우가 많고, 앞쪽 섹션이 대개 핵심 정보를 담고 있다.
   const chosenHeadings = headings.slice(0, remaining);
   for (const heading of chosenHeadings) {
-    points.push({ label: heading.replace(/^##\s+/, ""), insertAfterHeading: heading });
+    points.push({ label: heading.replace(HEADING_LINE_RE, "$1"), insertAfterHeading: heading });
   }
 
   return points;
 }
 
-/** 지점 뒤에 이미지 마크다운을 끼워 넣는다. 문단(빈 줄 2개) 단위로 나눠 다루므로 헤더 텍스트가 정확히 일치해야 한다. */
+/**
+ * 지점 뒤에 이미지 마크다운을 끼워 넣는다. 문단(빈 줄 2개) 단위로 나눠 다루는데, 소제목은 이제
+ * 그 블록의 첫 줄일 뿐 블록 전체가 아니므로(writer.md §6 - 소제목 바로 다음 줄에 문단이 붙는다)
+ * 블록 전체가 아니라 **첫 줄**이 헤더와 일치하는지로 찾는다.
+ */
 function insertImageMarkdown(body: string, point: ArticleImageInsertionPoint, imageMarkdown: string): string {
   const blocks = body.split(/\n{2,}/);
 
@@ -65,7 +71,7 @@ function insertImageMarkdown(body: string, point: ArticleImageInsertionPoint, im
     return blocks.join("\n\n");
   }
 
-  const index = blocks.findIndex((block) => block.trim() === point.insertAfterHeading);
+  const index = blocks.findIndex((block) => block.split("\n")[0]?.trim() === point.insertAfterHeading);
   if (index === -1) return body; // 못 찾으면 원본 그대로 - 위치를 못 찾았다고 이미지를 억지로 붙이지 않는다.
 
   blocks.splice(index + 1, 0, imageMarkdown);

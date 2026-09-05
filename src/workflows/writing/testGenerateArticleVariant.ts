@@ -13,27 +13,23 @@ const SAMPLE_OUTPUT = `
 ### SLUG
 Geunro-Jangryeogeum 2026 Payment!! Guide
 ### TAGS
-근로장려금, 지급일, 2026, 신청방법, 국세청
+근로장려금, 지급일, 2026, 신청방법, 국세청, 홈택스, 정기신청, 반기신청, 소득기준, 지급액, 모의계산
 ### BODY
-## 근로장려금 지급일은 언제인가요?
-
-근로장려금은 **9월 말** 지급됩니다. 국세청이 정기 신청분에 대해 심사를 마치고 순차적으로
+**근로장려금 지급일은 언제인가요?**
+근로장려금은 9월 말 지급됩니다. 국세청이 정기 신청분에 대해 심사를 마치고 순차적으로
 계좌에 입금하며, 신청 시점과 계좌 정보 등록 여부에 따라 실제 입금일이 며칠 차이 날 수 있습니다.
 지급 대상자에게는 안내문이 먼저 발송되므로, 안내문을 받은 뒤 홈택스에서 심사 결과를 확인하는
 것이 가장 정확합니다.
 
-## 얼마를 받을 수 있나요?
-
+**얼마를 받을 수 있나요?**
 가구 유형과 총소득에 따라 지급액이 달라집니다. 단독 가구, 홑벌이 가구, 맞벌이 가구로 나뉘고
 각 구간의 소득 상한과 최대 지급액이 다릅니다. 자세한 계산은 홈택스 모의계산을 이용하면 됩니다.
 
-## 자주 묻는 질문
-
-**Q. 지급일에 안 들어왔어요.** 계좌 정보가 등록되지 않았거나 심사가 지연된 경우입니다.
+**자주 묻는 질문**
+Q. 지급일에 안 들어왔어요. 계좌 정보가 등록되지 않았거나 심사가 지연된 경우입니다.
 홈택스에서 심사 상태를 확인하세요.
 
-## 요약
-
+**요약**
 핵심은 9월 말 순차 지급, 가구 유형별 지급액 차이, 홈택스에서 심사 결과 확인.
 `;
 
@@ -45,8 +41,8 @@ async function main(): Promise<void> {
   assert(parsed.title === "근로장려금 지급일 완벽 정리: 언제 얼마나 들어올까", `title 파싱 실패 (${parsed.title})`);
   assert(parsed.searchDescription?.startsWith("2026년 근로장려금"), "searchDescription 파싱 실패");
   assert(parsed.slug === "geunro-jangryeogeum-2026-payment-guide", `슬러그 정규화 실패 (${parsed.slug})`);
-  assert(parsed.tags.length === 5 && parsed.tags[0] === "근로장려금", `태그 파싱 실패 (${JSON.stringify(parsed.tags)})`);
-  assert(parsed.body.includes("## 자주 묻는 질문") && parsed.body.includes("## 요약"), "body에 FAQ/요약 포함 실패");
+  assert(parsed.tags.length === 11 && parsed.tags[0] === "근로장려금", `태그 파싱 실패 (${JSON.stringify(parsed.tags)})`);
+  assert(parsed.body.includes("**자주 묻는 질문**") && parsed.body.includes("**요약**"), "body에 FAQ/요약 포함 실패");
   console.log("✅ 파서: 마커 추출 + blogspot 슬러그 kebab 정규화");
 
   // 2) tistory는 슬러그가 null
@@ -95,6 +91,24 @@ async function main(): Promise<void> {
   });
   assert(short.status === "failed" && short.error.includes("짧"), `짧은 본문은 failed여야 한다 (${JSON.stringify(short)})`);
   console.log("✅ 본문 과소 -> failed");
+
+  // 6) 모델이 마커 형식 대신 대화체로 되물으면(근거 부족 등) failed여야 한다(2026-09-06 실측:
+  // 근거 얇은 job에서 모델이 "기준 원고에 정보가 부족합니다"라고만 답해, 마커가 하나도 없는데도
+  // 300자를 넘겨 과거엔 성공으로 잘못 처리됐다).
+  const conversational = await generateArticleVariant({
+    channel: "tistory",
+    category: null,
+    baseTitle: "t",
+    baseBody: "b",
+    generate: async () => ({
+      ok: true,
+      output:
+        "기준 원고를 확인했는데 실제 내용이 거의 없습니다. 결말 등 핵심 정보가 전혀 없어 이대로는 배리에이션을 쓸 수 없습니다. 어떻게 진행할까요?".repeat(3),
+      durationMs: 5,
+    }),
+  });
+  assert(conversational.status === "failed" && conversational.error.includes("마커"), `마커 없는 대화체 응답은 failed여야 한다 (${JSON.stringify(conversational)})`);
+  console.log("✅ 마커 형식 없는 대화체 응답 -> failed(과거엔 성공으로 오판)");
 
   console.log("\n✅ 전체 테스트 통과");
 }

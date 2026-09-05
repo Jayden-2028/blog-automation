@@ -13,8 +13,9 @@
 // 들어갈 수 있다는 뜻이고, 그래도 "본문 내용 자체는 들어간다"는 최소 요구는 만족한다.
 //
 // 마크다운 부분집합은 markdownToTelegraphNodes.ts와 동일하다(buildArticlePrompt.ts가 강제하는
-// 형식) - ## 소제목 / **굵게** / *이탤릭* / [텍스트](URL) / - 목록 / ![alt](url) 이미지 /
-// 빈 줄 구분 문단.
+// 형식) - **소제목**(볼드 한 줄, 바로 다음 줄에 문단) / **굵게** / *이탤릭* / [텍스트](URL) /
+// - 목록 / ![alt](url) 이미지 / 문단 사이 빈 줄 1개, 이미지 마커 앞뒤 빈 줄 2개(writer.md §6·§8,
+// 2026-09-06).
 
 /** HTML 특수문자 이스케이프. 원고 텍스트를 그대로 태그 안에 넣기 전에 반드시 거친다. */
 function escapeHtml(text: string): string {
@@ -51,6 +52,10 @@ function inlineToHtml(text: string): string {
 
 /** "![alt](url)" 한 줄짜리 블록인지 확인한다. generateArticleImages.ts가 이 형식으로만 삽입한다. */
 const IMAGE_LINE_PATTERN = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
+const IMAGE_PLACEHOLDER_PATTERN = /^\[IMAGE:[^\]]*\]$/;
+const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
+/** 이미지(실제/placeholder) 블록 위아래를 다른 블록보다 넓게 띄운다(writer.md §7·§8, 2026-09-06). */
+const IMAGE_BLOCK_MARGIN = "margin:2em 0";
 
 /**
  * 본문에서 "![alt](url)" 이미지 블록만 제거한다(그 외 텍스트는 그대로 유지).
@@ -76,9 +81,19 @@ function stripListMarker(line: string): string {
   return line.replace(/^\s*[-*]\s+/, "");
 }
 
+/** 헤더가 아닌 나머지 줄을 목록/문단으로 판정한다(예: "**참고 자료**" 다음 줄이 "- " 목록인 경우). */
+function renderNonHeadingLines(lines: string[]): string {
+  if (lines.every(isListLine)) {
+    const items = lines.map((line) => `<li>${inlineToHtml(stripListMarker(line))}</li>`).join("");
+    return `<ul>${items}</ul>`;
+  }
+  return `<p>${lines.map((line) => inlineToHtml(line)).join("<br>")}</p>`;
+}
+
 /**
  * 원고 본문(마크다운 부분집합)을 SmartEditor 붙여넣기용 HTML 문자열로 변환한다.
- * 빈 줄로 문단을 나누고, "## "는 h3, 전부 "-"로 시작하면 ul, "![alt](url)" 단독 줄은 img로 만든다.
+ * 빈 줄로 문단을 나누고, 첫 줄이 "**볼드**" 단독이면 h3(+ 바로 붙는 문단/목록), 전부 "-"로
+ * 시작하면 ul, "![alt](url)" 단독 줄은 img로 만든다.
  */
 export function convertArticleToNaverHtml(markdown: string): string {
   const paragraphs = markdown.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
@@ -92,25 +107,31 @@ export function convertArticleToNaverHtml(markdown: string): string {
       const imageMatch = lines[0].match(IMAGE_LINE_PATTERN);
       if (imageMatch) {
         const [, alt, src] = imageMatch;
-        blocks.push(`<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`);
+        blocks.push(`<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" style="${IMAGE_BLOCK_MARGIN}">`);
+        continue;
+      }
+      if (IMAGE_PLACEHOLDER_PATTERN.test(lines[0])) {
+        blocks.push(`<p style="${IMAGE_BLOCK_MARGIN}">${escapeHtml(lines[0])}</p>`);
         continue;
       }
     }
 
-    if (lines.length === 1 && /^##+\s+/.test(lines[0])) {
-      const headerText = lines[0].replace(/^##+\s+/, "");
-      blocks.push(`<h3>${inlineToHtml(headerText)}</h3>`);
+    const headingMatch = lines[0].match(HEADING_LINE_RE);
+    if (headingMatch) {
+      const rest = lines.slice(1);
+      if (rest.length === 0) {
+        blocks.push(`<p><b>${inlineToHtml(headingMatch[1])}</b></p>`);
+      } else if (rest.every(isListLine)) {
+        blocks.push(`<p style="margin-bottom:0"><b>${inlineToHtml(headingMatch[1])}</b></p>`);
+        blocks.push(renderNonHeadingLines(rest).replace("<ul>", '<ul style="margin-top:0">'));
+      } else {
+        const restHtml = rest.map((line) => inlineToHtml(line)).join("<br>");
+        blocks.push(`<p><b>${inlineToHtml(headingMatch[1])}</b><br>${restHtml}</p>`);
+      }
       continue;
     }
 
-    if (lines.every(isListLine)) {
-      const items = lines.map((line) => `<li>${inlineToHtml(stripListMarker(line))}</li>`).join("");
-      blocks.push(`<ul>${items}</ul>`);
-      continue;
-    }
-
-    const paragraphHtml = lines.map((line) => inlineToHtml(line)).join("<br>");
-    blocks.push(`<p>${paragraphHtml}</p>`);
+    blocks.push(renderNonHeadingLines(lines));
   }
 
   return blocks.join("\n");

@@ -150,6 +150,19 @@ function main(): void {
   assert(noRefs.some((c) => c.message.includes("참고 자료") && c.severity === "error"), "출처 없음은 error여야 한다");
   console.log("✅ 품질: 참고 자료 없음 -> error");
 
+  // 11-1) 참고 자료 헤더가 새 포맷(볼드, "## " 아님)이어도 인정해야 한다(2026-09-06, writer.md §6).
+  const boldRefs = checkQuality({
+    title: "경복궁 별빛야행 안내",
+    body: makeCleanBody().replace("## 참고 자료", "**참고 자료**"),
+    hashtags: Array.from({ length: 10 }, (_, i) => `#태그${i}`),
+    isMedical: false,
+  });
+  assert(
+    !boldRefs.some((c) => c.message.includes("참고 자료")),
+    `볼드 헤더("**참고 자료**")도 참고 자료 섹션으로 인정해야 한다 (실제: ${JSON.stringify(boldRefs)})`
+  );
+  console.log("✅ 품질: 참고 자료 헤더가 볼드여도 인정");
+
   // 12) 분량 초과/미달을 경고한다(아이폰18 원고가 3,304자로 실제로 걸린 항목).
   const tooLong = checkQuality({
     title: "제목",

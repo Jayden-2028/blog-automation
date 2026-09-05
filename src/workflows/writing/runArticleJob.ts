@@ -340,8 +340,9 @@ async function runResearchStageInner(
 }
 
 /**
- * parseDraftFile이 뽑은 "사용한 출처" 주석을 눈에 보이는 "## 참고 자료" 마크다운 섹션으로 되살린다.
+ * parseDraftFile이 뽑은 "사용한 출처" 주석을 눈에 보이는 "**참고 자료**" 섹션으로 되살린다.
  * 주석 각 줄은 "1. [등급] 제목 (날짜) — https://..." 형태 - URL과 제목을 뽑아 "- [제목](URL)"로.
+ * 헤더가 `##`가 아니라 볼드인 이유는 writer.md §6(2026-09-06 갱신) 참고.
  */
 function buildReferencesSection(notes: ReadonlyArray<{ label: string; body: string }>): string | null {
   const sourcesNote = notes.find((n) => /사용한\s*출처|참고\s*자료|출처\s*목록/.test(n.label));
@@ -365,7 +366,8 @@ function buildReferencesSection(notes: ReadonlyArray<{ label: string; body: stri
     items.push(`- [${label}](${url})`);
   }
   if (items.length === 0) return null;
-  return ["## 참고 자료", "", ...items].join("\n");
+  // 헤더 바로 다음 줄에 빈 줄 없이 목록이 붙는다(writer.md §6, 2026-09-06) - "소제목 다음 줄은 간격 없음".
+  return ["**참고 자료**", ...items].join("\n");
 }
 
 /** 자유 텍스트 날짜 표기를 timestamptz에 넣을 수 있는 ISO 문자열로 좁힌다. 못 하면 null. */

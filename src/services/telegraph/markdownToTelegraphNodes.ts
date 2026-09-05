@@ -7,7 +7,7 @@
 //
 // Telegraph가 허용하는 태그: a, aside, b, blockquote, br, code, em, figcaption, figure,
 // h3, h4, hr, i, iframe, img, li, ol, p, pre, s, strong, u, ul, video. h1/h2는 없다 -
-// 우리 원고의 "## 소제목"은 h3로 매핑한다.
+// 우리 원고의 "**소제목**" 볼드 한 줄(writer.md §6, 2026-09-06)은 h3로 매핑한다.
 //
 // 이미지(![alt](url)) 지원 이유(2026-08-28, 사용자 요청): generateArticleImages.ts가 AI 생성
 // 이미지를 본문에 마크다운 이미지 문법으로 끼워 넣는다. <figure><img/><figcaption></figure>로
@@ -52,6 +52,7 @@ function parseInline(text: string): TelegraphNode[] {
 
 /** "![alt](url)" 한 줄짜리 블록인지 확인한다. generateArticleImages.ts가 이 형식으로만 삽입한다. */
 const IMAGE_LINE_PATTERN = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
+const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
 
 /** 연속된 "- " 목록 줄들을 하나의 ul 블록으로 묶는다. */
 function isListLine(line: string): boolean {
@@ -62,9 +63,23 @@ function stripListMarker(line: string): string {
   return line.replace(/^\s*[-*]\s+/, "");
 }
 
+/** 목록/일반 문단만 판정한다(헤더 판정은 호출부가 먼저 걷어낸다). */
+function classifyNonHeadingLines(lines: string[]): TelegraphNode {
+  if (lines.every(isListLine)) {
+    return { tag: "ul", children: lines.map((line) => ({ tag: "li", children: parseInline(stripListMarker(line)) })) };
+  }
+  const children: TelegraphNode[] = [];
+  lines.forEach((line, index) => {
+    if (index > 0) children.push({ tag: "br" });
+    children.push(...parseInline(line));
+  });
+  return { tag: "p", children };
+}
+
 /**
  * 원고 본문(마크다운 부분집합)을 Telegraph Node[]로 변환한다.
- * 빈 줄로 문단을 나누고, 각 문단이 "## "로 시작하면 h3, 전부 "-"로 시작하는 줄이면 ul, 그 외는 p로 만든다.
+ * 빈 줄로 문단을 나누고, 각 문단의 첫 줄이 "**볼드**" 단독이면 h3(+ 바로 이어지는 나머지 줄은 목록/
+ * 문단으로 마저 판정), 전부 "-"로 시작하는 줄이면 ul, 그 외는 p로 만든다.
  */
 export function markdownToTelegraphNodes(markdown: string): TelegraphNode[] {
   const paragraphs = markdown.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
@@ -86,29 +101,17 @@ export function markdownToTelegraphNodes(markdown: string): TelegraphNode[] {
       }
     }
 
-    // 헤더: 블록 전체가 "## " 한 줄이라고 가정한다(프롬프트가 그렇게 쓰도록 강제한다).
-    if (lines.length === 1 && /^##+\s+/.test(lines[0])) {
-      const headerText = lines[0].replace(/^##+\s+/, "");
-      nodes.push({ tag: "h3", children: parseInline(headerText) });
+    // 헤더: 블록의 첫 줄이 "**소제목**" 볼드 단독이면 h3로 만들고(writer.md §6, 2026-09-06),
+    // 나머지 줄(그 소제목에 바로 붙는 내용, 빈 줄 없음)은 목록/문단 판정을 다시 거쳐 이어 붙인다
+    // (예: "**참고 자료**" 다음 줄에 "- " 목록이 바로 붙는 경우 p가 아니라 ul이어야 한다).
+    if (HEADING_LINE_RE.test(lines[0])) {
+      nodes.push({ tag: "h3", children: parseInline(lines[0].replace(HEADING_LINE_RE, "$1")) });
+      const rest = lines.slice(1);
+      if (rest.length > 0) nodes.push(classifyNonHeadingLines(rest));
       continue;
     }
 
-    // 목록: 블록의 모든 줄이 "- "로 시작하면 ul로 묶는다.
-    if (lines.every(isListLine)) {
-      nodes.push({
-        tag: "ul",
-        children: lines.map((line) => ({ tag: "li", children: parseInline(stripListMarker(line)) })),
-      });
-      continue;
-    }
-
-    // 일반 문단: 블록 안의 줄바꿈은 <br>로 보존한다(예: FAQ 형식의 질문/답변이 한 블록에 붙어 있는 경우).
-    const paragraphChildren: TelegraphNode[] = [];
-    lines.forEach((line, index) => {
-      if (index > 0) paragraphChildren.push({ tag: "br" });
-      paragraphChildren.push(...parseInline(line));
-    });
-    nodes.push({ tag: "p", children: paragraphChildren });
+    nodes.push(classifyNonHeadingLines(lines));
   }
 
   return nodes;

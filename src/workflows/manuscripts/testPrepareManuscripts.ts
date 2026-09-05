@@ -155,6 +155,52 @@ async function main(): Promise<void> {
   assert(r4.status === "failed" && r4.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
   console.log("✅ 배리에이션 생성 실패 -> job 실패로 전파");
 
+  // 4-1) 네이버 채널은 FAQ·참고자료 섹션을 뺀다(2026-09-06) - 티스토리·블로거는 그대로 유지.
+  const withFaqAndRefs = [
+    "도입부 문단입니다.",
+    "**자주 묻는 질문**",
+    "Q. 첫 질문인가요?",
+    "A. 첫 답변입니다.",
+    "Q. 둘째 질문인가요?",
+    "A. 둘째 답변입니다.",
+    "마무리 문단입니다.",
+    "**참고 자료**",
+    "- [출처1](https://a.com)",
+  ].join("\n\n");
+  const r4b = await prepareChannelManuscripts(job("a"), {
+    loadArticles: async () => [baseArticle(withFaqAndRefs)],
+    generateVariant: async (input) => okVariant(input.channel)(),
+    createVariantArticle: async ({ channel }) => variantArticle(99, channel),
+    writeManuscriptFile: async () => {},
+  });
+  assert(r4b.status === "success", "FAQ/참고자료 케이스 실패");
+  if (r4b.status === "success") {
+    const naver = r4b.topic.channels.find((c) => c.channel === "naver")!;
+    assert(!naver.body.includes("자주 묻는 질문") && !naver.body.includes("참고 자료"), "네이버 body에 FAQ/참고자료가 남아있으면 안 된다");
+    assert(naver.body.includes("도입부 문단입니다.") && naver.body.includes("마무리 문단입니다."), "네이버 본문 중 FAQ/참고자료가 아닌 부분은 유지돼야 한다");
+  }
+  console.log("✅ 네이버 채널만 FAQ·참고자료 제외(티스토리·블로거는 자기 body 그대로)");
+
+  // 4-2) .md 파일 쓰기 직전에만 [IMAGE PROMPT:]를 마커 바로 아래 재삽입한다(entry.body/manifest는 그대로).
+  const bodyWithImage = "본문 문단.\n\n[IMAGE: 설명 — 웹 검색]\n\n다음 문단.";
+  const writes4c: Record<string, string> = {};
+  const r4c = await prepareChannelManuscripts(job("a", { imagePrompts: ["재삽입될 프롬프트"] }), {
+    loadArticles: async () => [baseArticle(bodyWithImage)],
+    generateVariant: async (input) => okVariant(input.channel)(),
+    createVariantArticle: async ({ channel }) => variantArticle(99, channel),
+    writeManuscriptFile: async (path, content) => {
+      writes4c[path] = content;
+    },
+  });
+  assert(r4c.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
+  if (r4c.status === "success") {
+    const naverEntry = r4c.topic.channels.find((c) => c.channel === "naver")!;
+    assert(!naverEntry.body.includes("IMAGE PROMPT"), "manifest/entry.body에는 프롬프트를 재삽입하면 안 된다");
+    const naverFile = Object.entries(writes4c).find(([path]) => path.endsWith("naver.md"))?.[1] ?? "";
+    assert(naverFile.includes("[IMAGE PROMPT: 재삽입될 프롬프트]"), `.md 파일에는 마커 바로 아래 프롬프트가 재삽입돼야 한다 (${naverFile})`);
+  }
+  console.log("✅ .md 파일에만 이미지 프롬프트 재삽입, entry.body/manifest는 그대로");
+
   // 5) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다 + 페이지 갱신 시 배포 호출
   const marks: Array<{ id: string; patch: Record<string, unknown> }> = [];
   let manifestSaved: ManuscriptManifest | null = null;

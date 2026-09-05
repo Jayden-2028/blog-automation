@@ -11,14 +11,10 @@ function assert(condition: unknown, message: string): asserts condition {
 
 const SAMPLE_BODY = [
   "도입부 문단입니다. 이 글에서 다룰 내용을 짧게 소개합니다.",
-  "## 첫 번째 섹션",
-  "첫 번째 섹션의 본문입니다.",
-  "## 두 번째 섹션",
-  "두 번째 섹션의 본문입니다.",
-  "## 세 번째 섹션",
-  "세 번째 섹션의 본문입니다.",
-  "## 참고 자료",
-  "- [출처](https://example.com)",
+  "**첫 번째 섹션**\n첫 번째 섹션의 본문입니다.",
+  "**두 번째 섹션**\n두 번째 섹션의 본문입니다.",
+  "**세 번째 섹션**\n세 번째 섹션의 본문입니다.",
+  "**참고 자료**\n- [출처](https://example.com)",
 ].join("\n\n");
 
 function makeInput(overrides: Partial<Parameters<typeof generateArticleImages>[0]> = {}) {
@@ -52,10 +48,10 @@ async function main(): Promise<void> {
   const points3 = pickInsertionPoints(SAMPLE_BODY, 3);
   assert(points3.length === 3, `3장 요청 시 3개 지점이어야 한다 (실제: ${points3.length})`);
   assert(points3[0].insertAfterHeading === null, "첫 지점은 도입부(null)여야 한다");
-  assert(points3[1].insertAfterHeading === "## 첫 번째 섹션", `둘째 지점 실패 (실제: ${points3[1].insertAfterHeading})`);
-  assert(points3[2].insertAfterHeading === "## 두 번째 섹션", `셋째 지점 실패 (실제: ${points3[2].insertAfterHeading})`);
+  assert(points3[1].insertAfterHeading === "**첫 번째 섹션**", `둘째 지점 실패 (실제: ${points3[1].insertAfterHeading})`);
+  assert(points3[2].insertAfterHeading === "**두 번째 섹션**", `셋째 지점 실패 (실제: ${points3[2].insertAfterHeading})`);
   assert(
-    points3.every((p) => p.insertAfterHeading !== "## 참고 자료"),
+    points3.every((p) => p.insertAfterHeading !== "**참고 자료**"),
     "참고 자료 섹션은 삽입 지점에서 제외돼야 한다"
   );
   console.log("✅ 삽입 지점: 도입부 + 앞쪽 소제목 순, 참고 자료 제외");
@@ -83,12 +79,13 @@ async function main(): Promise<void> {
   assert(result.body.includes("job-1/3.png"), "셋째 이미지가 본문에 삽입돼야 한다");
   console.log("✅ 성공한 이미지 3장이 본문에 마크다운으로 삽입됨");
 
-  // 5) 삽입 위치 검증: 도입부 이미지는 첫 문단 바로 뒤, 섹션 이미지는 해당 "## " 바로 뒤에 와야 한다.
+  // 5) 삽입 위치 검증: 도입부 이미지는 첫 문단 바로 뒤, 섹션 이미지는 해당 소제목 블록 바로 뒤에 와야 한다.
   const blocks = result.body.split(/\n{2,}/);
   assert(blocks[0] === "도입부 문단입니다. 이 글에서 다룰 내용을 짧게 소개합니다.", "0번째 블록은 원래 도입부여야 한다");
   assert(blocks[1].startsWith("!["), "1번째 블록(도입부 뒤)이 이미지여야 한다");
-  const firstHeadingIdx = blocks.indexOf("## 첫 번째 섹션");
-  assert(blocks[firstHeadingIdx + 1].startsWith("!["), "'## 첫 번째 섹션' 바로 뒤가 이미지여야 한다");
+  const firstHeadingIdx = blocks.findIndex((b) => b.startsWith("**첫 번째 섹션**"));
+  assert(firstHeadingIdx !== -1, "'**첫 번째 섹션**' 블록을 찾아야 한다");
+  assert(blocks[firstHeadingIdx + 1].startsWith("!["), "'**첫 번째 섹션**' 바로 뒤가 이미지여야 한다");
   console.log("✅ 이미지가 정확한 위치(도입부 뒤 / 각 소제목 뒤)에 삽입됨");
 
   // 6) copyright_status는 provider를 반영한 "ai-generated:<provider>" 형식이어야 한다.

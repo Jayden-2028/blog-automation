@@ -54,6 +54,74 @@ function kstDateString(date: Date): string {
   return date.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
+const IMAGE_LINE_RE = /^\[IMAGE:\s*([\s\S]*?)\]\s*$/;
+const FAQ_HEADING_TEXT = "자주 묻는 질문";
+const REFERENCES_HEADING_TEXT = "참고 자료";
+
+/** "**소제목**"(신규)과 "## 소제목"(구식, 과거 원고 호환) 둘 다에서 소제목 텍스트를 뽑는다. */
+function headingTextOf(firstLine: string): string | null {
+  const bold = firstLine.match(/^\*\*(.+)\*\*$/);
+  if (bold) return bold[1].trim();
+  const legacy = firstLine.match(/^#{1,3}\s*(.+)$/);
+  if (legacy) return legacy[1].trim();
+  return null;
+}
+
+/**
+ * 네이버 채널 표시용으로 FAQ·참고자료 섹션을 뺀다(2026-09-06 사용자 요청 - "네이버 원고에서는
+ * 자주 묻는 질문과 참고자료를 뺄 것"). writer.md/기준 원고 자체의 FAQ·참고자료 생성 규칙(AEO/SEO
+ * 목적)은 그대로 두고, 이 함수는 매니페스트에 담기 직전 표시 단계에서만 걷어낸다 - 티스토리·블로거
+ * 배리에이션은 자기 FAQ를 새로 쓰므로 영향 없다(baseArticle.content 자체는 안 건드림).
+ */
+function stripFaqAndReferencesForNaver(body: string): string {
+  const blocks = body.split(/\n{2,}/);
+  const kept: string[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const block = blocks[i];
+    const firstLine = block.split("\n")[0]?.trim() ?? "";
+    const heading = headingTextOf(firstLine);
+
+    if (heading === FAQ_HEADING_TEXT) {
+      i += 1;
+      // 소제목 뒤 첫 문답은 같은 블록에 붙어 이미 건너뛰었다 - 이어지는 문답 블록(Q.로 시작)도 마저 건너뛴다.
+      while (i < blocks.length && /^Q[.．]/.test(blocks[i].trim())) i += 1;
+      continue;
+    }
+    if (heading === REFERENCES_HEADING_TEXT) {
+      i += 1; // 헤더+목록이 한 블록이라(runArticleJob.ts) 이 블록 하나만 건너뛰면 된다.
+      continue;
+    }
+    kept.push(block);
+    i += 1;
+  }
+  return kept.join("\n\n").trim();
+}
+
+/**
+ * `.md` 파일에 쓰기 직전에만 [IMAGE: 설명] 바로 다음 줄에 [IMAGE PROMPT: ...]를 등장 순서로
+ * 재삽입한다(writer.md §8 원래 형식 복원 - parseDraftFile.ts가 DB 저장 전에 빼낸 것을 되살림).
+ * manifest/화면용 entry.body는 건드리지 않는다(parseManuscriptBlocks가 렌더 시점에 다시 짝짓는다) -
+ * 재삽입한 결과를 다시 파싱하면 프롬프트 줄이 텍스트로 섞이므로 라운드트립하지 않는다.
+ * 마커 개수와 imagePrompts 길이가 다르면 잘못 짝지어질 위험이 있어 그대로 둔다(안전).
+ */
+function reinsertImagePrompts(body: string, imagePrompts: string[]): string {
+  const lines = body.split("\n");
+  const markerCount = lines.filter((line) => IMAGE_LINE_RE.test(line.trim())).length;
+  if (markerCount === 0 || markerCount !== imagePrompts.length) return body;
+
+  const result: string[] = [];
+  let index = 0;
+  for (const line of lines) {
+    result.push(line);
+    if (IMAGE_LINE_RE.test(line.trim())) {
+      result.push(`[IMAGE PROMPT: ${imagePrompts[index]}]`);
+      index += 1;
+    }
+  }
+  return result.join("\n");
+}
+
 /**
  * job.metadata.imagePrompts는 parseDraftFile.ts가 본문에서 빼낸 "[IMAGE PROMPT: ...]" 지시를
  * 등장 순서대로 담은 배열이다(runArticleJob.ts). 기준 원고와 배리에이션 모두 같은 순서로
@@ -111,7 +179,7 @@ export async function prepareChannelManuscripts(
       searchDescription: null,
       slug: null,
       tags: [],
-      body: baseArticle.content ?? "",
+      body: stripFaqAndReferencesForNaver(baseArticle.content ?? ""),
       imagePrompts,
       filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword, "naver")),
     },
@@ -162,7 +230,7 @@ export async function prepareChannelManuscripts(
   for (const entry of channels) {
     await writeManuscriptFile(
       manuscriptFilePath(date, job.keyword, entry.channel),
-      frontMatterFile(entry)
+      frontMatterFile({ ...entry, body: reinsertImagePrompts(entry.body, entry.imagePrompts) })
     );
   }
 

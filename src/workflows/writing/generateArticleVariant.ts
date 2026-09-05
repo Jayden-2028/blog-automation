@@ -94,7 +94,10 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `## 절대 규칙 - 구조/형식`,
     `- 제목은 기준 원고 제목과 완전히 다른 표현으로. 핵심 키워드를 앞쪽에 둔다.`,
     `- 첫 문단 100자 안에 핵심 키워드를 넣는다.`,
-    `- 소제목(##)은 질문형/How-to형으로. 본문 끝에 "## 자주 묻는 질문"(3~5문답)과 "## 요약" 문단을 둔다.`,
+    `- 소제목은 writer.md §6 규격대로 "**소제목**" 볼드 한 줄이다(# 안 씀). 질문형/How-to형으로 짓는다.`,
+    `  소제목 앞에는 빈 줄 1개, 소제목 바로 다음 줄에는 빈 줄 없이 그 소제목의 첫 문단이 붙는다.`,
+    `  본문 끝에 "**자주 묻는 질문**"(3~5문답)과 "**요약**" 문단을 둔다.`,
+    `- [IMAGE: ...]/[IMAGE PROMPT: ...] 마커 쌍의 앞뒤는 다른 블록 사이(빈 줄 1개)보다 넓게 빈 줄 2개로 띄운다.`,
     `- 본문 안에서 개별 출처를 부르지 않는다("(출처: ...)", "한 블로그에 따르면" 금지). 참고 링크는`,
     `  기준 원고의 '참고 자료'를 그대로 옮긴다.`,
     `- 이미지: 기준 원고에 ![alt](url) 이미지가 있으면 같은 URL로 본문 흐름에 맞는 위치에 그대로`,
@@ -109,9 +112,9 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `(검색 설명 1줄, 155자 이내, 핵심 키워드 + 요점)`,
     slugRule,
     `${M.tags}`,
-    `(쉼표로 구분한 태그 5~10개)`,
+    `(쉼표로 구분한 태그 정확히 10개 이상)`,
     `${M.body}`,
-    `(마크다운 본문: ## 소제목 / **굵게** / - 목록 / [텍스트](URL) / ![alt](url) 이미지 / 빈 줄로 문단 구분)`,
+    `(마크다운 본문: **소제목**(볼드, 다음 줄에 바로 문단) / **굵게** / - 목록 / [텍스트](URL) / ![alt](url) 이미지 / 문단 사이 빈 줄 1개, 이미지 마커 앞뒤 빈 줄 2개)`,
     `본문은 '참고 자료' 목록으로 끝낸다. 그 뒤에 점검 결과·작업 노트·요구사항 준수 설명 같은`,
     `메타 텍스트를 절대 붙이지 않는다.`,
     ``,
@@ -152,11 +155,11 @@ export function parseVariantOutput(raw: string, channel: VariantChannel, fallbac
       : null;
 
   const tagsRaw = sliceBetween(raw, M.tags, after(M.tags));
+  // 티스토리 해시태그는 10개 이상 확보해 두는 게 목표라(2026-09-06) 상한을 자르지 않는다.
   const tags = tagsRaw
     .split(/[,\n]/)
     .map((t) => t.replace(/^#/, "").trim())
-    .filter(Boolean)
-    .slice(0, 10);
+    .filter(Boolean);
 
   const body = stripTrailingMeta(sliceBetween(raw, M.body, []) || raw.trim());
 
@@ -199,6 +202,18 @@ export async function generateArticleVariant(
   const result = await generate(buildPrompt(input));
   if (!result.ok) {
     return { status: "failed", error: result.error };
+  }
+
+  // 마커 형식을 지키지 않은 응답(예: "기준 원고에 정보가 부족합니다" 같은 대화체 회신)을 그대로
+  // 통과시키면 안 된다 - sliceBetween은 ### BODY를 못 찾으면 원문 전체를 본문으로 써버려서,
+  // 회신이 300자를 넘기면(실측: 근거 얇은 job에서 재현) 겉보기엔 "성공"인 채로 제목/태그/검색
+  // 설명이 전부 비고 본문에 대화체 문장이 섞인 원고가 나간다(2026-09-06 실측 발견).
+  const missingMarkers = Object.values(VARIANT_OUTPUT_MARKERS).filter((marker) => !result.output.includes(marker));
+  if (missingMarkers.length > 0) {
+    return {
+      status: "failed",
+      error: `모델이 출력 마커 형식을 따르지 않았습니다(누락: ${missingMarkers.join(", ")}) - 기준 원고 정보가 부족해 모델이 대화체로 되물었을 수 있습니다. 원문 시작: ${result.output.slice(0, 200)}`,
+    };
   }
 
   const variant = parseVariantOutput(result.output, input.channel, input.baseTitle);
