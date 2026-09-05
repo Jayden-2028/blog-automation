@@ -155,11 +155,16 @@ async function main(): Promise<void> {
   assert(r4.status === "failed" && r4.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
   console.log("✅ 배리에이션 생성 실패 -> job 실패로 전파");
 
-  // 5) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다
+  // 5) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다 + 페이지 갱신 시 배포 호출
   const marks: Array<{ id: string; patch: Record<string, unknown> }> = [];
   let manifestSaved: ManuscriptManifest | null = null;
   let pageHtml: string | null = null;
+  let deployCalled = false;
   const r5 = await prepareApprovedManuscripts({
+    deploy: async () => {
+      deployCalled = true;
+      return { status: "skipped", reason: "test" };
+    },
     loadApprovedJobs: async () => [job("ready", { channelManuscriptsReadyAt: "2026-09-01T00:00:00Z" }), job("pending")],
     prepareJob: async (j) =>
       j.id === "pending"
@@ -194,10 +199,16 @@ async function main(): Promise<void> {
   assert(marks.length === 1 && marks[0].id === "pending", "완료 표시(metadata)가 pending job에만 있어야 한다");
   assert(manifestSaved !== null && (manifestSaved as ManuscriptManifest).topics.length === 1, "manifest 저장 실패");
   assert(pageHtml !== null && (pageHtml as string).includes("테스트 키워드 pending"), "페이지에 주제가 반영돼야 한다");
-  console.log("✅ prepareApprovedManuscripts - 준비 완료 job 건너뛰기 + manifest/페이지 갱신");
+  assert(deployCalled, "페이지를 새로 썼으면 배포도 호출돼야 한다");
+  console.log("✅ prepareApprovedManuscripts - 준비 완료 job 건너뛰기 + manifest/페이지 갱신 + 배포 호출");
 
-  // 6) maxJobsPerRun 제한
+  // 6) maxJobsPerRun 제한 + 전부 실패하면 페이지 갱신도 배포도 안 함
+  let deployCalledOnAllFailure = false;
   const r6 = await prepareApprovedManuscripts({
+    deploy: async () => {
+      deployCalledOnAllFailure = true;
+      return { status: "skipped", reason: "test" };
+    },
     loadApprovedJobs: async () => [job("x"), job("y"), job("z")],
     prepareJob: async () => ({ status: "failed", reason: "테스트용 실패" }),
     markPrepared: async () => {},
@@ -207,7 +218,8 @@ async function main(): Promise<void> {
     maxJobsPerRun: 2,
   });
   assert(r6.length === 2, `maxJobsPerRun 제한 실패 (${r6.length})`);
-  console.log("✅ maxJobsPerRun 제한");
+  assert(!deployCalledOnAllFailure, "성공한 job이 없으면 페이지도 배포도 갱신하면 안 된다");
+  console.log("✅ maxJobsPerRun 제한 + 전부 실패 시 배포 미호출");
 
   console.log("\n✅ 전체 통과");
 }

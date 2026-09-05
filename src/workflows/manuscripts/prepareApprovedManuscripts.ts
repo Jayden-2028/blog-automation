@@ -12,6 +12,8 @@ import type { PrepareChannelManuscriptsResult } from "./prepareChannelManuscript
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
+import type { DeployManuscriptsPageResult } from "./deployManuscriptsPage.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -29,6 +31,7 @@ export type PrepareApprovedManuscriptsOptions = {
   loadManifest?: () => Promise<ManuscriptManifest>;
   saveManifest?: (manifest: ManuscriptManifest) => Promise<void>;
   writePage?: (html: string) => Promise<void>;
+  deploy?: () => Promise<DeployManuscriptsPageResult>;
   /** job당 처리 상한(배리에이션 LLM 호출이 오래 걸리므로). 기본 3. */
   maxJobsPerRun?: number;
 };
@@ -49,6 +52,7 @@ export async function prepareApprovedManuscripts(
   const loadManifestFn = options.loadManifest ?? (() => loadManifest());
   const saveManifestFn = options.saveManifest ?? ((manifest: ManuscriptManifest) => saveManifest(manifest));
   const writePage = options.writePage ?? defaultWritePage;
+  const deploy = options.deploy ?? (() => deployManuscriptsPage());
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
 
   const approved = await loadApprovedJobs();
@@ -71,6 +75,14 @@ export async function prepareApprovedManuscripts(
   if (manifest) {
     await saveManifestFn(manifest);
     await writePage(renderManuscriptPage(manifest));
+    // 배포는 부가 기능이다 - 실패해도 원고 준비 자체(위 results)는 그대로 success 유지.
+    // Cloudflare 미설정이면 조용히 skipped를 돌려준다(deployManuscriptsPage.ts).
+    const deployResult = await deploy();
+    if (deployResult.status === "failed") {
+      console.error(`⚠️ [manuscripts] 페이지 배포 실패: ${deployResult.error}`);
+    } else if (deployResult.status === "success") {
+      console.log(`✅ [manuscripts] 페이지 배포 완료: ${deployResult.url}`);
+    }
   }
 
   return results;

@@ -73,6 +73,8 @@
     "test:publish-tistory": "tsx src/workflows/publish/testPublishArticleToTistory.ts",
     "test:manuscript-blocks": "tsx src/workflows/manuscripts/testParseManuscriptBlocks.ts",
     "test:prepare-manuscripts": "tsx src/workflows/manuscripts/testPrepareManuscripts.ts",
+    "test:deploy-manuscripts-page": "tsx src/workflows/manuscripts/testDeployManuscriptsPage.ts",
+    "test:notify-manuscripts-ready": "tsx src/workflows/manuscripts/testNotifyManuscriptsReady.ts",
     "manuscripts:build": "tsx src/workflows/manuscripts/buildManuscriptPageCli.ts",
     "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "debug:live-blogspot": "tsx src/workflows/publish/debug/liveBlogspotTest.ts",

@@ -246,6 +246,8 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       var topic = found.topic, ch = found.channel;
       var savedEdits = loadEdits(jobId, channel);
       var editing = false;
+      // 텔레그램 알림 링크가 방금 준비된 원고로 바로 열리도록 해시에 남긴다(jobId:channel).
+      history.replaceState(null, "", "#" + jobId + ":" + channel);
 
       var html = "";
       html += '<div class="doc-title">' + escapeHtmlJs(topic.keyword) + " — " + CHANNEL_LABEL[channel] + "</div>";
@@ -342,12 +344,23 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       btn.addEventListener("click", function () { renderChannel(btn.dataset.jobId, btn.dataset.channel); });
     });
 
-    // 첫 주제의 네이버 채널을 기본으로 열어 둔다(있으면).
-    if (DATA.length > 0) {
-      var first = DATA[0];
-      var firstChannel = first.channels[0];
-      if (firstChannel) renderChannel(first.jobId, firstChannel.channel);
-    }
+    // URL 해시(#jobId:channel)가 있으면 그 원고를 바로 연다(텔레그램 링크 딥링크).
+    // 없거나 못 찾으면 첫 주제의 첫 채널을 기본으로 연다.
+    (function openInitialChannel() {
+      var hash = location.hash.replace(/^#/, "");
+      if (hash) {
+        var parts = hash.split(":");
+        if (parts.length === 2 && findTopicChannel(parts[0], parts[1])) {
+          renderChannel(parts[0], parts[1]);
+          return;
+        }
+      }
+      if (DATA.length > 0) {
+        var first = DATA[0];
+        var firstChannel = first.channels[0];
+        if (firstChannel) renderChannel(first.jobId, firstChannel.channel);
+      }
+    })();
   </script>
 </body>
 </html>

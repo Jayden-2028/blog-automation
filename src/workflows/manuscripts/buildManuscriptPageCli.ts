@@ -14,6 +14,7 @@ import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManife
 import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
 import { prepareChannelManuscripts } from "./prepareChannelManuscripts.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 
 async function writePage(html: string): Promise<void> {
   const path = manuscriptIndexPagePath();
@@ -47,6 +48,11 @@ async function buildOne(jobId: string): Promise<void> {
 
   console.log(`✅ 준비 완료 - 채널 ${result.topic.channels.length}개`);
   console.log(`   열기: open ${manuscriptIndexPagePath()}`);
+
+  const deployResult = await deployManuscriptsPage();
+  if (deployResult.status === "success") console.log(`✅ 배포 완료: ${deployResult.url}`);
+  else if (deployResult.status === "failed") console.error(`⚠️ 배포 실패: ${deployResult.error}`);
+  else console.log(`ℹ️ 배포 건너뜀: ${deployResult.reason}`);
 }
 
 async function buildPending(): Promise<void> {

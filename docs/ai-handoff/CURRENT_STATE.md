@@ -1,6 +1,33 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-05 (Asia/Seoul)
+기준일: 2026-09-06 (Asia/Seoul)
+
+## 2026-09-06 세션 — 채널 원고 페이지 Cloudflare Pages 자동 배포 + 텔레그램 링크아웃
+
+**계기**: `manuscripts/index.html`이 로컬 파일이라 모바일에서 못 봄. Claude 아티팩트 자동 재게시를
+검토했으나 **헤드리스 `claude -p`에는 Artifact 게시 도구가 없어(직접 스모크테스트로 확인) 무인
+자동화가 불가능** — 로컬 launchd 파이프라인이 직접 배포하는 Cloudflare Pages + Access로 변경.
+
+**구현 완료**: `src/config/manuscriptsPageTargets.ts`(env 3종 다 있어야 enabled) +
+`src/workflows/manuscripts/deployManuscriptsPage.ts`(wrangler CLI 쉘아웃, `prepareApprovedManuscripts.ts`/
+`buildManuscriptPageCli.ts`에서 페이지 갱신 직후 호출, 실패해도 원고 준비 자체는 성공 유지) +
+`renderManuscriptPage.ts`에 해시 딥링크(`#jobId:channel`) + `notifyManuscriptsReady.ts`가
+Cloudflare 설정 시 로컬 경로 문구 대신 "원고 페이지 열기" 링크 버튼으로 전환(미설정이면 기존 문구
+그대로 폴백 - 회귀 없음). 테스트: `test:deploy-manuscripts-page`, `test:notify-manuscripts-ready`.
+
+**Cloudflare Pages 설정 (사용자가 한 번만, 아직 미완료)**:
+1. Cloudflare 무료 계정 생성.
+2. 터미널에서 직접: `npx wrangler login` (브라우저 인증 - 이 로그인은 사용자가 직접 해야 함).
+3. 대시보드 → My Profile → API Tokens → "Edit Cloudflare Pages" 템플릿으로 토큰 발급.
+4. `.env`(두 워크트리 공유 심링크)에 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`(대시보드
+   우측 표시) / `CLOUDFLARE_PAGES_PROJECT_NAME`(원하는 이름) 채우기.
+5. Cloudflare Zero Trust → Access → Applications → Add → Self-hosted, 호스트네임
+   `<프로젝트명>.pages.dev`, 정책 Allow / Include: Emails = 본인 이메일(비밀번호 없는 이메일
+   코드 로그인).
+
+**다음 확인**: 1~5단계 완료 후 `npm run manuscripts:build -- <jobId>` 한 번 실행해 실제 배포
+성공 + Access 로그인 게이트가 뜨는지 확인. 그 전까지는 배포가 조용히 skip되고 로컬 파일 생성만
+계속된다(회귀 없음).
 
 ## 2026-09-05 세션 — 반자동 업로드 중단, 채널별 원고 로컬 페이지로 전환
 

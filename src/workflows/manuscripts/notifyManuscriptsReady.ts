@@ -1,11 +1,16 @@
 // prepareApprovedManuscripts()의 job별 결과를 Telegram으로 알린다. notifyMultiPublish.ts를 대체.
-// 결정 버튼이 없다 - 사람이 로컬 index.html을 열어 직접 복사해 붙여넣으므로 알림은 "준비 완료 +
+// 결정 버튼이 없다 - 사람이 index.html을 열어 직접 복사해 붙여넣으므로 알림은 "준비 완료 +
 // 여는 방법"만 짧게 전한다(최근 텔레그램 메시지 간소화 방침 유지).
+//
+// Cloudflare Pages가 설정돼 있으면(2026-09-06) 로컬 경로 문구 대신 그 원고로 바로 열리는
+// 딥링크 버튼(#jobId:channel, renderManuscriptPage.ts 참고)을 붙인다. 미설정이면 지금처럼
+// 로컬 경로 텍스트로 폴백 - Cloudflare 설정 전에도 알림이 무의미해지지 않는다.
 
 import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
-import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
+import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import type { ManuscriptChannel } from "../../config/pipelinePaths.js";
+import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
 const CHANNEL_LABEL: Record<ManuscriptChannel, string> = {
@@ -14,7 +19,11 @@ const CHANNEL_LABEL: Record<ManuscriptChannel, string> = {
   blogspot: "🔵 Blogspot",
 };
 
-export function buildManuscriptReadyMessage(result: JobManuscriptsResult): TelegramOutgoingMessage {
+/** pagesUrl은 테스트 주입용. 생략하면 cloudflarePagesUrl()(환경변수 기반)을 쓴다. */
+export function buildManuscriptReadyMessage(
+  result: JobManuscriptsResult,
+  pagesUrl: string | null = cloudflarePagesUrl()
+): TelegramOutgoingMessage {
   const { job, result: outcome } = result;
 
   if (outcome.status === "failed") {
@@ -31,17 +40,18 @@ export function buildManuscriptReadyMessage(result: JobManuscriptsResult): Teleg
   }
 
   const channelList = outcome.topic.channels.map((c) => CHANNEL_LABEL[c.channel]).join(" · ");
-  return {
-    text: [
-      "📄 <b>3채널 원고 준비 완료</b>",
-      "",
-      `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-      channelList,
-      "",
-      `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`,
-      "위 파일을 브라우저로 열어 채널별 원고를 확인·복사해 붙여넣어 주세요.",
-    ].join("\n"),
-  };
+  const firstChannel = outcome.topic.channels[0]?.channel;
+
+  const lines = ["📄 <b>3채널 원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, channelList];
+  let buttons: TelegramInlineKeyboardButton[][] | undefined;
+
+  if (pagesUrl && firstChannel) {
+    buttons = [[{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}:${firstChannel}` }]];
+  } else {
+    lines.push("", `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`, "위 파일을 브라우저로 열어 채널별 원고를 확인·복사해 붙여넣어 주세요.");
+  }
+
+  return { text: lines.join("\n"), replyMarkup: buttons ? { inline_keyboard: buttons } : undefined };
 }
 
 export type NotifyManuscriptsReadyOptions = {
@@ -54,5 +64,5 @@ export async function notifyManuscriptsReady(
 ): Promise<void> {
   const sendMessages = options.sendMessages ?? ((messages) => TelegramNotifier.fromEnv().sendMessages(messages));
   if (results.length === 0) return;
-  await sendMessages(results.map(buildManuscriptReadyMessage));
+  await sendMessages(results.map((result) => buildManuscriptReadyMessage(result)));
 }
