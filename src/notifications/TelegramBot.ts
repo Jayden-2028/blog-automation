@@ -422,24 +422,17 @@ export class TelegramBot {
     return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : [];
   }
 
+  /** 주제 + 진행 안내만 남긴다(2026-09-04 사용자 요청) - category/점수/원문은 뺀다. */
   private buildConfirmationMessage(job: ArticleJobRow): string {
+    // 추천 제목은 조사 완료 알림(notifyResearchReady)에서 요약과 함께 보여준다. 여기서는 조사가
+    // 돌고 있다는 것만 알린다 - 웹 조사가 끝나면 요약 + 제목 + [원고 작성] 버튼이 온다.
     const lines = [
       `✅ <b>선택 완료 · 자료조사 시작</b>`,
       ``,
       `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-      `category: ${escapeTelegramHtml(job.category ?? "N/A")} · ${job.total_score ?? "?"}점`,
-    ];
-
-    if (job.headline && job.headline !== job.keyword) {
-      lines.push(`원문: ${escapeTelegramHtml(job.headline)}`);
-    }
-
-    // 추천 제목은 조사 완료 알림(notifyResearchReady)에서 요약과 함께 보여준다. 여기서는 조사가
-    // 돌고 있다는 것만 알린다 - 웹 조사가 끝나면 요약 + 제목 + [원고 작성] 버튼이 온다.
-    lines.push(
       ``,
-      `🔍 자료조사 중입니다 (약 10~20분). 끝나면 요약과 추천 제목을 보내드립니다. 이 버튼을 다시 누르지 않아도 됩니다.`
-    );
+      `🔍 자료조사 중입니다 (약 10~20분). 끝나면 요약과 추천 제목을 보내드립니다. 이 버튼을 다시 누르지 않아도 됩니다.`,
+    ];
 
     return lines.join("\n");
   }
