@@ -1,6 +1,36 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-01 (Asia/Seoul)
+기준일: 2026-09-05 (Asia/Seoul)
+
+## 2026-09-05 세션 — 자료조사 동시 실행 타임아웃 수정
+
+**증상**: 09:00 Top10 알림 직후 Go 버튼 3개를 연달아 눌렀더니 세 job 전부 "헤드리스 실행이
+1080000ms(18분) 안에 끝나지 않아 중단했습니다"로 실패(같은 시각에 3건 동시 도착). `prompts/research/
+researcher.md`는 9/1 이후 변경 없어 프롬프트 문제가 아님을 확인.
+
+**근본 원인**: `job:research`/`job:write`는 detached 프로세스로 뜨는데(`spawnDetachedTask.ts`,
+2026-09-01 `6a8efce`), 여기엔 동시 실행 제한이 전혀 없었다. `singleInstanceLock`은 `telegram-poll`
+폴러 자체에만 걸려 있어 detached 조사/집필 프로세스끼리는 서로 막지 않는다. Go를 거의 동시에
+누르면 WebSearch 헤비 헤드리스 세션이 여러 개 동시에 같은 계정 리소스를 나눠 쓰면서 개별 조사가
+평소보다 늘어나 18분 타임아웃을 넘긴다.
+
+**수정**: 신규 `src/jobs/lib/heavyPipelineLock.ts` — `runWithHeavyPipelineLock()`이 전역 파일 락
+(`logs/.pipeline-heavy.lock`)으로 조사/집필 헤드리스 실행을 1개로 직렬화한다. 이미 락이 잡혀 있으면
+10초 간격으로 재시도하며 대기하고(최대 50분), 그래도 못 잡으면 포기하고 그냥 실행(대기로 job이
+영원히 멈추는 것보다 경합을 감수). `staleMs`는 조사·집필 중 가장 긴 타임아웃(20분)보다 넉넉한
+30분으로 잡아 정상 실행 중인 락을 stale로 잘못 가로채지 않게 함. `runArticleJob.ts`의
+`defaultRunResearcher`/`defaultRunWriter`(실제 프로덕션 경로)에만 적용 — 테스트 주입 경로
+(`options.runResearcher`/`runWriter`)는 그대로라 기존 테스트 영향 없음.
+
+신규 `npm run test:heavy-pipeline-lock`(직렬화·maxWaitMs 초과 시 대기 포기·fn 실패 시 락 해제 보장
+3케이스) + `npm run build` 통과.
+
+**남은 것**:
+- ⬜ 라이브 검증 대기 — 다음에 Go를 연달아 눌렀을 때 실제로 순서대로 처리되는지 확인 필요.
+- ⬜ `generateArticleVariant`(OSMU 배리에이션, publish-poll에서 호출)는 이번 락에 포함 안 됨 - 승인이
+  여러 건 몰리면 같은 증상이 날 수 있음. 지금은 발생 실측이 없어 손대지 않음.
+- ⬜ 대기 중에도 확인 메시지는 "약 10~20분"으로 그대로 나간다 - 락 대기가 길어지면(3번째 job이면
+  최대 +36분) 문구가 실제 소요와 어긋날 수 있음. 실사용에서 자주 겹치면 문구 조정 검토.
 
 ## 2026-09-01 세션 — 원고 파이프라인 재설계 (스펙 주도 파일 기반)
 

@@ -34,6 +34,7 @@ import { createArticleForJob } from "../../services/supabase/repositories/articl
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
 import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
@@ -93,14 +94,19 @@ export type RunResearchStageResult =
 async function defaultRunResearcher(
   prompt: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await runHeadlessClaude({
-    prompt,
-    allowedTools: ["Read", "Write", "WebSearch", "WebFetch"],
-    permissionMode: "acceptEdits",
-    cwd: PIPELINE_ROOT,
-    timeoutMs: RESEARCH_TIMEOUT_MS,
+  // Go 버튼을 연달아 누르면 detached job:research가 동시에 여러 개 뜬다(spawnDetachedTask.ts) -
+  // 이 헤비 호출만 전역 락으로 직렬화해 WebSearch 세션끼리 리소스를 나눠 쓰다 타임아웃 나는 것을
+  // 막는다(2026-09-05 실측: 동시 3건 전부 18분 타임아웃 실패).
+  return runWithHeavyPipelineLock(async () => {
+    const result = await runHeadlessClaude({
+      prompt,
+      allowedTools: ["Read", "Write", "WebSearch", "WebFetch"],
+      permissionMode: "acceptEdits",
+      cwd: PIPELINE_ROOT,
+      timeoutMs: RESEARCH_TIMEOUT_MS,
+    });
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
-  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 async function defaultReadResearchFile(path: string): Promise<string | null> {
@@ -321,14 +327,17 @@ export type RunWritingStageOptions = {
 };
 
 async function defaultRunWriter(prompt: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await runHeadlessClaude({
-    prompt,
-    allowedTools: ["Read", "Write", "Skill"],
-    permissionMode: "acceptEdits",
-    cwd: PIPELINE_ROOT,
-    timeoutMs: WRITE_TIMEOUT_MS,
+  // defaultRunResearcher와 같은 이유(위 주석 참고) - 집필도 동시에 여러 job이 detached로 뜰 수 있다.
+  return runWithHeavyPipelineLock(async () => {
+    const result = await runHeadlessClaude({
+      prompt,
+      allowedTools: ["Read", "Write", "Skill"],
+      permissionMode: "acceptEdits",
+      cwd: PIPELINE_ROOT,
+      timeoutMs: WRITE_TIMEOUT_MS,
+    });
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
   });
-  return result.ok ? { ok: true } : { ok: false, error: result.error };
 }
 
 async function defaultReadDraftFile(path: string): Promise<string | null> {
