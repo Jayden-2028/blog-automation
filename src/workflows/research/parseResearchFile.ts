@@ -89,7 +89,13 @@ function parseFrontmatter(fm: string): {
     inCounts = false;
 
     const m = line.match(/^([A-Za-z_]+)\s*:\s*(.*)$/);
-    if (m) scalars[m[1].toLowerCase()] = m[2].trim().replace(/^["']|["']$/g, "");
+    if (m) {
+      // researcher.md §7 템플릿 자체가 `verdict: ok        # ok | thin | blocked`처럼 인라인
+      // 주석을 예시로 보여준다 - 에이전트가 그 형태를 그대로 남기면 값에 주석까지 섞여
+      // coerceVerdict가 "ok # ..."를 못 알아보고 기본값(thin)으로 떨어진다(2026-09-03 실측 발견).
+      const withoutComment = m[2].replace(/\s+#.*$/, "");
+      scalars[m[1].toLowerCase()] = withoutComment.trim().replace(/^["']|["']$/g, "");
+    }
   }
 
   return {

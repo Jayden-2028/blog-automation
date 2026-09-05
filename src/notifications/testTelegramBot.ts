@@ -12,8 +12,9 @@
 // 6. 이미 진행 중인 job은 버튼으로 되돌려지지 않는다
 
 import { jobFromFreshSelection, TelegramBot } from "./TelegramBot.js";
+import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import type { ArticleJobRow, ArticleRow, KeywordRankingRow } from "../types/database.js";
-import type { TelegramCallbackQuery } from "./TelegramBot.js";
+import type { TelegramCallbackQuery, TelegramUpdate } from "./TelegramBot.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -598,18 +599,68 @@ async function main(): Promise<void> {
   }
 
   // 8-6a) reject·중복 write: reject는 onWriteStart를 부르지 않고, 이미 writing인 job의 write 재클릭은
-  //       집필을 다시 띄우지 않고 "이미 작성 중"만 안내한다.
+  //       집필을 다시 띄우지 않고 "이미 작성 중"만 안내한다(아직 정상 범위 - updated_at을 방금으로
+  //       둬서 재시도 버튼(8-7 참고)이 안 붙는 경로를 확인한다).
   {
     const calls = newResearchCalls();
     const bot = makeResearchBot({ job: makeResearchJob(), calls });
     await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
     assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "reject는 집필 관련 호출을 하지 않아야 한다");
-    const bot2 = makeResearchBot({ job: makeResearchJob({ status: "writing" }), calls });
+    const bot2 = makeResearchBot({
+      job: makeResearchJob({ status: "writing", updated_at: new Date().toISOString() }),
+      calls,
+    });
     const dup = await bot2.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
     assert(dup.outcome.status === "already_final", "이미 writing인 job의 write 재클릭은 already_final");
     assert(calls.onWriteStart === 0 && calls.triggerWriting === 0, "중복 write 클릭은 집필을 다시 띄우지 않아야 한다");
     assert(dup.message.includes("이미 원고를 작성 중"), "중복 클릭에는 '이미 작성 중' 안내가 나가야 한다");
-    console.log("✅ reject·중복 write -> 집필 미호출, 중복 클릭에 '작성 중' 안내");
+    assert(dup.replyMarkup === undefined, "아직 멈춘 게 아니면 재시도 버튼을 붙이지 않아야 한다");
+    console.log("✅ reject·중복 write -> 집필 미호출, 중복 클릭에 '작성 중' 안내(재시도 버튼 없음)");
+  }
+
+  // 8-7) writing에 오래(임계값 이상) 멈춘 job은 write 재클릭에 재시도 버튼을 함께 준다 - 실패해도
+  //      status가 writing에서 안 풀리는 설계(runArticleJob.ts) 때문에 버튼 없이는 텔레그램에서
+  //      영원히 복구할 방법이 없었다(2026-09-01 실사고 대응).
+  {
+    const calls = newResearchCalls();
+    const staleUpdatedAt = new Date(Date.now() - 40 * 60 * 1000).toISOString(); // 40분 전
+    const bot = makeResearchBot({ job: makeResearchJob({ status: "writing", updated_at: staleUpdatedAt }), calls });
+    const stuck = await bot.handleResearchDecisionCallback(researchQuery(`research:write:${RESEARCH_JOB_ID}`));
+    assert(stuck.outcome.status === "already_final", "멈춘 job의 write 재클릭도 already_final(집필을 또 띄우지 않는다)");
+    assert(calls.triggerWriting === 0, "재클릭만으로는 집필을 다시 띄우지 않는다 - retry 버튼을 눌러야 한다");
+    assert(stuck.message.includes("응답이 없습니다"), "멈춘 job에는 별도 안내 문구가 나가야 한다");
+    assert(stuck.replyMarkup?.[0]?.[0]?.callback_data === `research:retry:${RESEARCH_JOB_ID}`, "재시도 버튼이 붙어야 한다");
+    console.log("✅ 오래 멈춘 writing job -> '응답 없음' 안내 + 재시도 버튼");
+  }
+
+  // 8-8) research:retry - 멈춘 job만 재시도를 허용하고, 아직 정상 범위거나 이미 다른 상태로
+  //      넘어간 job은 거부한다(경합/오클릭 방어).
+  {
+    const calls = newResearchCalls();
+    const staleUpdatedAt = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+    const bot = makeResearchBot({ job: makeResearchJob({ status: "writing", updated_at: staleUpdatedAt }), calls });
+    const retried = await bot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(retried.outcome.status === "retry_started", `멈춘 job의 retry는 retry_started여야 한다 (실제: ${retried.outcome.status})`);
+    assert(calls.triggerWriting === 1, "retry는 triggerWriting(detached 재실행)을 1회 호출해야 한다");
+    assert(retried.message.includes("다시 시작"), "재시작 확인 메시지가 나가야 한다");
+    console.log("✅ research:retry -> 멈춘 job만 triggerWriting 재실행");
+
+    const calls2 = newResearchCalls();
+    const freshBot = makeResearchBot({
+      job: makeResearchJob({ status: "writing", updated_at: new Date().toISOString() }),
+      calls: calls2,
+    });
+    const rejected = await freshBot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(rejected.outcome.status === "retry_rejected", "아직 임계값 전인 job의 retry는 거부해야 한다");
+    assert(calls2.triggerWriting === 0, "거부된 retry는 집필을 띄우면 안 된다");
+    console.log("✅ research:retry -> 아직 진행 중일 수 있는 job은 거부");
+
+    const calls3 = newResearchCalls();
+    const doneBot = makeResearchBot({ job: makeResearchJob({ status: "review" }), calls: calls3 });
+    const alreadyMoved = await doneBot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(alreadyMoved.outcome.status === "retry_rejected", "writing이 아닌 job의 retry는 거부해야 한다");
+    assert(calls3.triggerWriting === 0, "이미 다른 상태로 넘어간 job은 재실행하지 않아야 한다");
+    console.log("✅ research:retry -> writing이 아닌 job(이미 진행됨)은 거부");
   }
 
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.
@@ -630,6 +681,94 @@ async function main(): Promise<void> {
       `research: 데이터는 원고 검수 핸들러에서 무시돼야 한다 (실제: ${JSON.stringify(reviewResult.outcome)})`
     );
     console.log("✅ research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않음");
+  }
+
+  // ---------- 9) isTransientNetworkError: 인프라 장애 판정 ----------
+  {
+    const supabaseNetworkError = Object.assign(new Error("TypeError: fetch failed"), {
+      details:
+        "TypeError: fetch failed\n\nCaused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+    });
+    assert(isTransientNetworkError(supabaseNetworkError), "Supabase 스타일 DNS 실패는 인프라 장애로 판정해야 한다");
+    assert(isTransientNetworkError(new Error("connect ECONNREFUSED 127.0.0.1:5432")), "ECONNREFUSED는 인프라 장애다");
+    assert(!isTransientNetworkError(new Error("null value violates not-null constraint")), "일반 DB 제약 위반은 인프라 장애가 아니다");
+    assert(!isTransientNetworkError(new Error("job not found")), "일반 로직 에러는 인프라 장애가 아니다");
+    console.log("✅ isTransientNetworkError -> 네트워크/DNS만 인프라 장애로 판정");
+  }
+
+  // ---------- 10) pollOnce: offset 전진 안전성(인프라 장애 시 유실 방지) ----------
+  // 2026-09-02 실측 버그: Supabase DNS 장애 중 GO 클릭 3건이 "실패해도 offset은 전진시킨다"는
+  // 설계 때문에 영구 유실됐다. 인프라 장애는 offset을 전진시키지 않아 다음 폴링에서 텔레그램이
+  // 그대로 다시 배달하게 해야 하고, 코드/데이터 문제는 재시도해도 똑같이 실패하니 건너뛰어야 한다.
+  {
+    function makeUpdate(updateId: number, rank: number): TelegramUpdate {
+      return { update_id: updateId, callback_query: makeQuery(`go:${RUN_ID}:${rank}`) };
+    }
+
+    function makePollOnceBot(opts: {
+      updates: TelegramUpdate[];
+      storedOffset: number | null;
+      failRank: number;
+      failError: unknown;
+    }): { bot: TelegramBot; advancedTo: number[] } {
+      const advancedTo: number[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        fetchUpdates: async () => opts.updates,
+        getStoredOffset: async () => opts.storedOffset,
+        advanceStoredOffset: async (updateId) => {
+          advancedTo.push(updateId);
+          return null;
+        },
+        loadRanking: async (_runId, rank) => ({ ...makeRanking(), rank }),
+        createJob: async (ranking, status) => {
+          if (ranking.rank === opts.failRank) throw opts.failError;
+          return { job: makeJob({ status }), created: true };
+        },
+        saveTitles: async () => {},
+        generateTitles: async () => [],
+        triggerResearch: () => {},
+        sendTelegramRequest: async () => null,
+      });
+      return { bot, advancedTo };
+    }
+
+    // 10-1) 인프라 장애(DNS 등)로 실패한 update는 offset을 전진시키지 않는다 - 재시도 대상으로 남는다.
+    {
+      const updates = [makeUpdate(101, 1), makeUpdate(102, 2), makeUpdate(103, 3)];
+      const networkError = Object.assign(new Error("TypeError: fetch failed"), {
+        details: "Caused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+      });
+      const { bot, advancedTo } = makePollOnceBot({ updates, storedOffset: 100, failRank: 2, failError: networkError });
+      const result = await bot.pollOnce();
+      assert(result.errors.length === 1, `실패 1건이 기록돼야 한다 (실제: ${result.errors.length})`);
+      assert(result.results.length === 1, `102 이후는 처리를 멈춰야 한다 (실제 처리: ${result.results.length}건)`);
+      assert(
+        advancedTo.length === 1 && advancedTo[0] === 101,
+        `offset은 마지막 성공(101)까지만 전진해야 한다 (실제: ${JSON.stringify(advancedTo)})`
+      );
+      console.log("✅ 인프라 장애 update -> offset 미전진(재시도 대상으로 남음), 이후 update 중단");
+    }
+
+    // 10-2) 코드/데이터 문제로 실패한 update는 건너뛰고 offset을 전진시킨다 - 영원히 막히면 안 된다.
+    {
+      const updates = [makeUpdate(201, 1), makeUpdate(202, 2), makeUpdate(203, 3)];
+      const { bot, advancedTo } = makePollOnceBot({
+        updates,
+        storedOffset: 200,
+        failRank: 2,
+        failError: new Error("제약 조건 위반"),
+      });
+      const result = await bot.pollOnce();
+      assert(result.errors.length === 1, `실패 1건이 기록돼야 한다 (실제: ${result.errors.length})`);
+      assert(result.results.length === 2, `202를 건너뛰고 203까지 처리해야 한다 (실제: ${result.results.length}건)`);
+      assert(
+        advancedTo.length === 1 && advancedTo[0] === 203,
+        `offset은 마지막(203)까지 전진해야 한다 (실제: ${JSON.stringify(advancedTo)})`
+      );
+      console.log("✅ 코드/데이터 문제 update -> 건너뛰고 offset 전진, 이후 update 계속 처리");
+    }
   }
 
   console.log("\n✅ TelegramBot callback 핸들러 테스트 완료");
