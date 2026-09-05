@@ -87,6 +87,7 @@
     "debug:latest-rankings": "tsx src/workflows/keyword-ranking/debug/showLatestRankings.ts",
     "notify:keywords": "tsx src/workflows/keyword-notification/runKeywordNotification.ts",
     "test:notification": "tsx src/workflows/keyword-notification/testKeywordNotification.ts",
+    "test:format-notification-message": "tsx src/workflows/keyword-notification/testFormatNotificationMessage.ts",
     "test:callback-data": "tsx src/notifications/testTelegramCallbackData.ts",
     "test:telegram-bot": "tsx src/notifications/testTelegramBot.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
