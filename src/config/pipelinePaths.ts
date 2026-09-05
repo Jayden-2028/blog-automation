@@ -32,3 +32,28 @@ export function draftFilePath(keyword: string, suffix?: string): string {
   const name = suffix ? `${base}-${suffix}` : base;
   return resolve(PIPELINE_ROOT, "drafts", `${name}.md`);
 }
+
+// ---------- 채널별 원고(반자동 업로드 대체) ----------
+// 승인된 job마다 네이버/티스토리/블로거 3채널용 원고를 로컬 파일로 저장하고, 이를 한 화면에서
+// 열람·복사할 수 있는 index.html을 만든다. 서버 없이 file://로 열리므로 원고 본문은 manifest.json에
+// 인라인으로 담는다.
+
+export type ManuscriptChannel = "naver" | "tistory" | "blogspot";
+
+export const MANUSCRIPTS_DIR = "manuscripts";
+
+export function manuscriptTopicDir(date: string, keyword: string): string {
+  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, date, keywordSlug(keyword));
+}
+
+export function manuscriptFilePath(date: string, keyword: string, channel: ManuscriptChannel): string {
+  return resolve(manuscriptTopicDir(date, keyword), `${channel}.md`);
+}
+
+export function manuscriptManifestPath(): string {
+  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, "manifest.json");
+}
+
+export function manuscriptIndexPagePath(): string {
+  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, "index.html");
+}

@@ -2,6 +2,45 @@
 
 기준일: 2026-09-05 (Asia/Seoul)
 
+## 2026-09-05 세션 — 반자동 업로드 중단, 채널별 원고 로컬 페이지로 전환
+
+**계기**: 티스토리 카카오 로그인 만료로 승인 원고 7건이 발행 큐에서 head-of-line 블로킹으로 며칠째
+막힌 것을 조사하던 중, 사용자가 "반자동 업로드된 원고를 매번 재작성 수준으로 고치고 있다"며 원고
+품질이 자동 업로드를 받을 수준이 아니라고 판단 — 발행 파이프라인 설계를 통째로 바꿨다.
+
+**변경**: 네이버·티스토리·블로거 반자동 업로드(Playwright/API, `publishApprovedArticles.ts`)를
+호출부만 끊어 중단(코드는 유지 - 원고 품질이 오르면 되돌릴 수 있음). 대신 신규
+`src/workflows/manuscripts/*`:
+- `prepareChannelManuscripts.ts` — job 1건 → 네이버(기준 원고 그대로)·티스토리·블로거(기존
+  `generateArticleVariant` 재사용, 발행 코드에서 분리) 3채널 원고 준비 + `.md` 파일 저장.
+- `prepareApprovedManuscripts.ts` — approved 중 미준비 job을 fan-out(상한 3, 완료 표시는 새 DB
+  마이그레이션 없이 `article_jobs.metadata.channelManuscriptsReadyAt` 플래그로 - status는
+  approved 그대로 둔다).
+- `renderManuscriptPage.ts` → `manuscripts/index.html` — 날짜→주제→채널 트리, 채널별
+  제목/검색설명/슬러그/태그/본문(이미지 마커는 카드로 분리 표시), 수정(브라우저 localStorage에만
+  저장, 원본 파일은 불변)·복사(이미지 제외 본문만) 버튼. 서버 없이 file://로 연다.
+- `src/jobs/publishPollJob.ts`가 이제 `prepareApprovedManuscripts()` + `notifyManuscriptsReady()`를
+  호출(예전 `publishApprovedArticles`/`notifyMultiPublish` 대신).
+- 수동 실행: `npm run manuscripts:build [-- jobId]`.
+- 테스트: `npm run test:manuscript-blocks`(이미지 마커 파싱), `npm run test:prepare-manuscripts`
+  (오케스트레이션·멱등성, LLM/DB/파일시스템 전부 mock). `npm run build` 통과.
+- 실측: 밀려 있던 job(eb43d2bb, "이럴 거면 인터넷 끊어라")로 `manuscripts:build` 실제 실행 -
+  결과는 아래 "다음 확인" 참고.
+
+**범위 밖(다음 단계 아이디어, 이번엔 미착수)**: 페이지에 이미지 카드마다 "이미지 생성" 버튼을 붙여
+프롬프트 확인 후 서브 에이전트(ChatGPT/Gemini) 호출 → 로컬 저장까지 이어붙이는 구상 - 정적 파일로는
+디스크에 다시 쓸 수 없어 그때는 작은 로컬 서버가 필요해진다. 아이디어 단계로만 기록.
+
+**다음 확인**:
+- ⬜ `manuscripts:build -- eb43d2bb-...` 실제 실행 결과(정상 생성 여부, `manuscripts/index.html`
+  실물 확인) - 이 세션에서 백그라운드 실행 중이었다면 다음 세션에서 결과 확인.
+- ⬜ 밀려 있던 approved 6건(티빙/가해자 누나/고궁박물관/유카타/영화 옵세션/인터넷 끊어라)이
+  `job:publish-poll` 폴링으로 순차 처리되는지, `manuscripts/index.html`에 전부 반영되는지.
+- ⬜ 사용자가 실제로 페이지를 열어 복사→붙여넣기 흐름을 써 보고 UX 피드백.
+- 아래 "2026-09-05 세션 — 자료조사 동시 실행 타임아웃 수정" 항목의 "`generateArticleVariant`는
+  이번 락에 포함 안 됨" 캐비어트는 호출 경로가 바뀌어(publish-poll → prepareApprovedManuscripts)
+  최신 상태가 아니다 - 참고만 하고 새로 판단할 것.
+
 ## 2026-09-05 세션 — 자료조사 동시 실행 타임아웃 수정
 
 **증상**: 09:00 Top10 알림 직후 Go 버튼 3개를 연달아 눌렀더니 세 job 전부 "헤드리스 실행이

@@ -30,6 +30,9 @@ logs/
 # repo 루트만 - src/workflows/research/ 같은 소스 디렉터리는 건드리지 않는다.
 /research/
 /drafts/
+# 채널별 원고 열람 페이지(반자동 업로드 대체, 2026-09-05) - manuscripts/*.md와 index.html도
+# job별 산출물이라 위와 같은 이유로 커밋하지 않는다.
+/manuscripts/
 
 # Supabase CLI 생성물
 supabase/.temp/
