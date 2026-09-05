@@ -12,19 +12,38 @@ import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../.
 import type { ChannelName, JobPublishResult } from "./publishApprovedArticles.js";
 
 const CHANNEL_LABEL: Record<string, string> = {
-  naver: "네이버",
-  blogspot: "Blogspot",
-  tistory: "티스토리",
+  naver: "🟢 네이버",
+  blogspot: "🔵 Blogspot",
+  tistory: "🟠 티스토리",
 };
 
 const STATUS_LINE: Record<string, string> = {
-  published: "✅ 공개 발행",
-  draft: "📝 비공개(draft) 저장",
-  already_done: "↩︎ 이미 발행됨",
+  published: "✅ 발행 완료",
+  draft: "📝 임시저장 완료",
+  already_done: "↩︎ 이미 처리됨",
   skipped: "· 건너뜀",
   deferred: "⏳ 보류(다음 폴링 재시도)",
   failed: "⚠️ 실패",
 };
+
+/**
+ * 실패 사유(Playwright 콜 로그·원시 예외 메시지 포함)를 사람이 바로 알아볼 수 있는 짧은 한글
+ * 문구로 바꾼다(2026-09-04 사용자 요청 - "[title] page.click: Timeout 10000ms exceeded.\nCall
+ * log:\n  - waiting for locator(...)..." 같은 원문이 폰 화면에서 못 알아볼 정도로 길었다).
+ * 매칭되는 패턴이 없으면 콜 로그/스테이지 접두사를 뗀 첫 줄만 짧게 잘라 폴백으로 보여준다.
+ */
+function humanizeFailureReason(reason: string): string {
+  const firstLine = reason.split("\nCall log:")[0].trim();
+
+  if (/timeout\s*\d+ms exceeded/i.test(firstLine)) return "응답 대기 시간 초과";
+  if (/로그인|login/i.test(firstLine)) return "로그인 실패";
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|fetch failed|network/i.test(firstLine)) return "네트워크 오류";
+  if (/상한|daily_limit|quota/i.test(firstLine)) return "일일 한도 초과";
+  if (/찾을 수 없습니다|not[_ ]found/i.test(firstLine)) return "대상을 찾을 수 없음";
+
+  const withoutStagePrefix = firstLine.replace(/^\[[^\]]+\]\s*/, "");
+  return withoutStagePrefix.length > 60 ? `${withoutStagePrefix.slice(0, 60)}…` : withoutStagePrefix;
+}
 
 export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutgoingMessage {
   const { job, channels } = result;
@@ -39,7 +58,9 @@ export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutg
     const label = CHANNEL_LABEL[c.channel] ?? c.channel;
     const statusText = STATUS_LINE[c.status] ?? c.status;
     if (c.status === "failed" || c.status === "deferred" || c.status === "skipped") {
-      lines.push(`${label}: ${statusText} — ${escapeTelegramHtml(("reason" in c ? c.reason : "") ?? "").slice(0, 200)}`);
+      const rawReason = "reason" in c ? c.reason : "";
+      const reasonText = c.status === "failed" ? humanizeFailureReason(rawReason) : rawReason;
+      lines.push(`${label}: ${statusText} — ${escapeTelegramHtml(reasonText).slice(0, 200)}`);
     } else {
       lines.push(`${label}: ${statusText}`);
       const url = "url" in c ? c.url : "";

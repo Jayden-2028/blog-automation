@@ -1,7 +1,7 @@
 // keyword notification 파이프라인 테스트.
 // 기본은 dry-run이다 — 실제 Telegram으로 발송하지 않고, 발송될 메시지 내용을 콘솔에 그대로 출력해
 // (a) 최근 완료된 discovery_run의 keyword_rankings TOP N이 잘 조회되는지,
-// (b) score breakdown이 메시지에 포함되는지,
+// (b) 항목이 주제/seedQuery/category만 간결하게 보이는지(원문·배점표는 뺀다, formatNotificationMessage 참고),
 // (c) 추천 제목 placeholder 3개가 항목마다 붙는지,
 // (d) 메시지가 chunk로 잘 나뉘는지
 // 를 눈으로 확인할 수 있게 한다.

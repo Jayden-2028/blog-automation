@@ -61,12 +61,13 @@ function main(): void {
     makeSource({ id: 3, authority: "community" }),
   ];
 
-  // 1) 헤더의 등급별 건수 요약은 항상 나온다.
+  // 1) 헤더의 등급별 건수 요약은 뺐다(2026-09-04 - summary 본문의 breakdown과 중복이었고, 서로
+  //    다른 값을 낸 것도 실측에서 확인됨). 주제/category/총점만 남는다.
   const messages = buildResearchPreviewMessages(makeJob(), sources, summary("예매는 2026.08.20 마감됐습니다."));
   const combined = messages.map((m) => m.text).join("\n");
-  assert(combined.includes("공공 2"), "공공 2건이 헤더에 있어야 한다");
-  assert(combined.includes("커뮤니티 1"), "커뮤니티 1건이 헤더에 있어야 한다");
-  console.log("✅ 등급별 건수 요약 정확");
+  assert(!combined.includes("공공") && !combined.includes("커뮤니티 1"), "헤더에 등급별 건수가 없어야 한다");
+  assert(combined.includes("category: living") && combined.includes("61점"), "주제/category/총점은 남아야 한다");
+  console.log("✅ 헤더 등급별 건수 제거, 주제/category/총점 유지");
 
   // 2) 진행/중단 명령어 안내 텍스트는 없다(버튼으로 대체).
   assert(!combined.includes("job:write --"), "진행 명령어 안내 없음");

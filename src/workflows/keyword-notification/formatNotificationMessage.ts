@@ -8,14 +8,6 @@
 import { escapeTelegramHtml, TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
 import type { KeywordNotificationPayload, NotificationKeywordItem } from "../../types/keywordNotification.js";
 
-const TREND_DIRECTION_EMOJI: Record<string, string> = {
-  accelerating: "🚀",
-  rising: "📈",
-  falling: "📉",
-  flat: "➖",
-  unknown: "❔",
-};
-
 function formatDateHeader(startedAt: string): string {
   const date = new Date(startedAt);
   return Number.isNaN(date.getTime())
@@ -23,25 +15,13 @@ function formatDateHeader(startedAt: string): string {
     : date.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" });
 }
 
+/** 주제·시드쿼리·카테고리만 보여준다 - 원문(headline)과 항목별 배점표(scoreBreakdown)는 뺀다(2026-09-04 사용자 요청, 폰 화면에서 항목당 너무 길었다). */
 function formatItemBlock(item: NotificationKeywordItem): string {
   const keyword = escapeTelegramHtml(item.keyword);
-  const headline = item.headline ? escapeTelegramHtml(item.headline) : null;
-  const emoji = TREND_DIRECTION_EMOJI[item.trendDirection ?? "unknown"] ?? "❔";
-  const breakdown = item.scoreBreakdown;
 
-  const lines: string[] = [];
-  lines.push(`<b>${item.rank}. ${keyword}</b> — ${item.totalScore}점 ${emoji}`);
-  if (headline && headline !== keyword) {
-    lines.push(`   원문: ${headline}`);
-  }
+  const lines: string[] = [`<b>${item.rank}. ${keyword}</b>`];
   if (item.seedQuery) {
     lines.push(`   seedQuery: ${escapeTelegramHtml(item.seedQuery)} · category: ${escapeTelegramHtml(item.category ?? "N/A")}`);
-  }
-  if (breakdown) {
-    lines.push(
-      `   trend ${breakdown.trendMomentum} · news ${breakdown.newsVelocity} · content ${breakdown.contentDemand} · ` +
-        `fresh ${breakdown.freshness} · cross ${breakdown.crossSourceSignal} · click ${breakdown.clickPotential}`
-    );
   }
 
   return lines.join("\n");

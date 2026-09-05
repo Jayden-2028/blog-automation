@@ -37,12 +37,16 @@ function main(): void {
   const s = summarizeResearchFile(FILE);
   assert(s.verdict === "thin", `verdict 전달 (실제: ${s.verdict})`);
   assert(s.text.includes("verdict: thin"), "verdict 배지 줄이 있어야 한다");
-  assert(s.text.includes("근거 6건"), `근거 합계 줄 (실제 text: ${s.text})`);
-  assert(s.text.includes("공공 2") && s.text.includes("커뮤니티 3"), "등급별 건수");
   assert(s.text.includes("당첨자 발표"), "§1 요약 본문이 그대로 들어가야 한다");
-  assert(s.text.includes("확인되지 않은 통설"), "§4 통설 경고 블록");
-  assert(s.text.includes("현장 대기줄"), "통설 항목 내용");
-  console.log("✅ verdict + 근거 구성 + §1 요약 + §4 통설이 요약 텍스트에 포함됨");
+  console.log("✅ verdict + §1 요약이 요약 텍스트에 포함됨");
+
+  // 근거 건수(등급별 breakdown)와 §4 확인되지 않은 통설은 메시지에서 뺀다(2026-09-04 사용자 요청 -
+  // 헤더의 sourceCounts와 중복이었고, 두 계산이 서로 다른 값을 낸 것도 실측에서 확인됨).
+  assert(!s.text.includes("근거 6건"), `근거 건수 줄이 없어야 한다 (실제 text: ${s.text})`);
+  assert(!s.text.includes("공공 2") && !s.text.includes("커뮤니티 3"), "등급별 건수도 없어야 한다");
+  assert(!s.text.includes("확인되지 않은 통설"), "§4 통설 경고 블록이 없어야 한다");
+  assert(!s.text.includes("현장 대기줄"), "통설 항목 내용도 없어야 한다");
+  console.log("✅ 근거 건수 + §4 통설 블록 제거");
 
   // blocked verdict
   const blocked = buildResearchSummary(
