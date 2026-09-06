@@ -24,7 +24,8 @@ function main(): void {
   assert(prompt.includes("한강 불꽃축제 2026"), "키워드");
   assert(prompt.includes("2026-09-01"), "오늘 날짜");
   assert(prompt.includes("moai-marketer:content-blog") && prompt.includes("moai-writer:korean-humanize"), "헤드리스 가용 스킬로 오버라이드");
-  assert(prompt.includes("## ") && prompt.includes("마크다운 헤더"), "소제목 ## 유지 오버라이드");
+  assert(prompt.includes("**소제목**") && prompt.includes("볼드"), "소제목 볼드 규격 지시(2026-09-06부터)");
+  assert(!prompt.includes("`## `"), "더 이상 ## 마크다운 헤더를 쓰라고 하면 안 된다");
   assert(prompt.includes("[IMAGE: 설명]") && prompt.includes("최소 5개"), "이미지 마커 지시");
   assert(prompt.includes("WebSearch를 쓰지 않는다"), "writer는 웹 검색 없음");
   assert(prompt.includes("prompts/writing/style/trend.md"), "living은 trend 문체 참고 파일을 Read하라는 지시가 있어야 한다");

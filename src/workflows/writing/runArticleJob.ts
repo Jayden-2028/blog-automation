@@ -551,8 +551,7 @@ async function runWritingStageInner(
 
   // 이미지: 2026-09-01부터 API 자동생성 기본 보류(CLAUDE.md 운영 규칙). 보류면 writer가 남긴
   // `[IMAGE: 설명]` 마커를 본문에 그대로 두고(passthrough) 사용자가 직접 삽입한다.
-  // ⚠️ 재개(ARTICLE_IMAGE_GENERATION=true) 시 generateArticleImages는 아직 `## 헤딩 뒤 삽입`
-  // 방식이라, 마커 인식 방식으로 바꿔야 한다(Phase 5 후속 TODO).
+  // generateArticleImages의 삽입 지점 판정은 2026-09-06부터 `**볼드**` 소제목 기준이다(writer.md §6).
   const imageGenerationHeld = !ARTICLE_IMAGE_GENERATION_ENABLED;
   const imageGeneration: GenerateArticleImagesResult =
     options.generateImages === false || imageGenerationHeld

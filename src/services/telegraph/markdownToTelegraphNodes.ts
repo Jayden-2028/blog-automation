@@ -1,9 +1,9 @@
 // content-blog 스킬이 생성하는 마크다운 원고를 Telegraph Node[] 형식으로 변환한다.
 //
 // 왜 필요한가: Telegraph API는 HTML 문자열이 아니라 { tag, attrs?, children? } 형태의 Node
-// 배열을 요구한다(공식 문서 기준). 우리 원고는 ## 소제목 / **굵게** / - 목록 / [텍스트](URL) /
-// 빈 줄 구분 문단만 쓰도록 프롬프트로 강제했으므로(buildArticlePrompt.ts), 이 좁은 마크다운
-// 부분집합만 정확히 다루면 된다 - 범용 마크다운 파서를 새로 들여오지 않는다.
+// 배열을 요구한다(공식 문서 기준). 우리 원고는 **소제목**(볼드, 2026-09-06부터) / **굵게** /
+// - 목록 / [텍스트](URL) / 빈 줄 구분 문단만 쓰도록 프롬프트로 강제했으므로(buildWritingPrompt.ts),
+// 이 좁은 마크다운 부분집합만 정확히 다루면 된다 - 범용 마크다운 파서를 새로 들여오지 않는다.
 //
 // Telegraph가 허용하는 태그: a, aside, b, blockquote, br, code, em, figcaption, figure,
 // h3, h4, hr, i, iframe, img, li, ol, p, pre, s, strong, u, ul, video. h1/h2는 없다 -
