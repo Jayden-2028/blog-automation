@@ -29,13 +29,46 @@ incident+living), 블로그스팟 = 연예 가십 + 영화·드라마·예능·O
   전부 통과 확인.
 
 **미완료/후속**:
-- ⬜ `seed_queries` 테이블에 육아 관련 활성 행 10건이 남아 있다(육아지원금/부모급여/아동수당 등,
-  실측 확인). 이제 수집 파이프라인이 걸러내므로 Top N·알림에는 안 올라가지만, NAVER API 호출
-  자체는 매일 여전히 나간다 - 비활성화(`status`를 `inactive`로 UPDATE)는 원격 DB 쓰기라 **사용자
-  승인 필요**.
+- ✅ `seed_queries`의 육아 관련 활성 행 10건(육아지원금/부모급여/아동수당 등) - `status`를
+  `paused`로 전환 완료(사용자 승인, 2026-09-07). 삭제는 아니라 재개 시 `active`로 되돌리면 된다.
 - ⬜ 소스 확장(유튜브 급상승 API, 네이버 뉴스판) - 조사만 하기로 함, 아직 미착수.
 - ⬜ 커뮤니티 자동 채널 분류(`COMMUNITY_BLOGSPOT_TERMS`) 어휘는 초안이라 실제 운영 데이터로
   다듬어야 한다(`keywordCategoryRules.ts`와 같은 방식).
+
+## 2026-09-07 후속 — 키워드 알림을 채널별 3회로 고정 분리
+
+**결정**(사용자 승인): 하루 알림을 카테고리별 채널 3개로 완전히 분리해 고정한다. 사용자가 알림을
+보고 티스토리/블로그스팟 중 어디에 올릴지 직접 고르는 게 아니라, 카테고리가 이미 채널을 결정하고
+사용자는 준비된 채널별 원고를 검토 후 수동 업로드만 한다(기존 manuscripts 페이지 방식 그대로).
+
+1. **사회이슈(티스토리) — 09:00** `src/jobs/socialIssueKeywordJob.ts`(구 `dailyKeywordJob.ts`
+   개명). Creator Advisor 크롤링 + 구글 트렌드 조회를 **이 job이 맡고**, `includeCategories:
+   ["incident","living"]`로만 Top N을 뽑아 알림.
+2. **연예·OTT(블로그스팟) — 09:10** `src/jobs/entertainmentKeywordJob.ts`(신규). 크롤링을
+   반복하지 않는다 - `trendCollectOptions/googleTrendsOptions`를 `enabled:false`로 꺼서 위 job이
+   이미 저장한 오늘자 `trend_candidates`를 그대로 읽고 `includeCategories:["entertainment","ott"]`로
+   필터링만 한다. 그래서 **①이 먼저 끝나 있어야** 하고, launchd 09:00/09:10 순서로 그 순서를
+   보장한다.
+3. **커뮤니티 화제 — 13:00** `src/jobs/communityKeywordJob.ts`(기존, 변경 없음).
+
+`runDailyKeywordWorkflow`에 `includeCategories` 옵션 신설(`dailyKeywordWorkflow.ts`) - query pool을
+해당 category로 먼저 좁힌 뒤 NAVER 실시간 검색을 호출하므로, 관련 없는 카테고리 몫까지 검색 API를
+낭비하지 않는다. 실제 Supabase에 대고 동작 확인(entertainment/ott만 섞임 없이 나옴, trendCollect가
+skipped로 재수집 안 함 확인) - 검증 중 생긴 테스트용 `discovery_runs`/`keyword_rankings` 행은
+삭제 완료(사용자 승인).
+
+**launchd 변경**: `com.wooahpapa.blog-automation.daily-keyword.plist` 제거 →
+`social-issue-keyword.plist`(09:00)로 개명 + `entertainment-keyword.plist`(09:10) 신규 등록,
+둘 다 `launchctl load` 완료. `community-keyword.plist`는 그대로. `package.json`
+`job:daily-keyword` → `job:social-issue-keyword` 개명 + `job:entertainment-keyword` 추가.
+
+**미완료/후속**:
+- ⬜ 다음 날 09:00/09:10/13:00 세 번의 실제 launchd 실행에서 알림 3건이 각각 정상 도착하는지
+  관찰 필요(지금까지는 코드 레벨 검증만 했다).
+- ⬜ `entertainment-keyword` job이 `social-issue-keyword`보다 먼저(또는 그 job이 실패해) 도는
+  경우 `trend_candidates`가 비어 있을 수 있다 - 지금은 그래도 seed_queries만으로 안전하게
+  degrade하지만(빈 pool이면 관련 카테고리 후보가 적게 나올 뿐 에러는 아님), 실제 그런 날이
+  나오면 관찰해서 대응 여부를 판단한다.
 
 ## 2026-09-06 세션 — 원고 서식 규격 재정의(`##` 폐지) + 배리에이션 마커 검증 버그 수정
 

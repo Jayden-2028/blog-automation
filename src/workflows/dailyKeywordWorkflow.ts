@@ -338,6 +338,12 @@ export type DailyKeywordWorkflowOptions = {
   collectionSources?: readonly TrendSource[];
   /** buildDailyQueryPool에 그대로 전달. false면 seed_queries를 빼고 동적 소스만으로 pool을 만든다(오후 커뮤니티 전용). */
   includeSeedQueries?: boolean;
+  /**
+   * 지정하면 query pool을 이 category 목록으로만 좁힌다(2026-09-07 채널 전담제 - 사회이슈/연예·OTT
+   * 알림을 분리하기 위함). NAVER 실시간 검색(collect 단계)도 이 필터를 거친 query로만 호출되므로
+   * 다른 카테고리 몫까지 검색량을 낭비하지 않는다. 생략하면 필터링 없음(기존 동작).
+   */
+  includeCategories?: readonly string[];
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -527,10 +533,20 @@ export async function runDailyKeywordWorkflow(
       );
     }
 
-    queries = queryPool.entries.map((entry) => entry.keyword);
-    seedCategoryByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.category]));
-    seedPriorityByQuery = Object.fromEntries(queryPool.entries.map((entry) => [entry.keyword, entry.priority]));
-    stableSeedTerms = queryPool.entries
+    const scopedEntries = options.includeCategories
+      ? queryPool.entries.filter((entry) => options.includeCategories!.includes(entry.category))
+      : queryPool.entries;
+    if (options.includeCategories) {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] category 필터(${options.includeCategories.join(", ")}) 적용: ` +
+          `${queryPool.entries.length}건 -> ${scopedEntries.length}건`
+      );
+    }
+
+    queries = scopedEntries.map((entry) => entry.keyword);
+    seedCategoryByQuery = Object.fromEntries(scopedEntries.map((entry) => [entry.keyword, entry.category]));
+    seedPriorityByQuery = Object.fromEntries(scopedEntries.map((entry) => [entry.keyword, entry.priority]));
+    stableSeedTerms = scopedEntries
       .filter((entry) => entry.origin === "seed" || entry.origin === "merged")
       .map((entry) => entry.keyword);
   }

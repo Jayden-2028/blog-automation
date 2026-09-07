@@ -1,12 +1,14 @@
-// "매일 오후 1시 실행"의 진입점. 오전 daily-keyword(Creator Advisor + 구글 트렌드 + NAVER API)와
-// 별개로, 커뮤니티(더쿠 인기글) 유래 키워드만 모아 별도 알림 1건을 더 보낸다(2026-08-31 사용자 결정).
+// "매일 오후 1시 실행"의 진입점 - 커뮤니티 화제 카테고리(하루 3개 고정 알림 중 세 번째,
+// 2026-09-07 채널 전담제 개편). 오전의 socialIssueKeywordJob(09:00, 티스토리용)/
+// entertainmentKeywordJob(09:10, 블로그스팟용)와 별개로, 커뮤니티(더쿠 인기글) 유래 키워드만
+// 모아 별도 알림 1건을 더 보낸다(2026-08-31 사용자 결정).
 //
-// 오전과 같은 파이프라인을 그대로 태운다(collect → relevance → cluster → rank → notify) - 커뮤니티
-// 키워드도 NAVER 검색으로 볼륨/경쟁도를 보강하고 관련성 필터를 거쳐야 발행 가치를 판별할 수 있다.
-// 다른 점은 세 가지뿐이다:
+// 오전 job들과 같은 파이프라인을 그대로 태운다(collect → relevance → cluster → rank → notify) -
+// 커뮤니티 키워드도 NAVER 검색으로 볼륨/경쟁도를 보강하고 관련성 필터를 거쳐야 발행 가치를
+// 판별할 수 있다. 다른 점은 세 가지뿐이다:
 //   1. collectionSources = ["community"]      - 커뮤니티 수집기만 돌리고, 그 source만 pool에 읽는다
-//   2. includeSeedQueries = false             - 오전 seed 44건을 다시 태우지 않는다
-//   3. notifyOptions.headerTitle / metadata.kind = "community"  - 알림·조회에서 오전 run과 구분
+//   2. includeSeedQueries = false             - 오전 seed를 다시 태우지 않는다
+//   3. notifyOptions.headerTitle / metadata.kind = "community"  - 알림·조회에서 오전 run들과 구분
 //
 // launchd 등록: ~/Library/LaunchAgents/com.wooahpapa.blog-automation.community-keyword.plist
 //   StartCalendarInterval Hour=13 Minute=0, caffeinate -i 래핑, WorkingDirectory = 운영 worktree.
@@ -18,10 +20,10 @@ import type { SchedulerJob } from "../scheduler/Scheduler.js";
 import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 
 // 커뮤니티 수집(trendCollect)은 enrichment 단계다 - 실패해도 job 전체를 실패로 처리하지 않는다
-// (daily-keyword와 동일). 단 오후 job은 커뮤니티가 유일한 소스라, 수집이 완전히 실패하면
+// (오전 job들과 동일). 단 오후 job은 커뮤니티가 유일한 소스라, 수집이 완전히 실패하면
 // 아래 "candidatesCount 0" 경로에서 알림이 나간다.
 // competition(블로그 경쟁도 프로브)은 관측 전용이라 실패해도 job을 실패시키지 않는다
-// (dailyKeywordJob과 동일 - config/keywordCompetition.ts 참고).
+// (오전 job들과 동일 - config/keywordCompetition.ts 참고).
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
 const NOTIFICATION_HEADER = "📡 <b>오후 커뮤니티 인기 키워드</b>";

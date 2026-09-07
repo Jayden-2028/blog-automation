@@ -1,12 +1,14 @@
-// "매일 오전 8시 실행"의 실제 진입점. 외부 OS crontab/launchd가 이 스크립트를 하루 1회 실행시킨다
-// (scheduler/LocalScheduler.ts 주석 참고 — 이 프로세스 자체는 시간을 감시하지 않는다).
+// "매일 오전 9시 실행"의 실제 진입점 - 사회 이슈(사건사고·경제·정책) 카테고리, 티스토리용.
+// 외부 OS crontab/launchd가 이 스크립트를 하루 1회 실행시킨다(scheduler/LocalScheduler.ts 주석 참고
+// — 이 프로세스 자체는 시간을 감시하지 않는다).
 //
-// crontab 등록 예시(로컬 타임존 기준 매일 08:00, 결과는 logs/daily-keyword.log에 append):
-//
-//   0 8 * * * cd /path/to/blog-automation && /usr/local/bin/npm run job:daily-keyword >> logs/daily-keyword.log 2>&1
-//
-// macOS에서 launchd를 쓰려면 crontab 대신 ~/Library/LaunchAgents에 동일한 커맨드 +
-// <key>StartCalendarInterval</key> Hour=8/Minute=0 을 담은 .plist를 등록하면 된다.
+// 2026-09-07 채널 전담제 개편(사용자 결정): 하루 알림을 카테고리별 채널 3개로 완전히 분리해
+// 고정한다 - ① 이 job(사회이슈 -> 티스토리) ② entertainmentKeywordJob(연예·OTT -> 블로그스팟)
+// ③ communityKeywordJob(커뮤니티 화제, 오후 13:00). 예전엔 이 job이 카테고리 구분 없이 하루치
+// 키워드를 통째로 하나의 Top N으로 보냈는데, 이제 이 job만 실제 수집(Creator Advisor 크롤링 +
+// 구글 트렌드 조회)을 맡고 사회 이슈로만 필터링해 보낸다 - entertainmentKeywordJob은 이 job이 쌓아둔
+// trend_candidates를 재사용해 크롤링을 중복하지 않는다(그 job 상단 주석 참고). 그래서 이 job이
+// 먼저 끝나 있어야 한다 - launchd 스케줄이 09:00 / 09:10으로 순서를 보장한다.
 import "dotenv/config";
 
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
@@ -22,13 +24,16 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 // 이미 만들어진 Top 10 발송을 막으면 안 된다.
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
+const NOTIFICATION_HEADER = "🏛️ <b>오전 사회이슈 키워드 (티스토리용)</b>";
+
 const job: SchedulerJob = {
-  name: "daily-keyword",
+  name: "social-issue-keyword",
   execute: async () => {
-    // 오전 09:00 run은 Creator Advisor + 구글 트렌드까지만. 커뮤니티(더쿠)는 오후 13:00
-    // communityKeywordJob으로 분리했다(2026-08-31) - 오전/오후 알림이 각각 개별로 온다.
     const result = await runDailyKeywordWorkflow({
       collectionSources: ["creator_advisor", "google_trends"],
+      includeCategories: ["incident", "living"],
+      metadata: { kind: "social_issue" },
+      notifyOptions: { headerTitle: NOTIFICATION_HEADER },
     });
 
     console.log("\n▶ stage log");
@@ -42,14 +47,6 @@ const job: SchedulerJob = {
     }
     if (result.googleTrendsCollection?.status === "failed") {
       console.log(`\n⚠️ 구글 트렌드 수집 실패(비치명적) - ${result.googleTrendsCollection.error}`);
-    }
-    if (result.communityCollection?.status === "failed") {
-      console.log(`\n⚠️ 커뮤니티 수집 실패(비치명적) - ${result.communityCollection.error}`);
-    }
-    if (result.communityCollection?.sourceErrors) {
-      for (const [site, error] of Object.entries(result.communityCollection.sourceErrors)) {
-        console.log(`\n⚠️ 커뮤니티 "${site}" 조회 실패(비치명적, 나머지로 진행) - ${error}`);
-      }
     }
 
     if (result.relevance) {

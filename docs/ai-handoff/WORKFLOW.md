@@ -121,7 +121,10 @@ npm --prefix ~/blog-automation-prod run build
 | **job** | **두 가지 뜻이 있어 헷갈리기 쉽다** ↓ | |
 
 **job의 두 가지 뜻**
-1. **launchd job** — 예약 실행되는 프로그램. `daily-keyword`, `telegram-poll`, `publish-poll` 등 4개.
+1. **launchd job** — 예약 실행되는 프로그램. `social-issue-keyword`(09:00, 티스토리용)·
+   `entertainment-keyword`(09:10, 블로그스팟용)·`community-keyword`(13:00)·`telegram-poll`·
+   `publish-poll` 등 5개(2026-09-07 채널 전담제 개편 - 예전 `daily-keyword` 1개를 카테고리별
+   2개로 분리).
 2. **article_jobs** — **원고 1건**의 작업 단위. 텔레그램에서 Go를 누르면 하나 생긴다.
    재시도 명령에 넣는 `jobId`가 바로 이것이다.
 
