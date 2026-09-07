@@ -3,7 +3,8 @@
 // 마이그레이션(승인 필요)이 들어가므로, 완료 표시는 status 대신 metadata 플래그
 // (channelManuscriptsReadyAt)로 한다 - status는 approved 그대로 둔다.
 //
-// job당 배리에이션 LLM을 최대 2회(티스토리·블로거) 돌리므로 publishApprovedArticles.ts와 같은
+// job당 배정된 채널(티스토리 또는 블로그스팟) 1곳에만 배리에이션 LLM을 돌리지만(2026-09-07 채널
+// 전담제 개편), 그래도 여러 job을 한 번에 처리하면 오래 걸리므로 publishApprovedArticles.ts와 같은
 // 이유로 maxJobsPerRun 상한을 둔다. 성공한 job만 manifest에 반영하고 페이지를 한 번만 다시 그린다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";

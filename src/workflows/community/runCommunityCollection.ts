@@ -17,6 +17,7 @@ import {
   type CommunityPostInput,
   type ExtractCommunityKeywordsOptions,
 } from "./extractCommunityKeywords.js";
+import { excludeCandidateInserts } from "../keyword-discovery/excludeCandidateInserts.js";
 import { COMMUNITY_SOURCE, mapCommunityItemsToInserts } from "./mapCommunityCandidates.js";
 
 export type RunCommunityCollectionOptions = {
@@ -46,6 +47,8 @@ export type RunCommunityCollectionResult = {
   upsertedCount: number;
   /** 중복/너무 짧은 키워드로 버려진 수. */
   droppedCount: number;
+  /** 제외 카테고리(육아 등)·정치 키워드로 걸러져 저장되지 않은 수(2026-09-07). */
+  excludedCount: number;
   /** status='expired'로 전환된 기존 row 수. dryRun/skipExpire면 0. */
   expiredCount: number;
   trendDate: string | null;
@@ -70,6 +73,7 @@ export async function runCommunityCollection(
       fetchedCount: 0,
       upsertedCount: 0,
       droppedCount: 0,
+      excludedCount: 0,
       expiredCount: 0,
       trendDate: null,
     };
@@ -109,6 +113,7 @@ export async function runCommunityCollection(
         fetchedCount: 0,
         upsertedCount: 0,
         droppedCount: 0,
+        excludedCount: 0,
         expiredCount: 0,
         trendDate,
         ...(sourceErrorsResult ? { sourceErrors: sourceErrorsResult } : {}),
@@ -116,7 +121,10 @@ export async function runCommunityCollection(
     }
 
     const extracted = await extractKeywords(posts);
-    const { rows, droppedCount } = mapCommunityItemsToInserts(posts, extracted.items, { collectedAt });
+    const { rows: mapped, droppedCount } = mapCommunityItemsToInserts(posts, extracted.items, { collectedAt });
+
+    // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편).
+    const { rows, excludedCount } = excludeCandidateInserts(mapped);
 
     if (dryRun) {
       return {
@@ -124,6 +132,7 @@ export async function runCommunityCollection(
         fetchedCount,
         upsertedCount: 0,
         droppedCount,
+        excludedCount,
         expiredCount: 0,
         trendDate,
         ...(sourceErrorsResult ? { sourceErrors: sourceErrorsResult } : {}),
@@ -143,6 +152,7 @@ export async function runCommunityCollection(
       fetchedCount,
       upsertedCount: upserted.length,
       droppedCount,
+      excludedCount,
       expiredCount,
       trendDate,
       ...(sourceErrorsResult ? { sourceErrors: sourceErrorsResult } : {}),
@@ -156,6 +166,7 @@ export async function runCommunityCollection(
       fetchedCount: 0,
       upsertedCount: 0,
       droppedCount: 0,
+      excludedCount: 0,
       expiredCount: 0,
       trendDate: null,
       error: message,

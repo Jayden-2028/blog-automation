@@ -15,6 +15,7 @@ import { CREATOR_ADVISOR_CONFIG } from "../../config/creatorAdvisor.js";
 import { describeError } from "../../services/describeError.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { BrowserCreatorAdvisorProvider } from "../../services/search/providers/BrowserCreatorAdvisorProvider.js";
+import { excludeCandidateInserts } from "../keyword-discovery/excludeCandidateInserts.js";
 import {
   dedupeTrendCandidateInserts,
   mapCreatorAdvisorCandidatesToInserts,
@@ -47,6 +48,8 @@ export type RunCreatorAdvisorCollectionResult = {
   upsertedCount: number;
   /** status='expired'로 전환된 기존 row 수. dryRun/skipExpire면 0. */
   expiredCount: number;
+  /** 제외 카테고리(육아 등)·정치 키워드로 걸러져 저장되지 않은 수(2026-09-07). */
+  excludedCount: number;
   /** 실제 파싱에 쓰인 트렌드 기준일. */
   trendDate: string | null;
   /** topic card 단위 부분 실패(페이지 전체 실패가 아님). */
@@ -71,6 +74,7 @@ export async function runCreatorAdvisorCollection(
     fetchedCount: 0,
     upsertedCount: 0,
     expiredCount: 0,
+    excludedCount: 0,
     trendDate: null,
     topicErrors: {},
   };
@@ -88,11 +92,19 @@ export async function runCreatorAdvisorCollection(
     // 같은 키워드가 같은 내부 카테고리의 서로 다른 topic에 동시에 등장하면 unique index conflict key가
     // 배치 안에서 겹쳐 upsert 전체가 거부된다(21000). 그래서 DB에 보내기 전에 병합한다.
     const mapped = mapCreatorAdvisorCandidatesToInserts(fetched.candidates);
-    const { rows, droppedCount } = dedupeTrendCandidateInserts(mapped);
+    const { rows: deduped, droppedCount } = dedupeTrendCandidateInserts(mapped);
     if (droppedCount > 0) {
       console.log(
         `\u2139\uFE0F runCreatorAdvisorCollection: 같은 카테고리 내 중복 ${droppedCount}건을 병합했습니다 ` +
-          `(${mapped.length}건 -> ${rows.length}건).`
+          `(${mapped.length}건 -> ${deduped.length}건).`
+      );
+    }
+
+    // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편).
+    const { rows, excludedCount } = excludeCandidateInserts(deduped);
+    if (excludedCount > 0) {
+      console.log(
+        `ℹ️ runCreatorAdvisorCollection: 제외 대상(육아·정치) ${excludedCount}건을 걸렀습니다 (${deduped.length}건 -> ${rows.length}건).`
       );
     }
 
@@ -102,6 +114,7 @@ export async function runCreatorAdvisorCollection(
         fetchedCount: fetched.candidates.length,
         upsertedCount: 0,
         expiredCount: 0,
+        excludedCount,
         trendDate: fetched.latestAvailableTrendDate ?? fetched.trendDate,
         topicErrors: fetched.topicErrors,
       };
@@ -120,6 +133,7 @@ export async function runCreatorAdvisorCollection(
       fetchedCount: fetched.candidates.length,
       upsertedCount: upserted.length,
       expiredCount,
+      excludedCount,
       trendDate: fetched.latestAvailableTrendDate ?? fetched.trendDate,
       topicErrors: fetched.topicErrors,
     };
@@ -131,6 +145,7 @@ export async function runCreatorAdvisorCollection(
       fetchedCount: 0,
       upsertedCount: 0,
       expiredCount: 0,
+      excludedCount: 0,
       trendDate: null,
       topicErrors: {},
       error: message,

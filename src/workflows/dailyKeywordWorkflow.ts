@@ -14,6 +14,7 @@
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
 import type { TrendSource } from "../config/trendSources.js";
+import { shouldExcludeCandidate } from "../config/keywordExclusionRules.js";
 import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
@@ -70,7 +71,22 @@ export async function collectCandidates(
   queries: string[],
   options: CollectCandidatesOptions = {}
 ): Promise<CollectNaverCandidatesResult> {
-  return collectNaverCandidates(queries, options);
+  const result = await collectNaverCandidates(queries, options);
+
+  // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편). seed_queries에
+  // 등록된 상시 검색어(예: "육아지원금")가 아직 남아 있어도 여기서 걸러지므로 Top N/알림까지
+  // 올라가지 않는다 - trend_candidates 경로(excludeCandidateInserts.ts)와 같은 규칙을 쓴다.
+  const filtered = result.candidates.filter(
+    (candidate) => !shouldExcludeCandidate(candidate.keyword, candidate.category)
+  );
+  const excludedCount = result.candidates.length - filtered.length;
+  if (excludedCount > 0) {
+    console.log(
+      `ℹ️ collectCandidates: 제외 대상(육아·정치) ${excludedCount}건을 걸렀습니다 (${result.candidates.length}건 -> ${filtered.length}건).`
+    );
+  }
+
+  return { ...result, candidates: filtered };
 }
 
 // ---------- 1.5) filterRelevantCandidates ----------

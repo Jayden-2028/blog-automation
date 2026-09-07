@@ -1,6 +1,41 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-06 (Asia/Seoul)
+기준일: 2026-09-07 (Asia/Seoul)
+
+## 2026-09-07 세션 — 채널 전담제 개편(육아 카테고리 제외 + 티스토리/블로그스팟 카테고리 분리)
+
+**결정**(사용자 승인): 육아(parenting) 카테고리를 시스템 전체에서 완전히 제외한다. 카테고리를
+4종으로 재편하고 채널을 전담시킨다 - 티스토리 = 사회·문화 이슈/사건사고/경제·정책(기존
+incident+living), 블로그스팟 = 연예 가십 + 영화·드라마·예능·OTT(기존 entertainment+ott), 커뮤니티
+화제(community)는 키워드 내용에 따라 둘 중 하나로 자동 배정. 네이버는 이번 개편에서 완전히 뺐다
+(사용자가 별도 프로세스로 나중에 재설계 예정 - 관련 코드는 지우지 않고 dormant 유지). 사회 이슈
+카테고리에서 정당·선거 등 정치 이슈는 배제.
+
+**변경**:
+- `src/config/keywordExclusionRules.ts`(신규) - 육아 카테고리·정치 키워드 판정. `src/workflows/
+  keyword-discovery/excludeCandidateInserts.ts`(신규)로 Creator Advisor/Google Trends/커뮤니티
+  세 수집 경로(`run*Collection.ts`) 모두에서 `trend_candidates` upsert 직전에 적용. 정적
+  `seed_queries` 유래 후보(NAVER 실시간 검색)도 `dailyKeywordWorkflow.ts`의 `collectCandidates()`에서
+  같은 규칙으로 한 번 더 거른다.
+- `src/config/channelRouting.ts`(신규) - 카테고리 -> 발행 채널 배정표 + `classifyCommunityChannel()`
+  (인플루언서/유튜버 가십 어휘면 블로그스팟, 그 외 기본값 티스토리).
+- `src/workflows/manuscripts/prepareChannelManuscripts.ts` 전면 재작성 - 예전엔 job 1건마다
+  네이버(기준)+티스토리+블로거 3채널을 다 만들었는데, 이제 `resolvePublishChannel()`로 정해진
+  채널 1곳의 배리에이션만 만든다. 배정 실패(예: parenting) 시 명시적으로 실패 처리.
+- `src/config/keywordScoring.ts`의 `DIVERSITY_CONFIG.targetCategories`에서 `parenting` 제거(사용자
+  승인 - CLAUDE.md 스코어링 로직 변경 게이트 항목).
+- 신규 테스트 3개(`test:channel-routing`, `test:keyword-exclusion`, `test:exclude-candidates`) +
+  `test:prepare-manuscripts` 전면 갱신(단일 채널 배정 기준). `npm run build` + 관련 회귀 테스트
+  전부 통과 확인.
+
+**미완료/후속**:
+- ⬜ `seed_queries` 테이블에 육아 관련 활성 행 10건이 남아 있다(육아지원금/부모급여/아동수당 등,
+  실측 확인). 이제 수집 파이프라인이 걸러내므로 Top N·알림에는 안 올라가지만, NAVER API 호출
+  자체는 매일 여전히 나간다 - 비활성화(`status`를 `inactive`로 UPDATE)는 원격 DB 쓰기라 **사용자
+  승인 필요**.
+- ⬜ 소스 확장(유튜브 급상승 API, 네이버 뉴스판) - 조사만 하기로 함, 아직 미착수.
+- ⬜ 커뮤니티 자동 채널 분류(`COMMUNITY_BLOGSPOT_TERMS`) 어휘는 초안이라 실제 운영 데이터로
+  다듬어야 한다(`keywordCategoryRules.ts`와 같은 방식).
 
 ## 2026-09-06 세션 — 원고 서식 규격 재정의(`##` 폐지) + 배리에이션 마커 검증 버그 수정
 

@@ -6,6 +6,7 @@ import { TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
 import { describeError } from "../../services/describeError.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
+import { excludeCandidateInserts } from "../keyword-discovery/excludeCandidateInserts.js";
 import { GOOGLE_TRENDS_SOURCE, mapGoogleTrendsItemsToInserts } from "./mapGoogleTrendsCandidates.js";
 import type { FetchGoogleTrendsResult } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
 
@@ -30,6 +31,8 @@ export type RunGoogleTrendsCollectionResult = {
   upsertedCount: number;
   /** 중복 키워드로 버려진 수. */
   droppedCount: number;
+  /** 제외 카테고리(육아 등)·정치 키워드로 걸러져 저장되지 않은 수(2026-09-07). */
+  excludedCount: number;
   /** status='expired'로 전환된 기존 row 수. dryRun/skipExpire면 0. */
   expiredCount: number;
   trendDate: string | null;
@@ -49,6 +52,7 @@ export async function runGoogleTrendsCollection(
       fetchedCount: 0,
       upsertedCount: 0,
       droppedCount: 0,
+      excludedCount: 0,
       expiredCount: 0,
       trendDate: null,
     };
@@ -59,10 +63,13 @@ export async function runGoogleTrendsCollection(
     const fetched = await fetchTrends();
 
     // 매핑은 순수 함수이므로 DB 접근 전에 끝낸다 - 매핑에서 실패하면 원격에 아무것도 쓰지 않는다.
-    const { rows, droppedCount } = mapGoogleTrendsItemsToInserts(fetched.items, {
+    const { rows: mapped, droppedCount } = mapGoogleTrendsItemsToInserts(fetched.items, {
       collectedAt: fetched.collectedAt,
     });
-    const trendDate = rows[0]?.trend_date ?? fetched.collectedAt.slice(0, 10);
+    const trendDate = mapped[0]?.trend_date ?? fetched.collectedAt.slice(0, 10);
+
+    // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편).
+    const { rows, excludedCount } = excludeCandidateInserts(mapped);
 
     if (dryRun) {
       return {
@@ -70,6 +77,7 @@ export async function runGoogleTrendsCollection(
         fetchedCount: fetched.items.length,
         upsertedCount: 0,
         droppedCount,
+        excludedCount,
         expiredCount: 0,
         trendDate,
       };
@@ -87,6 +95,7 @@ export async function runGoogleTrendsCollection(
       fetchedCount: fetched.items.length,
       upsertedCount: upserted.length,
       droppedCount,
+      excludedCount,
       expiredCount,
       trendDate,
     };
@@ -98,6 +107,7 @@ export async function runGoogleTrendsCollection(
       fetchedCount: 0,
       upsertedCount: 0,
       droppedCount: 0,
+      excludedCount: 0,
       expiredCount: 0,
       trendDate: null,
       error: message,

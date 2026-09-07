@@ -1,7 +1,16 @@
-// 승인된 job 1건 -> 네이버/티스토리/블로거 3채널 원고 준비 (반자동 업로드 대체, 2026-09-05).
+// 승인된 job 1건 -> 배정된 채널(티스토리 또는 블로그스팟) 원고 1건 준비 (반자동 업로드 대체,
+// 2026-09-05; 채널 전담제 개편 2026-09-07).
 //
-// 네이버는 기준 원고를 그대로 쓰고(기존에도 배리에이션 없이 발행했다), 티스토리·블로거는 기존
-// publishArticleToBlogspot.ts/publishArticleToTistory.ts 안에 있던 배리에이션 생성 로직
+// 채널은 job.category로 정해진다(config/channelRouting.ts) - 사회 이슈는 티스토리, 연예·OTT는
+// 블로그스팟, 커뮤니티 화제는 키워드 내용으로 둘 중 하나. 배정표에 없는 카테고리(육아 등)면 실패
+// 처리한다 - 육아는 애초에 수집 단계에서 걸러지므로(config/keywordExclusionRules.ts) 정상 운영에서는
+// 도달하지 않지만, 과거에 이미 만들어진 job 등을 방어적으로 처리한다.
+//
+// 네이버는 이번 개편에서 완전히 뺐다(사용자가 별도 프로세스로 재설계 예정, 2026-09-07) - 작성 단계
+// 산출물(platform=null article, 예전에 "네이버 기준 원고"라 부르던 것)은 여전히 존재하지만 그 자체로
+// 채널이 되지는 않고, 배정된 채널의 배리에이션을 만드는 재료로만 쓴다.
+//
+// 기존 publishArticleToBlogspot.ts/publishArticleToTistory.ts 안에 있던 배리에이션 생성 로직
 // (generateArticleVariant)을 발행과 분리해 이 단계에서만 돈다. Playwright/API 업로드는 하지 않는다 -
 // 결과를 로컬 .md 파일로 저장해 사람이 직접 복사해 붙여넣는다.
 //
@@ -13,8 +22,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 
+import { resolvePublishChannel } from "../../config/channelRouting.js";
 import { manuscriptFilePath, PIPELINE_ROOT } from "../../config/pipelinePaths.js";
-import type { ManuscriptChannel } from "../../config/pipelinePaths.js";
 import {
   createArticle,
   listArticlesByJobId,
@@ -23,8 +32,6 @@ import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult, VariantChannel } from "../writing/generateArticleVariant.js";
 import type { ManuscriptChannelEntry, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
-
-const VARIANT_CHANNELS: readonly VariantChannel[] = ["tistory", "blogspot"];
 
 export type PrepareChannelManuscriptsResult =
   | { status: "success"; topic: ManuscriptTopicEntry }
@@ -55,48 +62,6 @@ function kstDateString(date: Date): string {
 }
 
 const IMAGE_LINE_RE = /^\[IMAGE:\s*([\s\S]*?)\]\s*$/;
-const FAQ_HEADING_TEXT = "자주 묻는 질문";
-const REFERENCES_HEADING_TEXT = "참고 자료";
-
-/** "**소제목**"(신규)과 "## 소제목"(구식, 과거 원고 호환) 둘 다에서 소제목 텍스트를 뽑는다. */
-function headingTextOf(firstLine: string): string | null {
-  const bold = firstLine.match(/^\*\*(.+)\*\*$/);
-  if (bold) return bold[1].trim();
-  const legacy = firstLine.match(/^#{1,3}\s*(.+)$/);
-  if (legacy) return legacy[1].trim();
-  return null;
-}
-
-/**
- * 네이버 채널 표시용으로 FAQ·참고자료 섹션을 뺀다(2026-09-06 사용자 요청 - "네이버 원고에서는
- * 자주 묻는 질문과 참고자료를 뺄 것"). writer.md/기준 원고 자체의 FAQ·참고자료 생성 규칙(AEO/SEO
- * 목적)은 그대로 두고, 이 함수는 매니페스트에 담기 직전 표시 단계에서만 걷어낸다 - 티스토리·블로거
- * 배리에이션은 자기 FAQ를 새로 쓰므로 영향 없다(baseArticle.content 자체는 안 건드림).
- */
-function stripFaqAndReferencesForNaver(body: string): string {
-  const blocks = body.split(/\n{2,}/);
-  const kept: string[] = [];
-  let i = 0;
-  while (i < blocks.length) {
-    const block = blocks[i];
-    const firstLine = block.split("\n")[0]?.trim() ?? "";
-    const heading = headingTextOf(firstLine);
-
-    if (heading === FAQ_HEADING_TEXT) {
-      i += 1;
-      // 소제목 뒤 첫 문답은 같은 블록에 붙어 이미 건너뛰었다 - 이어지는 문답 블록(Q.로 시작)도 마저 건너뛴다.
-      while (i < blocks.length && /^Q[.．]/.test(blocks[i].trim())) i += 1;
-      continue;
-    }
-    if (heading === REFERENCES_HEADING_TEXT) {
-      i += 1; // 헤더+목록이 한 블록이라(runArticleJob.ts) 이 블록 하나만 건너뛰면 된다.
-      continue;
-    }
-    kept.push(block);
-    i += 1;
-  }
-  return kept.join("\n\n").trim();
-}
 
 /**
  * `.md` 파일에 쓰기 직전에만 [IMAGE: 설명] 바로 다음 줄에 [IMAGE PROMPT: ...]를 등장 순서로
@@ -125,8 +90,8 @@ function reinsertImagePrompts(body: string, imagePrompts: string[]): string {
 /**
  * job.metadata.imagePrompts는 parseDraftFile.ts가 본문에서 빼낸 "[IMAGE PROMPT: ...]" 지시를
  * 등장 순서대로 담은 배열이다(runArticleJob.ts). 기준 원고와 배리에이션 모두 같은 순서로
- * "[IMAGE: 설명]" 마커를 남기므로(generateArticleVariant.ts 프롬프트 지시) 세 채널이 같은
- * imagePrompts를 공유한다 - 실제 대응은 parseManuscriptBlocks가 마커 개수와 대조해 검증한다.
+ * "[IMAGE: 설명]" 마커를 남기므로(generateArticleVariant.ts 프롬프트 지시) 배정된 채널도 같은
+ * imagePrompts를 그대로 쓴다 - 실제 대응은 parseManuscriptBlocks가 마커 개수와 대조해 검증한다.
  */
 function readImagePrompts(job: ArticleJobRow): string[] {
   const raw = job.metadata?.imagePrompts;
@@ -166,73 +131,62 @@ export async function prepareChannelManuscripts(
   const writeManuscriptFile = options.writeManuscriptFile ?? defaultWriteManuscriptFile;
   const now = options.now ?? (() => new Date());
 
+  const channel = resolvePublishChannel(job.category, job.keyword);
+  if (!channel) {
+    return { status: "failed", reason: `채널 배정 불가 (category: ${job.category ?? "없음"})` };
+  }
+
   const articles = await loadArticles(job.id);
   const baseArticle = [...articles].reverse().find((a) => a.platform == null);
-  if (!baseArticle) return { status: "failed", reason: "기준 원고(네이버) 없음" };
+  if (!baseArticle) return { status: "failed", reason: "기준 원고 없음" };
 
   const date = kstDateString(now());
   const imagePrompts = readImagePrompts(job);
-  const channels: ManuscriptChannelEntry[] = [
-    {
-      channel: "naver",
-      title: baseArticle.title ?? job.keyword,
-      searchDescription: null,
-      slug: null,
-      tags: [],
-      body: stripFaqAndReferencesForNaver(baseArticle.content ?? ""),
-      imagePrompts,
-      filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword, "naver")),
-    },
-  ];
 
-  for (const channel of VARIANT_CHANNELS) {
-    const existing = [...articles].reverse().find((a) => a.platform === channel) ?? null;
+  const existing = [...articles].reverse().find((a) => a.platform === channel) ?? null;
 
-    let title: string;
-    let content: string;
-    let searchDescription: string | null = null;
-    let slug: string | null = null;
-    let tags: string[] = [];
+  let title: string;
+  let content: string;
+  let searchDescription: string | null = null;
+  let slug: string | null = null;
+  let tags: string[] = [];
 
-    if (existing) {
-      title = existing.title ?? job.keyword;
-      content = existing.content ?? "";
-    } else {
-      const result = await generateVariant({
-        channel,
-        category: job.category,
-        baseTitle: baseArticle.title ?? job.keyword,
-        baseBody: baseArticle.content ?? "",
-      });
-      if (result.status !== "success") {
-        return { status: "failed", reason: `${channel} 배리에이션 실패: ${result.error}` };
-      }
-      title = result.variant.title;
-      content = result.variant.body;
-      searchDescription = result.variant.searchDescription;
-      slug = result.variant.slug;
-      tags = result.variant.tags;
-      await createVariantArticle({ jobId: job.id, channel, title, content, aiModel: baseArticle.ai_model });
-    }
-
-    channels.push({
-      channel: channel as ManuscriptChannel,
-      title,
-      searchDescription,
-      slug,
-      tags,
-      body: content,
-      imagePrompts,
-      filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword, channel as ManuscriptChannel)),
+  if (existing) {
+    title = existing.title ?? job.keyword;
+    content = existing.content ?? "";
+  } else {
+    const result = await generateVariant({
+      channel,
+      category: job.category,
+      baseTitle: baseArticle.title ?? job.keyword,
+      baseBody: baseArticle.content ?? "",
     });
+    if (result.status !== "success") {
+      return { status: "failed", reason: `${channel} 배리에이션 실패: ${result.error}` };
+    }
+    title = result.variant.title;
+    content = result.variant.body;
+    searchDescription = result.variant.searchDescription;
+    slug = result.variant.slug;
+    tags = result.variant.tags;
+    await createVariantArticle({ jobId: job.id, channel, title, content, aiModel: baseArticle.ai_model });
   }
 
-  for (const entry of channels) {
-    await writeManuscriptFile(
-      manuscriptFilePath(date, job.keyword, entry.channel),
-      frontMatterFile({ ...entry, body: reinsertImagePrompts(entry.body, entry.imagePrompts) })
-    );
-  }
+  const entry: ManuscriptChannelEntry = {
+    channel,
+    title,
+    searchDescription,
+    slug,
+    tags,
+    body: content,
+    imagePrompts,
+    filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword, channel)),
+  };
+
+  await writeManuscriptFile(
+    manuscriptFilePath(date, job.keyword, channel),
+    frontMatterFile({ ...entry, body: reinsertImagePrompts(entry.body, entry.imagePrompts) })
+  );
 
   return {
     status: "success",
@@ -242,7 +196,7 @@ export async function prepareChannelManuscripts(
       category: job.category,
       date,
       readyAt: now().toISOString(),
-      channels,
+      channels: [entry],
     },
   };
 }

@@ -469,7 +469,10 @@ export const DIVERSITY_CONFIG = {
   // 점수가 낮아도 한 자리를 만들어준다"는 규칙인데, 사망·범죄 기사에 그걸 적용하면 매일 사건사고
   // 하나를 억지로 Top 10에 올리게 된다. 그런 글을 쓸지는 사용자가 Go/Pass로 결정할 일이지
   // 다양성 정책이 밀어 넣을 일이 아니다. 점수가 높으면 backfill 없이도 정상적으로 올라온다.
-  targetCategories: ["ott", "parenting", "living", "entertainment", "community"] as string[],
+  // parenting 제거(2026-09-07 채널 개편, 사용자 승인) - 육아 카테고리는 수집 단계에서 원천
+  // 차단되어(keywordExclusionRules.ts) candidate pool에 아예 들어오지 않으므로, backfill 대상으로
+  // 남겨둬도 동작하지 않는 죽은 설정이었다.
+  targetCategories: ["ott", "living", "entertainment", "community"] as string[],
   // true면 targetCategories 중 Top N에 대표가 없는 category를 candidate pool에서 backfill 시도한다.
   enableCategoryBackfill: true,
   // category별 Top N 등장 상한(2026-08-31). 지정한 category만 적용, 나머지는 무제한. 기본은 비활성({}).
