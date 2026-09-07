@@ -18,6 +18,7 @@ import { shouldExcludeCandidate } from "../config/keywordExclusionRules.js";
 import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
+import { runDaumRealtimeCollection } from "./daum-realtime/runDaumRealtimeCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
@@ -44,6 +45,10 @@ import type {
   RunGoogleTrendsCollectionOptions,
   RunGoogleTrendsCollectionResult,
 } from "./google-trends/runGoogleTrendsCollection.js";
+import type {
+  RunDaumRealtimeCollectionOptions,
+  RunDaumRealtimeCollectionResult,
+} from "./daum-realtime/runDaumRealtimeCollection.js";
 import type {
   RunCommunityCollectionOptions,
   RunCommunityCollectionResult,
@@ -326,11 +331,13 @@ export type DailyKeywordWorkflowOptions = {
   trendCollectOptions?: RunCreatorAdvisorCollectionOptions;
   /** 구글 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
   googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
+  /** 다음 실시간 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
+  daumRealtimeOptions?: RunDaumRealtimeCollectionOptions;
   /** 커뮤니티(더쿠 등) 수집 단계(trendCollect)에 그대로 전달된다. */
   communityOptions?: RunCommunityCollectionOptions;
   /**
-   * 이번 run에서 수집·조회할 동적 트렌드 소스. 생략하면 세 소스 모두(현행 동작).
-   * - 오전 job: ["creator_advisor", "google_trends"] — 커뮤니티는 오후로 분리(2026-08-31)
+   * 이번 run에서 수집·조회할 동적 트렌드 소스. 생략하면 네 소스 모두(현행 동작).
+   * - 오전 job들: ["creator_advisor", "google_trends", "daum_realtime"] — 커뮤니티는 오후로 분리(2026-08-31)
    * - 오후 커뮤니티 job: ["community"]
    * trendCollect 단계에서 어떤 수집기를 돌릴지, buildDailyQueryPool이 어떤 source의 trend_candidates를
    * 읽을지를 함께 결정한다(오후 run이 오전에 쌓인 creator_advisor 후보를 다시 태우지 않도록).
@@ -358,6 +365,8 @@ export type DailyKeywordWorkflowResult = {
   trendCollection: RunCreatorAdvisorCollectionResult | null;
   /** 구글 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
   googleTrendsCollection: RunGoogleTrendsCollectionResult | null;
+  /** 다음 실시간 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
+  daumRealtimeCollection: RunDaumRealtimeCollectionResult | null;
   /** 커뮤니티 수집 결과. 위와 같다. disabled면 status="skipped". */
   communityCollection: RunCommunityCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
@@ -413,6 +422,7 @@ export async function runDailyKeywordWorkflow(
     stageLog,
     trendCollection: null,
     googleTrendsCollection: null,
+    daumRealtimeCollection: null,
     communityCollection: null,
     queryPool: null,
     collected: null,
@@ -441,10 +451,12 @@ export async function runDailyKeywordWorkflow(
     // runCreatorAdvisorCollection() 자체가 예외를 던지지 않고 status로 실패를 알린다.
     const trendStartedAt = Date.now();
 
-    // 이번 run이 다룰 동적 소스. 생략하면 세 소스 모두(현행). 오전 job은 커뮤니티를 빼고,
-    // 오후 커뮤니티 job은 community 하나만 넘긴다(2026-08-31, 발송 2회 분리).
+    // 이번 run이 다룰 동적 소스. 생략하면 네 소스 모두(현행). 오전 job들은 커뮤니티를 빼고,
+    // 오후 커뮤니티 job은 community 하나만 넘긴다(2026-08-31, 발송 2회 분리). daum_realtime은
+    // 2026-09-08 추가 - 사회이슈/연예 두 오전 job 모두에 자동으로 나뉘어 들어간다(카테고리
+    // 분류가 라우팅을 대신하므로 이 소스 자체를 특정 job 전용으로 두지 않는다).
     const collectionSources: readonly TrendSource[] =
-      options.collectionSources ?? ["creator_advisor", "google_trends", "community"];
+      options.collectionSources ?? ["creator_advisor", "google_trends", "daum_realtime", "community"];
     const forceSkip = { enabled: false } as const;
 
     // 소스별로 독립 수집한다. 하나가 실패해도 나머지는 계속 돌아야 하므로 순차 실행하되 서로의
@@ -459,6 +471,11 @@ export async function runDailyKeywordWorkflow(
       collectionSources.includes("google_trends") ? options.googleTrendsOptions : { ...options.googleTrendsOptions, ...forceSkip }
     );
     result.googleTrendsCollection = googleTrendsCollection;
+
+    const daumRealtimeCollection = await runDaumRealtimeCollection(
+      collectionSources.includes("daum_realtime") ? options.daumRealtimeOptions : { ...options.daumRealtimeOptions, ...forceSkip }
+    );
+    result.daumRealtimeCollection = daumRealtimeCollection;
 
     const communityCollection = await runCommunityCollection(
       collectionSources.includes("community") ? options.communityOptions : { ...options.communityOptions, ...forceSkip }
@@ -477,6 +494,12 @@ export async function runDailyKeywordWorkflow(
           `${googleTrendsCollection.upsertedCount}건 저장 (trendDate: ${googleTrendsCollection.trendDate ?? "N/A"}, 만료 ${googleTrendsCollection.expiredCount}건)`
       );
     }
+    if (daumRealtimeCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 다음 실시간 트렌드 수집: ${daumRealtimeCollection.fetchedCount}건 조회 → ` +
+          `${daumRealtimeCollection.upsertedCount}건 저장 (trendDate: ${daumRealtimeCollection.trendDate ?? "N/A"}, 만료 ${daumRealtimeCollection.expiredCount}건)`
+      );
+    }
     if (communityCollection.status === "success") {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] 커뮤니티 수집: ${communityCollection.fetchedCount}건 조회 → ` +
@@ -492,6 +515,7 @@ export async function runDailyKeywordWorkflow(
     const trendResults = [
       { source: "creator_advisor", result: trendCollection },
       { source: "google_trends", result: googleTrendsCollection },
+      { source: "daum_realtime", result: daumRealtimeCollection },
       { source: "community", result: communityCollection },
     ];
     const succeeded = trendResults.filter((entry) => entry.result.status === "success");

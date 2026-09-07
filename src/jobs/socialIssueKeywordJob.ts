@@ -30,7 +30,7 @@ const job: SchedulerJob = {
   name: "social-issue-keyword",
   execute: async () => {
     const result = await runDailyKeywordWorkflow({
-      collectionSources: ["creator_advisor", "google_trends"],
+      collectionSources: ["creator_advisor", "google_trends", "daum_realtime"],
       includeCategories: ["incident", "living"],
       metadata: { kind: "social_issue" },
       notifyOptions: { headerTitle: NOTIFICATION_HEADER },

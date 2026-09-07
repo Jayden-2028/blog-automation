@@ -1,6 +1,43 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-07 (Asia/Seoul)
+기준일: 2026-09-08 (Asia/Seoul)
+
+## 2026-09-08 세션 — 다음(Daum) 실시간 트렌드 소스 추가
+
+**결정**(사용자 승인): "사회 이슈 서치풀에 다음 실시간 검색도 추가할 수 있을지" 확인 요청 →
+실측 검증 후 사회이슈(09:00)/연예·OTT(09:10) 두 job 모두에 자동으로 나뉘어 들어가는 일반 소스로
+추가.
+
+**실측 확인 사항**:
+- 다음은 2020년에 "실시간 이슈 검색어(실검)"를 종료했지만, 후속으로 "실시간 트렌드"라는 새
+  서비스를 베타로 운영 중이다(공식 설명서 `focus.daum.net/daum/m/algorithm/part5` 확인 - 검색
+  로그+뉴스 문서 결합, Z-Score 급상승 탐지, 선거 후보자 키워드 원천 차단 등 자체 가드레일 보유).
+- 브라우저 자동화나 로그인 없이 `https://www.daum.net/`을 스푸핑 없는 기본 User-Agent로 GET하면
+  응답 HTML 안에 순위·키워드·등락 상태가 그대로 JSON으로 박혀 있다(`curl`/Node 기본 fetch 모두
+  실측 확인). Creator Advisor보다 훨씬 가볍고 Google Trends RSS와 같은 층위다.
+- `robots.txt`가 대부분 경로를 막지만(`Disallow: /`) 정확히 이 데이터가 있는 루트 경로는 명시
+  허용한다(`Allow: /$`). ToS상 상업적 재사용 범위까지는 별도 확인 대상으로 남겨둔다.
+- 연예 가십+사회이슈+일상이 섞인 종합 트렌드라(예: "한은서 윤종훈 결혼", "김병기 뇌물 구속영장"),
+  `classifyKeywordCategory()`가 알아서 분류해 두 job에 나눠 들어가게 했다 - 소스 자체를 특정
+  job 전용으로 두지 않았다.
+
+**구현**: `src/services/search/providers/daumRealtime/`(parseDaumRealtimePage.ts - 마커+중괄호
+balance로 JSON 추출, DaumRealtimeProvider.ts - fetch 래퍼) + `src/workflows/daum-realtime/`
+(mapDaumRealtimeCandidates.ts, runDaumRealtimeCollection.ts, runCollectionCli.ts,
+testDaumRealtime.ts). `config/trendSources.ts`에 이미 있던 `daum_realtime` 플레이스홀더(기본
+disabled)를 실제 구현으로 채우고 기본값을 `true`로 전환. `dailyKeywordWorkflow.ts`의 4번째
+동적 소스로 배선. `socialIssueKeywordJob.ts`/`entertainmentKeywordJob.ts` 둘 다
+`collectionSources`에 추가(entertainment job은 재수집 없이 social-issue job이 이미 모은 오늘자
+`trend_candidates`를 읽기만 함 - 기존 Creator Advisor/Google Trends와 같은 패턴).
+
+**알려진 한계**: 실측 dry-run에서 10건 중 8건이 키워드 어휘 미매칭으로 `living`(→티스토리)에
+폴백됐다("결혼"만으로는 안 걸림 - "결혼 발표"만 어휘에 있음). Google Trends도 처음엔 같은
+문제를 겪었고 뉴스 출처 신호로 보완했는데, 다음 실시간 트렌드 데이터에는 출처 정보가 없어 같은
+방법을 못 쓴다. 당장 고치지 않고 실제 운영 데이터로 어휘를 다듬는 기존 방식(`keywordCategoryRules.ts`)
+을 따르기로 함.
+
+**검증**: `npm run test:daum-realtime`(파서/매핑/수집 배선 12케이스) + `npm run collect:daum-realtime`
+(dry-run)으로 실제 다음 홈에서 10건 조회·분류 확인. `npm run build` + 전체 회귀 테스트 통과.
 
 ## 2026-09-07 세션 — 채널 전담제 개편(육아 카테고리 제외 + 티스토리/블로그스팟 카테고리 분리)
 

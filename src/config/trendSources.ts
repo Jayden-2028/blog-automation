@@ -16,7 +16,11 @@
 // - community: 기본 true. 더쿠(theqoo.net/hot)만 붙어 있고 robots.txt 실측상 허용, 인증/프로필
 //   불필요, 2026-08-30에 맥에서 dry-run fetch 20건 실측 검증. 켜두는 것이 기본, 끄려면
 //   COMMUNITY_TRENDS_ENABLED=false. 사이트 하나가 막혀도 runCommunityCollection이 격리한다.
-// - daum_realtime: 기본 false. 아직 수집기가 구현되지 않았다.
+// - daum_realtime: 기본 true(2026-09-08 사용자 승인 + 실측 검증 완료). 다음 홈 "실시간 트렌드"
+//   위젯을 인증 없이 그냥 GET해서 읽는다(robots.txt가 루트 경로를 명시적으로 허용 - `Allow: /$`).
+//   브라우저 자동화도 로그인도 필요 없어 Google Trends와 같은 급으로 가볍다. 끄려면
+//   DAUM_REALTIME_ENABLED=false. 연예/사회이슈가 섞인 종합 트렌드라 키워드 어휘 분류로 라우팅해
+//   사회이슈(09:00)/연예·OTT(09:10) 두 job에 자동으로 나뉘어 들어간다.
 // 어느 쪽이든 buildDailyQueryPool은 소스가 꺼져 있거나 실패해도 나머지로 정상 동작한다.
 
 import { CREATOR_ADVISOR_CONFIG } from "./creatorAdvisor.js";
@@ -81,7 +85,7 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
     candidateTtlHours: parseIntEnv(process.env.GOOGLE_TRENDS_CANDIDATE_TTL_HOURS, 12),
   },
   daum_realtime: {
-    enabled: parseBooleanEnv(process.env.DAUM_REALTIME_ENABLED, false),
+    enabled: parseBooleanEnv(process.env.DAUM_REALTIME_ENABLED, true),
     maxDailyCandidates: parseIntEnv(process.env.DAUM_REALTIME_MAX_DAILY_CANDIDATES, 8),
     maxCandidatesPerTopic: parseIntEnv(process.env.DAUM_REALTIME_MAX_DAILY_CANDIDATES, 8),
     // 10분 주기로 갱신되는 실시간 순위라 가장 짧다.

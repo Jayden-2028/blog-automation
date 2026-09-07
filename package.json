@@ -89,6 +89,8 @@
     "collect:creator-advisor": "tsx src/workflows/creator-advisor/runCollectionCli.ts",
     "collect:google-trends": "tsx src/workflows/google-trends/runCollectionCli.ts",
     "test:google-trends": "tsx src/workflows/google-trends/testGoogleTrends.ts",
+    "collect:daum-realtime": "tsx src/workflows/daum-realtime/runCollectionCli.ts",
+    "test:daum-realtime": "tsx src/workflows/daum-realtime/testDaumRealtime.ts",
     "collect:community": "tsx src/workflows/community/runCollectionCli.ts",
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
     "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
