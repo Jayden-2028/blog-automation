@@ -48,9 +48,22 @@
 - 커뮤니티: run #49, 키워드 4건 발송(55초, fetch 기반이라 가장 빠름).
 
 **결론**: 키워드 수집 파이프라인 전체가 맥 없이 GitHub Actions만으로 완주함을 실측 확인. 로컬과
-결과 형태(discovery_run 생성, Telegram 알림 형식) 동일. **남은 결정**: schedule을 켜고 로컬
-launchd(`social-issue-keyword`/`entertainment-keyword`/`community-keyword` plist 3개)를 내릴지,
-아니면 당분간 로컬과 클라우드를 병행 관찰할지 - 사용자 결정 대기.
+결과 형태(discovery_run 생성, Telegram 알림 형식) 동일.
+
+**Phase 2 전환 완료(2026-09-13, 같은 세션, 사용자 승인)** - schedule 활성화 + 로컬 launchd 이관:
+- 세 워크플로우에 cron 추가: 사회이슈 `0 0 * * *`(00:00 UTC=09:00 KST), 연예·OTT `10 0 * * *`
+  (00:10 UTC=09:10 KST), 커뮤니티 `0 4 * * *`(04:00 UTC=13:00 KST). `workflow_dispatch`는
+  유지(수동 재실행용).
+- 로컬 launchd 3개(`social-issue-keyword`/`entertainment-keyword`/`community-keyword` plist)는
+  `launchctl bootout`으로 내림. plist 파일은 삭제하지 않음 - 되돌리려면
+  `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<plist>`.
+- `telegram-poll`/`publish-poll`은 이번 범위 밖 - 로컬에 그대로 남아 있고 여전히 맥 의존.
+
+**지금부터 키워드 수집 3종의 유일한 실행 경로는 GitHub Actions다.** 다음 확인: 내일(2026-09-14)
+09:00/09:10/13:00 KST 자동 실행이 정시에 도는지 관찰(Actions 탭 또는 텔레그램 도착 시각으로 확인).
+
+**남은 로컬 의존 구간**(맥이 꺼지면 여전히 멈추는 것): 텔레그램 버튼 수신(`telegram-poll`),
+리서치/집필/발행 폴링(`publish-poll`) - 이게 다음 Phase 대상.
 
 ---
 
