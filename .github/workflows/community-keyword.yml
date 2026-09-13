@@ -1,0 +1,44 @@
+# 클라우드 이전 Phase 2 - 커뮤니티(더쿠) 인기글 유래 키워드 수집. 순수 fetch 기반(더쿠 HTML
+# 파싱, 로그인/Playwright 불필요 - src/services/community/theqoo/TheqooProvider.ts 참고)이라
+# 세 job 중 클라우드 이전이 가장 안전하다. 단, 인기글 제목 -> 키워드 변환에 LLM 1콜
+# (extractCommunityKeywords.ts, runHeadlessClaude 경유)을 쓰므로 CLAUDE_CODE_OAUTH_TOKEN이 필요하다
+# (2026-09-13 스모크테스트로 구독 기반 CI 인증 확인됨 - docs/ai-handoff/CLOUD_MIGRATION.md 참고).
+#
+# 지금은 workflow_dispatch(수동)만 - 다른 두 워크플로우와 같은 이유로 schedule은 아직 안 넣음.
+
+name: community-keyword
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: community-keyword
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI (extractCommunityKeywords LLM 호출용)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run community-keyword
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: npm run job:community-keyword

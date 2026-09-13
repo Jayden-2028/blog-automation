@@ -1,0 +1,41 @@
+# 클라우드 이전 Phase 2 - 연예·OTT 키워드 수집(블로그스팟용). social-issue-keyword.yml이 같은 날
+# 먼저 실행되어 trend_candidates를 채워둔 뒤에 실행해야 한다(entertainmentKeywordJob.ts 상단 주석
+# 참고 - 재수집 없이 오늘자 candidates를 읽기만 함). 로컬 launchd(09:00/09:10 순서)와 동일한 이유.
+#
+# 지금은 workflow_dispatch(수동)만 - social-issue-keyword.yml과 같은 이유로 schedule은 아직 안 넣음.
+#
+# 필요한 repo secret: social-issue-keyword.yml과 동일(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET).
+
+name: entertainment-keyword
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: entertainment-keyword
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run entertainment-keyword
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: npm run job:entertainment-keyword

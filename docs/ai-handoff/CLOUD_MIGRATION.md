@@ -1,6 +1,47 @@
 # 클라우드 이전 로드맵
 
-기준일: 2026-08-28
+기준일: 2026-09-13
+
+## 2026-09-13 갱신 — 핵심 블로커 두 개 해소 + Phase 2 착수
+
+**배경**: 감시인이 09-09~09-13 계속 실패(마지막 성공 run #41, 09-07)로 관측됨 - 로컬 맥 의존
+파이프라인이 실제로 여러 날 멈춰 있었다. 사용자가 "맥 꺼져도 자동으로 도는" 방향을 다시 우선순위로
+올림(맥미니는 최후 옵션, 클라우드+무료 우선).
+
+**실측 검증 완료(스모크테스트, `.github/workflows/test-claude-subscription-auth.yml`)** - 아래
+"핵심 제약 두 가지" 중 2번(`claude -p` 과금 문제)이 해소됨:
+
+1. `claude setup-token`으로 발급한 구독(Pro/Max) 기반 OAuth 토큰(`CLAUDE_CODE_OAUTH_TOKEN` secret)이
+   GitHub Actions 러너에서 `claude -p`를 **API 토큰 과금 없이** 인증함 - 순수 텍스트 응답 확인(1.98초).
+2. 같은 토큰으로 WebSearch/WebFetch 도구(리서치 단계와 동일 플래그: `--allowed-tools WebSearch,WebFetch
+   --permission-mode acceptEdits`)도 정상 동작 - 실제 검색 실행, 출처 URL 반환 확인(9.7초).
+3. 신선한 CI 환경(계정 플러그인 캐시 없음)에서 `claude plugin marketplace add` +
+   `claude plugin install moai-marketer@moai-cowork -y`로 계정 플러그인을 즉석 설치 가능,
+   Skill 도구(집필 단계와 동일 플래그: `--allowed-tools Read,Write,Skill`)로
+   `moai-marketer:content-blog`를 정상 로드함(`LOADED` 응답, 3.6초).
+
+**아직 미확인**: 로컬 인터랙티브 사용과 rate limit을 공유하는지(1회성 테스트로는 판단 불가 - 실사용
+중 관찰 필요), 완전 무인 예약 자동화에 대한 Anthropic 이용약관 명문화 여부(문서에서 못 찾음).
+
+**결론**: "1. 로그인 세션에 묶인 것"(Creator Advisor, 네이버 발행)만 여전히 막혀 있고, "2. `claude -p`
+과금 문제"는 해소됐다. 아래 원래 로드맵의 Phase 2/3 판단이 이걸 반영해 갱신된다.
+
+**Phase 2 착수(2026-09-13)** - 키워드 수집 3종을 GitHub Actions로 이전:
+`.github/workflows/{social-issue,entertainment,community}-keyword.yml` 신규. 로컬과 동일한 npm
+스크립트를 그대로 실행(로직 이원화 없음). Creator Advisor는 `CREATOR_ADVISOR_ENABLED=false`로
+명시적으로 꺼서 NAVER API+구글트렌드+다음실시간(+커뮤니티는 fetch 기반이라 원래도 로그인 불필요)만으로
+수집 - `NON_FATAL_STAGES`(코드로 확인됨)라 꺼도 파이프라인은 정상 완주, 품질만 하락.
+
+신규 repo secret: `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`(등록 완료, 2026-09-13).
+
+**지금은 `workflow_dispatch`(수동)만, `schedule` 없음** - 로컬 launchd와 스케줄이 겹치면 같은 시각에
+중복 수집 + 중복 텔레그램 알림이 나갈 수 있어, 수동 실행으로 먼저 결과를 검증한 뒤 schedule을 추가하고
+그 시점에 로컬 launchd job을 내릴지 결정한다. **다음 확인**: 세 워크플로우를 실제 순서(사회이슈 →
+연예 → 커뮤니티)로 수동 실행해 discovery_run/Telegram 알림이 정상인지 확인.
+
+---
+
+기준일(이전): 2026-08-28
 
 ## 왜 이 문서가 있나
 

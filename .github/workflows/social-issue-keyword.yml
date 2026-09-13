@@ -1,0 +1,48 @@
+# 클라우드 이전 Phase 2 - 사회이슈 키워드 수집(티스토리용, 로컬 09:00 job과 동일 로직).
+# docs/ai-handoff/CLOUD_MIGRATION.md 참고. 로컬 launchd(com.wooahpapa.blog-automation.
+# social-issue-keyword.plist)와 같은 npm 스크립트를 그대로 실행한다 - 로직 이원화 없음.
+#
+# Creator Advisor(trendCollect)는 로그인 세션이 이 러너에 없어 CREATOR_ADVISOR_ENABLED=false로
+# 명시적으로 끈다(비치명적 enrichment 단계라 꺼도 파이프라인은 정상 완주 - socialIssueKeywordJob.ts
+# 의 NON_FATAL_STAGES 참고). NAVER API/구글 트렌드/다음 실시간/커뮤니티만으로 수집한다.
+#
+# 지금은 workflow_dispatch(수동)만 있다 - 로컬 launchd와 동시에 스케줄을 걸면 같은 시각에 중복
+# 수집 + 중복 텔레그램 알림이 나갈 수 있어, 수동 실행으로 결과를 먼저 검증한 뒤 schedule을 추가하고
+# 그때 로컬 launchd job을 내릴지 결정한다.
+#
+# 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+# NAVER_CLIENT_ID, NAVER_CLIENT_SECRET.
+
+name: social-issue-keyword
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: social-issue-keyword
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run social-issue-keyword
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          CREATOR_ADVISOR_ENABLED: "false"
+        run: npm run job:social-issue-keyword
