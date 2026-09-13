@@ -2,8 +2,10 @@
 # GitHub Actions 러너에서 실제로 `claude -p`를 인증하는지 확인한다. 성공하면 API 토큰 과금 없이
 # 리서치/집필 단계를 클라우드로 옮길 수 있다는 뜻이다(docs/ai-handoff/CLOUD_MIGRATION.md 참고).
 #
-# 도구(WebSearch/WebFetch/Read/Write) 없이 순수 텍스트 응답만 확인한다 - 인증 자체만 격리해서
-# 본다. 스킬(moai-marketer 등) 로딩 여부는 별도 검증 대상(이 워크플로우 범위 밖).
+# 2단계: 도구 없이 순수 인증만 확인(완료, 2026-09-13 - 성공).
+# 3단계: WebSearch/WebFetch + permission-mode acceptEdits가 CI 네트워크에서 실제로 동작하는지,
+# 그리고 moai-marketer 플러그인을 CI에서 새로 설치해 Skill 도구로 불러올 수 있는지 확인한다
+# (writer.md 실제 호출은 --allowed-tools Read,Write,Skill을 씀 - runArticleJob.ts:420-423 참고).
 #
 # 필요한 repo secret: CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`으로 로컬에서 생성 후 등록).
 # 예약 실행 없음(workflow_dispatch만) - 확인 끝나면 이 파일은 지우거나 그대로 둬도 무해(수동 실행뿐).
@@ -34,3 +36,27 @@ jobs:
           echo "---"
           echo "claude -p 실행 (도구 없음, 순수 텍스트):"
           time claude -p "Reply with exactly the single word: OK" --output-format text
+
+      - name: Test 2 - WebSearch/WebFetch tools (research stage와 동일한 플래그)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          time claude -p "WebSearch 도구로 '오늘 날짜'를 검색하고, 찾은 내용을 근거로 오늘이 몇 년 며칠인지 한국어 한 문장으로만 답하세요. Write나 Read는 쓰지 마세요." \
+            --output-format text \
+            --allowed-tools "WebSearch,WebFetch" \
+            --permission-mode acceptEdits
+
+      - name: Test 3 - moai-marketer 플러그인 설치 (신선한 CI 환경)
+        run: |
+          claude plugin marketplace add https://github.com/modu-ai/moai-cowork.git
+          claude plugin install moai-marketer@moai-cowork -y
+          claude plugin list
+
+      - name: Test 4 - Skill 도구로 moai-marketer:content-blog 로드 (writer.md와 동일한 플래그)
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          time claude -p "Skill 도구로 moai-marketer:content-blog 스킬을 호출해서 로드되는지만 확인하세요. 실제로 글을 쓰지 말고, 스킬이 정상 로드됐으면 정확히 LOADED라고만, 실패했으면 FAILED와 한 줄 이유만 답하세요." \
+            --output-format text \
+            --allowed-tools "Skill" \
+            --permission-mode acceptEdits
