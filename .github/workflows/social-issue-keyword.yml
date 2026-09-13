@@ -21,6 +21,10 @@
 name: social-issue-keyword
 
 on:
+  schedule:
+    # 00:00 UTC = 09:00 KST. 로컬 launchd(social-issue-keyword.plist)는 2026-09-13 내림 -
+    # 이 워크플로우가 유일한 실행 경로다.
+    - cron: "0 0 * * *"
   workflow_dispatch: {}
 
 concurrency:
