@@ -36,8 +36,21 @@
 
 **지금은 `workflow_dispatch`(수동)만, `schedule` 없음** - 로컬 launchd와 스케줄이 겹치면 같은 시각에
 중복 수집 + 중복 텔레그램 알림이 나갈 수 있어, 수동 실행으로 먼저 결과를 검증한 뒤 schedule을 추가하고
-그 시점에 로컬 launchd job을 내릴지 결정한다. **다음 확인**: 세 워크플로우를 실제 순서(사회이슈 →
-연예 → 커뮤니티)로 수동 실행해 discovery_run/Telegram 알림이 정상인지 확인.
+그 시점에 로컬 launchd job을 내릴지 결정한다.
+
+**수동 실측 완료(2026-09-13, 같은 세션)** - 세 워크플로우를 실제 순서(사회이슈 → 연예 → 커뮤니티)로
+전부 수동 실행, 전부 성공:
+- 사회이슈: run #47, 키워드 10건 Telegram 발송(3분22초). 첫 실행에서 rank 단계 주제어 추출이
+  `spawn claude ENOENT`로 규칙 기반 폴백된 걸 발견 - `claude` CLI 설치 단계가 이 워크플로우에만
+  없었다(community-keyword.yml에는 있었음). 즉시 수정.
+- 연예·OTT: run #48, 키워드 10건 발송(2분44초, 재수집 없이 사회이슈가 만든 오늘자 trend_candidates
+  재사용 확인). 수정 후 ENOENT 재발 없음.
+- 커뮤니티: run #49, 키워드 4건 발송(55초, fetch 기반이라 가장 빠름).
+
+**결론**: 키워드 수집 파이프라인 전체가 맥 없이 GitHub Actions만으로 완주함을 실측 확인. 로컬과
+결과 형태(discovery_run 생성, Telegram 알림 형식) 동일. **남은 결정**: schedule을 켜고 로컬
+launchd(`social-issue-keyword`/`entertainment-keyword`/`community-keyword` plist 3개)를 내릴지,
+아니면 당분간 로컬과 클라우드를 병행 관찰할지 - 사용자 결정 대기.
 
 ---
 
