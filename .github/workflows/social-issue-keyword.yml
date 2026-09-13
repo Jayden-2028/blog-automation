@@ -11,7 +11,12 @@
 # 그때 로컬 launchd job을 내릴지 결정한다.
 #
 # 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-# NAVER_CLIENT_ID, NAVER_CLIENT_SECRET.
+# NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, CLAUDE_CODE_OAUTH_TOKEN.
+#
+# 2026-09-13 첫 실측 실행에서 발견: rank 단계의 주제어 추출(TOPIC_MERGE_PREVIEW,
+# extractTopicQueries.ts)도 runHeadlessClaude를 쓴다 - claude CLI 미설치 상태로 처음 돌렸더니
+# "spawn claude ENOENT"로 규칙 기반 폴백됐다(job 자체는 성공, 품질만 하락). claude CLI 설치 +
+# 토큰을 추가해 이 단계도 CI에서 정상 동작하게 한다.
 
 name: social-issue-keyword
 
@@ -36,6 +41,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Install Claude Code CLI (주제어 추출 LLM 호출용)
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Run social-issue-keyword
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -44,5 +52,6 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CREATOR_ADVISOR_ENABLED: "false"
         run: npm run job:social-issue-keyword
