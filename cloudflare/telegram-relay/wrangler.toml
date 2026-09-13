@@ -1,0 +1,11 @@
+name = "blog-automation-telegram-relay"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+GITHUB_OWNER = "Jayden-2028"
+GITHUB_REPO = "blog-automation"
+
+# secrets(TELEGRAM_WEBHOOK_SECRET, GH_DISPATCH_TOKEN)은 평문으로 여기 안 둔다.
+# `wrangler secret put TELEGRAM_WEBHOOK_SECRET` / `wrangler secret put GH_DISPATCH_TOKEN`으로
+# 별도 등록한다(docs/ai-handoff/CLOUD_MIGRATION.md Phase 3 참고).

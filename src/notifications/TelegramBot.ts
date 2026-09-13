@@ -736,6 +736,55 @@ export class TelegramBot {
    *   update 이후로는 전진시키지 않는다. 그래야 텔레그램이 다음 폴링에서 그대로 다시 배달한다
    *   (2026-09-02: 이 구분이 없어서 Supabase DNS 장애 중 GO 클릭 3건이 영구 유실됐다).
    */
+  /**
+   * callback_query 하나를 끝까지 처리한다(3개 파서 순차 시도 + 응답 전송 + 필요시 자료조사 트리거).
+   * pollOnce()의 원래 루프 본문을 그대로 뺀 것 - 수신 경로(getUpdates 배치 vs webhook 단건)와
+   * 무관하게 재사용하려는 목적(파일 최상단 "구조 원칙" 주석 참고). offset 갱신/배치 에러 처리는
+   * 호출자(pollOnce, 또는 webhook 진입점) 책임이다 - 이 메서드는 update 하나만 안다.
+   */
+  async processUpdate(update: TelegramUpdate): Promise<{
+    handled: boolean;
+    result?: HandleCallbackResult;
+    reviewResult?: HandleArticleReviewResult;
+    researchDecisionResult?: HandleResearchDecisionResult;
+    researchTrigger?: ResearchTriggerResult;
+  }> {
+    if (!update.callback_query) return { handled: false };
+
+    const result = await this.handleCallbackQuery(update.callback_query);
+
+    // 키워드 선택 형식이 아니면(우리 버튼이 아니거나 "review:"/"research:" 형식) 다음 파서를
+    // 시도한다. 세 파서는 서로 배타적이라(각 test*CallbackData.ts로 확인) 이중 처리 위험이 없다.
+    if (result.outcome.status === "ignored" && result.outcome.reason === "not_a_selection") {
+      const reviewResult = await this.handleArticleReviewCallback(update.callback_query);
+      if (reviewResult.outcome.status !== "ignored") {
+        await this.respondToArticleReview(update.callback_query, reviewResult);
+        return { handled: true, reviewResult };
+      }
+
+      const researchResult = await this.handleResearchDecisionCallback(update.callback_query);
+      if (researchResult.outcome.status !== "ignored") {
+        await this.respondToResearchDecision(update.callback_query, researchResult);
+        return { handled: true, researchDecisionResult: researchResult };
+      }
+    }
+
+    await this.respondToCallback(update.callback_query, result);
+
+    // Go로 job이 새로 selected가 되면(신규 생성 또는 rejected -> selected 복구) 자료조사를
+    // detached 프로세스로 띄운다. 확인 메시지("자료조사 중입니다")는 위 respondToCallback에서
+    // 이미 나갔고, 완료(요약 + 원고 작성 버튼)·실패 알림은 job:research CLI가 직접 보낸다.
+    // 중복 클릭 등으로 이미 researching 이후로 넘어간 job은 runResearchStage가 skipped로 처리한다.
+    const selectedJob = jobFromFreshSelection(result.outcome);
+    let researchTrigger: ResearchTriggerResult | undefined;
+    if (selectedJob) {
+      this.triggerResearch(selectedJob.id);
+      researchTrigger = { job: selectedJob };
+    }
+
+    return { handled: true, result, researchTrigger };
+  }
+
   async pollOnce(): Promise<{
     processed: number;
     results: HandleCallbackResult[];
@@ -761,40 +810,11 @@ export class TelegramBot {
       }
 
       try {
-        const result = await this.handleCallbackQuery(update.callback_query);
-
-        // 키워드 선택 형식이 아니면(우리 버튼이 아니거나 "review:"/"research:" 형식) 다음 파서를
-        // 시도한다. 세 파서는 서로 배타적이라(각 test*CallbackData.ts로 확인) 이중 처리 위험이 없다.
-        if (result.outcome.status === "ignored" && result.outcome.reason === "not_a_selection") {
-          const reviewResult = await this.handleArticleReviewCallback(update.callback_query);
-          if (reviewResult.outcome.status !== "ignored") {
-            reviewResults.push(reviewResult);
-            await this.respondToArticleReview(update.callback_query, reviewResult);
-            maxUpdateId = Math.max(maxUpdateId, update.update_id);
-            continue;
-          }
-
-          const researchResult = await this.handleResearchDecisionCallback(update.callback_query);
-          if (researchResult.outcome.status !== "ignored") {
-            researchDecisionResults.push(researchResult);
-            await this.respondToResearchDecision(update.callback_query, researchResult);
-            maxUpdateId = Math.max(maxUpdateId, update.update_id);
-            continue;
-          }
-        }
-
-        results.push(result);
-        await this.respondToCallback(update.callback_query, result);
-
-        // Go로 job이 새로 selected가 되면(신규 생성 또는 rejected -> selected 복구) 자료조사를
-        // detached 프로세스로 띄운다. 확인 메시지("자료조사 중입니다")는 위 respondToCallback에서
-        // 이미 나갔고, 완료(요약 + 원고 작성 버튼)·실패 알림은 job:research CLI가 직접 보낸다.
-        // 중복 클릭 등으로 이미 researching 이후로 넘어간 job은 runResearchStage가 skipped로 처리한다.
-        const selectedJob = jobFromFreshSelection(result.outcome);
-        if (selectedJob) {
-          this.triggerResearch(selectedJob.id);
-          researchTriggerResults.push({ job: selectedJob });
-        }
+        const processed = await this.processUpdate(update);
+        if (processed.result) results.push(processed.result);
+        if (processed.reviewResult) reviewResults.push(processed.reviewResult);
+        if (processed.researchDecisionResult) researchDecisionResults.push(processed.researchDecisionResult);
+        if (processed.researchTrigger) researchTriggerResults.push(processed.researchTrigger);
 
         maxUpdateId = Math.max(maxUpdateId, update.update_id);
       } catch (error) {

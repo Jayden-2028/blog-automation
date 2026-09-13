@@ -122,6 +122,7 @@
     "job:entertainment-keyword": "tsx src/jobs/entertainmentKeywordJob.ts",
     "job:community-keyword": "tsx src/jobs/communityKeywordJob.ts",
     "job:telegram-poll": "tsx src/jobs/telegramPollJob.ts",
+    "job:telegram-update": "tsx src/jobs/runTelegramUpdateCli.ts",
     "job:publish-poll": "tsx src/jobs/publishPollJob.ts",
     "job:watchdog": "tsx src/jobs/watchdogJob.ts",
     "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",

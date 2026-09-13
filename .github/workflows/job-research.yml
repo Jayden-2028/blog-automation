@@ -1,0 +1,53 @@
+# 클라우드 이전 Phase 3 - 자료조사 단계(runResearchStage)를 GitHub Actions에서 실행한다.
+# 로컬에서는 TelegramBot.triggerResearch가 `npm run job:research -- <jobId>`를 detached 자식
+# 프로세스로 띄웠는데, GH Actions 러너에선 detached 프로세스가 job 종료와 함께 죽으므로 이렇게
+# "별도 워크플로우를 workflow_dispatch로 새로 발화"하는 방식으로 대체한다(telegram-update.yml이
+# 이 워크플로우를 GitHub API로 호출 - triggerResearch override 참고).
+#
+# 완료/실패 알림은 이 CLI(runResearchStageCli.ts)가 기존 코드 그대로 직접 텔레그램에 보낸다 -
+# 호출자는 fire-and-forget이라 이 워크플로우 자체의 성패를 따로 릴레이할 필요가 없다.
+#
+# claude -p 사용(WebSearch/WebFetch, RESEARCH_PROVIDER=claude 기본) - CLAUDE_CODE_OAUTH_TOKEN 필요.
+# 최대 소요 18분(RESEARCH_TIMEOUT_MS) - 타임아웃 여유를 넉넉히 둔다.
+
+name: job-research
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "article_jobs.id (UUID)"
+        required: true
+        type: string
+
+concurrency:
+  group: job-research-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run job:research
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: npm run job:research -- "${{ inputs.job_id }}"

@@ -1,0 +1,52 @@
+# 클라우드 이전 Phase 3 - 텔레그램 버튼 클릭 1건을 처리하는 워크플로우. 로컬 telegram-poll처럼
+# getUpdates로 배치를 긁어오는 대신, Cloudflare Worker(텔레그램 webhook 릴레이)가 이 워크플로우를
+# repository_dispatch API로 직접 발화하며 update 원본 JSON을 client_payload로 넘긴다.
+#
+# permissions.actions: write가 필요하다 - triggerResearch/triggerWriting이 job-research.yml/
+# job-write.yml을 workflow_dispatch API로 새로 발화하기 때문(dispatchWorkflow.ts 참고).
+#
+# 제목 생성(Go 클릭 시, ~25초)은 이 워크플로우 안에서 동기로 돈다(로컬과 동일) - 그래서
+# claude CLI가 여기도 필요하다. 리서치/집필 자체(수 분~20분)는 여기서 안 기다리고 다른 워크플로우로
+# 넘긴다.
+
+name: telegram-update
+
+on:
+  repository_dispatch:
+    types: [telegram_update]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: telegram-update
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI (제목 생성용)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run job:telegram-update
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TELEGRAM_UPDATE_JSON: ${{ toJson(github.event.client_payload) }}
+        run: npm run job:telegram-update
