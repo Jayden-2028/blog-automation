@@ -1,0 +1,36 @@
+# 실측용 1회성 스모크 테스트 - Claude 구독(Pro/Max) 기반 `claude setup-token` OAuth 토큰이
+# GitHub Actions 러너에서 실제로 `claude -p`를 인증하는지 확인한다. 성공하면 API 토큰 과금 없이
+# 리서치/집필 단계를 클라우드로 옮길 수 있다는 뜻이다(docs/ai-handoff/CLOUD_MIGRATION.md 참고).
+#
+# 도구(WebSearch/WebFetch/Read/Write) 없이 순수 텍스트 응답만 확인한다 - 인증 자체만 격리해서
+# 본다. 스킬(moai-marketer 등) 로딩 여부는 별도 검증 대상(이 워크플로우 범위 밖).
+#
+# 필요한 repo secret: CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`으로 로컬에서 생성 후 등록).
+# 예약 실행 없음(workflow_dispatch만) - 확인 끝나면 이 파일은 지우거나 그대로 둬도 무해(수동 실행뿐).
+
+name: test-claude-subscription-auth
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run claude -p with subscription OAuth token
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          echo "claude --version:"
+          claude --version
+          echo "---"
+          echo "claude -p 실행 (도구 없음, 순수 텍스트):"
+          time claude -p "Reply with exactly the single word: OK" --output-format text
