@@ -1,6 +1,29 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-08 (Asia/Seoul)
+기준일: 2026-09-14 (Asia/Seoul)
+
+## 2026-09-14 세션(메인 윈도우) — Cloudflare Access 게이트 활성화 완료 + 역할 범위 재확인
+
+**작업**: 09-06 세션에서 미완료로 남아 있던 절차 5단계(Cloudflare Zero Trust Access)를 대시보드에서
+직접 진행 — Zero Trust 무료 플랜 활성화(사용자 승인, 카드 등록됨/한도초과 시에만 과금) →
+Access 애플리케이션 생성(대상 `blog-automation-manuscripts.pages.dev`) → 정책 `owner-email`
+(이메일 = `bjkim2028@gmail.com`만 허용). 실제 접속 테스트로 로그인 게이트가 뜨는 것까지 확인함
+(이전엔 링크만 있으면 누구나 원고 원문 - 실존 인물 인용 포함 - 을 볼 수 있었음).
+
+**역할 범위 재확인(사용자 질문에 대한 답)**: Cloudflare Pages/Access의 목적은 **"맥이 꺼져 있어도
+파이프라인이 자동으로 돈다"가 아니다.** 실제 역할은 **완성된 정적 원고 페이지(`manuscripts/`)를
+모바일 등 외부에서 열람 가능하게 호스팅 + 접근 제한**뿐이다. 키워드 수집·리서치·집필(헤드리스
+`claude -p`)·텔레그램 봇 폴링·발행 폴링(그리고 그 안에서 Cloudflare로 배포를 "트리거"하는 동작
+자체)은 전부 `~/blog-automation-prod`의 launchd job 5개로 여전히 **맥이 켜져 있어야만** 돈다.
+이 레포에는 wrangler.toml/Workers/Cron Trigger 등 파이프라인 자체를 Cloudflare로 옮긴 코드가
+전혀 없음(확인 완료). 맥이 꺼져 있으면: 키워드 알림도 안 오고, 승인해도 원고 페이지가 갱신·재배포
+되지 않는다 - 마지막으로 배포된 페이지만 그대로 떠 있는다.
+
+**만약 "맥 꺼져도 자동화가 돈다"가 실제 목표라면**: 별도의 훨씬 큰 작업이다 - 최소한 (1) 키워드
+수집/스코어링, (2) 텔레그램 봇 수신, (3) 리서치·집필(현재 `claude -p` CLI 의존) 중 CLI를 API
+호출로 바꿔야 하는 부분, (4) 발행 폴링을 Cloudflare Workers(Cron Triggers) 등 상시 가동 환경으로
+옮겨야 한다. 특히 (3)은 헤드리스 CLI 전제로 설계된 블로그 작성 스킬 재사용 구조와 정면으로 부딪힌다
+(`AGENTS.md`/`CLAUDE.md` 참고). 아직 착수 안 됨 - 사용자가 이 방향을 원하면 별도 설계부터 시작.
 
 ## 2026-09-08 세션 — 다음(Daum) 실시간 트렌드 소스 추가
 
@@ -160,19 +183,19 @@ skipped로 재수집 안 함 확인) - 검증 중 생긴 테스트용 `discovery
 Cloudflare 설정 시 로컬 경로 문구 대신 "원고 페이지 열기" 링크 버튼으로 전환(미설정이면 기존 문구
 그대로 폴백 - 회귀 없음). 테스트: `test:deploy-manuscripts-page`, `test:notify-manuscripts-ready`.
 
-**Cloudflare Pages 설정 (사용자가 한 번만, 아직 미완료)**:
-1. Cloudflare 무료 계정 생성.
-2. 터미널에서 직접: `npx wrangler login` (브라우저 인증 - 이 로그인은 사용자가 직접 해야 함).
-3. 대시보드 → My Profile → API Tokens → "Edit Cloudflare Pages" 템플릿으로 토큰 발급.
-4. `.env`(두 워크트리 공유 심링크)에 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`(대시보드
-   우측 표시) / `CLOUDFLARE_PAGES_PROJECT_NAME`(원하는 이름) 채우기.
-5. Cloudflare Zero Trust → Access → Applications → Add → Self-hosted, 호스트네임
-   `<프로젝트명>.pages.dev`, 정책 Allow / Include: Emails = 본인 이메일(비밀번호 없는 이메일
-   코드 로그인).
+**Cloudflare Pages 설정 (사용자 1회 작업, 1~5단계 전부 완료 — 2026-09-14 확인)**:
+1. ✅ Cloudflare 무료 계정 생성.
+2. ✅ `npx wrangler login`(토큰 기반 배포라 런타임엔 불필요 - 배포 자체는 `.env`의 API 토큰으로
+   동작 확인됨).
+3. ✅ API 토큰 발급, `.env`에 반영.
+4. ✅ `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_PAGES_PROJECT_NAME` 전부 설정
+   확인(두 워크트리 `.env` 공유 심링크).
+5. ✅ **2026-09-14 완료**: Zero Trust 무료 플랜 활성화 + Access 애플리케이션(`owner-email`
+   정책, 이메일=`bjkim2028@gmail.com`) 생성. 로그인 게이트 실제 작동 확인.
 
-**다음 확인**: 1~5단계 완료 후 `npm run manuscripts:build -- <jobId>` 한 번 실행해 실제 배포
-성공 + Access 로그인 게이트가 뜨는지 확인. 그 전까지는 배포가 조용히 skip되고 로컬 파일 생성만
-계속된다(회귀 없음).
+**다음 확인**: 완료. `publish-poll` 로그에 배포 성공 다건 확인됨(`✅ [manuscripts] 페이지 배포
+완료: https://blog-automation-manuscripts.pages.dev`). 위 "2026-09-14 세션" 항목의 역할 범위
+재확인 내용도 참고 - Access 게이트는 열람 제한 목적이지, 파이프라인의 맥 의존성과는 무관하다.
 
 ## 2026-09-05 세션 — 반자동 업로드 중단, 채널별 원고 로컬 페이지로 전환
 
