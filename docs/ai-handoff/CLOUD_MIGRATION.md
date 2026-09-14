@@ -65,6 +65,48 @@
 **남은 로컬 의존 구간**(맥이 꺼지면 여전히 멈추는 것): 텔레그램 버튼 수신(`telegram-poll`),
 리서치/집필/발행 폴링(`publish-poll`) - 이게 다음 Phase 대상.
 
+## Phase 3 완료(2026-09-14, 같은 세션) — 텔레그램 버튼 수신을 클라우드로
+
+**설계**: 폴링을 웹훅으로 바꾸되 비즈니스 로직은 재구현하지 않는다.
+
+```
+텔레그램 버튼 클릭
+  → Cloudflare Worker(cloudflare/telegram-relay/, secret_token 검증만, 로직 없음)
+  → GitHub repository_dispatch(telegram_update 이벤트, update JSON을 client_payload로 그대로)
+  → telegram-update.yml → job:telegram-update(runTelegramUpdateCli.ts)
+      → TelegramBot.processUpdate() 재사용(pollOnce()에서 순수 추출, 동작 무변경)
+      → 무거운 작업(리서치/집필)은 triggerResearch/triggerWriting을 GitHub workflow_dispatch
+        API 호출로 오버라이드 -> job-research.yml / job-write.yml을 별도 워크플로우로 새로 발화
+```
+
+**왜 detached 프로세스를 못 쓰는가**: GH Actions 러너는 job이 끝나면 통째로 내려가서, 그 안에서
+띄운 백그라운드 자식 프로세스가 완료 전에 같이 죽는다(로컬 launchd와 결정적으로 다른 점) - 그래서
+"같은 러너에서 fire-and-forget"이 아니라 "별도 워크플로우 실행을 API로 새로 만드는" 방식을 썼다.
+
+**구현**: `TelegramBot.ts`에 `processUpdate()` 신설(리팩터링만, `test:telegram-bot` 전체 통과 확인) +
+`src/services/github/dispatchWorkflow.ts` + `src/jobs/runTelegramUpdateCli.ts` +
+`.github/workflows/{job-research,job-write,telegram-update}.yml` + `cloudflare/telegram-relay/`.
+
+**설정(사용자 작업)**: GitHub fine-grained PAT(저장소 단일 범위, Contents: Read and write) 발급 →
+Cloudflare Workers용 API 토큰 신규 발급("Cloudflare Workers 편집" 템플릿, 기존 Pages 토큰은
+Workers 권한이 없어서 재사용 불가 확인됨) → workers.dev 서브도메인 최초 등록(`bjkim2028.workers.dev`)
+→ Worker 배포(`wrangler deploy`) → Worker secret 2개 등록(`TELEGRAM_WEBHOOK_SECRET`은 Claude가
+생성, `GH_DISPATCH_TOKEN`은 PAT를 사용자가 직접 `wrangler secret put`).
+
+**검증(실제 컷오버 전)**: 가짜 텔레그램 페이로드로 curl 3종 테스트 - 잘못된 secret_token(403),
+callback_query 없는 update(200, GitHub 안 깨움), 가짜 callback_query·다른 chat_id(200 + 실제
+GitHub Actions 실행 + chat_id 검증으로 안전하게 ignored 처리, DB/텔레그램 무변경) - 전부 통과.
+
+**컷오버**: `setWebhook` 호출(Worker URL + secret_token) → `getWebhookInfo`로 등록 확인 →
+`launchctl bootout`으로 로컬 `telegram-poll` 내림.
+
+**실제 클릭 검증**: 사용자가 실제 알림에서 "Go" 클릭 → `telegram-update` 워크플로우(32초, job 생성
++ 제목 생성 + 리서치 트리거) → `job-research.yml` 자동 발화·실행 확인. 리서치 완료까지 지켜보는 중.
+
+**지금부터 키워드 수집 + 텔레그램 버튼 수신 + 리서치/집필 트리거 전부 맥 전원과 무관하게 클라우드에서
+돈다.** 로컬에 남은 건 `publish-poll`(원고 페이지 준비 + Cloudflare Pages 배포 트리거) 하나 -
+다음 Phase 대상.
+
 ---
 
 기준일(이전): 2026-08-28
