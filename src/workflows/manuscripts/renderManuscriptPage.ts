@@ -123,61 +123,96 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   :root { color-scheme: light dark; --bg:#fff; --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --card:#f6f8fa; --accent:#2563eb; }
   @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#30363d; --card:#161b22; --accent:#60a5fa; } }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); display:flex; height:100vh;
-         font:14px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif; }
-  aside { width:280px; flex:0 0 280px; border-right:1px solid var(--line); overflow-y:auto; padding:14px; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:16px/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", sans-serif; }
+
+  /* 모바일 상단바(햄버거 메뉴) - 데스크톱에서는 숨김 */
+  .topbar { display:flex; align-items:center; gap:10px; padding:10px 12px; border-bottom:1px solid var(--line);
+            position:sticky; top:0; background:var(--bg); z-index:20; }
+  .topbar-title { font-weight:700; font-size:15px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nav-toggle-btn { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px;
+                    width:40px; height:40px; min-width:40px; font-size:18px; line-height:1; cursor:pointer; }
+  .backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:29; }
+  body.nav-open .backdrop { display:block; }
+
+  /* 목록(아사이드) - 모바일에서는 왼쪽에서 슬라이드되는 드로어, 데스크톱에서는 고정 사이드바 */
+  aside { position:fixed; top:0; left:0; bottom:0; width:85vw; max-width:320px; background:var(--bg);
+          border-right:1px solid var(--line); overflow-y:auto; padding:16px; z-index:30;
+          transform:translateX(-100%); transition:transform .2s ease; }
+  body.nav-open aside { transform:translateX(0); }
   aside h1 { font-size:15px; margin:0 0 4px; }
   aside .meta { color:var(--muted); font-size:12px; margin-bottom:14px; }
-  .empty { color:var(--muted); }
+  .empty { color:var(--muted); padding:16px; }
   details.day { margin-bottom:6px; }
-  details.day > summary { font-weight:700; cursor:pointer; padding:4px 0; }
+  details.day > summary { font-weight:700; cursor:pointer; padding:8px 4px; }
   details.day .count { color:var(--muted); font-weight:400; font-size:12px; }
   details.topic { margin:2px 0 2px 12px; }
-  details.topic > summary { cursor:pointer; padding:4px 0; font-size:13px; }
+  details.topic > summary { cursor:pointer; padding:8px 4px; font-size:13.5px; }
   ul.channels { list-style:none; margin:0 0 6px 14px; padding:0; }
   .channel-btn { display:block; width:100%; text-align:left; background:none; border:none; color:var(--fg);
-                 padding:5px 8px; border-radius:6px; cursor:pointer; font-size:13px; }
+                 padding:10px 8px; border-radius:6px; cursor:pointer; font-size:14px; }
   .channel-btn:hover { background:var(--card); }
   .channel-btn.active { background:var(--accent); color:#fff; }
-  main { flex:1; overflow-y:auto; padding:24px 32px; }
-  .placeholder { color:var(--muted); }
-  .doc-title { font-size:20px; font-weight:700; margin:0 0 12px; }
-  .meta-grid { display:grid; grid-template-columns:120px 1fr auto; gap:6px 10px; align-items:start;
-               background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:18px; }
-  .meta-grid .k { color:var(--muted); font-size:12.5px; padding-top:3px; }
-  .meta-grid .v { font-size:13.5px; word-break:break-word; }
-  .mini-copy { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:5px;
-               padding:2px 8px; font-size:12px; cursor:pointer; }
+
+  main { padding:18px 16px 48px; max-width:720px; margin:0 auto; }
+  .placeholder { color:var(--muted); padding:8px; }
+  .doc-title { font-size:19px; line-height:1.4; font-weight:700; margin:0 0 14px; }
+
+  .meta-grid { display:flex; flex-direction:column; gap:12px;
+               background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:18px; }
+  .meta-row-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .meta-grid .k { color:var(--muted); font-size:12.5px; }
+  .meta-grid .v { font-size:14.5px; word-break:break-word; margin-top:3px; }
+  .mini-copy { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:6px;
+               padding:5px 10px; font-size:12.5px; cursor:pointer; flex:0 0 auto; }
   .mini-copy:hover { border-color:var(--accent); }
-  .toolbar { display:flex; gap:8px; margin-bottom:14px; }
-  .btn { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:7px;
-         padding:7px 14px; font-size:13px; cursor:pointer; }
+
+  .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  .btn { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:8px;
+         padding:10px 16px; font-size:14px; cursor:pointer; min-height:40px; }
   .btn:hover { border-color:var(--accent); }
   .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn.active { background:#b45309; border-color:#b45309; color:#fff; }
-  .edited-badge { font-size:12px; color:#b45309; margin-left:4px; }
-  .body-block { margin-bottom:14px; }
+  .edited-badge { font-size:12px; color:#b45309; margin-left:2px; align-self:center; }
+
+  .body-block { margin-bottom:16px; }
   .text-block { white-space:pre-wrap; }
-  .heading-block { font-weight:700; margin-bottom:0; white-space:pre-wrap; }
+  .heading-block { font-weight:700; font-size:16.5px; margin-bottom:0; white-space:pre-wrap; }
   .editable[contenteditable="true"] { outline:2px dashed var(--accent); outline-offset:4px; padding:4px; border-radius:6px; }
-  .image-card { border:1px dashed var(--line); border-radius:8px; padding:10px 12px; background:var(--card); margin:2em 0; }
+  .image-card { border:1px dashed var(--line); border-radius:10px; padding:12px; background:var(--card); margin:1.6em 0; }
   .image-card .label { font-size:12px; color:var(--muted); margin-bottom:4px; }
-  .image-card .desc { font-size:13px; margin-bottom:8px; }
+  .image-card .desc { font-size:13.5px; margin-bottom:8px; }
   .image-card .prompt { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px;
-                         background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px; white-space:pre-wrap; }
+                         background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:8px 10px;
+                         white-space:pre-wrap; overflow-wrap:break-word; }
   .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#1f2328; color:#fff;
-           padding:8px 16px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .15s; }
+           padding:10px 18px; border-radius:8px; font-size:13.5px; opacity:0; pointer-events:none; transition:opacity .15s;
+           max-width:90vw; text-align:center; }
   .toast.show { opacity:1; }
+
+  /* 데스크톱: 상단바 없애고 사이드바를 항상 보이는 고정 패널로 */
+  @media (min-width: 860px) {
+    .topbar, .backdrop { display:none; }
+    body { display:flex; min-height:100vh; }
+    aside { position:static; transform:none; width:300px; flex:0 0 300px; height:100vh; z-index:auto; }
+    main { flex:1; height:100vh; overflow-y:auto; padding:28px 40px; max-width:800px; margin:0; }
+  }
 </style>
 </head>
 <body>
-  <aside>
+  <div class="topbar">
+    <button type="button" class="nav-toggle-btn" id="nav-toggle" aria-label="원고 목록 열기">☰</button>
+    <div class="topbar-title">채널별 원고</div>
+  </div>
+  <div class="backdrop" id="backdrop"></div>
+  <aside id="sidebar">
     <h1>채널별 원고</h1>
     <div class="meta">생성 ${escapeHtml(generated)} (KST)</div>
     ${treeHtml}
   </aside>
   <main id="main">
-    <div class="placeholder">왼쪽에서 주제 → 채널을 선택하세요.</div>
+    <div class="placeholder">${days.size === 0 ? "" : "메뉴(☰)에서 주제 → 채널을 선택하세요."}</div>
   </main>
   <div class="toast" id="toast"></div>
 
@@ -188,6 +223,15 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     var main = document.getElementById("main");
     var toastEl = document.getElementById("toast");
     var current = null; // { jobId, channel }
+
+    // 모바일 목록 드로어 - 데스크톱(min-width:860px)에서는 CSS가 topbar/backdrop을 숨기므로 무해하다.
+    function setNavOpen(open) {
+      document.body.classList.toggle("nav-open", open);
+    }
+    document.getElementById("nav-toggle").addEventListener("click", function () {
+      setNavOpen(!document.body.classList.contains("nav-open"));
+    });
+    document.getElementById("backdrop").addEventListener("click", function () { setNavOpen(false); });
 
     function toast(msg) {
       toastEl.textContent = msg;
@@ -298,8 +342,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     }
 
     function metaRow(label, value) {
-      return '<div class="k">' + label + '</div><div class="v">' + escapeHtmlJs(value) +
-        '</div><button type="button" class="mini-copy copy-field" data-text="' + escapeHtmlJs(value) + '">복사</button>';
+      return '<div class="meta-row">' +
+        '<div class="meta-row-head"><span class="k">' + label + '</span>' +
+        '<button type="button" class="mini-copy copy-field" data-text="' + escapeHtmlJs(value) + '">복사</button></div>' +
+        '<div class="v">' + escapeHtmlJs(value) + '</div>' +
+        '</div>';
     }
 
     function currentBlockTexts() {
@@ -464,7 +511,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     }
 
     document.querySelectorAll(".channel-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () { renderChannel(btn.dataset.jobId, btn.dataset.channel); });
+      btn.addEventListener("click", function () {
+        renderChannel(btn.dataset.jobId, btn.dataset.channel);
+        setNavOpen(false); // 모바일에서 채널 선택 시 드로어를 닫아 바로 본문을 보여준다.
+        main.scrollTop = 0;
+      });
     });
 
     // URL 해시(#jobId:channel)가 있으면 그 원고를 바로 연다(텔레그램 링크 딥링크).
