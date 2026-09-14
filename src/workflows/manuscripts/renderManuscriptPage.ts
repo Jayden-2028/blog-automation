@@ -191,6 +191,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
            max-width:90vw; text-align:center; }
   .toast.show { opacity:1; }
 
+  /* 이미지 프롬프트 팩 - 원고 안의 이미지 프롬프트를 전부 모아 한 번에 복사(이미지 생성 도구에 붙여넣기용). */
+  .sec-title { font-size:15px; font-weight:700; margin:32px 0 10px; }
+  .prompt-pack { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; line-height:1.7;
+                 background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px;
+                 white-space:pre-wrap; overflow-wrap:break-word; overflow-x:auto; }
+
   /* 데스크톱: 상단바 없애고 사이드바를 항상 보이는 고정 패널로 */
   @media (min-width: 860px) {
     .topbar, .backdrop { display:none; }
@@ -303,18 +309,23 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       if (ch.tags && ch.tags.length) html += metaRow("태그", ch.tags.join(", "));
       html += "</div>";
 
+      var imageBlocks = ch.blocks.filter(function (b) { return b.type === "image"; });
+
       html += '<div class="toolbar">';
       html += '<button type="button" class="btn" id="edit-toggle">✏️ 수정</button>';
       html += '<button type="button" class="btn primary" id="copy-body">📋 복사</button>';
+      if (imageBlocks.length > 0) html += '<button type="button" class="btn" id="copy-image-pack">🖼 이미지 프롬프트 전체 복사(' + imageBlocks.length + '장)</button>';
       if (savedEdits) html += '<button type="button" class="btn" id="revert">↩️ 원본으로 되돌리기</button>';
       html += savedEdits ? '<span class="edited-badge">이 브라우저에서 수정됨</span>' : "";
       html += "</div>";
 
       html += '<div id="blocks">';
+      var imageIndex = 0;
       ch.blocks.forEach(function (block, i) {
         if (block.type === "image") {
+          imageIndex += 1;
           html += '<div class="body-block image-card">';
-          html += '<div class="label">🖼 이미지 위치</div>';
+          html += '<div class="label">🖼 이미지 ' + imageIndex + ' 위치</div>';
           html += '<div class="desc">' + escapeHtmlJs(block.description) + "</div>";
           if (block.prompt) {
             html += '<div class="prompt">' + escapeHtmlJs(block.prompt) + "</div>";
@@ -337,8 +348,28 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       });
       html += "</div>";
 
+      if (imageBlocks.length > 0) {
+        html += '<h2 class="sec-title">🖼️ 이미지 생성 프롬프트 팩(' + imageBlocks.length + '장)</h2>';
+        html += '<div class="prompt-pack">' + escapeHtmlJs(imagePromptPack(ch)) + '</div>';
+      }
+
       main.innerHTML = html;
       wireChannelEvents(topic, ch);
+    }
+
+    /** 원고 안의 이미지 프롬프트를 전부 모아 한 번에 복사할 수 있는 텍스트로 만든다 - ChatGPT/Gemini
+     *  등 이미지 생성 도구에 한 번에 붙여넣어 순서대로 만들 수 있게. 번호는 image-card 라벨과 맞춘다. */
+    function imagePromptPack(ch) {
+      var n = 0;
+      var parts = [];
+      ch.blocks.forEach(function (block) {
+        if (block.type !== "image") return;
+        n += 1;
+        var head = "[이미지 " + n + "] " + block.description;
+        var body = block.prompt ? block.prompt : "(프롬프트 미상 - 원본 원고를 확인하세요)";
+        parts.push(head + "\\n" + body);
+      });
+      return parts.join("\\n\\n---\\n\\n");
     }
 
     function metaRow(label, value) {
@@ -508,6 +539,13 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       document.getElementById("copy-body").addEventListener("click", function () {
         copyRich(collectRichHtml(ch), collectPlainText(ch));
       });
+
+      var imagePackBtn = document.getElementById("copy-image-pack");
+      if (imagePackBtn) {
+        imagePackBtn.addEventListener("click", function () {
+          copyText(imagePromptPack(ch));
+        });
+      }
     }
 
     document.querySelectorAll(".channel-btn").forEach(function (btn) {
