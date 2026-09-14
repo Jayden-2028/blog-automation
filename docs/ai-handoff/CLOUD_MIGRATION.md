@@ -114,6 +114,38 @@ GitHub Actions 실행 + chat_id 검증으로 안전하게 ignored 처리, DB/텔
 클라우드에서 실측 완주 확인됨.** 로컬에 남은 건 `publish-poll`(원고 페이지 준비 + Cloudflare Pages
 배포 트리거) 하나 - 다음 Phase 대상.
 
+## Phase 4 완료(2026-09-14, 같은 세션) — 발행 준비(publish-poll)를 이벤트 기반으로
+
+**설계**: Phase 3와 같은 원칙 - 폴링 대신 이벤트. `review:confirm`(✅ 승인) 콜백이 성공하는 바로
+그 순간(`TelegramBot.ts` confirm 분기 끝)에 `triggerPublishPrepare()`를 호출해
+`job-publish-prepare.yml`을 바로 발화한다. 10분 주기 cron이었다면 대기열이 매번 비어 있어도
+하루 144회 GH Actions 분을 태웠을 것 - 승인은 텔레그램 버튼을 눌러야만 일어나는 사건이라 이벤트로
+묶는 게 더 정확하고 싸다. `job-publish-prepare.yml`은 기존 `job:publish-poll` 스크립트를 그대로
+재사용(`prepareApprovedManuscripts` + Cloudflare Pages 배포, 코드 변경 없음).
+
+**신규 GitHub secret 3종**: `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`/
+`CLOUDFLARE_PAGES_PROJECT_NAME`(Pages 배포용 - Phase 3의 Workers 전용 토큰과는 다른 토큰).
+
+**검증 중 발견한 운영 사고(코드 버그 아님) - 중요**: 검증하다가 타임스탬프가 안 맞는 걸 발견해서
+추적한 결과, **로컬 맥의 `publish-poll`이 이번 세션 내내 한 번도 안 꺼진 채 계속 10분 주기로 돌고
+있었다** - Phase 3에서 `telegram-poll`만 내리고 `publish-poll`은 깜빡했다. 그래서 사용자가 처음
+승인 버튼을 누른 시점(Phase 4 코드 push 전)에 로컬 폴러가 먼저 job을 처리해버렸고, 이후 코드
+배포 후 다시 누른 승인은 클라우드로 정확히 갔지만 "이미 처리됨"이라 빈 대기열로 빨리 끝났다 -
+**이벤트 배선 자체는 정상 동작 확인**(dispatch 성공, 워크플로우 정상 실행), 다만 로컬이 먼저
+채간 것뿐.
+
+**더 중요한 발견**: 이 참에 확인해보니 Phase 2에서 내렸던 키워드 수집 3개 launchd job도
+`launchctl bootout`만 했지 `disable`은 안 했었다 - bootout은 일시 해제일 뿐이라 맥 재부팅/재로그인
+시 `RunAtLoad: true`로 다시 살아난다(오늘 아침 텔레그램 폴러 409 에러가 정확히 이 패턴으로
+재발했던 것과 동일한 원인). **로컬 blog-automation launchd 5개 전부(`telegram-poll`,
+`publish-poll`, `social-issue-keyword`, `entertainment-keyword`, `community-keyword`) 이번에
+`launchctl disable` + plist를 `.disabled`로 이름 변경까지 해서 재부팅에도 안전하게 완전히
+껐다.** 복구하려면 `.disabled` 접미사를 떼고 `launchctl enable` + `launchctl bootstrap`.
+
+**클라우드 이전 최종 상태**: `~/Library/LaunchAgents/`에 blog-automation 관련 활성 plist 0개.
+전체 파이프라인(키워드 수집 → 텔레그램 → 리서치 → 집필 → 승인 → 발행 준비 → Cloudflare Pages
+배포)이 맥 전원과 완전히 무관하게 클라우드에서 돈다.
+
 ---
 
 기준일(이전): 2026-08-28
