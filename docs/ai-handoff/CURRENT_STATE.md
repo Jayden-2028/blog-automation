@@ -2,7 +2,51 @@
 
 기준일: 2026-09-14 (Asia/Seoul)
 
+## 2026-09-14 세션(별도 창) — 클라우드 이전 Phase 2~4 완료 + 원고 페이지 UI 개선
+
+**클라우드 이전 완료(같은 날 아래 "Cloudflare Access" 절 이후 진행, 별도 세션 창)**: 키워드 수집
+3종(Phase 2, GitHub Actions cron) → 텔레그램 버튼 수신(Phase 3, Cloudflare Worker 웹훅 +
+`repository_dispatch`) → 리서치/집필 트리거(Phase 3) → 발행 준비(Phase 4, 승인 콜백 직후 이벤트
+트리거)까지 전 구간을 실측 완주 확인. 상세 설계·검증 로그는 `docs/ai-handoff/CLOUD_MIGRATION.md` 참고.
+
+- 로컬 launchd 5개(`telegram-poll`/`publish-poll`/`social-issue-keyword`/`entertainment-keyword`/
+  `community-keyword`) 전부 `launchctl disable` + plist `.disabled` 이름 변경으로 영구 비활성화(재부팅
+  에도 안전). `~/Library/LaunchAgents/`에 활성 blog-automation plist는 이제 0개(확인 완료,
+  `.disabled` 파일 5개만 남아 있음).
+- 검증 중 로컬 `publish-poll`이 Phase 3 컷오버 이후에도 안 꺼진 채 계속 10분 주기로 돌고 있던 운영
+  사고를 발견 - 이번에 완전히 정리(코드 버그 아님, launchd 정리 누락).
+- `job-write.yml`에 NAVER 자격증명 누락 버그 발견+수정(검수 단계에서 NAVER 기준 출처 수집이
+  실패해 전체 재조사 폴백을 타던 원인).
+- **역할 범위 갱신(아래 "Cloudflare Access" 절 무효화)**: 그 절의 "이 레포에는 파이프라인 자체를
+  클라우드로 옮긴 코드가 전혀 없다"/"맥이 꺼져 있으면 안 돈다"는 서술은 이 세션 이후 더 이상 사실이
+  아니다. **전체 파이프라인(키워드 수집 → 텔레그램 → 리서치 → 집필 → 승인 → 발행 준비 → Cloudflare
+  Pages 배포)이 맥 전원과 무관하게 클라우드에서 돈다.** Cloudflare Pages/Access(열람 제한 목적)에
+  대한 그 절의 설명 자체는 여전히 유효 - 무효화되는 건 "맥 의존" 부분뿐이다. 유일하게 남은 로그인
+  세션 의존은 Creator Advisor 크롤링인데, CI에서는 `CREATOR_ADVISOR_ENABLED=false`로 명시적으로 꺼서
+  비치명 폴백(seed_queries만 사용, 품질만 하락)으로 처리한다.
+
+**원고 페이지 UI 개선(같은 날 후속 커밋)**:
+- 모바일 레이아웃 전면 개편 — 반응형 드로어 네비(<860px, 상단바 ☰ 토글 + 슬라이드인 목록), 폰트
+  14→16px(iOS가 16px 미만 contenteditable 포커스 시 자동 확대/줌 하는 실사용 버그 방지), 메타정보
+  (제목/검색설명/태그)를 라벨+복사 버튼 헤더 / 값 스택 구조로 재구성, 터치 타겟 확대(최소 40px).
+  로직(드로어 open/close/자동닫힘)은 JS로 확인, 픽셀 단위 실기기 확인은 아직 안 함.
+- 이미지 프롬프트 일괄복사("프롬프트 팩") 추가 — 카드마다 하나씩 복사하던 걸 채널 전체 이미지
+  프롬프트를 `[이미지 N] 설명 + 프롬프트` 형식으로 모아 한 번에 복사하는 버튼/섹션으로 보완. 이미지
+  카드 라벨에 번호를 붙여 팩과 대조 가능. 버그 발견+수정: 템플릿 리터럴의 `\n`이 실제 개행으로 출력돼
+  인라인 `<script>`가 SyntaxError로 죽던 것을 `\\n`으로 수정.
+- 두 변경 모두 실제 manifest로 로컬 렌더링 확인 + Cloudflare Pages 실배포 완료.
+
+**남은 것**:
+- ⬜ 모바일 레이아웃 실기기(텔레그램에서 열기) 확인 필요 - 이 세션의 브라우저 자동화로는 좁은
+  뷰포트 리사이즈가 안 먹혀 픽셀 단위 검증을 못 함.
+- ⬜ 내일 이후 09:00/09:10/13:00 KST 자동 실행이 GitHub Actions cron으로 정시에 계속 도는지,
+  텔레그램 버튼 반응이 웹훅으로 지연 없이 오는지 며칠 더 관찰.
+
 ## 2026-09-14 세션(메인 윈도우) — Cloudflare Access 게이트 활성화 완료 + 역할 범위 재확인
+
+> ⚠️ **위 "클라우드 이전 Phase 2~4" 절 이후로 이 절의 "맥이 꺼져 있으면 파이프라인이 안 돈다"는
+> 결론은 낡았다.** Cloudflare Pages/Access 관련 사실(열람 제한 목적, 설정 완료 여부)만 유효하게
+> 참고하고, 자동화 실행 환경 판단은 위 최신 절을 따른다.
 
 **작업**: 09-06 세션에서 미완료로 남아 있던 절차 5단계(Cloudflare Zero Trust Access)를 대시보드에서
 직접 진행 — Zero Trust 무료 플랜 활성화(사용자 승인, 카드 등록됨/한도초과 시에만 과금) →

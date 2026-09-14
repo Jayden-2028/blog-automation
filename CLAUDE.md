@@ -51,10 +51,16 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   수 있는 완성된 문자열이어야 한다. 시스템 안정화 후 자동생성 재개. 불안정기 유료 호출 회피가 목적.
 - 발행: 네이버·티스토리·블로거 반자동 업로드(Playwright/API)는 **일단 중단**이다(2026-09-05,
   원고 품질이 아직 반자동 업로드분을 매번 재작성 수준으로 고쳐야 하는 상태라 자동화가 오히려
-  일을 늘렸다). 대신 텔레그램에서 원고를 승인하면 `publishPollJob`이
-  `prepareApprovedManuscripts()`로 채널 3종(네이버=기준 원고, 티스토리·블로거=배리에이션) 원고를
-  준비해 `manuscripts/<날짜>/<주제>/*.md`에 저장하고 `manuscripts/index.html`(날짜→주제→채널
-  트리, 수정/복사 버튼)을 갱신한다. 사용자가 그 페이지에서 직접 복사해 각 블로그에 붙여넣는다.
+  일을 늘렸다). 대신 텔레그램에서 원고를 승인(✅)하면 `publishPollJob`(`prepareApprovedManuscripts()`)이
+  `config/channelRouting.ts`가 job의 category로 배정한 **채널 1곳**(티스토리 또는 블로그스팟 -
+  2026-09-07 채널 전담제 개편으로 네이버는 라우팅에서 완전히 제외됨, 배정 실패 시 명시적 실패
+  처리)의 배리에이션 원고를 준비해 `manuscripts/<날짜>/<주제>/*.md`에 저장하고
+  `manuscripts/index.html`(날짜→주제→채널 트리, 수정/복사 버튼)을 갱신한다. 작성 단계 산출물
+  (예전에 "네이버 기준 원고"라 부르던 platform=null article)은 여전히 존재하지만 그 자체로 발행
+  채널이 되지 않고 배정된 채널 배리에이션을 만드는 재료로만 쓰인다. 사용자가 그 페이지에서 직접
+  복사해 블로그에 붙여넣는다. 트리거는 2026-09-14부터 폴링이 아니라 **승인 콜백 직후 이벤트
+  기반**이다(`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분 폴링(`publish-poll` launchd)은
+  영구 비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가 같은 스크립트를 재사용해 실행한다.
   반자동 업로드 코드(`publishApprovedArticles.ts` 등)는 지우지 않고 호출만 끊었다 - 원고 품질이
   올라오면 `src/jobs/publishPollJob.ts`의 호출부만 되돌리면 재개된다. `BLOGGER_PUBLISH_AS_DRAFT`
   등 발행 환경변수는 그대로 두되(재개 대비) 지금은 이 폴러가 쓰이지 않는다.
