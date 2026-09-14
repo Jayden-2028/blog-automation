@@ -113,6 +113,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async (path, content) => {
       writes[path] = content;
     },
+    mergeJobMetadata: async () => {},
   });
   assert(r3.status === "success", "신규 생성 실패");
   if (r3.status === "success") {
@@ -136,6 +137,7 @@ async function main(): Promise<void> {
     generateVariant: async (input) => okVariant(input.channel)(),
     createVariantArticle: async ({ channel }) => variantArticle(99, channel),
     writeManuscriptFile: async () => {},
+    mergeJobMetadata: async () => {},
   });
   assert(r4.status === "success", "entertainment 배정 실패");
   if (r4.status === "success") {
@@ -189,6 +191,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async (path, content) => {
       writes7[path] = content;
     },
+    mergeJobMetadata: async () => {},
   });
   assert(r7.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
   if (r7.status === "success") {
@@ -197,6 +200,60 @@ async function main(): Promise<void> {
     assert(tistoryFile.includes("[IMAGE PROMPT: 재삽입될 프롬프트]"), `.md 파일에는 마커 바로 아래 프롬프트가 재삽입돼야 한다 (${tistoryFile})`);
   }
   console.log("✅ .md 파일에만 이미지 프롬프트 재삽입, entry.body/manifest는 그대로");
+
+  // 7-1) 신규 생성 시 searchDescription/slug/tags를 job.metadata.channelMeta에 저장해야 한다
+  //      (articles 테이블엔 이 컬럼들이 없어 재사용 시 복구할 곳이 여기뿐 - 2026-09-15).
+  const metaPatches: Array<Record<string, unknown>> = [];
+  const r71 = await prepareChannelManuscripts(job("a", "living"), {
+    loadArticles: async () => [baseArticle()],
+    generateVariant: async (input) => okVariant(input.channel)(),
+    createVariantArticle: async ({ channel }) => variantArticle(99, channel),
+    writeManuscriptFile: async () => {},
+    mergeJobMetadata: async (_id, patch) => {
+      metaPatches.push(patch);
+    },
+  });
+  assert(r71.status === "success", "신규 생성(메타 저장 케이스) 실패");
+  assert(metaPatches.length === 1, `job.metadata 갱신이 1회 호출돼야 한다 (${metaPatches.length})`);
+  const savedChannelMeta = metaPatches[0]?.channelMeta as Record<string, { tags: string[] }> | undefined;
+  assert(
+    savedChannelMeta?.tistory?.tags?.length === 2,
+    `channelMeta.tistory.tags가 저장돼야 한다 (${JSON.stringify(savedChannelMeta)})`
+  );
+  console.log("✅ 신규 생성 시 searchDescription/slug/tags를 job.metadata.channelMeta에 저장");
+
+  // 7-2) 재사용 시 job.metadata.channelMeta에 저장된 값이 있으면 tags 등을 복구해야 한다
+  //      (없으면 2026-09-15 이전 job처럼 계속 비어 있는 게 맞다 - 별도 케이스로 확인).
+  const r72 = await prepareChannelManuscripts(
+    job("a", "living", {
+      channelMeta: { tistory: { searchDescription: "복구된 설명", slug: null, tags: ["복구태그1", "복구태그2", "복구태그3"] } },
+    }),
+    {
+      loadArticles: async () => [baseArticle(), variantArticle(2, "tistory")],
+      generateVariant: async () => {
+        throw new Error("재사용 케이스는 generateVariant를 호출하면 안 된다");
+      },
+      writeManuscriptFile: async () => {},
+    }
+  );
+  assert(r72.status === "success", "재사용+메타 복구 케이스 실패");
+  if (r72.status === "success") {
+    const ch = r72.topic.channels[0];
+    assert(ch.tags.length === 3 && ch.tags[0] === "복구태그1", `재사용 시 tags가 job.metadata에서 복구돼야 한다 (${JSON.stringify(ch.tags)})`);
+    assert(ch.searchDescription === "복구된 설명", "재사용 시 searchDescription도 복구돼야 한다");
+  }
+  const r73 = await prepareChannelManuscripts(job("a", "living"), {
+    loadArticles: async () => [baseArticle(), variantArticle(2, "tistory")],
+    generateVariant: async () => {
+      throw new Error("재사용 케이스는 generateVariant를 호출하면 안 된다");
+    },
+    writeManuscriptFile: async () => {},
+  });
+  assert(
+    r73.status === "success" && r73.topic.channels[0].tags.length === 0,
+    "channelMeta가 없는(과거) job은 재사용 시 tags가 계속 비어 있어야 한다"
+  );
+  console.log("✅ 재사용 시 job.metadata.channelMeta 있으면 tags/searchDescription 복구, 없으면 그대로 빈 값");
 
   // 8) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다 + 페이지 갱신 시 배포 호출
   const marks: Array<{ id: string; patch: Record<string, unknown> }> = [];

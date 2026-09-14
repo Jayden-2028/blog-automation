@@ -193,6 +193,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .body-block { margin-bottom:16px; }
   .text-block { white-space:pre-wrap; }
   .heading-block { font-weight:700; font-size:16.5px; margin-bottom:0; white-space:pre-wrap; }
+  .tags-line { color:var(--muted); font-size:13px; margin-top:1.6em; }
   .editable[contenteditable="true"] { outline:2px dashed var(--accent); outline-offset:4px; padding:4px; border-radius:6px; }
   .image-card { border:1px dashed var(--line); border-radius:10px; padding:12px; background:var(--card); margin:1.6em 0; }
   .image-card .label { font-size:12px; color:var(--muted); margin-bottom:4px; }
@@ -387,6 +388,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
           html += '<div class="body-block text-block editable" data-block-index="' + i + '">' + escapeHtmlJs(text) + "</div>";
         }
       });
+      if (ch.tags && ch.tags.length > 0) {
+        html += '<div class="body-block tags-line">' + escapeHtmlJs(hashtagLine(ch.tags)) + "</div>";
+      }
       html += "</div>";
 
       if (imageBlocks.length > 0) {
@@ -396,6 +400,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       main.innerHTML = html;
       wireChannelEvents(topic, ch);
+    }
+
+    /** 태그를 본문 맨 끝에 붙는 해시태그 한 줄로 만든다("#태그1 #태그2 ..."). */
+    function hashtagLine(tags) {
+      return tags.map(function (t) { return "#" + t; }).join(" ");
     }
 
     /** 원고 안의 이미지 프롬프트를 전부 모아 한 번에 복사할 수 있는 텍스트로 만든다 - ChatGPT/Gemini
@@ -501,6 +510,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         var html = blockHtml(block, i);
         if (html) parts.push(html);
       });
+      if (ch.tags && ch.tags.length > 0) parts.push("<p>" + escapeHtmlJs(hashtagLine(ch.tags)) + "</p>");
       return parts.join("\\n");
     }
 
@@ -516,6 +526,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         var text = blockPlainText(block, i);
         if (text) parts.push(text);
       });
+      if (ch.tags && ch.tags.length > 0) parts.push(hashtagLine(ch.tags));
       return parts.join("\\n\\n");
     }
 
