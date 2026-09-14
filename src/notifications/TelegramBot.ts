@@ -178,6 +178,13 @@ export type TelegramBotOptions = {
    * 띄우고 즉시 반환한다. 테스트에서는 호출 횟수만 세는 no-op를 주입한다.
    */
   triggerResearch?: (jobId: string) => void;
+  /**
+   * review:confirm(승인) 직후 호출한다. 기본은 no-op - 로컬에서는 publish-poll 폴러(10분 주기)가
+   * approved job을 알아서 찾아가므로 굳이 즉시 트리거할 필요가 없다. 클라우드 진입점
+   * (runTelegramUpdateCli.ts)만 이걸 주입해 job-publish-prepare.yml을 발화한다(2026-09-14 Phase 4 -
+   * 폴링 대신 승인 이벤트로 바로 트리거해서 10분 주기 GH Actions 폴링의 분당 과금을 피한다).
+   */
+  triggerPublishPrepare?: () => void;
 
   // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
   /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
@@ -210,6 +217,7 @@ export class TelegramBot {
   private readonly triggerWriting: (jobId: string) => void;
   private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   private readonly triggerResearch: (jobId: string) => void;
+  private readonly triggerPublishPrepare: () => void;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
@@ -258,6 +266,7 @@ export class TelegramBot {
       });
     this.triggerResearch =
       options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
+    this.triggerPublishPrepare = options.triggerPublishPrepare ?? (() => {});
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -523,6 +532,7 @@ export class TelegramBot {
     if (article) {
       await this.updateArticleStatus(article.id, "approved");
     }
+    this.triggerPublishPrepare();
     // 이미지 브리프 자동 발송(TelegramBot의 옛 sendImageBrief 주입 지점)은 여기서 뺐다
     // (2026-08-28 재작업): 이미지가 이제 runWritingStage 단계에서 AI로 자동 생성돼 원고에 이미
     // 삽입된 채로 승인 대기 중이었다 - 승인 시점에 "브리프를 만들어드릴게요"를 또 보내면 이미

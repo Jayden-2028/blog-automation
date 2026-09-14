@@ -32,8 +32,8 @@ async function main(): Promise<void> {
   }
 
   const pendingDispatches: Promise<void>[] = [];
-  const dispatchAndTrack = (workflowFile: string, jobId: string): void => {
-    const promise = dispatchGithubWorkflow({ workflowFile, inputs: { job_id: jobId } }).catch((error) => {
+  const dispatchAndTrack = (workflowFile: string, inputs: Record<string, string> = {}): void => {
+    const promise = dispatchGithubWorkflow({ workflowFile, inputs }).catch((error) => {
       console.error(`⚠️ ${workflowFile} 발화 실패:`, error instanceof Error ? error.message : error);
     });
     pendingDispatches.push(promise);
@@ -42,8 +42,9 @@ async function main(): Promise<void> {
   const bot = TelegramBot.fromEnv({
     generateTitles: (job) =>
       generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
-    triggerResearch: (jobId) => dispatchAndTrack("job-research.yml", jobId),
-    triggerWriting: (jobId) => dispatchAndTrack("job-write.yml", jobId),
+    triggerResearch: (jobId) => dispatchAndTrack("job-research.yml", { job_id: jobId }),
+    triggerWriting: (jobId) => dispatchAndTrack("job-write.yml", { job_id: jobId }),
+    triggerPublishPrepare: () => dispatchAndTrack("job-publish-prepare.yml"),
   });
 
   const result = await bot.processUpdate(update);

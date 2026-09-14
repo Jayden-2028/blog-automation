@@ -1,0 +1,56 @@
+# 클라우드 이전 Phase 4(마지막 조각) - approved job의 채널 원고 준비 + manuscripts 페이지
+# Cloudflare Pages 재배포(prepareApprovedManuscripts, 로컬 publish-poll이 10분 주기 폴링으로
+# 하던 일).
+#
+# 폴링이 아니라 이벤트 기반이다: review:confirm(✅ 승인) 콜백이 telegram-update.yml 안에서
+# triggerPublishPrepare()를 호출해 이 워크플로우를 바로 발화한다(TelegramBot.ts 참고). 10분 주기
+# cron으로 돌리면 대기열이 비어 있어도 하루 144회 과금되는데(무료 한도 낭비), 승인은 텔레그램
+# 버튼을 눌러야만 일어나는 사건이라 이벤트로 묶는 게 자연스럽고 더 싸다.
+#
+# job:publish-poll을 그대로 재사용한다(singleInstanceLock/jitter는 GH Actions 러너에선 해롭지
+#않음 - 매번 새 러너라 락 파일이 항상 비어 있고, jitter는 그냥 몇십 초 더 걸릴 뿐).
+#
+# Cloudflare Pages 배포(deployManuscriptsPage.ts, npx wrangler pages deploy)에 필요한 시크릿
+# 3종(CLOUDFLARE_API_TOKEN/ACCOUNT_ID/PAGES_PROJECT_NAME)이 필요 - 기존 Pages 배포용 토큰 재사용
+# (Workers 토큰과 다름, 이미 로컬 .env에 있던 것 그대로).
+
+name: job-publish-prepare
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: job-publish-prepare
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI + moai-marketer 플러그인 (배리에이션 생성용)
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin marketplace add https://github.com/modu-ai/moai-cowork.git
+          claude plugin install moai-marketer@moai-cowork -y
+
+      - name: Run job:publish-poll
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+        run: npm run job:publish-poll
