@@ -168,6 +168,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .placeholder { color:var(--muted); padding:8px; }
   .doc-title { font-size:19px; line-height:1.4; font-weight:700; margin:0 0 14px; }
 
+  .hint { background:var(--card); border-left:3px solid var(--accent); padding:12px 14px;
+          font-size:13px; line-height:1.75; border-radius:0 8px 8px 0; margin:0 0 16px; }
+  .hint code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px;
+               background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
+
   .meta-grid { display:flex; flex-direction:column; gap:12px;
                background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:18px; }
   .meta-row-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
@@ -205,6 +210,13 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .prompt-pack { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12.5px; line-height:1.7;
                  background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px;
                  white-space:pre-wrap; overflow-wrap:break-word; overflow-x:auto; }
+
+  /* 이미지 캡션 표 - 본문 진입 전에 이미지별 설명을 한눈에 훑고 복사할 수 있게. */
+  .caption-table { border-collapse:collapse; width:100%; font-size:13px; margin-bottom:20px; }
+  .caption-table th, .caption-table td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line);
+                                          vertical-align:top; line-height:1.6; }
+  .caption-table th { width:84px; color:var(--muted); font-weight:600; white-space:nowrap; }
+  .caption-table td.copycol { width:56px; text-align:right; }
 
   /* 데스크톱: 상단바 없애고 사이드바를 항상 보이는 고정 패널로 */
   @media (min-width: 860px) {
@@ -311,6 +323,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       var html = "";
       html += '<div class="doc-title">' + escapeHtmlJs(topic.keyword) + " — " + CHANNEL_LABEL[channel] + "</div>";
+
+      var imageBlocksForHint = ch.blocks.filter(function (b) { return b.type === "image"; });
+      html += '<div class="hint">붙여넣기 순서 — ① <b>본문 복사(서식 유지)</b>로 에디터에 붙여넣습니다';
+      if (imageBlocksForHint.length > 0) {
+        html += ' ② <code>[[이미지 N]]</code> 자리에 그 번호의 이미지 프롬프트로 만든 이미지를 올리고 마커 줄은 지웁니다';
+      }
+      html += ' ③ 제목·검색 설명·태그를 복사해 채웁니다</div>';
+
       html += '<div class="meta-grid">';
       html += metaRow("제목", ch.title);
       if (ch.searchDescription) html += metaRow("검색 설명", ch.searchDescription);
@@ -321,12 +341,24 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       var imageBlocks = ch.blocks.filter(function (b) { return b.type === "image"; });
 
       html += '<div class="toolbar">';
-      html += '<button type="button" class="btn" id="edit-toggle">✏️ 수정</button>';
-      html += '<button type="button" class="btn primary" id="copy-body">📋 복사</button>';
+      html += '<button type="button" class="btn primary" id="copy-body">📋 본문 복사 (서식 유지)</button>';
+      html += '<button type="button" class="btn" id="copy-plain">본문 평문 복사</button>';
       if (imageBlocks.length > 0) html += '<button type="button" class="btn" id="copy-image-pack">🖼 이미지 프롬프트 전체 복사(' + imageBlocks.length + '장)</button>';
+      html += '<button type="button" class="btn" id="edit-toggle">✏️ 수정</button>';
       if (savedEdits) html += '<button type="button" class="btn" id="revert">↩️ 원본으로 되돌리기</button>';
       html += savedEdits ? '<span class="edited-badge">이 브라우저에서 수정됨</span>' : "";
       html += "</div>";
+
+      if (imageBlocks.length > 0) {
+        html += '<h2 class="sec-title">🖼 이미지 캡션(' + imageBlocks.length + '장)</h2>';
+        html += '<table class="caption-table"><tbody>';
+        imageBlocks.forEach(function (block, idx) {
+          var n = idx + 1;
+          html += '<tr><th>이미지 ' + n + '</th><td>' + escapeHtmlJs(block.description) + '</td>'
+            + '<td class="copycol"><button type="button" class="mini-copy copy-field" data-text="' + escapeHtmlJs(block.description) + '">복사</button></td></tr>';
+        });
+        html += '</tbody></table>';
+      }
 
       html += '<div id="blocks">';
       var imageIndex = 0;
@@ -422,9 +454,8 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return "<p>" + lines.map(inlineHtml).join("<br>") + "</p>";
     }
 
-    /** 블록 하나(수정 중이면 편집된 값)를 rich HTML로. 이미지 카드는 복사 대상에서 뺀다. */
+    /** 블록 하나(수정 중이면 편집된 값)를 rich HTML로. 이미지는 collectRichHtml이 먼저 처리한다. */
     function blockHtml(block, i) {
-      if (block.type === "image") return "";
       if (block.type === "heading") {
         var hEl = findEditable(i, "h"), bEl = findEditable(i, "b");
         var headingText = (hEl ? hEl.innerText : block.heading).trim();
@@ -443,9 +474,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return linesToHtml(text.split("\\n").map(function (l) { return l.trim(); }).filter(Boolean));
     }
 
-    /** 블록 하나를 plain text로(이미지 제외). 소제목-문단은 줄바꿈 1개, 블록 사이는 2개(writer.md §6). */
+    /** 블록 하나를 plain text로(이미지는 collectPlainText가 먼저 처리한다). 소제목-문단은 줄바꿈
+     *  1개, 블록 사이는 2개(writer.md §6). */
     function blockPlainText(block, i) {
-      if (block.type === "image") return null;
       if (block.type === "heading") {
         var hEl = findEditable(i, "h"), bEl = findEditable(i, "b");
         var headingText = (hEl ? hEl.innerText : block.heading).trim();
@@ -456,9 +487,17 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return (el ? el.innerText : block.content).trim();
     }
 
+    /** 본문 복사에 이미지 자리를 [[이미지 N]] 마커로 남긴다(붙여넣은 뒤 그 자리에 이미지를 올리고
+     *  마커 줄을 지우는 용도) - 번호는 이미지 캡션 표/프롬프트 팩과 같은 순서로 맞춘다. */
     function collectRichHtml(ch) {
       var parts = [];
+      var imgN = 0;
       ch.blocks.forEach(function (block, i) {
+        if (block.type === "image") {
+          imgN += 1;
+          parts.push("<p>[[이미지 " + imgN + "]]</p>");
+          return;
+        }
         var html = blockHtml(block, i);
         if (html) parts.push(html);
       });
@@ -467,7 +506,13 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
     function collectPlainText(ch) {
       var parts = [];
+      var imgN = 0;
       ch.blocks.forEach(function (block, i) {
+        if (block.type === "image") {
+          imgN += 1;
+          parts.push("[[이미지 " + imgN + "]]");
+          return;
+        }
         var text = blockPlainText(block, i);
         if (text) parts.push(text);
       });
@@ -547,6 +592,10 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       document.getElementById("copy-body").addEventListener("click", function () {
         copyRich(collectRichHtml(ch), collectPlainText(ch));
+      });
+
+      document.getElementById("copy-plain").addEventListener("click", function () {
+        copyText(collectPlainText(ch));
       });
 
       var imagePackBtn = document.getElementById("copy-image-pack");
