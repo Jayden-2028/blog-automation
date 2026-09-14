@@ -100,12 +100,19 @@ GitHub Actions 실행 + chat_id 검증으로 안전하게 ignored 처리, DB/텔
 **컷오버**: `setWebhook` 호출(Worker URL + secret_token) → `getWebhookInfo`로 등록 확인 →
 `launchctl bootout`으로 로컬 `telegram-poll` 내림.
 
-**실제 클릭 검증**: 사용자가 실제 알림에서 "Go" 클릭 → `telegram-update` 워크플로우(32초, job 생성
-+ 제목 생성 + 리서치 트리거) → `job-research.yml` 자동 발화·실행 확인. 리서치 완료까지 지켜보는 중.
+**실제 클릭 검증 - 전 구간 완주(2026-09-14)**:
+- "Go" 클릭 → `telegram-update`(32초, job 생성+제목 생성+리서치 트리거) → `job-research.yml`
+  자동 실행 → **9분 6초, verdict `ok`로 완료**, 텔레그램에 리서치 요약 + [✍️ 원고 작성] 버튼 도착.
+- "원고 작성" 클릭 → `telegram-update`(19초, `research:write` 처리) → `job-write.yml` 자동 실행
+  → **완료**(job `0d7f7939-...`, 상태 `검수 대기`로 정상 전이 확인 - `npm run report:jobs`로 검증).
+- **버그 발견 + 수정**: 첫 `job-write.yml` 실행이 18분 41초나 걸림(보통 훨씬 빠름) - 원인은
+  `job-research.yml`에는 있던 `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`을 `job-write.yml`에 빠뜨려서,
+  검수 단계 NAVER 기준 출처 수집이 전부 실패 -> 에이전트가 전부 재조사하는 폴백 경로를 탐 - 치명적은
+  아니었지만(자동 폴백으로 완료는 됨) 품질/속도 저하. 즉시 추가해 수정.
 
-**지금부터 키워드 수집 + 텔레그램 버튼 수신 + 리서치/집필 트리거 전부 맥 전원과 무관하게 클라우드에서
-돈다.** 로컬에 남은 건 `publish-poll`(원고 페이지 준비 + Cloudflare Pages 배포 트리거) 하나 -
-다음 Phase 대상.
+**지금부터 키워드 수집 + 텔레그램 버튼 수신 + 리서치/집필 트리거까지 전 구간이 맥 전원과 무관하게
+클라우드에서 실측 완주 확인됨.** 로컬에 남은 건 `publish-poll`(원고 페이지 준비 + Cloudflare Pages
+배포 트리거) 하나 - 다음 Phase 대상.
 
 ---
 
