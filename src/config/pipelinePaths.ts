@@ -34,9 +34,11 @@ export function draftFilePath(keyword: string, suffix?: string): string {
 }
 
 // ---------- 채널별 원고(반자동 업로드 대체) ----------
-// 승인된 job마다 네이버/티스토리/블로거 3채널용 원고를 로컬 파일로 저장하고, 이를 한 화면에서
-// 열람·복사할 수 있는 index.html을 만든다. 서버 없이 file://로 열리므로 원고 본문은 manifest.json에
-// 인라인으로 담는다.
+// 승인된 job마다 배정된 채널 원고를 로컬 .md 파일로도 저장(사람이 직접 열어볼 때용 참고 사본)하고,
+// 이를 한 화면에서 열람·복사할 수 있는 index.html을 만든다. 목록 자체(어떤 job이 준비됐는지, 본문
+// 인라인 포함)의 단일 소스는 Supabase manuscript_manifest_topics 테이블이다(manuscriptManifest.ts,
+// 2026-09-15 - GitHub Actions처럼 매번 새 컴퓨터에서 도는 실행 환경에서는 로컬 파일이 공유되지
+// 않아 목록이 유실되는 사고가 있었다).
 
 export type ManuscriptChannel = "naver" | "tistory" | "blogspot";
 
@@ -48,10 +50,6 @@ export function manuscriptTopicDir(date: string, keyword: string): string {
 
 export function manuscriptFilePath(date: string, keyword: string, channel: ManuscriptChannel): string {
   return resolve(manuscriptTopicDir(date, keyword), `${channel}.md`);
-}
-
-export function manuscriptManifestPath(): string {
-  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, "manifest.json");
 }
 
 export function manuscriptIndexPagePath(): string {

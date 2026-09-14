@@ -1,6 +1,55 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-14 (Asia/Seoul)
+기준일: 2026-09-15 (Asia/Seoul)
+
+## 2026-09-15 세션 — 원고 목록 유실 사고 원인 규명 + 근본 수정(Supabase 이전) + 좌측 목록 UI
+
+**사고**: 사용자가 "텔레그램에서 승인된 원고가 채널별 원고 페이지에 안 보인다"고 신고("유부녀 킬러"
+Blogspot 건 등). 조사 결과 `article_jobs.metadata.channelManuscriptsReadyAt`은 찍혀 있고
+텔레그램 "준비 완료" 알림도 갔지만, 실제 배포된 페이지에는 없는 job이 **4건** 확인됨(브루노마스
+내한, 옥토버페스트 서울, 광안리 드론쇼, 유부녀 킬러 - 전부 2026-09-14 오후 클라우드 처리분).
+
+**근본 원인**: 원고 목록(`manuscripts/manifest.json`)이 `.gitignore` 대상 **로컬 파일**이었다.
+09-14 Phase 4로 발행 준비가 GitHub Actions(`job-publish-prepare.yml`)로 넘어갔는데, 이 러너는
+매번 새로 체크아웃되는 일회용 컴퓨터라 그 로컬 파일이 매 실행마다 없는 상태로 시작했다. 그 결과
+클라우드 실행마다 "방금 승인된 job만 담긴 거의 빈 목록"으로 페이지를 통째로 다시 배포해, 이전
+실행(로컬이든 클라우드든)이 이미 배포해 둔 다른 job들을 지워버렸다 - 게다가 한 번 "준비 완료"
+표시된 job은 재처리 대상에서 빠지게 설계돼 있어 자동으로도 복구되지 않았다. `telegram_offsets`를
+DB로 옮긴 것과 똑같은 이유("짧게/일회성으로 반복 실행되는 프로세스는 로컬 상태를 못 믿는다")의
+재발이었다.
+
+**즉시 복구**: 유실된 4건을 `npm run manuscripts:build -- <jobId>`로 재생성(이미 approved 상태라
+재승인 없이 기존 배리에이션 재사용, LLM 재호출 없음)해 페이지에 복구·재배포.
+
+**근본 수정(사용자 승인, `supabase db push` 완료)**: `manuscripts/manifest.json` 파일을 완전히
+없애고 신규 테이블 `manuscript_manifest_topics`(migration
+`supabase/migrations/20260915013000_manuscript_manifest_topics.sql`)로 이전했다.
+`manuscriptManifest.ts`의 `loadManifest`/`saveManifest` 내부만 바뀌었고 외부 계약(타입·함수
+시그니처)은 그대로라 호출부(`buildManuscriptPageCli.ts`/`prepareApprovedManuscripts.ts`) 변경
+없음. `saveManifest`는 항상 **job_id 단위 upsert**만 하고 다른 행을 지우지 않는다 - 그래서 어느
+실행 환경이 무엇을 알고 있든, 서로 다른 프로세스의 저장이 서로를 지우는 구조적 유실이 원천적으로
+불가능해졌다(단순히 "파일을 DB로 옮기기만" 했다면 같은 버그가 재현됐을 것 - 관건은 whole-file
+overwrite를 없애고 행 단위 upsert로 바꾼 것).
+
+기존 로컬 16개 topic은 `manuscripts/manifest.json`에서 새 테이블로 백필 완료. 신규
+`npm run test:manuscript-manifest`(실제 Supabase에 씀, 테스트 job_id만 정리)로 "서로 다른 실행의
+저장이 서로를 지우지 않는지"를 직접 검증 - 통과. **재현 테스트**: 로컬 `manuscripts/` 디렉터리를
+통째로 지운 뒤(GitHub Actions의 빈 체크아웃과 동일 조건) `manuscripts:build`를 실행해도 DB에서
+16개 topic 전부를 정상 복원·배포함을 확인.
+
+**원고 페이지 좌측 목록 UI**(같은 세션, 사용자 요청): 날짜별 드롭다운이 전부 `open`으로 하드코딩돼
+있던 것을, 오늘 날짜(Asia/Seoul)만 기본으로 펼치고 지난 날짜는 접어두게 변경
+(`renderManuscriptPage.ts`). 오늘 준비된 원고가 아직 없는 날엔 가장 최근 날짜를 대신 펼쳐 페이지가
+전부 접힌 채로 비어 보이지 않게 함. 실제 배포로 확인(2026-09-15 5건 펼침 / 09-07·09-06·09-05 접힘).
+
+**남은 것**:
+- ⬜ 다음 텔레그램 승인 건이 실제로 GitHub Actions에서 처리될 때 페이지에 정상 반영되는지
+  라이브로 한 번 더 관찰(이번 검증은 로컬에서 "빈 체크아웃"을 흉내낸 것 - 실제 GH Actions 러너
+  에서의 최종 확인은 아직).
+- ⬜ 이번에 복구한 4건(브루노마스/옥토버페스트/광안리/유부녀 킬러)은 재생성 시점이 오늘
+  (2026-09-15)이라 좌측 목록에서 원래 날짜(09-14)가 아니라 오늘 날짜 그룹 아래 보인다 - 내용은
+  정확하지만 날짜 그룹 표시만 그렇다. 사용자가 신경 쓰면 해당 4개 행의 `date` 컬럼만 수동으로
+  2026-09-14로 고칠 수 있음(사소해서 이번엔 안 건드림).
 
 ## 2026-09-14 세션(별도 창) — 클라우드 이전 Phase 2~4 완료 + 원고 페이지 UI 개선
 

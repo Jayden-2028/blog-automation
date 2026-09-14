@@ -401,6 +401,35 @@ export type TelegramOffsetInsert = {
 
 export type TelegramOffsetUpdate = Partial<TelegramOffsetInsert>;
 
+// ---------- manuscript_manifest_topics ----------
+// 채널별 원고 페이지(manuscripts/index.html)의 날짜->주제->채널 목록. job_id로 upsert.
+// supabase/migrations/20260915013000_manuscript_manifest_topics.sql 참고.
+
+export type ManuscriptManifestTopicRow = {
+  job_id: string;
+  keyword: string;
+  category: string | null;
+  date: string;
+  ready_at: string;
+  /** ManuscriptChannelEntry[](manuscriptManifest.ts) 그대로. */
+  channels: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ManuscriptManifestTopicInsert = {
+  job_id: string;
+  keyword: string;
+  category?: string | null;
+  date: string;
+  ready_at: string;
+  channels: unknown;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ManuscriptManifestTopicUpdate = Partial<ManuscriptManifestTopicInsert>;
+
 // ---------- images ----------
 // 원고에 연결된 이미지와 출처·저작권·대체 텍스트 정보를 보관한다.
 
@@ -517,6 +546,12 @@ export type Database = {
         Row: TelegramOffsetRow;
         Insert: TelegramOffsetInsert;
         Update: TelegramOffsetUpdate;
+        Relationships: [];
+      };
+      manuscript_manifest_topics: {
+        Row: ManuscriptManifestTopicRow;
+        Insert: ManuscriptManifestTopicInsert;
+        Update: ManuscriptManifestTopicUpdate;
         Relationships: [];
       };
       images: {

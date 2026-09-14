@@ -1,4 +1,5 @@
-// manifest.json -> 열람용 index.html (날짜 -> 주제 -> 채널 3개 트리). file://로 여는 정적 페이지라
+// manifest(Supabase manuscript_manifest_topics, manuscriptManifest.ts) -> 열람용 index.html
+// (날짜 -> 주제 -> 채널 3개 트리). file://로 여는 정적 페이지라
 // 서버·번들러가 없다 - scripts/statusDashboard.ts와 같은 관례(문자열 템플릿 -> writeFile)를 따른다.
 //
 // 원고 본문은 Node에서 미리 parseManuscriptBlocks로 텍스트/이미지 블록으로 나눠 JSON에 담는다.
