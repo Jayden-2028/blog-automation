@@ -74,6 +74,33 @@ async function main(): Promise<void> {
   assert(withoutImages.includes("도입부 문단입니다.") && withoutImages.includes("첫 번째 소제목"), "본문 텍스트가 유실됨");
   console.log("✅ manuscriptBodyWithoutImages - 마커 제거, 본문 유지");
 
+  // 7) [IMAGE:] 바로 다음 줄에 [IMAGE PROMPT:]가 이미 붙어 저장된 경우(2026-09-15 발견 -
+  //    옥토버페스트/추석/광안리드론쇼 3건에서 실제로 이 형태였고, 이미지 블록으로 인식되지 않아
+  //    이미지 캡션 표·프롬프트 팩 버튼이 통째로 안 떴다)도 이미지 블록으로 인식하고, 인라인
+  //    프롬프트를 그대로 써야 한다(imagePrompts 배열은 아예 안 넘겨도 됨 - 인라인이 우선).
+  const inlinePromptBody = [
+    "도입부 문단입니다.",
+    "",
+    "[IMAGE: 카페 사진 — 웹 검색]",
+    "[IMAGE PROMPT: 서울 카페 아메리카노 감성 사진]",
+    "",
+    "마무리 문단입니다.",
+  ].join("\n");
+  const inlineBlocks = parseManuscriptBlocks(inlinePromptBody);
+  const inlineImages = inlineBlocks.filter((b) => b.type === "image");
+  assert(inlineImages.length === 1, `인라인 IMAGE PROMPT도 이미지 블록 1개로 인식해야 한다 (실제: ${inlineImages.length})`);
+  assert(
+    inlineImages[0].type === "image" && inlineImages[0].prompt === "서울 카페 아메리카노 감성 사진",
+    "인라인 IMAGE PROMPT 텍스트를 그대로 써야 한다"
+  );
+  assert(inlineBlocks.length === 3, `텍스트/이미지/텍스트 3블록이어야 한다 (실제: ${inlineBlocks.length})`);
+  console.log("✅ [IMAGE:]+[IMAGE PROMPT:] 인라인 결합도 이미지 블록으로 인식 + 인라인 프롬프트 사용");
+
+  // 8) manuscriptBodyWithoutImages도 인라인 IMAGE PROMPT 줄까지 함께 제거해야 한다.
+  const inlineWithoutImages = manuscriptBodyWithoutImages(inlinePromptBody);
+  assert(!inlineWithoutImages.includes("[IMAGE"), "인라인 IMAGE PROMPT 줄이 제거되지 않음");
+  console.log("✅ manuscriptBodyWithoutImages - 인라인 IMAGE PROMPT 줄도 함께 제거");
+
   console.log("\n✅ parseManuscriptBlocks 테스트 전체 통과");
 }
 
