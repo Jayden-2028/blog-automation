@@ -10,6 +10,11 @@
 # ARTICLE_IMAGE_GENERATION=true env를 추가해야 한다(잊지 말 것).
 #
 # 최대 소요 20분(WRITE_TIMEOUT_MS) - 타임아웃 여유를 넉넉히 둔다.
+#
+# 2026-09-14 첫 실측 실행에서 발견: 검수 단계(articleReviewChecks)가 NAVER 기준 출처를 다시
+# 수집하는데(collectSourcesForJob) NAVER_CLIENT_ID/SECRET이 여기 빠져 있어서 전부 실패 ->
+# 에이전트가 처음부터 다시 조사하느라 18분 41초나 걸렸다(보통 훨씬 빠름). 치명적은 아니었지만
+# (자동 폴백으로 완료는 됨) 품질/속도 저하라 추가함.
 
 name: job-write
 
@@ -52,4 +57,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: npm run job:write -- "${{ inputs.job_id }}"
