@@ -85,13 +85,21 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     timeStyle: "short",
   }).format(generatedAt);
 
+  // kstDateString(prepareChannelManuscripts.ts)과 같은 포맷(en-CA -> YYYY-MM-DD)으로 오늘 날짜를
+  // 계산해, 그 날짜 그룹만 기본으로 펼쳐두고 지난 날짜는 접어 둔다(목록이 길어질수록 오늘 것부터
+  // 바로 보이게 - 2026-09-15 사용자 요청). 오늘 준비된 원고가 아직 없는 날은 대신 가장 최근 날짜를
+  // 펼쳐서, 페이지를 열자마자 전부 접혀 비어 보이는 것을 막는다(topics가 date desc 정렬이라
+  // days의 첫 키가 최신 날짜).
+  const todayKst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(generatedAt);
+  const defaultOpenDate = days.has(todayKst) ? todayKst : [...days.keys()][0];
+
   const treeHtml =
     days.size === 0
       ? `<div class="empty">아직 준비된 원고가 없습니다.</div>`
       : [...days.entries()]
           .map(
             ([date, topicsOfDay]) => `
-      <details class="day" open>
+      <details class="day"${date === defaultOpenDate ? " open" : ""}>
         <summary>${escapeHtml(date)} <span class="count">${topicsOfDay.length}</span></summary>
         ${topicsOfDay
           .map(
