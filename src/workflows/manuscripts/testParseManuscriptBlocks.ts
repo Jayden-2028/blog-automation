@@ -1,4 +1,5 @@
-import { manuscriptBodyWithoutImages, parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
+import { manuscriptBodyWithoutImages, parseManuscriptBlocks, substituteConfirmedImages } from "./parseManuscriptBlocks.js";
+import type { ManuscriptImage } from "./manuscriptManifest.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -100,6 +101,44 @@ async function main(): Promise<void> {
   const inlineWithoutImages = manuscriptBodyWithoutImages(inlinePromptBody);
   assert(!inlineWithoutImages.includes("[IMAGE"), "인라인 IMAGE PROMPT 줄이 제거되지 않음");
   console.log("✅ manuscriptBodyWithoutImages - 인라인 IMAGE PROMPT 줄도 함께 제거");
+
+  // 9) substituteConfirmedImages - Blogspot 자동 발행 전처리. 각 마커 위치에 확정 이미지(url
+  //    있음)가 정확히 1장이면 실제 `![설명](url)`로 바꾼다.
+  const imageBody = [
+    "도입부 문단입니다.",
+    "",
+    "[IMAGE: 카페 사진 — 웹 검색]",
+    "",
+    "**소제목**",
+    "문단입니다.",
+    "",
+    "[IMAGE: 골목 일러스트 — AI 생성]",
+  ].join("\n");
+
+  const oneConfirmed: ManuscriptImage[] = [
+    { index: 1, description: "카페 사진 — 웹 검색", prompt: null, url: "https://x/1.png", provider: "openai", fileName: "01.png" },
+  ];
+  const substituted1 = substituteConfirmedImages(imageBody, oneConfirmed);
+  assert(substituted1.includes("![카페 사진 — 웹 검색](https://x/1.png)"), "확정 이미지 1장은 마크다운 이미지로 치환돼야 한다");
+  assert(substituted1.includes("[IMAGE: 골목 일러스트"), "확정 안 된(0장) 마커는 그대로 남아야 한다");
+  console.log("✅ substituteConfirmedImages - 확정 1장만 치환, 미확정 마커는 유지");
+
+  // 10) A/B 비교로 같은 인덱스에 후보가 2장(둘 다 url 있음) -> 아직 사람이 안 골랐으니 치환 안 함.
+  const abCandidates: ManuscriptImage[] = [
+    { index: 1, description: "카페 사진", prompt: null, url: "https://x/a.png", provider: "openai", fileName: "01-openai.png" },
+    { index: 1, description: "카페 사진", prompt: null, url: "https://x/b.png", provider: "gemini", fileName: "01-gemini.png" },
+  ];
+  const substituted2 = substituteConfirmedImages(imageBody, abCandidates);
+  assert(substituted2.includes("[IMAGE: 카페 사진"), "A/B 후보 2장(미확정)은 마커를 그대로 둬야 한다");
+  console.log("✅ substituteConfirmedImages - A/B 미확정(후보 2장)은 마커 유지");
+
+  // 11) 생성 실패(url null)만 있으면 확정 0장 -> 마커 유지.
+  const failedOnly: ManuscriptImage[] = [
+    { index: 1, description: "카페 사진", prompt: null, url: null, provider: "openai", fileName: "01.png", error: "생성 실패" },
+  ];
+  const substituted3 = substituteConfirmedImages(imageBody, failedOnly);
+  assert(substituted3.includes("[IMAGE: 카페 사진"), "url 없는(실패) 이미지는 치환하면 안 된다");
+  console.log("✅ substituteConfirmedImages - 생성 실패(url 없음)는 마커 유지");
 
   console.log("\n✅ parseManuscriptBlocks 테스트 전체 통과");
 }

@@ -103,6 +103,33 @@ export class ArticleJobRepository {
   }
 
   /**
+   * 승인됐지만 아직 원고를 안 만든 job만 반환한다(오래된 선택 순).
+   *
+   * 왜 별도 메서드인가(2026-09-16 실측 사고): prepareApprovedManuscripts는 원래
+   * `listByStatus("approved", 20)`으로 20건을 받아 **메모리에서** channelManuscriptsReadyAt이 없는
+   * 것만 걸렀다. 그런데 이 조회는 selected_at **오름차순**(오래된 것 먼저)이라, 승인 후 준비까지
+   * 끝난 job이 20건을 채우자 그 20건이 전부 필터에 걸러져 pending이 항상 빈 배열이 됐다 - 정작
+   * 준비가 필요한 **새로 승인된 job은 20건 창 밖으로 밀려나** 조회조차 되지 않았다. 그래서
+   * 텔레그램에서 승인해도 job-publish-prepare가 13초 만에 아무 로그 없이 끝나고 원고가 뷰어에
+   * 영영 안 나타났다(approved 22건 / limit 20에서 발생, 이후 승인은 전부 무음 유실).
+   *
+   * 필터를 DB로 내려 "준비 안 된 것"만 뽑으므로 승인 누적 건수와 무관하게 안전하다.
+   * `metadata->>channelManuscriptsReadyAt is null`은 키가 아예 없는 경우와 JSON null 둘 다 잡는다.
+   */
+  static async listApprovedWithoutManuscript(limit = 20): Promise<ArticleJobRow[]> {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("*")
+      .eq("status", "approved")
+      .filter("metadata->>channelManuscriptsReadyAt", "is", null)
+      .order("selected_at", { ascending: true })
+      .limit(limit);
+
+    if (error) throw error;
+    return data ?? [];
+  }
+
+  /**
    * status와 무관하게 최근 선택된 job을 최신순으로 반환한다.
    *
    * listByStatus는 "다음 단계 워커가 집어갈 job"을 찾는 용도라 status가 고정이다. 이 메서드는

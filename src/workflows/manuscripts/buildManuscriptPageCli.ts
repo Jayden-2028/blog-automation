@@ -1,8 +1,16 @@
-// 채널별 원고 페이지를 수동으로 만들거나 다시 그리는 진입점.
+// 원고 페이지를 수동으로 만들거나 다시 그리는 진입점.
 //
 // 사용법:
 //   npm run manuscripts:build              approved 대기열 중 아직 준비 안 된 job을 최대 3건 처리
 //   npm run manuscripts:build -- <jobId>   그 job 1건만 즉시 처리(이미 준비됐어도 다시 만든다)
+//   npm run manuscripts:build -- --refresh 원고는 건드리지 않고 저장된 목록으로 페이지만 다시 그려 배포
+//
+// --refresh가 왜 필요한가(2026-09-16 실측 사고): 페이지는 "승인된 원고를 실제로 처리할 때"만
+// 다시 그려졌다(prepareApprovedManuscripts의 `if (manifest)` 분기 - 처리한 job이 0건이면 렌더도
+// 배포도 건너뛴다). 그래서 09-15 15:26의 뷰어 전면 재설계가 **배포되지 않은 채** 14:53에 만들어진
+// 옛 HTML이 그대로 떠 있었고, 사용자가 "화면이 그대로"라고 리포트하기 전까지 아무도 몰랐다.
+// 디자인/렌더러만 바뀐 변경은 다음 원고 승인을 기다릴 이유가 없다 - 이 모드로 즉시 반영한다.
+// LLM·이미지 생성을 전혀 호출하지 않으므로 비용이 들지 않고, DB 원고 데이터도 바꾸지 않는다.
 import "dotenv/config";
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -69,9 +77,29 @@ async function buildPending(): Promise<void> {
   console.log(`\n열기: open ${manuscriptIndexPagePath()}`);
 }
 
+/** 저장된 목록(manifest)만 읽어 페이지를 다시 그리고 배포한다. 원고/이미지/DB는 건드리지 않는다. */
+async function refreshPage(): Promise<void> {
+  console.log("▶ 저장된 원고 목록으로 페이지만 다시 그리는 중...");
+  const manifest = await loadManifest();
+  if (manifest.topics.length === 0) {
+    console.log("⏭ 저장된 원고가 없습니다 - 그릴 내용이 없어 배포하지 않습니다.");
+    return;
+  }
+
+  await writePage(renderManuscriptPage(manifest));
+  console.log(`✅ 페이지 재생성 - 원고 ${manifest.topics.length}건`);
+  console.log(`   열기: open ${manuscriptIndexPagePath()}`);
+
+  const deployResult = await deployManuscriptsPage();
+  if (deployResult.status === "success") console.log(`✅ 배포 완료: ${deployResult.url}`);
+  else if (deployResult.status === "failed") console.error(`⚠️ 배포 실패: ${deployResult.error}`);
+  else console.log(`ℹ️ 배포 건너뜀: ${deployResult.reason}`);
+}
+
 async function main(): Promise<void> {
-  const jobId = process.argv[2];
-  if (jobId) await buildOne(jobId);
+  const arg = process.argv[2];
+  if (arg === "--refresh") await refreshPage();
+  else if (arg) await buildOne(arg);
   else await buildPending();
 }
 

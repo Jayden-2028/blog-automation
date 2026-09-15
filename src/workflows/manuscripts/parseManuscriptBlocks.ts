@@ -23,6 +23,8 @@
 // 붙이는 것보다는 프롬프트 없이 보여주는 편이 안전하다 - 그래서 마커 개수와 imagePrompts 길이가
 // 다르면(그리고 인라인 프롬프트도 없으면) 그 문서 전체를 "프롬프트 미상"으로 처리한다.
 
+import type { ManuscriptImage } from "./manuscriptManifest.js";
+
 export type ManuscriptBlock =
   | { type: "text"; content: string }
   | { type: "heading"; heading: string; body: string }
@@ -90,4 +92,33 @@ export function manuscriptBodyWithoutImages(body: string): string {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+/**
+ * Blogspot 자동 발행(publishArticleToBlogspot.ts)이 HTML로 변환하기 직전에 쓴다. [IMAGE: 설명]
+ * 마커를 그 위치(1부터 시작하는 등장 순서)에 해당하는 이미지가 **정확히 1장** 확정됐을 때만 실제
+ * `![설명](url)` 마크다운으로 치환한다.
+ *
+ * A/B 비교 모드(IMAGE_AB_COMPARE=true)에서는 같은 위치에 provider가 다른 후보가 2장 들어오는데,
+ * 어느 쪽을 쓸지는 사람이 원고 페이지에서 눈으로 보고 고르는 과정이라 manifest에 "선택됨" 표시가
+ * 없다(2026-09-15 기준) - 그래서 후보가 2장 이상이거나(아직 사람이 안 고름) 전부 실패(url 없음)면
+ * 마커를 그대로 둔다. convertArticleToHtml이 그 경우도 플레이스홀더 텍스트로 안전하게 렌더한다 -
+ * 엉뚱한 이미지를 자동으로 골라 발행하는 것보다 낫다.
+ */
+export function substituteConfirmedImages(body: string, images: ManuscriptImage[]): string {
+  const rawBlocks = body.split(/\n{2,}/);
+  let markerIndex = 0;
+
+  return rawBlocks
+    .map((raw) => {
+      const match = matchImageBlock(raw.trim());
+      if (!match) return raw;
+      markerIndex += 1;
+
+      const confirmed = images.filter((image) => image.index === markerIndex && image.url);
+      if (confirmed.length !== 1) return raw;
+
+      return `![${match.description}](${confirmed[0].url})`;
+    })
+    .join("\n\n");
 }
