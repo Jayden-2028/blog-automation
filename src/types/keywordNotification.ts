@@ -14,6 +14,12 @@ export type NotificationKeywordItem = {
   totalScore: number;
   scoreBreakdown: KeywordRankingScoreBreakdownJson | null;
   trendDirection: string | null;
+  /**
+   * 헤드리스 LLM이 만드는 20자 내외 한 줄 요약(generateKeywordSummaries.ts, 2026-09-15).
+   * fetchTopKeywordsForNotification 시점엔 없고, sendKeywordNotification이 나중에 채운다 -
+   * 실패해도 null로 두고 알림 자체는 막지 않는다.
+   */
+  summary: string | null;
 };
 
 export type NotificationSourceRun = {

@@ -26,6 +26,7 @@ function item(overrides: Partial<NotificationKeywordItem> = {}): NotificationKey
       total: 63,
     },
     trendDirection: "accelerating",
+    summary: null,
     ...overrides,
   };
 }
@@ -75,6 +76,19 @@ function main(): void {
   const [, noSeedChunk] = formatNotificationMessage(payload([item({ seedQuery: null })]));
   assert(!noSeedChunk.text.includes("seedQuery"), "seedQuery 없으면 그 줄이 아예 없어야 한다");
   console.log("✅ seedQuery 없음 -> 줄 생략");
+
+  // 6) summary가 있으면 seedQuery/category 다음 줄에 그대로 나온다(2026-09-15).
+  const [, withSummaryChunk] = formatNotificationMessage(payload([item({ summary: "감독 경질설에 팬들 반발" })]));
+  assert(withSummaryChunk.text.includes("감독 경질설에 팬들 반발"), "summary가 있으면 그 줄이 나와야 한다");
+  console.log("✅ summary 있음 -> 요약 줄 추가");
+
+  // 7) summary가 null이면(생성 실패 등) 그 줄 자체가 생략된다 - 알림을 막지 않는다.
+  const [, noSummaryChunk] = formatNotificationMessage(payload([item({ summary: null })]));
+  assert(
+    noSummaryChunk.text.split("\n").length === 2,
+    `summary 없으면 제목+seedQuery 2줄만 남아야 한다 (실제: ${JSON.stringify(noSummaryChunk.text.split("\n"))})`
+  );
+  console.log("✅ summary 없음(null) -> 줄 생략");
 
   console.log("\n✅ 전체 테스트 통과");
 }

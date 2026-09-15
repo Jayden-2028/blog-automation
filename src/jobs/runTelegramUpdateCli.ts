@@ -45,13 +45,14 @@ async function main(): Promise<void> {
     triggerResearch: (jobId) => dispatchAndTrack("job-research.yml", { job_id: jobId }),
     triggerWriting: (jobId) => dispatchAndTrack("job-write.yml", { job_id: jobId }),
     triggerPublishPrepare: () => dispatchAndTrack("job-publish-prepare.yml"),
+    triggerRevision: (jobId, feedback) => dispatchAndTrack("job-revise.yml", { job_id: jobId, feedback }),
   });
 
   const result = await bot.processUpdate(update);
   await Promise.all(pendingDispatches);
 
   if (!result.handled) {
-    console.log("· [telegram-update] callback_query가 없는 update - 무시");
+    console.log("· [telegram-update] callback_query/message가 없는(또는 무관한) update - 무시");
     return;
   }
   console.log("✅ [telegram-update] 처리 완료:", JSON.stringify({
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
     hasReviewResult: Boolean(result.reviewResult),
     hasResearchDecisionResult: Boolean(result.researchDecisionResult),
     triggeredResearch: Boolean(result.researchTrigger),
+    hasEditFeedbackResult: Boolean(result.editFeedbackResult),
   }));
 }
 

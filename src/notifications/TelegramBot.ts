@@ -44,9 +44,20 @@ export type TelegramCallbackQuery = {
   from?: { id: number | string };
 };
 
+// 일반 텍스트 메시지(2026-09-15, 수정 피드백 기능) - "수정 필요" 클릭 뒤 사용자가 답장(reply)으로
+// 보내는 수정 방향을 받는 데만 쓴다. reply_to_message가 있는 메시지만 다룬다(handleEditFeedbackMessage
+// 참고) - Cloudflare Worker도 같은 기준으로 이 update 형태만 릴레이한다(telegram-relay/src/index.ts).
+export type TelegramMessage = {
+  message_id: number;
+  chat: { id: number | string };
+  text?: string;
+  reply_to_message?: { message_id: number };
+};
+
 export type TelegramUpdate = {
   update_id: number;
   callback_query?: TelegramCallbackQuery;
+  message?: TelegramMessage;
 };
 
 export type HandleCallbackOutcome =
@@ -80,6 +91,21 @@ export type HandleArticleReviewOutcome =
 
 export type HandleArticleReviewResult = {
   outcome: HandleArticleReviewOutcome;
+  message: string;
+};
+
+// ---------- 수정 피드백(일반 텍스트 답장) 처리 - 2026-09-15 ----------
+// review:edit(수정 필요) 클릭 뒤, handleArticleReviewCallback이 "이 메시지에 답장으로 방향을
+// 적어주세요"를 보내며 그 메시지의 id를 job.metadata.editRequestMessageId에 저장해둔다. 사용자가
+// 그 메시지에 답장하면 이 핸들러가 reply_to_message.message_id로 역매칭해 job을 찾고, 답장 본문을
+// 피드백 삼아 재작성(job:revise)을 트리거한다.
+
+export type HandleEditFeedbackOutcome =
+  | { status: "ignored"; reason: "wrong_chat" | "not_a_reply" | "empty_text" | "no_matching_job" }
+  | { status: "accepted"; job: ArticleJobRow };
+
+export type HandleEditFeedbackResult = {
+  outcome: HandleEditFeedbackOutcome;
   message: string;
 };
 
@@ -185,6 +211,19 @@ export type TelegramBotOptions = {
    * 폴링 대신 승인 이벤트로 바로 트리거해서 10분 주기 GH Actions 폴링의 분당 과금을 피한다).
    */
   triggerPublishPrepare?: () => void;
+  /**
+   * "수정 필요" 뒤 사용자가 답장으로 보낸 피드백을 받으면 호출한다(2026-09-15). 기본 구현은
+   * job:revise CLI를 detached 프로세스로 띄우고 즉시 반환한다(완료 알림은 그 CLI가 직접 보낸다).
+   * 클라우드 진입점(runTelegramUpdateCli.ts)은 job-revise.yml을 workflow_dispatch로 발화하도록
+   * 오버라이드한다(triggerResearch/triggerWriting과 같은 패턴).
+   */
+  triggerRevision?: (jobId: string, feedback: string) => void;
+  /**
+   * 답장(reply_to_message.message_id)으로 "수정 필요" 요청 메시지를 역매칭해 그 job을 찾는다.
+   * 기본 구현은 status="review"인 job을 훑어 metadata.editRequestMessageId가 일치하는 것을 찾는다
+   * (동시에 검수 대기 중인 job이 많지 않다는 전제 - 많아지면 Supabase jsonb 쿼리로 바꿀 것).
+   */
+  findJobByEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
 
   // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
   /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
@@ -218,6 +257,8 @@ export class TelegramBot {
   private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   private readonly triggerResearch: (jobId: string) => void;
   private readonly triggerPublishPrepare: () => void;
+  private readonly triggerRevision: (jobId: string, feedback: string) => void;
+  private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
@@ -267,6 +308,14 @@ export class TelegramBot {
     this.triggerResearch =
       options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
     this.triggerPublishPrepare = options.triggerPublishPrepare ?? (() => {});
+    this.triggerRevision =
+      options.triggerRevision ?? ((jobId, feedback) => spawnDetachedTask("job:revise", [jobId, feedback]));
+    this.findJobByEditRequestMessageId =
+      options.findJobByEditRequestMessageId ??
+      (async (messageId) => {
+        const reviewJobs = await ArticleJobRepository.listByStatus("review", 50);
+        return reviewJobs.find((j) => (j.metadata as Record<string, unknown>)?.editRequestMessageId === messageId) ?? null;
+      });
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -501,17 +550,27 @@ export class TelegramBot {
       // job.status는 review에 남긴다(승인 아님) - "확인했지만 손볼 곳이 있다"는 뜻이라, 실제로
       // 수정된 뒤 다시 confirm이 눌릴 때까지 계속 검수 대기 상태여야 한다. requiresMedicalReview도
       // 켜져 있었다면 그대로 true로 남긴다(같은 이유).
+      //
+      // 2026-09-15부터 "수정 후 원고를 다시 만들어주세요"로 끝내지 않고, 답장으로 수정 방향을
+      // 받아 자동 재작성한다(사용자 요청). 이 메서드가 직접 sendMessage로 요청 메시지를 보내
+      // message_id를 얻어야 해서(반환값이 필요) 기존 return-then-caller-sends 패턴 대신 여기서
+      // 바로 보낸다 - message를 빈 문자열로 돌려 respondToArticleReview가 중복 발송하지 않게 한다.
       const timestamp = new Date().toISOString();
+      const sent = await this.sendMessage(
+        `✏️ <b>수정 필요로 표시함</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+          `이 메시지에 <b>답장(reply)</b>으로 수정 방향을 적어주세요. 그대로 반영해 다시 작성해 드립니다.`
+      ).catch(() => null);
       await this.mergeJobMetadata(job.id, {
         reviewDecision: "needs_edit",
         reviewedAt: timestamp,
+        editRequestMessageId: sent?.message_id ?? null,
         ...(job.metadata.requiresMedicalReview
           ? { medicalReviewDecision: "needs_edit", medicalReviewedAt: timestamp }
           : {}),
       });
       return {
         outcome: { status: "reviewed", action: "edit", job },
-        message: `✏️ <b>수정 필요로 표시함</b>\n${escapeTelegramHtml(job.keyword)}\n수정 후 원고를 다시 만들어주세요.`,
+        message: "",
       };
     }
 
@@ -545,6 +604,45 @@ export class TelegramBot {
       message:
         `✅ <b>승인됨</b>\n${escapeTelegramHtml(job.keyword)}` +
         (wasMedical ? "\n의학 정보 교차확인도 함께 완료됐습니다." : ""),
+    };
+  }
+
+  /**
+   * "수정 필요" 뒤 사용자가 보낸 답장 텍스트를 처리한다. callback_query가 아니라 일반 message라
+   * processUpdate에서 별도로 분기해 호출한다(handleCallbackQuery류와 완전히 다른 입력 형태).
+   */
+  async handleEditFeedbackMessage(message: TelegramMessage): Promise<HandleEditFeedbackResult> {
+    if (String(message.chat.id) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+
+    const replyToId = message.reply_to_message?.message_id;
+    if (replyToId === undefined) {
+      return { outcome: { status: "ignored", reason: "not_a_reply" }, message: "" };
+    }
+
+    const feedback = message.text?.trim();
+    if (!feedback) {
+      return { outcome: { status: "ignored", reason: "empty_text" }, message: "" };
+    }
+
+    const job = await this.findJobByEditRequestMessageId(replyToId);
+    if (!job) {
+      // "수정 필요" 요청과 무관한 답장(다른 메시지에 답장했거나, 이미 처리된 요청)이다 - 조용히
+      // 무시한다. 여기서 뭔가를 보내면 봇과 상관없는 대화에도 답장을 달게 된다.
+      return { outcome: { status: "ignored", reason: "no_matching_job" }, message: "" };
+    }
+
+    // 같은 요청에 두 번째 답장이 와도 재작성을 두 번 트리거하지 않도록 즉시 지운다 - 다음
+    // "수정 필요" 클릭이 새 editRequestMessageId를 다시 채운다.
+    await this.mergeJobMetadata(job.id, { editRequestMessageId: null, lastEditFeedback: feedback });
+    this.triggerRevision(job.id, feedback);
+
+    return {
+      outcome: { status: "accepted", job },
+      message:
+        `🔄 <b>수정 반영 중</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+        `말씀하신 방향으로 다시 작성하고 있습니다. 완료되면 새 초안을 보내드립니다.`,
     };
   }
 
@@ -758,8 +856,16 @@ export class TelegramBot {
     reviewResult?: HandleArticleReviewResult;
     researchDecisionResult?: HandleResearchDecisionResult;
     researchTrigger?: ResearchTriggerResult;
+    editFeedbackResult?: HandleEditFeedbackResult;
   }> {
-    if (!update.callback_query) return { handled: false };
+    if (!update.callback_query) {
+      // callback_query가 아니면 콜백 3종 파서를 시도할 이유가 없다 - update.message가 있으면
+      // "수정 필요" 답장인지만 확인한다(handleEditFeedbackMessage 참고).
+      if (!update.message) return { handled: false };
+      const editFeedbackResult = await this.handleEditFeedbackMessage(update.message);
+      if (editFeedbackResult.message) await this.sendMessage(editFeedbackResult.message).catch(() => {});
+      return { handled: editFeedbackResult.outcome.status !== "ignored", editFeedbackResult };
+    }
 
     const result = await this.handleCallbackQuery(update.callback_query);
 
@@ -801,6 +907,7 @@ export class TelegramBot {
     reviewResults: HandleArticleReviewResult[];
     researchDecisionResults: HandleResearchDecisionResult[];
     researchTriggerResults: ResearchTriggerResult[];
+    editFeedbackResults: HandleEditFeedbackResult[];
     errors: string[];
   }> {
     const lastUpdateId = await this.getStoredOffset(this.receiverId);
@@ -810,11 +917,12 @@ export class TelegramBot {
     const reviewResults: HandleArticleReviewResult[] = [];
     const researchDecisionResults: HandleResearchDecisionResult[] = [];
     const researchTriggerResults: ResearchTriggerResult[] = [];
+    const editFeedbackResults: HandleEditFeedbackResult[] = [];
     const errors: string[] = [];
     let maxUpdateId = lastUpdateId ?? -1;
 
     for (const update of updates) {
-      if (!update.callback_query) {
+      if (!update.callback_query && !update.message) {
         maxUpdateId = Math.max(maxUpdateId, update.update_id);
         continue;
       }
@@ -825,6 +933,7 @@ export class TelegramBot {
         if (processed.reviewResult) reviewResults.push(processed.reviewResult);
         if (processed.researchDecisionResult) researchDecisionResults.push(processed.researchDecisionResult);
         if (processed.researchTrigger) researchTriggerResults.push(processed.researchTrigger);
+        if (processed.editFeedbackResult) editFeedbackResults.push(processed.editFeedbackResult);
 
         maxUpdateId = Math.max(maxUpdateId, update.update_id);
       } catch (error) {
@@ -846,7 +955,15 @@ export class TelegramBot {
       await this.advanceStoredOffset(maxUpdateId, this.receiverId);
     }
 
-    return { processed: updates.length, results, reviewResults, researchDecisionResults, researchTriggerResults, errors };
+    return {
+      processed: updates.length,
+      results,
+      reviewResults,
+      researchDecisionResults,
+      researchTriggerResults,
+      editFeedbackResults,
+      errors,
+    };
   }
 
   /** respondToCallback과 같은 원칙(§answerCallbackQuery 만료 무시)으로 검수 결과를 알린다. */
@@ -947,8 +1064,9 @@ export class TelegramBot {
   private async getUpdates(offset?: number): Promise<TelegramUpdate[]> {
     const body: Record<string, unknown> = {
       limit: UPDATES_LIMIT,
-      // callback_query만 받는다. 일반 메시지까지 받으면 offset만 소모하고 처리할 것이 없다.
-      allowed_updates: ["callback_query"],
+      // callback_query + message(수정 피드백 답장, 2026-09-15). 그 외 update 타입은 offset만
+      // 소모하고 처리할 게 없다.
+      allowed_updates: ["callback_query", "message"],
     };
     if (offset !== undefined) body.offset = offset;
 
@@ -960,8 +1078,13 @@ export class TelegramBot {
     await this.post("answerCallbackQuery", { callback_query_id: callbackQueryId, text });
   }
 
-  async sendMessage(text: string, replyMarkup?: TelegramInlineKeyboard): Promise<void> {
-    await this.post("sendMessage", {
+  /**
+   * message_id를 돌려준다(2026-09-15부터) - "수정 필요" 답장 요청 메시지처럼, 나중에
+   * reply_to_message.message_id로 역매칭해야 하는 메시지가 생겨서 필요해졌다. 기존 호출부는
+   * 반환값을 그냥 무시하면 되므로 시그니처 확장에 영향받지 않는다.
+   */
+  async sendMessage(text: string, replyMarkup?: TelegramInlineKeyboard): Promise<{ message_id: number } | null> {
+    return this.post<{ message_id: number }>("sendMessage", {
       chat_id: this.chatId,
       text,
       parse_mode: "HTML",

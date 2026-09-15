@@ -4,8 +4,11 @@
 # "별도 워크플로우를 workflow_dispatch로 새로 발화"하는 방식으로 대체한다(telegram-update.yml이
 # 이 워크플로우를 GitHub API로 호출 - triggerResearch override 참고).
 #
-# 완료/실패 알림은 이 CLI(runResearchStageCli.ts)가 기존 코드 그대로 직접 텔레그램에 보낸다 -
-# 호출자는 fire-and-forget이라 이 워크플로우 자체의 성패를 따로 릴레이할 필요가 없다.
+# 실패 알림은 이 CLI(runResearchStageCli.ts)가 기존 코드 그대로 직접 텔레그램에 보낸다.
+#
+# 2026-09-15: 조사가 끝나면(성공 시) "원고를 쓸까요?" 확인 없이 이 CLI가 곧바로 job-write.yml을
+# workflow_dispatch로 발화한다(runResearchStageCli.ts의 triggerWriting 참고) - telegram-update.yml
+# 과 같은 이유로 permissions.actions: write + GITHUB_TOKEN이 필요하다.
 #
 # claude -p 사용(WebSearch/WebFetch, RESEARCH_PROVIDER=claude 기본) - CLAUDE_CODE_OAUTH_TOKEN 필요.
 # 최대 소요 18분(RESEARCH_TIMEOUT_MS) - 타임아웃 여유를 넉넉히 둔다.
@@ -19,6 +22,10 @@ on:
         description: "article_jobs.id (UUID)"
         required: true
         type: string
+
+permissions:
+  contents: read
+  actions: write
 
 concurrency:
   group: job-research-${{ inputs.job_id }}
@@ -50,4 +57,5 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run job:research -- "${{ inputs.job_id }}"

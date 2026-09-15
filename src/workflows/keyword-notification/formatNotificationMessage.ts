@@ -23,6 +23,11 @@ function formatItemBlock(item: NotificationKeywordItem): string {
   if (item.seedQuery) {
     lines.push(`   seedQuery: ${escapeTelegramHtml(item.seedQuery)} · category: ${escapeTelegramHtml(item.category ?? "N/A")}`);
   }
+  // 20자 내외 요약(2026-09-15 사용자 요청, generateKeywordSummaries.ts) - 클릭 전에 무슨
+  // 내용인지 바로 알 수 있게. 생성 실패 시(null)엔 이 줄을 통째로 뺀다.
+  if (item.summary) {
+    lines.push(`   ${escapeTelegramHtml(item.summary)}`);
+  }
 
   return lines.join("\n");
 }

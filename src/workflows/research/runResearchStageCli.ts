@@ -1,16 +1,36 @@
-// article_jobs 1건의 자료조사만 실행하고 멈추는 수동 진입점(사전 확인 체크포인트).
+// article_jobs 1건의 자료조사를 실행하는 진입점.
 //
-// 왜 필요한가(SPRINT_2_DESIGN.md 13절, 2026-08-27): 첫 실측에서 원고 자체는 정확했지만, 수집된
-// 근거 안에 "이미 마감된 이벤트"라는 핵심 정보가 있었는데도 3분 분량의 LLM 비용을 쓴 뒤에야
-// 그 사실을 알게 됐다. 조사(2초, 비용 0)만 먼저 하고 사람이 값싸게 판단할 기회를 준다.
+// 2026-09-15부터 조사 완료 후 "원고를 쓸까요?" 확인 없이 곧바로 집필 단계(job:write)로 자동
+// 연결한다(사용자 요청 - 키워드 선택부터 초안 완성까지 사람 개입 없이 진행). verdict(ok/thin/
+// blocked)와 무관하게 항상 자동 진행하기로 결정했다 - 이전엔 SPRINT_2_DESIGN.md 13절(2026-08-27,
+// "경복궁 별빛야행" 사고 - 근거에 이미 마감된 이벤트라는 정보가 있었는데 3분짜리 LLM 비용을 쓴
+// 뒤에야 알게 됨)로 이 체크포인트를 만들었지만, 사용자가 그 트레이드오프를 알고도 자동 진행을
+// 선택했다. 대신 초안이 나온 뒤의 검수 단계(승인/수정 필요/반려)가 마지막 방어선이 된다.
+//
+// notifyResearchReady()/handleResearchDecisionCallback은 지우지 않고 그대로 둔다 - 다시 체크포인트가
+// 필요해지면 아래 triggerWriting() 호출을 notifyResearchReady() 호출로 되돌리기만 하면 된다.
 //
 // 사용법:
 //   npm run job:research -- <jobId>
 import "dotenv/config";
 
 import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { dispatchGithubWorkflow } from "../../services/github/dispatchWorkflow.js";
+import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
 import { runResearchStage } from "../writing/runArticleJob.js";
-import { notifyResearchReady } from "./notifyResearchReady.js";
+
+/**
+ * job:write를 곧바로 이어서 발화한다. GITHUB_TOKEN이 있으면(GH Actions 러너) job-write.yml을
+ * workflow_dispatch로 새로 발화하고, 없으면(로컬 수동 실행) 기존 방식대로 detached 자식으로 띄운다
+ * - TelegramBot.ts의 triggerWriting 기본값과 같은 분기 원칙.
+ */
+async function triggerWriting(jobId: string): Promise<void> {
+  if (process.env.GITHUB_TOKEN) {
+    await dispatchGithubWorkflow({ workflowFile: "job-write.yml", inputs: { job_id: jobId } });
+    return;
+  }
+  spawnDetachedTask("job:write", [jobId]);
+}
 
 async function main(): Promise<void> {
   const jobId = process.argv[2];
@@ -44,11 +64,9 @@ async function main(): Promise<void> {
   console.log(`   등급: ${JSON.stringify(result.sourceCounts)}`);
   console.log(`   파일: ${result.researchFilePath}`);
 
-  console.log("\n▶ Telegram으로 미리보기 발송 중...");
-  await notifyResearchReady(result.job, result.researchFilePath, result.sources);
-  console.log("✅ 완료 - Telegram에서 확인 후 진행/중단을 결정해주세요");
-  console.log(`   진행: npm run job:write -- ${jobId}`);
-  console.log(`   중단: npm run job:reject -- ${jobId}`);
+  console.log("\n▶ 원고 작성으로 자동 연결 중...");
+  await triggerWriting(jobId);
+  console.log("✅ 완료 - job:write를 발화했습니다. 초안이 준비되면 Telegram으로 알림이 갑니다");
 }
 
 main().catch((error) => {

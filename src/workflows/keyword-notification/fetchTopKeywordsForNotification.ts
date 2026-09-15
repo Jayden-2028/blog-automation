@@ -35,6 +35,8 @@ export async function fetchTopKeywordsForNotification(
     totalScore: row.total_score,
     scoreBreakdown: row.score_breakdown,
     trendDirection: row.trend_direction,
+    // sendKeywordNotification이 generateKeywordSummaries로 채운다(이 함수는 순수 DB 조회만 한다).
+    summary: null,
   }));
 
   const categories = Array.from(

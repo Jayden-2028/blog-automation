@@ -5,6 +5,7 @@
 
 import { fetchTopKeywordsForNotification } from "./fetchTopKeywordsForNotification.js";
 import { formatNotificationMessage } from "./formatNotificationMessage.js";
+import { generateKeywordSummaries } from "./generateKeywordSummaries.js";
 import {
   TelegramNotifier,
   type TelegramInlineKeyboardButton,
@@ -30,7 +31,21 @@ export async function sendKeywordNotification(
 
   // 추천 제목은 여기서 만들지 않는다 - 사용자가 버튼으로 고른 뒤 그 1건에 대해서만 생성한다
   // (SPRINT_1_DESIGN.md 7절). 알림 시점에 10건을 만들면 8~9건은 쓰이지도 않고 버려진다.
-  const payload: KeywordNotificationPayload = { run: fetched.run, items: fetched.items };
+  //
+  // 반대로 20자 요약(2026-09-15)은 여기서 전부(최대 topN건) 만든다 - 사용자가 고르기 "전에"
+  // 화면에서 바로 보여야 하는 정보라 선택을 기다릴 수 없다. 항목마다 호출하지 않고 1콜로 묶는다
+  // (generateKeywordSummaries.ts 참고). 실패해도 던지지 않으므로 알림 발송 자체는 막지 않는다.
+  const summaries = await generateKeywordSummaries(
+    fetched.items.map((item) => ({
+      keyword: item.keyword,
+      headline: item.headline,
+      seedQuery: item.seedQuery,
+      category: item.category,
+    }))
+  );
+  const items = fetched.items.map((item, index) => ({ ...item, summary: summaries[index] ?? null }));
+
+  const payload: KeywordNotificationPayload = { run: fetched.run, items };
 
   const chunks = formatNotificationMessage(payload, { headerTitle: options.headerTitle });
   const messages = chunks.map((chunk) => chunk.text);

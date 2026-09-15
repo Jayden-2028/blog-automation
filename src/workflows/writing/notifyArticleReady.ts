@@ -95,7 +95,10 @@ export function buildArticleBodyMessages(article: ArticleRow): TelegramOutgoingM
   return splitIntoChunks(escaped, TELEGRAM_MESSAGE_CHAR_LIMIT).map((text) => ({ text }));
 }
 
-function buildReviewDecisionButtons(jobId: string): TelegramInlineKeyboardButton[] {
+// export하는 이유: notifyRevisedArticleReady.ts(수정 피드백 재작성, 2026-09-15)가 같은 결정
+// 버튼(승인/수정 필요/반려)을 재사용한다 - 원고가 최초 작성이든 재작성이든 검수 결정은 동일해야
+// 하므로 버튼 정의를 두 곳에 따로 두지 않는다.
+export function buildReviewDecisionButtons(jobId: string): TelegramInlineKeyboardButton[] {
   return [
     { text: "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
     { text: "✏️ 수정 필요", callback_data: buildArticleReviewCallbackData("edit", jobId) },

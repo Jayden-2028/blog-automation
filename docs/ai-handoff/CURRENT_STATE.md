@@ -2,6 +2,62 @@
 
 기준일: 2026-09-15 (Asia/Seoul)
 
+## 2026-09-15 세션(후속) — 텔레그램 파이프라인 3종 변경(키워드 요약/자동 작성 연결/수정 피드백)
+
+사용자 요청 3건, 전부 구현+테스트 완료(코드는 main에 push됨). **단, 실제로 작동하려면 사용자가
+Telegram 웹훅 재등록 1건을 직접 해야 한다 - 아래 "사용자 조치 필요" 참고.**
+
+**1. 키워드 알림에 20자 요약 추가** - `generateKeywordSummaries.ts`(신규). 알림 1건(최대 10개
+항목)당 헤드리스 Claude 1콜로 묶어서 항목별 20자 내외 요약을 만든다(항목마다 호출 안 함).
+구독 기반 CLI(`CLAUDE_CODE_OAUTH_TOKEN`)라 별도 API 과금 없음 - 세 키워드 워크플로우에 이미 있는
+토큰 재사용. 실패해도 그 요약 줄만 빠지고 알림 자체는 막지 않는다(`sendKeywordNotification.ts`에서
+호출, `NotificationKeywordItem.summary` 필드 추가).
+
+**2. 리서치 완료 → "원고를 쓸까요?" 확인 없이 바로 집필로 자동 연결** - 사용자가 verdict(근거
+품질)와 무관하게 항상 자동 진행하기로 결정(안전장치 트레이드오프 인지 후 승인 - 이 체크포인트는
+2026-08-27 "경복궁 별빛야행" 사고로 만든 것이었다). `runResearchStageCli.ts`가 조사 성공 시
+`notifyResearchReady()` 대신 `job-write.yml`을 바로 발화한다(GITHUB_TOKEN 있으면 workflow_dispatch,
+없으면 로컬 detached). `job-research.yml`에 `permissions.actions: write` + `GITHUB_TOKEN` 추가.
+`notifyResearchReady.ts`/`handleResearchDecisionCallback`은 지우지 않고 그대로 둠(되돌리려면
+`runResearchStageCli.ts`의 `triggerWriting()` 호출을 원복하기만 하면 됨). **"선택 완료·자료조사
+시작" 즉시 확인 메시지는 그대로 유지** - 사용자 요청을 "행동을 요구하는 중간 확인 단계 생략"으로
+해석했고, 클릭 없이 오는 즉시 알림은 남겨도 무방하다고 판단함. 원했던 것과 다르면 알려줄 것.
+
+**3. "수정 필요" → 답장으로 방향 입력 → 자동 재작성** - 신규 기능(기존 버튼 재사용이 아니라
+4개 레이어를 새로 만듦):
+- `TelegramBot.ts`: `handleArticleReviewCallback`의 edit 분기가 "이 메시지에 답장으로 수정
+  방향을 적어주세요"를 직접 보내고 그 message_id를 `job.metadata.editRequestMessageId`에 저장.
+  신규 `handleEditFeedbackMessage()`가 일반 메시지(update.message, reply_to_message로 역매칭)를
+  받아 매칭되는 job을 찾으면 `triggerRevision(jobId, feedback)` 호출 + `editRequestMessageId`
+  즉시 비움(중복 트리거 방지). `TelegramUpdate`에 `message` 필드 신설, `processUpdate`가
+  callback_query 없을 때 이 경로로 분기.
+- `cloudflare/telegram-relay/src/index.ts`: `callback_query` 없어도 `reply_to_message`가 있는
+  일반 메시지는 통과시키도록 필터 완화(그 외 잡담은 여전히 여기서 버려 GH Actions를 안 깨움).
+- 신규 `reviseArticleWithFeedback.ts`(generateArticleVariant.ts와 같은 헤드리스 경로, ### TITLE/
+  ### BODY 마커 - 팩트는 기존 원고에서만, 피드백이 언급한 부분만 수정) + `runReviseArticleCli.ts`
+  (`job:revise`, 재작성본을 새 article row로 저장 - "같은 job의 기준 원고가 재작성으로 여러 건
+  남을 수 있다"는 기존 설계를 그대로 씀) + `notifyRevisedArticleReady.ts`(같은 승인/수정/반려
+  버튼 재사용) + 신규 워크플로우 `job-revise.yml`.
+
+**⚠️ 사용자 조치 필요(승인 완료, 아직 미실행) - Telegram 웹훅 재등록**: 지금 `getWebhookInfo`
+확인 결과 `allowed_updates: ["callback_query"]`로 고정돼 있어서, 3번 기능에 필요한 일반 답장
+메시지가 Telegram 서버 단계에서부터 걸러져 Worker에 도달하지 못한다(Worker/코드를 다 고쳐도
+이것 때문에 안 됨). 아래 curl로 `allowed_updates`에 `"message"`를 추가해야 한다(Worker
+URL/secret은 기존과 동일, 재실행해도 안전 - Telegram 외부 설정 변경이라 CLAUDE.md 정책상 Claude가
+대신 실행하지 않음):
+```
+curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -d "url=https://blog-automation-telegram-relay.bjkim2028.workers.dev" \
+  -d "secret_token=<기존 TELEGRAM_WEBHOOK_SECRET>" \
+  -d 'allowed_updates=["callback_query","message"]'
+```
+실행 후 `getWebhookInfo`로 `allowed_updates`에 `"message"`가 포함됐는지 확인할 것.
+
+**검증**: `npm run build` 통과. 신규/갱신 테스트 전부 통과 - `test:format-notification-message`
+(요약 줄 표시/생략), `test:telegram-bot`(edit 분기 재작성 + 신규 11번 섹션: 답장 매칭 6케이스),
+`test:notify-article`, `test:revise-article`(신규, 마커 파싱·안전장치), `test:notify-revised-article`
+(신규). 실제 사용자 답장으로 end-to-end 검증은 위 웹훅 재등록 후 다음 "수정 필요" 클릭 때 필요.
+
 ## 2026-09-15 세션 — 원고 목록 유실 사고 원인 규명 + 근본 수정(Supabase 이전) + 좌측 목록 UI
 
 **사고**: 사용자가 "텔레그램에서 승인된 원고가 채널별 원고 페이지에 안 보인다"고 신고("유부녀 킬러"

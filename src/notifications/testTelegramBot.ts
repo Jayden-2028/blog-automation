@@ -295,9 +295,13 @@ async function main(): Promise<void> {
     mergeJobMetadata: number;
     findLatestArticle: number;
     updateArticleStatus: number;
+    sentMessages: string[];
+    metadataPatches: Record<string, unknown>[];
   };
   function newReviewCalls(): ReviewCalls {
     return {
+      sentMessages: [],
+      metadataPatches: [],
       loadJobById: 0,
       updateStatus: 0,
       mergeJobMetadata: 0,
@@ -342,6 +346,7 @@ async function main(): Promise<void> {
       },
       mergeJobMetadata: async (_id, patch) => {
         opts.calls.mergeJobMetadata++;
+        opts.calls.metadataPatches.push(patch);
         return { ...(opts.job ?? makeReviewJob()), metadata: { ...(opts.job?.metadata ?? {}), ...patch } };
       },
       findLatestArticleByJobId: async () => {
@@ -351,6 +356,15 @@ async function main(): Promise<void> {
       updateArticleStatus: async (_id, status) => {
         opts.calls.updateArticleStatus++;
         return article ? { ...article, status } : null;
+      },
+      // edit 액션이 sendMessage(-> post -> sendTelegramRequest)를 직접 호출해 message_id를 받는다
+      // (2026-09-15) - 실제 네트워크 호출을 막고 보낸 텍스트만 기록한다.
+      sendTelegramRequest: async (method, body) => {
+        if (method === "sendMessage") {
+          opts.calls.sentMessages.push(String(body.text));
+          return { message_id: 9001 } as never;
+        }
+        return null;
       },
     });
   }
@@ -443,6 +457,10 @@ async function main(): Promise<void> {
 
   // 7-6) edit: metadata만 남기고 requiresMedicalReview는 여전히 true로 남아야 한다(재확인 전까지
   // 게이트 유지). job.status도 approved로 넘어가지 않는다(승인 아님).
+  //
+  // 2026-09-15부터 edit은 "수정 후 다시 만들어주세요" 안내로 끝나지 않고, 답장을 요청하는 메시지를
+  // 직접 sendMessage로 보내(message_id를 얻으려고) job.metadata.editRequestMessageId에 저장한다 -
+  // 그래서 result.message는 이제 빈 문자열이고(중복 발송 방지), 실제 안내는 sentMessages에 남는다.
   {
     const calls = newReviewCalls();
     const bot = makeReviewBot({ job: makeReviewJob(), calls });
@@ -450,8 +468,13 @@ async function main(): Promise<void> {
     assert(result.outcome.status === "reviewed" && result.outcome.action === "edit", "edit은 reviewed/edit이어야 한다");
     assert(calls.updateStatus === 0, "edit은 job.status를 바꾸면 안 된다");
     assert(calls.updateArticleStatus === 0, "edit은 article.status를 바꾸면 안 된다");
-    assert(result.message.includes("수정 필요"), "수정 필요 안내가 있어야 한다");
-    console.log("✅ edit -> metadata만 갱신(게이트는 계속 걸려 있음), status 불변");
+    assert(result.message === "", "edit은 result.message를 비워야 한다(직접 보냈으므로 중복 발송 방지)");
+    assert(calls.sentMessages.length === 1, `수정 방향을 물어보는 메시지를 직접 1건 보내야 한다 (실제: ${calls.sentMessages.length})`);
+    assert(calls.sentMessages[0]!.includes("답장"), "답장으로 방향을 적어달라는 안내가 있어야 한다");
+    const patch = calls.metadataPatches[calls.metadataPatches.length - 1]!;
+    assert(patch.reviewDecision === "needs_edit", "reviewDecision은 needs_edit이어야 한다");
+    assert(patch.editRequestMessageId === 9001, `보낸 메시지의 id를 editRequestMessageId로 저장해야 한다 (실제: ${patch.editRequestMessageId})`);
+    console.log("✅ edit -> 답장 요청 메시지 직접 발송 + editRequestMessageId 저장(게이트는 계속 걸려 있음), status 불변");
   }
 
   // 7-6b) confirm인데 원고가 아예 없으면(예외적 상황) article 갱신 없이 job만 approved로 바뀐다 -
@@ -768,6 +791,137 @@ async function main(): Promise<void> {
         `offset은 마지막(203)까지 전진해야 한다 (실제: ${JSON.stringify(advancedTo)})`
       );
       console.log("✅ 코드/데이터 문제 update -> 건너뛰고 offset 전진, 이후 update 계속 처리");
+    }
+  }
+
+  // ---------- 11) 수정 피드백(handleEditFeedbackMessage) - 답장 매칭 (2026-09-15) ----------
+  {
+    const EDIT_JOB_ID = "edit-job-uuid-1";
+    const EDIT_REQUEST_MESSAGE_ID = 777;
+
+    function makeEditJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
+      return makeJob({
+        id: EDIT_JOB_ID,
+        status: "review",
+        metadata: { reviewDecision: "needs_edit", editRequestMessageId: EDIT_REQUEST_MESSAGE_ID },
+        ...overrides,
+      });
+    }
+
+    type EditCalls = { findJob: number; triggerRevision: Array<{ jobId: string; feedback: string }>; mergeJobMetadata: number; sentMessages: string[] };
+    function newEditCalls(): EditCalls {
+      return { findJob: 0, triggerRevision: [], mergeJobMetadata: 0, sentMessages: [] };
+    }
+
+    function makeEditBot(opts: { job: ArticleJobRow | null; calls: EditCalls }): TelegramBot {
+      return new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        findJobByEditRequestMessageId: async (messageId) => {
+          opts.calls.findJob++;
+          return opts.job && messageId === EDIT_REQUEST_MESSAGE_ID ? opts.job : null;
+        },
+        triggerRevision: (jobId, feedback) => {
+          opts.calls.triggerRevision.push({ jobId, feedback });
+        },
+        mergeJobMetadata: async (_id, patch) => {
+          opts.calls.mergeJobMetadata++;
+          return { ...(opts.job ?? makeEditJob()), metadata: { ...(opts.job?.metadata ?? {}), ...patch } };
+        },
+        sendTelegramRequest: async (method, body) => {
+          if (method === "sendMessage") opts.calls.sentMessages.push(String(body.text));
+          return null;
+        },
+      });
+    }
+
+    function replyMessage(text: string | undefined, replyToId: number | undefined, chatId: string | number = CHAT_ID) {
+      return {
+        message_id: 900,
+        chat: { id: chatId },
+        text,
+        ...(replyToId !== undefined ? { reply_to_message: { message_id: replyToId } } : {}),
+      };
+    }
+
+    // 11-1) 답장이 아닌 일반 메시지(reply_to_message 없음) -> 무시, job 조회 안 함.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const result = await bot.handleEditFeedbackMessage(replyMessage("아무 말", undefined));
+      assert(result.outcome.status === "ignored" && result.outcome.reason === "not_a_reply", "답장이 아니면 not_a_reply여야 한다");
+      assert(calls.findJob === 0, "답장이 아니면 job을 조회하면 안 된다");
+      assert(calls.triggerRevision.length === 0, "답장이 아니면 재작성을 트리거하면 안 된다");
+      console.log("✅ 답장이 아닌 메시지 -> 무시, DB 접근 없음");
+    }
+
+    // 11-2) 다른 chat에서 온 답장 -> 거부.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const result = await bot.handleEditFeedbackMessage(replyMessage("피드백", EDIT_REQUEST_MESSAGE_ID, "other-chat"));
+      assert(result.outcome.status === "ignored" && result.outcome.reason === "wrong_chat", "다른 chat이면 wrong_chat이어야 한다");
+      assert(calls.findJob === 0, "다른 chat이면 job을 조회하면 안 된다");
+      console.log("✅ 다른 chat에서 온 답장 -> 거부, DB 접근 없음");
+    }
+
+    // 11-3) 빈 텍스트 답장(사진만 보낸 경우 등) -> 무시.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const result = await bot.handleEditFeedbackMessage(replyMessage("   ", EDIT_REQUEST_MESSAGE_ID));
+      assert(result.outcome.status === "ignored" && result.outcome.reason === "empty_text", "빈 텍스트면 empty_text여야 한다");
+      console.log("✅ 빈 텍스트 답장 -> 무시");
+    }
+
+    // 11-4) 매칭되는 job이 없는 답장(다른 메시지에 답장했거나 이미 처리됨) -> 무시, 재작성 트리거 없음.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: null, calls });
+      const result = await bot.handleEditFeedbackMessage(replyMessage("피드백", 999));
+      assert(result.outcome.status === "ignored" && result.outcome.reason === "no_matching_job", "매칭 안 되면 no_matching_job이어야 한다");
+      assert(calls.triggerRevision.length === 0, "매칭 안 되면 재작성을 트리거하면 안 된다");
+      console.log("✅ 매칭되는 job 없음 -> 무시, 재작성 미트리거");
+    }
+
+    // 11-5) 정상 매칭 -> 재작성 트리거 + editRequestMessageId 비움(중복 트리거 방지) + 안내 메시지.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const result = await bot.handleEditFeedbackMessage(replyMessage("제목을 더 짧게 해주세요", EDIT_REQUEST_MESSAGE_ID));
+      assert(result.outcome.status === "accepted", `정상 매칭이면 accepted여야 한다 (실제: ${JSON.stringify(result.outcome)})`);
+      assert(
+        calls.triggerRevision.length === 1 &&
+          calls.triggerRevision[0]!.jobId === EDIT_JOB_ID &&
+          calls.triggerRevision[0]!.feedback === "제목을 더 짧게 해주세요",
+        `jobId+feedback 그대로 재작성을 트리거해야 한다 (실제: ${JSON.stringify(calls.triggerRevision)})`
+      );
+      assert(calls.mergeJobMetadata === 1, "editRequestMessageId를 비우기 위해 metadata를 갱신해야 한다");
+      assert(result.message.includes("수정 반영 중"), "수정 반영 중 안내가 있어야 한다");
+      console.log("✅ 정상 매칭 -> 재작성 트리거 + editRequestMessageId 소비 + 안내 메시지");
+    }
+
+    // 11-6) processUpdate가 callback_query 없는 update를 handleEditFeedbackMessage로 보내고,
+    // 결과 메시지를 실제로 발송한다.
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const update: TelegramUpdate = { update_id: 1, message: replyMessage("더 발랄하게요", EDIT_REQUEST_MESSAGE_ID) };
+      const processed = await bot.processUpdate(update);
+      assert(processed.handled, "매칭되는 답장이면 handled여야 한다");
+      assert(processed.editFeedbackResult?.outcome.status === "accepted", "editFeedbackResult가 accepted여야 한다");
+      assert(calls.sentMessages.length === 1 && calls.sentMessages[0]!.includes("수정 반영 중"), "processUpdate가 안내 메시지를 실제로 보내야 한다");
+      console.log("✅ processUpdate -> callback_query 없는 답장을 수정 피드백으로 처리 + 안내 발송");
+    }
+
+    // 11-7) callback_query도 message도 없는 update -> 여전히 무시(기존 동작 유지).
+    {
+      const calls = newEditCalls();
+      const bot = makeEditBot({ job: makeEditJob(), calls });
+      const processed = await bot.processUpdate({ update_id: 2 });
+      assert(!processed.handled, "callback_query/message 둘 다 없으면 handled=false여야 한다");
+      assert(calls.findJob === 0, "처리할 게 없으면 job을 조회하면 안 된다");
+      console.log("✅ callback_query/message 둘 다 없는 update -> 여전히 무시");
     }
   }
 
