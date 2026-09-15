@@ -137,8 +137,9 @@ IMAGE_AB_COMPARE=true   → 프롬프트 1개당 2장(openai + gemini). 뷰어�
 IMAGE_AB_COMPARE=false  → IMAGE_PROVIDER 한쪽만. (비교 끝난 뒤 기본값)
 ```
 
-- openai: `gpt-image-1`, quality=low, 1024x1024 — **2026-10-23 종료 예정 모델.** 비교에서
-  이쪽이 뽑히면 후속 모델 전환이 바로 따라와야 한다.
+- openai: `gpt-image-2`, quality=low, 1024x1024 — 2026-09-16에 `gpt-image-1`에서 교체했다
+  (`gpt-image-1`은 2026-12-01 종료, 공식 권장 대체가 `gpt-image-2`이고 단가도 더 싸다. 예전에
+  여기 적혀 있던 "2026-10-23 종료"는 오기였다).
 - gemini: `gemini-3.1-flash-lite-image` (나노바나나 2 라이트)
 
 원고당 장수는 writer가 남긴 마커 개수를 그대로 따른다(보통 3~5장). 상한만 `IMAGE_MAX_PER_ARTICLE`

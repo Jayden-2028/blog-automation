@@ -2,6 +2,38 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속4) — 이미지 모델 `gpt-image-1` → `gpt-image-2` 교체 + 잘못된 종료일 정정
+
+**계기**: 사용자 질문 - "육아 세션은 Codex CLI로 이미지를 만드는데, 이 시스템에서도 그 구조가
+가능한가?" 답을 내려면 "API로는 최신 모델을 못 쓰는가"를 먼저 확인해야 했다.
+
+**조사 결과**(사용자 계정 API 키로 모델 목록 직접 조회 + OpenAI 공식 문서):
+- `gpt-image-2`는 **API로 정상 제공된다**. 더 최신인 `gpt-image-2.5-flare`/`-sunburst`
+  (2026-09-08)까지 이미 접근 가능하다.
+- 단가: gpt-image-2 출력 $30/1M·이미지입력 $8/1M vs gpt-image-1 $40/1M·$10/1M —
+  **새 모델이 더 싸다**. gpt-image-2.5도 2와 동일 단가(`xhigh`/`max` 화질이 추가됨).
+- **종료일 정정**: 여러 문서에 "gpt-image-1 2026-10-23 종료"로 적혀 있었는데(2026-08-28에
+  모델 메타데이터에서 읽은 값), 공식 deprecation 문서 기준 실제 종료일은 **2026-12-01**이고
+  (2026-06-02 공지) 권장 대체 모델이 `gpt-image-2`다. CURRENT_STATE.md/PROGRESS.md/
+  BLOGSPOT_ONLY_DESIGN.md의 날짜를 전부 정정했다.
+- `quality: "low"`/`size: "1024x1024"`는 gpt-image-2에서도 그대로 지원돼 호출부 수정이 필요 없었다.
+
+**수정**: `src/services/images/generateImage.ts`의 `OPENAI_IMAGE_MODEL`을 `gpt-image-2`로 교체.
+
+**Codex CLI 경로에 대한 판단(이번엔 채택 안 함)**: 코드만 보면 쉽다 - `generateImage.ts`가 이미
+provider 추상화(`"openai" | "gemini"`)라 `"codex"`를 하나 더 붙여 `codex exec`를 쉘아웃하면 된다
+(로컬 codex 0.149.1 확인, ChatGPT OAuth 로그인 상태, `codex exec` 비대화형 지원). **문제는 실행
+위치다** - 이미지 생성은 GitHub Actions 러너에서 돌고 거기엔 맥의 ChatGPT 로그인 세션이 없다.
+가져가려면 OAuth 자격증명을 시크릿으로 넣어야 하는데(`CLAUDE_CODE_OAUTH_TOKEN` 전례 있음),
+**세션 만료 시 사람이 다시 로그인해야 조용히 복구되는 구조**가 되고 이는 티스토리를 접은 이유와
+정확히 같은 실패 유형이다. 게다가 gpt-image-2가 API로도 되고 기존보다 싸므로 codex 경로의 기술적
+이점(최신 모델 확보)이 사라졌다 - 남는 건 구독 할당량 절감뿐인데 ToS 회색지대까지 감수할 근거가
+약하다. 이미지 API 비용이 실제로 부담되는 것으로 드러나면 그때 다시 검토한다(현재 실제 청구액은
+API 키에 `api.usage.read` 권한이 없어 못 읽었다 - OpenAI 대시보드에서 확인 필요).
+
+**남은 것**:
+- ⬜ `gpt-image-2.5`(flare/sunburst) 품질·속도 실측 미검증. 단가가 2와 같으니 A/B 비교에 한 칸
+  끼워 넣어 함께 보는 방법이 있다.
 ## 2026-09-16 세션(후속3) — writer.md 구조 분리 리팩터(654줄 → 3개 파일)
 
 **계기**: 09-15 세션에서 인용/헤지 규칙이 다른 모양으로 재발한 사고를 진단한 뒤, 사용자가 "writer/
@@ -363,10 +395,12 @@ GitHub Actions 로그로 전 구간 실측: `telegram_update` 워크플로우가
 - **기본 꺼짐**: `MANUSCRIPT_IMAGE_GENERATION` 기본 false. 유료 API라 사용자가 켠다.
 
 **4. 이미지 A/B 비교 (사용자 결정)**
-`IMAGE_AB_COMPARE=true`(기본)면 프롬프트 1개당 OpenAI(`gpt-image-1` low) + Gemini
+`IMAGE_AB_COMPARE=true`(기본)면 프롬프트 1개당 OpenAI + Gemini
 (`gemini-3.1-flash-lite-image`) 양쪽을 만들어 뷰어에 나란히 띄운다. 사용자가 직접 보고 고른 뒤
 false로 내리고 `IMAGE_PROVIDER`를 고정한다. **호출이 2배라 비교 기간에만 켠다.**
-⚠️ `gpt-image-1`은 2026-10-23 종료 예정 - OpenAI가 뽑히면 후속 모델 전환이 바로 따라와야 한다.
+(OpenAI 쪽 모델은 2026-09-16에 `gpt-image-1` → `gpt-image-2`로 교체했다 - 아래 09-16 세션 참고.
+이 절에 적혀 있던 "gpt-image-1 2026-10-23 종료"는 **틀린 값**이었다: 공식 deprecation 문서 기준
+종료일은 **2026-12-01**이다.)
 
 **5. 원고 뷰어 전면 재설계** - `renderManuscriptPage.ts`
 사용자가 지정한 참조 파일(`~/Documents/blog-manuscripts/naver-parenting/viewer.html`)의 레이아웃·

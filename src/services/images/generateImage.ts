@@ -4,7 +4,7 @@
 // Gemini도 활용 가능"이라고 했다 - 기본은 OpenAI, `IMAGE_PROVIDER` 환경변수로 전환 가능하게
 // 만들어 나중에 비교하거나 한쪽 API가 막혀도 다른 쪽으로 바로 돌릴 수 있게 한다.
 //
-// b64_json만 받는 이유: gpt-image-1은 URL 응답을 지원하지 않고 base64만 돌려준다(공식 스펙).
+// b64_json만 받는 이유: GPT Image 계열은 URL 응답을 지원하지 않고 base64만 돌려준다(공식 스펙).
 // 어차피 우리가 최종적으로 Supabase Storage에 직접 올릴 것이므로 바이너리를 그대로 받는 편이
 // 중간 다운로드 단계를 없애 더 낫다.
 
@@ -21,8 +21,20 @@ export type GenerateImageResult =
 
 const OPENAI_IMAGE_TIMEOUT_MS = 120_000;
 
-/** gpt-image-1은 2026-10-23 종료 예정이다(모델 메타데이터 확인, 2026-08-28) - 그 전에 후속 모델로 전환해야 한다. */
-const OPENAI_IMAGE_MODEL = "gpt-image-1";
+/**
+ * 2026-09-16 gpt-image-1 -> gpt-image-2 교체. OpenAI 공식 deprecation 문서 기준 gpt-image-1은
+ * **2026-12-01 종료**(2026-06-02 공지)이고 권장 대체 모델이 정확히 gpt-image-2다. 그 전에
+ * 옮겨야 하는 데다 단가도 더 싸다(출력 $30/1M vs gpt-image-1 $40/1M, 이미지 입력 $8 vs $10).
+ * `quality: "low"`와 `size: "1024x1024"`는 그대로 지원돼 호출부 변경이 필요 없었다.
+ *
+ * (이전 주석에 적혀 있던 "2026-10-23 종료"는 2026-08-28 모델 메타데이터에서 읽은 값인데 공식
+ * 문서와 달랐다 - 문서 쪽을 따른다. docs/ai-handoff/*.md의 같은 날짜도 함께 정정했다.)
+ *
+ * 더 최신 계열로 gpt-image-2.5-flare / gpt-image-2.5-sunburst(2026-09-08)가 있고 단가는 2와
+ * 같다(xhigh/max 화질이 추가됨). 품질·속도를 실측한 적이 없어 이번엔 안 올렸다 - 필요하면
+ * A/B 비교에 한 칸 끼워 넣어 함께 본다.
+ */
+const OPENAI_IMAGE_MODEL = "gpt-image-2";
 
 async function generateWithOpenAI(input: GenerateImageInput): Promise<GenerateImageResult> {
   const apiKey = process.env.OPENAI_API_KEY;
