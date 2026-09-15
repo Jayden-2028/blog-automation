@@ -21,7 +21,7 @@
 // 스키마: supabase/migrations/20260915013000_manuscript_manifest_topics.sql.
 
 import { supabase } from "../../services/supabase/client.js";
-import type { ManuscriptManifestTopicRow } from "../../types/database.js";
+import type { ArticleJobRow, ManuscriptManifestTopicRow } from "../../types/database.js";
 
 /** 자동 생성된 이미지 1장. index는 본문 [IMAGE: ] 마커 순서(1부터)와 일치한다. */
 export type ManuscriptImage = {
@@ -146,4 +146,15 @@ export async function saveManifest(manifest: ManuscriptManifest): Promise<void> 
 /** 같은 jobId의 기존 topic을 새 entry로 교체한다(없으면 추가). 순수 함수 - DB 접근 없음. */
 export function upsertTopicEntry(manifest: ManuscriptManifest, entry: ManuscriptTopicEntry): ManuscriptManifest {
   return { topics: [...manifest.topics.filter((t) => t.jobId !== entry.jobId), entry] };
+}
+
+/**
+ * 이전 실행(prepareManuscript)이 job.metadata.images에 저장해 둔 자동 생성 이미지를 읽는다 -
+ * prepareManuscript.ts(재생성 방지)와 publishArticleToBlogspot.ts(본문에 실제 이미지 삽입) 둘 다
+ * 같은 데이터를 봐야 해서 여기 하나로 모은다(2026-09-15).
+ */
+export function readJobManuscriptImages(job: ArticleJobRow): ManuscriptImage[] {
+  const raw = job.metadata?.images;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((image): image is ManuscriptImage => !!image && typeof image === "object" && "index" in image);
 }

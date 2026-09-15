@@ -316,6 +316,7 @@ async function main(): Promise<void> {
   let pageHtml: string | null = null;
   let deployCalled = false;
   const r11 = await prepareApprovedManuscripts({
+    publishBlogspot: async () => ({ ok: false, reason: "disabled", detail: "test" }),
     deploy: async () => {
       deployCalled = true;
       return { status: "skipped", reason: "test" };
@@ -386,6 +387,50 @@ async function main(): Promise<void> {
   assert(r12.length === 2, `maxJobsPerRun 제한 실패 (${r12.length})`);
   assert(!deployCalledOnAllFailure, "성공한 job이 없으면 페이지도 배포도 갱신하면 안 된다");
   console.log("✅ maxJobsPerRun 제한 + 전부 실패 시 배포 미호출");
+
+  // 13) 원고 준비 성공 직후 publishBlogspot(jobId)를 호출해야 한다(2026-09-15 재배선) - 실패한
+  //     job에는 호출하면 안 된다. publishBlogspot 자체가 실패해도(예외 포함) 원고 준비 결과는
+  //     그대로 success 유지.
+  const publishCalls: string[] = [];
+  const r13 = await prepareApprovedManuscripts({
+    deploy: async () => ({ status: "skipped", reason: "test" }),
+    loadApprovedJobs: async () => [job("ok", "living"), job("fail", "living")],
+    prepareJob: async (j) =>
+      j.id === "ok"
+        ? {
+            status: "success",
+            imageFailures: [],
+            topic: {
+              jobId: j.id,
+              keyword: j.keyword,
+              category: j.category,
+              date: "2026-09-15",
+              readyAt: "2026-09-15T00:00:00Z",
+              manuscript: {
+                title: "제목",
+                searchDescription: null,
+                slug: null,
+                tags: [],
+                body: "본문",
+                imagePrompts: [],
+                images: [],
+                filePath: "x",
+              },
+            },
+          }
+        : { status: "failed", reason: "테스트용 실패" },
+    markPrepared: async () => {},
+    loadManifest: async () => ({ topics: [] }),
+    saveManifest: async () => {},
+    writePage: async () => {},
+    publishBlogspot: async (jobId) => {
+      publishCalls.push(jobId);
+      throw new Error("Blogger 호출 실패(테스트)");
+    },
+  });
+  assert(publishCalls.length === 1 && publishCalls[0] === "ok", `원고 준비 성공 job에만 publishBlogspot 호출 (${JSON.stringify(publishCalls)})`);
+  assert(r13.find((r) => r.job.id === "ok")?.result.status === "success", "publishBlogspot 예외가 원고 준비 결과를 실패로 바꾸면 안 된다");
+  console.log("✅ 원고 준비 성공 직후 publishBlogspot 호출 (실패한 job은 미호출, 발행 예외가 원고 준비 결과에 영향 없음)");
 
   console.log("\n✅ 전체 통과");
 }

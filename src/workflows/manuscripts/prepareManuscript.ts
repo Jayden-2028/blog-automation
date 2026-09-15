@@ -31,6 +31,7 @@ import {
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
+import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 
@@ -203,7 +204,7 @@ export async function prepareManuscript(
 
   // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
-  let images: ManuscriptImage[] = readSavedImages(job);
+  let images: ManuscriptImage[] = readJobManuscriptImages(job);
   const imageFailures: string[] = [];
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
@@ -248,11 +249,4 @@ export async function prepareManuscript(
       manuscript: entry,
     },
   };
-}
-
-/** 이전 실행이 만들어 job.metadata.images에 넣어 둔 이미지를 되살린다(재실행 시 재생성 방지). */
-function readSavedImages(job: ArticleJobRow): ManuscriptImage[] {
-  const raw = job.metadata?.images;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((i): i is ManuscriptImage => !!i && typeof i === "object" && "index" in i);
 }

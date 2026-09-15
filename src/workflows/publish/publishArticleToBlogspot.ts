@@ -9,6 +9,17 @@
 //
 // 완전 자동이라 실패를 삼키지 않는다 - 모든 실패 경로가 publications.status='failed' 기록 +
 // 구조화된 reason을 남긴다.
+//
+// 2026-09-15 재배선(BLOGSPOT_ONLY_DESIGN.md 이후 원고 파이프라인과 맞추기 - 아직 BLOGGER_ENABLED는
+// 켜지 않았다, 코드만 준비): 이 함수는 원래 prepareManuscript.ts보다 먼저 있던 반자동 업로드 경로의
+// 잔재라, 09-05 이후 도입된 두 가지를 몰랐다.
+// 1) searchDescription: 배리에이션을 새로 안 만들고 재사용하는 경로(articles 테이블에 이미
+//    platform='blogspot' 행이 있음)에서는 검색 설명을 못 구했다 - prepareManuscript.ts처럼
+//    job.metadata.channelMeta.blogspot에서 복구한다.
+// 2) 이미지: 원고 본문(articles.content)에는 여전히 `[IMAGE: 설명]` 마커 텍스트만 있고, 실제
+//    생성된 이미지 URL은 job.metadata.images(prepareManuscript.ts가 저장)에 따로 있다 - HTML
+//    변환 전에 substituteConfirmedImages로 마커를 실제 `![설명](url)`로 바꿔 넣는다. A/B 비교로
+//    후보가 2장이라 아직 사람이 고르지 않았으면(또는 전부 실패했으면) 마커를 그대로 둔다.
 
 import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
@@ -26,10 +37,16 @@ import {
 } from "../../services/supabase/repositories/publicationRepository.js";
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
+import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
+import { substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
 import type { BloggerInsertInput, BloggerInsertResult } from "../../services/publish/blogger/BloggerClient.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 export const BLOGSPOT_PLATFORM = "blogspot";
+
+/** prepareManuscript.ts가 신규 생성 시 job.metadata.channelMeta.blogspot에 저장하는 형태. */
+type ChannelMetaEntry = { searchDescription: string | null; slug: string | null; tags: string[] };
+type ChannelMetaMap = Record<string, ChannelMetaEntry>;
 
 const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "publishing", "published"];
 
@@ -133,9 +150,12 @@ export async function publishArticleToBlogspot(
     };
   }
 
-  // 갓 생성한 배리에이션의 메타데이터(검색 설명). articles에 metadata 컬럼이 없어 재사용 경로에서는
-  // 잃는다 - 첫 발행에서만 활용한다(대부분의 경우). 필요해지면 articles.metadata migration.
-  let freshSearchDescription: string | null = null;
+  // articles 테이블엔 searchDescription 컬럼이 없다 - prepareManuscript.ts와 같은 자리
+  // (job.metadata.channelMeta.blogspot)에서 복구한다. 재사용 경로(이미 배리에이션이 있음)는 여기서
+  // 채워지고, 신규 생성 경로는 아래에서 방금 만든 값으로 덮어쓴다.
+  const channelMeta = (job.metadata?.channelMeta as ChannelMetaMap | undefined) ?? {};
+  let searchDescription: string | null = channelMeta[BLOGSPOT_PLATFORM]?.searchDescription ?? null;
+
   if (!variantArticle) {
     const result = await generateVariant({
       category: job.category,
@@ -145,7 +165,7 @@ export async function publishArticleToBlogspot(
     if (result.status !== "success") {
       return { ok: false, reason: "variant_failed", detail: result.error };
     }
-    freshSearchDescription = result.variant.searchDescription;
+    searchDescription = result.variant.searchDescription;
     variantArticle = await createVariantArticle({
       jobId,
       title: result.variant.title,
@@ -155,14 +175,18 @@ export async function publishArticleToBlogspot(
     variantCreated = true;
   }
 
-  const contentHtml = convertArticleToHtml(variantArticle.content ?? "");
+  // prepareManuscript.ts가 job.metadata.images에 저장해 둔 자동 생성 이미지를, 본문의
+  // [IMAGE: 설명] 마커 자리에 확정된 것만(정확히 1장) 실제 이미지로 바꿔 넣은 뒤 HTML로 변환한다.
+  const confirmedImages = readJobManuscriptImages(job);
+  const bodyWithImages = substituteConfirmedImages(variantArticle.content ?? "", confirmedImages);
+  const contentHtml = convertArticleToHtml(bodyWithImages);
   const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
 
   const inserted = await insertPost({
     title: variantArticle.title ?? job.keyword,
     contentHtml,
     labels: label ? [label] : undefined,
-    searchDescription: freshSearchDescription,
+    searchDescription,
     isDraft: BLOGGER_CONFIG.publishAsDraft,
   });
 

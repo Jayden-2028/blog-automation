@@ -1,6 +1,61 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-15 (Asia/Seoul)
+기준일: 2026-09-16 (Asia/Seoul)
+
+## 2026-09-16 세션 — Blogspot 자동 업로드 코드 재배선(BLOGGER_ENABLED는 계속 false)
+
+사용자 요청: "이미지 자동생성 기능 확인 / 채널별 원고 페이지 리뉴얼 / 블로그스팟 자동 업로드 시스템
+준비" 3건. 1번은 GitHub secrets/vars 정상 설정 확인(실사용 검증은 다음 승인 때), 2번은 오늘 낮
+이미 재설계된 뷰어를 사용자가 직접 확인하기로 함(추가 작업 없음). 3번만 실제 코드 작업 -
+범위는 "현재 파이프라인에 맞게 재배선, BLOGGER_ENABLED는 계속 false"로 사용자가 확정.
+
+**발견한 문제**: `publishArticleToBlogspot.ts`(SPRINT_5_DESIGN.md 시절 코드, 반자동 업로드
+중단 이전)가 09-05 이후 도입된 `prepareManuscript.ts` 파이프라인과 두 군데 어긋나 있었다 -
+지금 `BLOGGER_ENABLED=true`로 켰다면 실제로 이렇게 망가졌을 것들:
+1. 배리에이션을 재사용하는 경로(이미 `articles.platform='blogspot'` 행이 있음)에서
+   searchDescription을 못 구했다 - articles 테이블엔 그 컬럼이 없고, prepareManuscript.ts가
+   `job.metadata.channelMeta.blogspot`에 저장해 둔 값을 읽는 로직이 이 함수엔 없었다.
+2. 원고 본문(`articles.content`)엔 여전히 `[IMAGE: 설명]` 마커 텍스트만 있고, 실제 생성된
+   이미지 URL은 `job.metadata.images`에 따로 있다(뷰어만 렌더링 시점에 마커↔이미지를 짝짓는
+   구조라 - CURRENT_STATE.md 09-15 "이미지 자동 생성" 절 참고). 그대로 발행하면 Blogger 포스트에
+   "[IMAGE: 설명]"이라는 글자가 그대로 박혔을 것이다.
+
+**수정**:
+- `src/workflows/manuscripts/parseManuscriptBlocks.ts`: 신규 `substituteConfirmedImages(body,
+  images)` - `[IMAGE: 설명]` 마커를 그 위치(1부터 시작하는 등장 순서)에 확정 이미지가 **정확히
+  1장**일 때만 `![설명](url)`로 치환한다. `IMAGE_AB_COMPARE=true`라 같은 위치에 provider가 다른
+  후보 2장이 들어올 수 있는데, 어느 쪽을 쓸지는 사람이 원고 페이지를 보고 고르는 과정이라
+  manifest에 "선택됨" 표시가 아예 없다(2026-09-15 기준 알려진 한계) - 그래서 후보가 2장(미확정)
+  이거나 전부 실패(url 없음)면 마커를 그대로 둔다(엉뚱한 이미지를 자동으로 고르는 것보다 안전 -
+  convertArticleToHtml이 플레이스홀더 텍스트로라도 안전하게 렌더).
+- `src/workflows/manuscripts/manuscriptManifest.ts`: 신규 `readJobManuscriptImages(job)` -
+  `job.metadata.images` 읽기를 한 곳으로 모음(prepareManuscript.ts의 로컬 함수였던 것을 공유
+  유틸로 승격 - publishArticleToBlogspot.ts도 같은 데이터를 봐야 해서).
+- `src/workflows/publish/publishArticleToBlogspot.ts`: 위 두 함수로 searchDescription 복구 +
+  이미지 치환을 배선. **`BLOGGER_ENABLED` 게이트는 그대로 - 이 세션에서 건드리지 않았다**(켜는
+  건 여전히 사용자 승인 사항, CLAUDE.md).
+- `src/workflows/manuscripts/prepareApprovedManuscripts.ts`: 원고 준비(이미지까지) 성공 직후
+  `publishArticleToBlogspot(jobId)`를 이어서 호출하도록 배선(신규 `publishBlogspot` 옵션,
+  기본값). `BLOGGER_ENABLED=false`인 동안은 그 함수가 즉시 `{ok:false, reason:"disabled"}`로
+  아무것도 안 하고 돌아오므로 지금은 무해하다 - 나중에 `BLOGGER_ENABLED=true`로 켜는 순간 **이
+  배선 코드를 다시 안 건드려도** 승인 흐름에 자동으로 올라탄다. best-effort(예외를 잡아 로그만
+  남김) - 발행 실패가 원고 준비 자체(파일/페이지/manifest)를 실패로 만들지 않는다(이미지 생성과
+  같은 원칙).
+
+**검증**: `npx tsc --noEmit` + `npm run build` 통과. `test:manuscript-blocks`(신규 3케이스:
+확정 1장 치환/A·B 미확정 유지/생성실패 유지), `test:publish-blogspot`(신규 3케이스: 재사용 시
+searchDescription 복구/확정 이미지 HTML 삽입/A·B 미확정 시 마커 유지), `test:prepare-manuscripts`
+(신규 1케이스: 성공 job에만 publishBlogspot 호출 + 발행 예외가 원고 준비 결과에 영향 없음) 전부
+통과. `test:manuscript-images`/`test:article-variant` 회귀 확인.
+
+**남은 것(BLOGGER_ENABLED를 실제로 켤 때 확인할 목록)**:
+- ⬜ A/B 이미지 "선택" 기능이 없다 - `IMAGE_AB_COMPARE=true`인 채로 자동 업로드를 켜면 이미지가
+  있는 마커 대부분이 미확정으로 남아 플레이스홀더 텍스트째로 발행될 가능성이 높다. 켜기 전에
+  `IMAGE_AB_COMPARE=false` + `IMAGE_PROVIDER` 고정을 먼저 하거나, 원고 페이지에 "이 이미지 사용"
+  선택 저장 기능을 먼저 만들어야 한다.
+- ⬜ 실제 Blogger API 호출 경로(BloggerClient.ts, refresh token)는 이번에 안 건드렸다 - 마지막
+  실측 라이브 테스트가 언제였는지 확인 필요(SPRINT_5_DESIGN.md 시절 이후 재검증 기록 없음).
+- ⬜ 일일 발행 상한(`BLOGGER_CONFIG.dailyLimit`)이 지금 값 그대로 적절한지 재검토.
 
 ## 2026-09-15 세션(후속4) — 자료조사/집필 GH Actions 큐가 조용히 서로를 취소하던 사고 원인 규명 + 수정
 

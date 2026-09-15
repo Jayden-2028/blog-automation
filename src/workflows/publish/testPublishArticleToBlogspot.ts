@@ -131,6 +131,73 @@ async function main(): Promise<void> {
   assert(savedFailed, "실패도 publications에 기록해야 한다");
   console.log("✅ Blogger 실패 -> blogger_failed + failed 기록");
 
+  // 7) 배리에이션 재사용 경로(이미 있음)에서 job.metadata.channelMeta.blogspot의 searchDescription을
+  //    복구해 insertPost에 넘겨야 한다(2026-09-15 재배선 - prepareManuscript.ts가 이미 만들어 둔
+  //    배리에이션을 재사용할 때 검색 설명을 잃던 문제).
+  let insertedSearchDescription: string | null | undefined;
+  const reused = await publishArticleToBlogspot("job-1", {
+    ...baseDeps,
+    loadJob: async () =>
+      job({ metadata: { channelMeta: { blogspot: { searchDescription: "복구된 설명", slug: null, tags: [] } } } }),
+    loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "재사용 본문" })],
+    generateVariant: async () => {
+      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
+    },
+    insertPost: async (input) => {
+      insertedSearchDescription = input.searchDescription;
+      return baseDeps.insertPost();
+    },
+  });
+  assert(reused.ok === true, `배리에이션 재사용 발행 실패 (${JSON.stringify(reused)})`);
+  assert(insertedSearchDescription === "복구된 설명", `재사용 시 searchDescription이 복구돼야 한다 (${insertedSearchDescription})`);
+  console.log("✅ 배리에이션 재사용 -> job.metadata.channelMeta에서 searchDescription 복구");
+
+  // 8) 본문의 [IMAGE: 설명] 마커가 job.metadata.images에서 확정된(url 있는) 이미지로 치환돼
+  //    contentHtml에 실제 <img>로 들어가야 한다(마커 텍스트가 그대로 발행되면 안 된다).
+  let insertedHtml = "";
+  const withImages = await publishArticleToBlogspot("job-1", {
+    ...baseDeps,
+    loadJob: async () => job({ metadata: { images: [{ index: 1, description: "설명", prompt: null, url: "https://img.example.com/1.png", provider: "openai", fileName: "01.png" }] } }),
+    loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "본문 시작\n\n[IMAGE: 설명]\n\n본문 끝" })],
+    generateVariant: async () => {
+      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
+    },
+    insertPost: async (input) => {
+      insertedHtml = input.contentHtml;
+      return baseDeps.insertPost();
+    },
+  });
+  assert(withImages.ok === true, `이미지 포함 발행 실패 (${JSON.stringify(withImages)})`);
+  assert(insertedHtml.includes("<img src=\"https://img.example.com/1.png\""), `확정 이미지가 HTML에 삽입돼야 한다 (${insertedHtml})`);
+  assert(!insertedHtml.includes("[IMAGE:"), "발행 HTML에 마커 텍스트가 그대로 남으면 안 된다");
+  console.log("✅ 확정된 자동 생성 이미지가 발행 HTML에 실제 <img>로 삽입됨");
+
+  // 9) A/B 비교로 후보가 2장(아직 미확정)이면 마커를 그대로 두고 발행한다(엉뚱한 이미지 자동 선택 금지).
+  let insertedHtmlAb = "";
+  const withAbImages = await publishArticleToBlogspot("job-1", {
+    ...baseDeps,
+    loadJob: async () =>
+      job({
+        metadata: {
+          images: [
+            { index: 1, description: "설명", prompt: null, url: "https://img.example.com/a.png", provider: "openai", fileName: "01-openai.png" },
+            { index: 1, description: "설명", prompt: null, url: "https://img.example.com/b.png", provider: "gemini", fileName: "01-gemini.png" },
+          ],
+        },
+      }),
+    loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "본문 시작\n\n[IMAGE: 설명]\n\n본문 끝" })],
+    generateVariant: async () => {
+      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
+    },
+    insertPost: async (input) => {
+      insertedHtmlAb = input.contentHtml;
+      return baseDeps.insertPost();
+    },
+  });
+  assert(withAbImages.ok === true, "A/B 미확정 케이스도 발행은 진행돼야 한다");
+  assert(insertedHtmlAb.includes("[IMAGE:"), "A/B 후보가 2장이면(미확정) 마커를 그대로 두고 발행해야 한다");
+  console.log("✅ A/B 비교 미확정(후보 2장) -> 마커 유지한 채 발행");
+
   console.log("\n✅ 전체 테스트 통과");
 }
 
