@@ -2,6 +2,43 @@
 
 기준일: 2026-09-15 (Asia/Seoul)
 
+## 2026-09-15 세션(후속3) — 미병합 브랜치 정리 + 텔레그램 웹훅 재등록 + "수정 피드백 자동 재작성" 실사용 검증 완료
+
+**1. 미병합 브랜치 정리** - `claude/telegram-bot-setup-7bqiyc`(09-05, 커밋 5개, 텔레그램 메시지
+간소화)가 10일째 안 병합된 채 남아 있었다. 파일별로 main과 직접 diff해 대조한 결과 -
+`TelegramBot.ts`의 확인 메시지 간소화, `notifyResearchReady.ts`/`summarizeResearchForReview.ts`의
+근거 요약 간소화, `formatNotificationMessage.ts`의 원문/배점표 제거, `notifyMultiPublish.ts`의
+채널 아이콘+실패사유 한글화 - **전부 다른 세션 작업으로 main에 이미 독자적으로 재구현돼 있었고,
+그마저 09-15 티스토리 삭제에 맞춰 더 발전된 상태**였다(예: `notifyMultiPublish.ts`는 branch가 만들
+당시엔 없던 티스토리 삭제 이후 버전으로 main이 이미 앞서 있음). merge-tree 충돌 4곳도 전부 "main이
+더 나은 버전을 이미 갖고 있어서" 생기는 것들이었다. 고유하게 남길 내용이 없어 사용자 승인 받아
+로컬+원격 브랜치 삭제(`git push origin --delete`) 완료. `npm run status:all` 기준 미병합 브랜치 0개.
+
+**2. 텔레그램 웹훅 재등록 - "수정 필요 → 답장 자동 재작성" 기능 실사용 가능해짐** - 위 09-15(후속)
+세션에서 승인만 받고 미실행 상태였던 웹훅 재등록을 실제로 수행했다. `TELEGRAM_WEBHOOK_SECRET`은
+로컬 `.env`에 없고(설계상 `wrangler secret put`으로만 존재, write-only라 기존 값 조회 불가) 처음
+설정 당시 값을 사용자가 분실한 상태였다 - 새 랜덤 시크릿으로 교체(`wrangler secret put`, Cloudflare
+Worker `blog-automation-telegram-relay`)한 뒤 같은 값으로 `setWebhook`
+(`allowed_updates: ["callback_query","message"]`) 재호출. `getWebhookInfo`로
+`allowed_updates`에 `"message"` 포함 확인. (실행 방식: `wrangler secret put`은 Claude가 직접
+실행, `setWebhook` curl은 하네스 자동 승인 필터가 "외부 메시지 설정 변경"으로 차단해 사용자가
+직접 `!` 명령으로 실행함 - 정책과 일치하는 동작.)
+
+**3. 실사용 end-to-end 검증 완료** - 사용자가 실제 원고에 "수정 필요" 클릭 → 처음엔 일반 메시지로
+답신해 반영 안 됨(설계대로 - `reply_to_message` 없는 메시지는 Cloudflare Worker가 조용히 무시,
+GitHub Actions 안 깨움) → 텔레그램 "답장(Reply)" 기능으로 다시 보내자 정상 작동 확인.
+GitHub Actions 로그로 전 구간 실측: `telegram_update` 워크플로우가
+`hasEditFeedbackResult:true`로 job을 정확히 역매칭 → `job-revise` 워크플로우 자동 발화(1분
+54초) → 재작성 완료 + 텔레그램 알림 발송. 사용자가 실제 원고 내용(비단정적 표현 삭제 요청)이
+정확히 반영된 것까지 확인함. **09-15(후속) 세션에 남아 있던 "실사용 end-to-end 검증 필요" 항목
+해소됨.**
+
+⚠️ **사용자가 이 기능을 쓸 때 알아야 할 것**: 반드시 봇이 보낸 "이 메시지에 답장(reply)으로
+수정 방향을 적어주세요" 메시지를 길게 눌러 텔레그램 네이티브 "답장" 기능으로 보내야 한다. 채팅창에
+새 메시지로 그냥 타이핑해 보내면 아무 반응 없이 조용히 무시된다(의도된 설계 - 답장이 아닌 일반
+잡담까지 GitHub Actions를 깨우지 않기 위함). 에러 메시지가 따로 안 오므로 처음 쓰는 사람은 "왜
+안 오지"하고 헷갈릴 수 있다.
+
 ## 2026-09-15 세션(후속2) — **Blogspot 단독 운영 전환 + 이미지 자동 생성 + 뷰어 재설계**
 
 사용자 결정: **티스토리 운영 중단. 이 파이프라인의 모든 원고는 Blogspot으로만 나간다.**
@@ -125,7 +162,7 @@ Telegram 웹훅 재등록 1건을 직접 해야 한다 - 아래 "사용자 조�
   남을 수 있다"는 기존 설계를 그대로 씀) + `notifyRevisedArticleReady.ts`(같은 승인/수정/반려
   버튼 재사용) + 신규 워크플로우 `job-revise.yml`.
 
-**⚠️ 사용자 조치 필요(승인 완료, 아직 미실행) - Telegram 웹훅 재등록**: 지금 `getWebhookInfo`
+**✅ 완료(후속3 세션에서 실행) - Telegram 웹훅 재등록**: 아래는 실행 당시 기록, 지금 `getWebhookInfo`
 확인 결과 `allowed_updates: ["callback_query"]`로 고정돼 있어서, 3번 기능에 필요한 일반 답장
 메시지가 Telegram 서버 단계에서부터 걸러져 Worker에 도달하지 못한다(Worker/코드를 다 고쳐도
 이것 때문에 안 됨). 아래 curl로 `allowed_updates`에 `"message"`를 추가해야 한다(Worker
@@ -142,7 +179,8 @@ curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
 **검증**: `npm run build` 통과. 신규/갱신 테스트 전부 통과 - `test:format-notification-message`
 (요약 줄 표시/생략), `test:telegram-bot`(edit 분기 재작성 + 신규 11번 섹션: 답장 매칭 6케이스),
 `test:notify-article`, `test:revise-article`(신규, 마커 파싱·안전장치), `test:notify-revised-article`
-(신규). 실제 사용자 답장으로 end-to-end 검증은 위 웹훅 재등록 후 다음 "수정 필요" 클릭 때 필요.
+(신규). ✅ 실제 사용자 답장으로 end-to-end 검증 완료(위 "2026-09-15 세션(후속3)" 참고) - 웹훅
+재등록 + 실사용 확인 끝남.
 
 ## 2026-09-15 세션 — 원고 목록 유실 사고 원인 규명 + 근본 수정(Supabase 이전) + 좌측 목록 UI
 
