@@ -2,6 +2,36 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속2) — 승인된 원고가 뷰어에 영영 안 나타나던 사고(조회 창 밖으로 밀려남)
+
+**사고**: 사용자가 텔레그램에서 "남양주 카페 갑질 테러"를 승인(23:27 KST)했는데 뷰어에 안 나타남.
+승인 콜백은 정상이었고(`reviewDecision: confirmed`, status `approved`), `job-publish-prepare`도
+정상 발화했지만 **13초 만에 아무 로그도 없이** 끝났다.
+
+**근본 원인**: `prepareApprovedManuscripts`가 `listByStatus("approved", 20)`으로 20건을 받아
+**메모리에서** `channelManuscriptsReadyAt` 없는 것만 걸렀다. 그런데 이 조회는 `selected_at`
+**오름차순**(오래된 것 먼저) + `limit 20`이다. 승인·준비까지 끝난 옛 job이 20건을 채우자:
+- 조회된 20건 = 전부 준비 완료 → 필터에서 전멸 → `pending = []` → 아무 일도 안 하고 종료
+- 정작 준비가 필요한 **새로 승인된 job은 20건 창 밖**이라 조회조차 안 됨
+
+실측: approved 총 **22건**, 그중 준비 안 된 2건("남양주 카페", "경복궁 구멍 뚫기")이 정확히
+최신 2건이라 밀려나 있었다. **이 시점 이후의 모든 승인이 무음으로 유실되는 상태**였다 - 발행이
+수동 복붙이라 `approved`는 `published`로 넘어가지 않고 영원히 쌓이기만 하므로(published 0건),
+한 번 20건을 넘긴 뒤로는 되돌아올 수 없는 고장이었다. 09-15 14:53 이후 페이지가 재배포되지
+않은 진짜 이유도 이것이다("승인이 없어서"가 아니라 **승인이 보이지 않아서**).
+
+**수정**: `ArticleJobRepository.listApprovedWithoutManuscript(limit)` 신설 - 필터를 DB로 내려
+`metadata->>channelManuscriptsReadyAt is null`인 approved만 뽑는다(키 없음/JSON null 둘 다 잡음).
+승인 누적 건수와 무관하게 안전하다. `prepareApprovedManuscripts`의 기본 loadApprovedJobs를 이걸로
+교체. 실측 검증: 옛 방식 조회 20건 중 준비 대상 0건 → 새 방식 정확히 2건.
+
+**같은 계열의 남은 위험(아직 안 고침)**:
+- ⬜ `TelegramBot.findJobByEditRequestMessageId`가 `listByStatus("review", 50)`을 훑어
+  `editRequestMessageId`를 찾는다 - review가 50건을 넘으면 "수정 필요" 답장이 매칭에 실패해
+  조용히 무시된다(현재 review 6건이라 당장은 안전, 코드에도 원래 TODO 주석이 있음).
+- ⬜ `publishApprovedArticles.ts`(휴면 코드)·`publishNaverDraftCli.ts`도 같은
+  `listByStatus("approved", 20)` 패턴이지만 현재 호출되지 않는다.
+
 ## 2026-09-16 세션(후속) — 뷰어 재설계가 12시간 동안 배포 안 된 채였던 사고 + `--refresh` 모드 신설
 
 **사고**: 사용자가 원고 페이지(https://blog-automation-manuscripts.pages.dev)를 열었더니 09-15

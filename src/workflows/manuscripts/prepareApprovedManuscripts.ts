@@ -56,7 +56,10 @@ async function defaultWritePage(html: string): Promise<void> {
 export async function prepareApprovedManuscripts(
   options: PrepareApprovedManuscriptsOptions = {}
 ): Promise<JobManuscriptsResult[]> {
-  const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listByStatus("approved", 20));
+  // "준비 안 된 것"을 DB에서 직접 거른다 - 예전엔 approved 20건을 받아 메모리에서 걸렀는데,
+  // 준비까지 끝난 job이 그 20건을 채우자 새로 승인된 job이 조회 창 밖으로 밀려나 영영 처리되지
+  // 않았다(ArticleJobRepository.listApprovedWithoutManuscript 주석 참고, 2026-09-16 사고).
+  const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listApprovedWithoutManuscript(20));
   const prepareJob = options.prepareJob ?? ((job) => prepareManuscript(job));
   const markPrepared =
     options.markPrepared ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
