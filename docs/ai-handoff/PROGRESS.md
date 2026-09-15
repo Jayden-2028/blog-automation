@@ -33,11 +33,17 @@
 - [x] 뷰어에 실제 이미지 인라인 + 캡션 표 + A/B 나란히 보기
 - [x] 이미지 자동 생성 코드 — writer 프롬프트 → 생성 → Supabase Storage
 - [x] 이미지 로컬 미러 CLI (npm run sync:images)
-- [ ] 이미지 생성 켜기 — GitHub secret/variable 등록 후 첫 실측 (사용자 조치)
-- [ ] 이미지 A/B 비교 (OpenAI vs Gemini) 후 provider 확정
+- [x] 이미지 생성 켜기 — GitHub secret/variable 등록 + 첫 실측 완료 (2026-09-16)
+- [x] 이미지 A/B 비교 후 provider 확정 — OpenAI(gpt-image-2) 단독, 단가 1/5.6 + 한글·맥락 우위
+- [x] 이미지 규격을 구글 디스커버 기준으로 (16:9 / 1536x864, max-image-preview:large 적용)
+- [x] **Blogspot 자동 업로드 — 비공개 초안까지** (2026-09-16 켬: `BLOGGER_ENABLED=true` +
+      `BLOGGER_PUBLISH_AS_DRAFT=true`. 텔레그램 최종 승인 → 원고·이미지 준비 → 초안 자동 저장)
+- [ ] **Blogspot 자동 발행 — 공개** (스위치는 `BLOGGER_PUBLISH_AS_DRAFT=false`. 사용자 별도 결정)
+- [ ] 사람이 채우는 3영역 자동화 검토 — 퍼머링크 / 검색 설명 / 웹 검색 이미지
+      (API로 안 되는 것들. 우회안은 CURRENT_STATE 2026-09-16 후속6 참고)
+- [ ] 예약 발행을 원고 뷰어에서 시간 지정으로 (후순위 기능 패치 — 지금은 CLI
+      `npm run blogspot:schedule`로만 가능)
 - [ ] 로컬 폴더 정리 (~/blog-automation/{repo,prod,kw})
-- [ ] Blogspot 자동 업로드 — 비공개 초안까지 (품질 확인 후 착수)
-- [ ] Blogspot 자동 발행 — 공개 (별도 결정)
 - [ ] 커뮤니티 수집기 브랜치 main 병합
 - [ ] keyword-collection-optimization 브랜치 main 병합
 
