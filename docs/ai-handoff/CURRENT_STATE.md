@@ -2,6 +2,49 @@
 
 기준일: 2026-09-15 (Asia/Seoul)
 
+## 2026-09-15 세션(후속4) — 자료조사/집필 GH Actions 큐가 조용히 서로를 취소하던 사고 원인 규명 + 수정
+
+**사고**: 사용자가 키워드 2건("강식당 돈까스 가격 논쟁", "경복궁 구멍 뚫기 논란")을 Go로 선택했는데
+"자료조사 중입니다" 확인만 오고 그 뒤로 아무 알림도 안 왔다(딜레이가 아니라 무응답). 조사 결과
+두 job 모두 DB에서 `status: "selected"`로 멈춰 있었고, `job:research` 코드는 실행되지도 못했다.
+
+**근본 원인**: 09-15 오전 커밋 `95803f1`("자료조사/집필/재작성 GH Actions를 전역 1개로 직렬화",
+concurrency group `heavy-pipeline`)이 GitHub Actions concurrency 큐의 실제 동작을 잘못 가정했다.
+GitHub의 concurrency 큐는 **"실행 중 1개 + 대기(queued) 1개"까지만 허용**하고, 그 상태에서 새
+workflow_dispatch가 또 오면 **대기 중이던 실행을 경고 없이 그냥 취소**한다(무한정 쌓이는 FIFO 큐가
+아니다). 실측 타임라인(22:34~22:36 KST에 Go 3건이 몰림): 1번째 조사 실행 중 → 2번째("강식당")
+대기 진입 → 3번째("경복궁") 도착이 2번째를 취소 → 1번째 완료 후 자동으로 집필을 다음 큐에 밀어넣는
+순간 3번째("경복궁")도 취소. 취소가 GitHub Actions 자체에서(코드 실행 전에) 일어나 `job:research`
+안의 실패 알림 try/catch도 동작할 기회가 없었다 - 그래서 완전히 무음이었다.
+
+**즉시 복구**: 두 job 모두 `status: "selected"`에서 멈춰 있어(researching으로 못 넘어감) 데이터
+손상 없이 안전하게 재시도 가능 - `gh workflow run job-research.yml -f job_id=...`로 순서대로
+(동시 아님) 재실행해 정상 완료 확인.
+
+**구조적 수정** - `src/services/github/dispatchWorkflow.ts`: `dispatchGithubWorkflow`에
+`concurrencyGroupWorkflows` 옵션 추가 - 주어지면 디스패치 직전 GitHub API(`GET .../actions/
+runs?status=queued`)로 그 그룹에 이미 대기 중인 실행이 있는지 확인하고, 있으면 짧게(기본 10초
+간격) 재확인하며 기다리다가 비면 디스패치한다. 무한 대기는 안 하고 `avoidEvictionMaxWaitMs`(호출자별
+설정)를 넘기면 포기하고 그냥 디스패치한다(로컬 시절 `heavyPipelineLock.ts` 파일 락과 같은 철학을
+GitHub Actions API 폴링으로 재구현). 대기 조회 자체가 실패해도 디스패치를 막지 않는다(best-effort).
+- `src/jobs/runTelegramUpdateCli.ts`: triggerResearch/triggerWriting/triggerRevision이
+  `HEAVY_PIPELINE_WORKFLOWS` 그룹으로 대기 확인하도록 배선(이 워크플로우 자체가 5분 타임아웃이라
+  대기 상한 3분). triggerPublishPrepare도 자기 그룹(`job-publish-prepare.yml`)으로 같은 보호 적용.
+- `src/workflows/research/runResearchStageCli.ts`: 조사 완료 후 집필을 자동으로 잇는 dispatch
+  (정확히 "경복궁" job을 밀어낸 지점)에도 같은 보호 적용, 대기 상한 5분(job-research.yml
+  timeout-minutes 25분 안에서 여유 있게).
+- 신규 `npm run test:dispatch-workflow`(6케이스: 그룹 미지정/대기 0건/대기 중 재확인 후 디스패치/
+  그룹 밖 워크플로우 무시/maxWaitMs 초과 시 포기/조회 실패 시 미차단) 전부 통과. `npx tsc --noEmit`
+  + `npm run build` + `test:telegram-bot` 통과.
+
+**남은 한계(알고 진행)**: 이 수정은 "대기 1개 초과로 취소"를 크게 줄이지만 100% 없애지는 않는다 -
+Go 클릭이 대기 상한(3분) 안에 3건 이상 몰리면 여전히 취소될 수 있다. 다만 그 경우는 대기 조회
+과정이 GH Actions 로그에 남아 사후 추적이 가능하고, telegram-update.yml 자체도 `concurrency
+group: telegram-update`로 순차 처리돼 클릭들이 완전히 동시가 아니라 수십 초 간격으로 벌어지므로
+실제 충돌 확률은 낮다. 완전히 없애려면 GitHub 큐에 의존하지 않는 앱 레벨 FIFO(DB 큐 테이블 +
+드레인 크론)가 필요한데, 이는 새 마이그레이션이 필요하고 CLOUD_MIGRATION.md Phase 4가 명시적으로
+피한 "폴링" 모델로 되돌아가는 트레이드오프가 있어 이번엔 하지 않음 - 재발하면 그때 판단.
+
 ## 2026-09-15 세션(후속3) — 미병합 브랜치 정리 + 텔레그램 웹훅 재등록 + "수정 피드백 자동 재작성" 실사용 검증 완료
 
 **1. 미병합 브랜치 정리** - `claude/telegram-bot-setup-7bqiyc`(09-05, 커밋 5개, 텔레그램 메시지

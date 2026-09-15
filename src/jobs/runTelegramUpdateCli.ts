@@ -16,7 +16,15 @@ import "dotenv/config";
 import { TelegramBot } from "../notifications/TelegramBot.js";
 import type { TelegramUpdate } from "../notifications/TelegramBot.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
-import { dispatchGithubWorkflow } from "../services/github/dispatchWorkflow.js";
+import { dispatchGithubWorkflow, HEAVY_PIPELINE_WORKFLOWS } from "../services/github/dispatchWorkflow.js";
+
+/**
+ * 이 워크플로우(telegram-update.yml) 자체의 timeout-minutes가 5분이라, concurrency 대기도 그 안에서
+ * 끝나야 한다 - checkout/npm ci/claude 설치에 쓰는 시간을 빼고 넉넉히 여유를 둔다(2026-09-15,
+ * dispatchWorkflow.ts 상단 주석 참고 - 대기 없이 바로 디스패치하면 이미 대기 중이던 다른 원고를
+ * 밀어낼 수 있다).
+ */
+const TELEGRAM_UPDATE_DISPATCH_MAX_WAIT_MS = 3 * 60 * 1000;
 
 async function main(): Promise<void> {
   const raw = process.env.TELEGRAM_UPDATE_JSON;
@@ -32,8 +40,17 @@ async function main(): Promise<void> {
   }
 
   const pendingDispatches: Promise<void>[] = [];
-  const dispatchAndTrack = (workflowFile: string, inputs: Record<string, string> = {}): void => {
-    const promise = dispatchGithubWorkflow({ workflowFile, inputs }).catch((error) => {
+  const dispatchAndTrack = (
+    workflowFile: string,
+    inputs: Record<string, string> = {},
+    concurrencyGroupWorkflows?: string[]
+  ): void => {
+    const promise = dispatchGithubWorkflow({
+      workflowFile,
+      inputs,
+      concurrencyGroupWorkflows,
+      avoidEvictionMaxWaitMs: TELEGRAM_UPDATE_DISPATCH_MAX_WAIT_MS,
+    }).catch((error) => {
       console.error(`⚠️ ${workflowFile} 발화 실패:`, error instanceof Error ? error.message : error);
     });
     pendingDispatches.push(promise);
@@ -42,10 +59,11 @@ async function main(): Promise<void> {
   const bot = TelegramBot.fromEnv({
     generateTitles: (job) =>
       generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
-    triggerResearch: (jobId) => dispatchAndTrack("job-research.yml", { job_id: jobId }),
-    triggerWriting: (jobId) => dispatchAndTrack("job-write.yml", { job_id: jobId }),
-    triggerPublishPrepare: () => dispatchAndTrack("job-publish-prepare.yml"),
-    triggerRevision: (jobId, feedback) => dispatchAndTrack("job-revise.yml", { job_id: jobId, feedback }),
+    triggerResearch: (jobId) => dispatchAndTrack("job-research.yml", { job_id: jobId }, HEAVY_PIPELINE_WORKFLOWS),
+    triggerWriting: (jobId) => dispatchAndTrack("job-write.yml", { job_id: jobId }, HEAVY_PIPELINE_WORKFLOWS),
+    triggerPublishPrepare: () => dispatchAndTrack("job-publish-prepare.yml", {}, ["job-publish-prepare.yml"]),
+    triggerRevision: (jobId, feedback) =>
+      dispatchAndTrack("job-revise.yml", { job_id: jobId, feedback }, HEAVY_PIPELINE_WORKFLOWS),
   });
 
   const result = await bot.processUpdate(update);
