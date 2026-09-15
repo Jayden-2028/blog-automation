@@ -65,4 +65,16 @@ jobs:
           IMAGE_AB_COMPARE: ${{ vars.IMAGE_AB_COMPARE }}
           IMAGE_PROVIDER: ${{ vars.IMAGE_PROVIDER }}
           IMAGE_MAX_PER_ARTICLE: ${{ vars.IMAGE_MAX_PER_ARTICLE }}
+          # Blogspot 자동 발행(2026-09-16 배선). prepareApprovedManuscripts가 원고 준비 직후
+          # publishArticleToBlogspot을 부르는데, BLOGGER_ENABLED가 "true"가 아니면 그 함수가
+          # 즉시 disabled로 돌아와 아무것도 안 한다 - 그래서 지금 이 줄들이 있어도 무해하다.
+          # 켜는 것은 원고·이미지 품질을 확인한 뒤 사용자가 vars.BLOGGER_ENABLED를 true로 바꾸는
+          # 시점이다(CLAUDE.md 승인 게이트). BLOGGER_PUBLISH_AS_DRAFT는 기본 true라 첫 단계는
+          # 비공개 초안까지만 올라간다.
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
+          BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
         run: npm run job:publish-poll
