@@ -321,9 +321,16 @@ async function runResearchStageInner(
     community: allSources.filter((s) => s.authority === "community").length,
   };
 
+  // researchFileContent를 job.metadata에 통째로 저장한다(2026-09-15) - 클라우드에서는
+  // job-research.yml과 job-write.yml이 완전히 분리된 GH Actions 러너에서 돌아서, 여기서 로컬에
+  // 쓴 research/<슬러그>.md 파일이 write 단계 러너에는 없다. 그동안은 이걸 놓쳐서 job:write가
+  // "파일이 없으니" 매번 조사부터 다시 했다(sources는 이미 DB에 있는데도) - 시간·비용 낭비는
+  // 물론, 그 재조사 자체가 실패하면(예: claude 종료 코드 1) 이미 끝난 조사까지 덩달아 실패로
+  // 보였다. runWritingStage가 이 내용으로 로컬 파일을 복원해 재조사를 건너뛴다.
   await ArticleJobRepository.mergeMetadata(jobId, {
     lastError: null,
     researchFilePath: outputPath,
+    researchFileContent: fileText,
     researchVerdict: parsed.verdict,
     sourceCounts,
   });
@@ -484,9 +491,23 @@ export async function runWritingStage(
   }
 
   // 근거 + 자료조사 파일 확보. sources row가 없거나 research/[키워드].md가 없으면 조사부터 한다.
-  // 자동 흐름(Go -> 자동 research -> write)에서는 파일이 이미 있어 이 분기를 타지 않는다.
+  // 로컬(같은 프로세스가 조사부터 실행)에서는 파일이 이미 있어 이 분기를 타지 않는다.
+  //
+  // 클라우드에서는 job-research.yml과 job-write.yml이 완전히 분리된 GH Actions 러너에서 돌아서
+  // 파일이 로컬에 절대 없다(2026-09-15 발견) - sources는 DB에 있는데 파일만 없다고 매번 조사부터
+  // 다시 하면 시간·비용 낭비는 물론, 그 재조사 자체가 실패했을 때(예: claude 종료 코드 1) 이미
+  // 끝난 조사까지 실패로 보인다. sources가 있고 job.metadata.researchFileContent(runResearchStage가
+  // 저장해 둔 원문)가 있으면 재조사 대신 그 내용으로 로컬 파일을 복원한다.
   const researchPath = researchFilePath(job.keyword);
   let sources = options.sources ?? (await listSourcesByJobId(jobId));
+  if (sources.length > 0 && !existsSync(researchPath)) {
+    const savedContent = (job.metadata as Record<string, unknown> | null)?.researchFileContent;
+    if (typeof savedContent === "string" && savedContent.trim().length > 0) {
+      await mkdir(dirname(researchPath), { recursive: true });
+      await writeFile(researchPath, savedContent, "utf8");
+      console.log(`ℹ️ [writing] 다른 실행이 저장해 둔 research 내용으로 파일 복원(재조사 생략): ${researchPath}`);
+    }
+  }
   if (sources.length === 0 || !existsSync(researchPath)) {
     const research = await runResearchStage(jobId, options.researchOptions);
     if (research.status !== "success") {
