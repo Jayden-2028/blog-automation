@@ -2,6 +2,92 @@
 
 기준일: 2026-09-15 (Asia/Seoul)
 
+## 2026-09-15 세션(후속2) — **Blogspot 단독 운영 전환 + 이미지 자동 생성 + 뷰어 재설계**
+
+사용자 결정: **티스토리 운영 중단. 이 파이프라인의 모든 원고는 Blogspot으로만 나간다.**
+이유 - 티스토리는 카카오 로그인이 자주 풀리고 공식 API가 없어(Playwright 의존) 풀 자동화가
+불가능하다. Blogspot은 Blogger API v3 + 만료 없는 refresh token이 이미 확보돼 있다.
+
+전체 설계는 **`docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`**에 있다. 아래는 이번 세션에서 실제로
+바꾼 것.
+
+**1. 티스토리 완전 삭제 + 채널 단일화**
+- 삭제: `services/publish/tistory/`(4파일), `publishArticleToTistory.ts`(+테스트),
+  `config/channelRouting.ts`(+테스트), package.json의 tistory 스크립트 4개.
+- `config/publishTargets.ts`: `TISTORY_CONFIG`/`TISTORY_CATEGORY_BY_INTERNAL` 제거.
+  `BLOGSPOT_LABEL_BY_INTERNAL`에 `incident: "사건사고"` 추가 - 예전엔 사건사고/생활이 티스토리
+  담당이라 이 표에 없었는데, 이제 전부 Blogspot으로 오므로 라벨이 비면 안 된다.
+- `generateArticleVariant`: `channel` 인자와 `VariantChannel` 타입 삭제. 항상 Blogspot용 1건.
+- `prepareChannelManuscripts.ts` → **`prepareManuscript.ts`로 rename.** "채널 배정 불가" 실패
+  경로가 통째로 사라졌다(육아 등 어떤 카테고리든 통과).
+- `pipelinePaths.ts`: `ManuscriptChannel` 타입 삭제. 원고 경로에서 채널 단계가 빠졌다 -
+  `manuscripts/<날짜>/<주제>/<채널>.md` → `manuscripts/<날짜>/<주제>.md`.
+- 네이버 dormant 코드는 손대지 않음(2026-09-07 결정 유지).
+
+**2. manifest 구조 - 마이그레이션 없이 단일 원고로**
+`ManuscriptTopicEntry.channels[]` → `.manuscript`(단일 객체). **DB의 `channels` jsonb 컬럼은
+그대로 뒀다** - 컬럼 변경은 migration이고 그건 승인 게이트다(CLAUDE.md). 읽기/쓰기 경계에서만
+배열 1칸 ↔ 단일 객체로 매핑한다(`manuscriptManifest.ts`의 `rowToTopic`/`saveManifest`).
+과거 행(channel이 "tistory"였던 것 포함)도 `[0]`을 집으면 그대로 읽히므로 뷰어에서 안 사라진다.
+`ManuscriptEntry`에 `images: ManuscriptImage[]` 필드 추가(과거 행은 빈 배열 → 폴백 렌더).
+
+**3. 이미지 자동 생성 (신규)** - `src/workflows/images/generateManuscriptImages.ts`
+- writer가 본문에 남긴 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 쌍을 그대로 쓴다. 브리프를 LLM에
+  다시 묻지 않는다(문맥 세탁 + 호출 증가). 본문은 **건드리지 않는다** - 만든 이미지는 manifest에만
+  얹고 뷰어가 마커 자리에 끼워 그린다. 옛 경로(`generateArticleImages.ts`, 자체 브리프 + 본문에
+  마크다운 삽입)는 지우지 않고 호출만 안 한다.
+- 도는 시점: **승인 이후** `prepareManuscript` 안에서 원고 확정 직후. 반려·수정 중인 원고에
+  이미지 비용이 나가지 않게 하기 위함. `job.metadata.imagesReadyAt`으로 job당 1회 멱등.
+- 짝짓기 안전장치: 마커 수와 `imagePrompts` 길이가 다르면 **생성하지 않는다**(엉뚱한 이미지에
+  엉뚱한 프롬프트를 붙이느니 안 만든다 - parseManuscriptBlocks와 같은 규칙).
+- best-effort: 한 장 실패해도 나머지는 계속, 전부 실패해도 원고 준비는 success.
+- 저장: Supabase Storage `article-images`가 원본(공개 URL을 manifest에). 로컬 미러는
+  `npm run sync:images`(신규 CLI)가 manifest를 읽어 아직 없는 파일만 내려받는다.
+  `uploadArticleImage`에 `variant` 인자 추가(A/B에서 같은 index를 파일명으로 가르기 위함).
+- **기본 꺼짐**: `MANUSCRIPT_IMAGE_GENERATION` 기본 false. 유료 API라 사용자가 켠다.
+
+**4. 이미지 A/B 비교 (사용자 결정)**
+`IMAGE_AB_COMPARE=true`(기본)면 프롬프트 1개당 OpenAI(`gpt-image-1` low) + Gemini
+(`gemini-3.1-flash-lite-image`) 양쪽을 만들어 뷰어에 나란히 띄운다. 사용자가 직접 보고 고른 뒤
+false로 내리고 `IMAGE_PROVIDER`를 고정한다. **호출이 2배라 비교 기간에만 켠다.**
+⚠️ `gpt-image-1`은 2026-10-23 종료 예정 - OpenAI가 뽑히면 후속 모델 전환이 바로 따라와야 한다.
+
+**5. 원고 뷰어 전면 재설계** - `renderManuscriptPage.ts`
+사용자가 지정한 참조 파일(`~/Documents/blog-manuscripts/naver-parenting/viewer.html`)의 레이아웃·
+디자인을 그대로 이식하고 포인트 컬러만 오렌지(`--pen: #E8590C`). 참조가 라이트 전용이라 다크 모드
+분기를 없앴다(`color-scheme: light` 고정).
+- 좌측: 날짜 그룹(접기/펼치기) → 주제. 3단 → 2단. 오늘 날짜만 펼침.
+- 우측 순서: 카테고리 배지 → 제목 → 부제(날짜·카테고리·글자수·이미지 수·jobId) → hint →
+  대표 이미지(thumbrow) → meta-grid(제목/검색설명/슬러그/태그 + 행별 복사) → toolbar →
+  캡션 표 → `#preview` 본문(**실제 이미지 인라인** + figcaption 캡션) → 이미지 생성 프롬프트 `<pre>`.
+- 이미지 상태 3종을 다 그린다: 성공(1장) / A/B(provider 라벨 붙여 나란히) / 실패·미생성(점선
+  박스 + 사유 + 프롬프트 인라인). 과거 원고는 이미지가 없으므로 자동으로 "미생성" 렌더.
+- 딥링크가 `#jobId:channel` → `#jobId`로 바뀌었다(옛 링크도 앞부분만 떼어 받아준다).
+- 본문 복사 규칙은 그대로: 이미지 자리는 `[[이미지 N]]`, 맨 끝에 해시태그 한 줄.
+- 실제 브라우저에서 3가지 상태 모두 렌더 확인함(콘솔 에러 없음).
+
+**6. 텔레그램 알림** - "3채널 원고 준비 완료" → "원고 준비 완료 / 🔵 Blogspot · 이미지 N장".
+
+**7. GitHub Actions** - `job-publish-prepare.yml`에 `OPENAI_API_KEY`/`GEMINI_API_KEY` secret과
+`MANUSCRIPT_IMAGE_GENERATION`/`IMAGE_AB_COMPARE`/`IMAGE_PROVIDER`/`IMAGE_MAX_PER_ARTICLE` vars 추가.
+
+**8. 진척 원장 신설** - `docs/ai-handoff/PROGRESS.md`. 데일리 데스크 아티팩트의 blog-automation
+패널이 이 파일에서 집계되는데 **파일 자체가 없어서** 대시보드가 2026-09-04자 스프린트 목록에
+멈춰 있었다. 새 마일스톤으로 다시 만들고 아티팩트 DB(`progress/blogAutomation`)를 갱신했다.
+
+### 검증
+`npx tsc --noEmit` 통과, `npm run build` 통과. 단위 테스트 전부 통과:
+`test:prepare-manuscripts`(이미지 케이스 2건 추가), `test:manuscript-images`(신규 7케이스),
+`test:notify-manuscripts-ready`, `test:manuscript-blocks`, `test:article-variant`,
+`test:publish-approved`, `test:notify-multi-publish`, `test:publish-blogspot`.
+
+### 사용자 조치 필요
+1. **이미지 생성을 켜려면** GitHub repo에 secret `OPENAI_API_KEY`·`GEMINI_API_KEY`, variable
+   `MANUSCRIPT_IMAGE_GENERATION=true`를 넣어야 한다(유료 호출이라 기본 꺼짐).
+2. `.env`의 `TISTORY_*` 4줄은 이제 아무도 읽지 않는다 - 지워도 된다.
+3. 로컬 폴더 정리(`~/blog-automation/{repo,prod,kw}`)는 세션 작업 디렉터리를 옮기는 일이라
+   맨 마지막에 별도로 한다.
+
 ## 2026-09-15 세션(후속) — 텔레그램 파이프라인 3종 변경(키워드 요약/자동 작성 연결/수정 피드백)
 
 사용자 요청 3건, 전부 구현+테스트 완료(코드는 main에 push됨). **단, 실제로 작동하려면 사용자가

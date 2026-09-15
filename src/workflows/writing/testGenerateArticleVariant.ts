@@ -36,32 +36,31 @@ Q. 지급일에 안 들어왔어요. 계좌 정보가 등록되지 않았거나 
 async function main(): Promise<void> {
   console.log("▶ generateArticleVariant 테스트 시작\n");
 
-  // 1) 파서: 마커별 추출 + blogspot 슬러그 정규화(특수문자 제거, kebab)
-  const parsed = parseVariantOutput(SAMPLE_OUTPUT, "blogspot", "폴백 제목");
+  // 1) 파서: 마커별 추출 + 슬러그 정규화(특수문자 제거, kebab)
+  const parsed = parseVariantOutput(SAMPLE_OUTPUT, "폴백 제목");
   assert(parsed.title === "근로장려금 지급일 완벽 정리: 언제 얼마나 들어올까", `title 파싱 실패 (${parsed.title})`);
   assert(parsed.searchDescription?.startsWith("2026년 근로장려금"), "searchDescription 파싱 실패");
   assert(parsed.slug === "geunro-jangryeogeum-2026-payment-guide", `슬러그 정규화 실패 (${parsed.slug})`);
   assert(parsed.tags.length === 11 && parsed.tags[0] === "근로장려금", `태그 파싱 실패 (${JSON.stringify(parsed.tags)})`);
   assert(parsed.body.includes("**자주 묻는 질문**") && parsed.body.includes("**요약**"), "body에 FAQ/요약 포함 실패");
-  console.log("✅ 파서: 마커 추출 + blogspot 슬러그 kebab 정규화");
+  console.log("✅ 파서: 마커 추출 + 슬러그 kebab 정규화");
 
-  // 2) tistory는 슬러그가 null
-  const tistoryParsed = parseVariantOutput(SAMPLE_OUTPUT, "tistory", "폴백");
-  assert(tistoryParsed.slug === null, "tistory 슬러그는 null이어야 한다");
-  console.log("✅ tistory -> 슬러그 null");
+  // 2) 슬러그가 비어 있으면 null (2026-09-15 티스토리 제거 전에는 채널별 분기였다)
+  const noSlug = parseVariantOutput(SAMPLE_OUTPUT.replace("Geunro-Jangryeogeum 2026 Payment!! Guide", "!!!"), "폴백");
+  assert(noSlug.slug === null, `쓸 수 없는 슬러그는 null이어야 한다 (${noSlug.slug})`);
+  console.log("✅ 빈/무효 슬러그 -> null");
 
   // 2-1) 본문 뒤에 모델이 붙이는 "**점검 결과**" 메타 텍스트를 잘라낸다(2026-09-01 관측).
   const withMeta =
     SAMPLE_OUTPUT +
     "\n\n### 참고 자료\n- [링크](https://example.com)\n\n---\n\n**점검 결과**: 사실 보존 완료, 연속 3어절 겹침 없음.";
-  const cleaned = parseVariantOutput(withMeta, "blogspot", "폴백");
+  const cleaned = parseVariantOutput(withMeta, "폴백");
   assert(!cleaned.body.includes("점검 결과"), `본문에서 점검 결과가 제거돼야 한다\n${cleaned.body.slice(-200)}`);
   assert(cleaned.body.includes("참고 자료"), "참고 자료 목록까지는 남아야 한다");
   console.log("✅ 본문 뒤 '점검 결과' 메타 텍스트 제거");
 
   // 3) generate 성공 -> variant 반환
   const ok = await generateArticleVariant({
-    channel: "blogspot",
     category: "living",
     baseTitle: "기준 원고 제목",
     baseBody: "기준 본문",
@@ -72,7 +71,6 @@ async function main(): Promise<void> {
 
   // 4) generate 실패 -> failed 그대로 전달
   const fail = await generateArticleVariant({
-    channel: "blogspot",
     category: null,
     baseTitle: "t",
     baseBody: "b",
@@ -83,7 +81,6 @@ async function main(): Promise<void> {
 
   // 5) 본문이 너무 짧으면 failed (파싱은 됐지만 쓸 수 없는 출력)
   const short = await generateArticleVariant({
-    channel: "blogspot",
     category: null,
     baseTitle: "t",
     baseBody: "b",
@@ -96,7 +93,6 @@ async function main(): Promise<void> {
   // 근거 얇은 job에서 모델이 "기준 원고에 정보가 부족합니다"라고만 답해, 마커가 하나도 없는데도
   // 300자를 넘겨 과거엔 성공으로 잘못 처리됐다).
   const conversational = await generateArticleVariant({
-    channel: "tistory",
     category: null,
     baseTitle: "t",
     baseBody: "b",

@@ -116,19 +116,20 @@ async function main(): Promise<void> {
   assert(r6[0].markedPublished === false, "deferred job은 published로 안 넘어간다");
   console.log("✅ preflight 차단 -> 전 채널 deferred, 발행 호출 없음");
 
-  // 7) tistory 채널: 임시저장(draft)까지. naver+tistory 둘 다 draft/already면 published 이동.
+  // 7) naver+blogspot 둘 다 draft/already면 published 이동.
+  //    (2026-09-15 티스토리 제거 - 예전엔 여기서 티스토리 임시저장도 함께 확인했다)
   const marks7: string[] = [];
   const r7 = await publishApprovedArticles({
     loadApprovedJobs: async () => [job("i")],
-    activeChannels: ["naver", "tistory"],
+    activeChannels: ["naver", "blogspot"],
     preflight: noPreflight,
     publishNaver: naverOk,
-    publishTistory: async () => ({ ok: true as const, publicationId: 5, draftUrl: "https://t/x", variantCreated: true, alreadyDone: false }),
+    publishBlogspot: blogspotPublished,
     markJobPublished: async (id) => marks7.push(id),
   });
-  assert(r7[0].channels.find((c) => c.channel === "tistory")?.status === "draft", "tistory -> draft");
-  assert(r7[0].markedPublished === true && marks7[0] === "i", "naver+tistory 임시저장 완료 -> published 이동");
-  console.log("✅ tistory 채널 -> draft, 전 채널 임시저장 시 published 이동");
+  assert(r7[0].channels.find((c) => c.channel === "blogspot")?.status === "published", "blogspot -> published");
+  assert(r7[0].markedPublished === true && marks7[0] === "i", "전 채널 처리 완료 -> published 이동");
+  console.log("✅ 전 채널 처리 완료 시 published 이동");
 
   // 8) 실패 사유 정규화: Playwright 콜 로그가 섞인 원문도 짧은 한글 문구로 바뀌어야 한다.
   //    (2026-09-04 사용자 요청 - 네이버 제목 클릭 타임아웃 원문이 폰 화면에서 못 알아볼 정도로 길었다)
@@ -143,14 +144,12 @@ async function main(): Promise<void> {
           '[title] page.click: Timeout 10000ms exceeded.\nCall log:\n  - waiting for locator(\'.se-component.se-documentTitle .se-text-paragraph\')\n    - locator resolved to <p id="SE-d66afbaa-4739-4da5-822a-c93b">',
       },
       { channel: "blogspot", status: "failed", reason: "[login] NAVER 로그인이 필요합니다(세션 만료 또는 미로그인)." },
-      { channel: "tistory", status: "failed", reason: "TypeError: fetch failed" },
     ],
   });
   assert(naverTimeoutMsg.text.includes("🟢 네이버: ⚠️ 실패 — 응답 대기 시간 초과"), `타임아웃 정규화 실패 (${naverTimeoutMsg.text})`);
   assert(naverTimeoutMsg.text.includes("🔵 Blogspot: ⚠️ 실패 — 로그인 실패"), `로그인 정규화 실패 (${naverTimeoutMsg.text})`);
-  assert(naverTimeoutMsg.text.includes("🟠 티스토리: ⚠️ 실패 — 네트워크 오류"), `네트워크 오류 정규화 실패 (${naverTimeoutMsg.text})`);
   assert(!naverTimeoutMsg.text.includes("Call log"), "Playwright 콜 로그 원문이 남아있으면 안 된다");
-  console.log("✅ 실패 사유 정규화: 타임아웃/로그인/네트워크 -> 짧은 한글 문구 + 채널 아이콘");
+  console.log("✅ 실패 사유 정규화: 타임아웃/로그인 -> 짧은 한글 문구 + 채널 아이콘");
 
   // 9) 분류에 안 걸리는 낯선 에러도 콜 로그 없이 짧게 잘려서 나온다(폴백 경로).
   const fallbackMsg = buildMultiPublishMessage({

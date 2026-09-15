@@ -3,7 +3,9 @@
 //
 // 채널별 enabled 기준: "사람의 사전 준비 없이 자동으로 돌 수 있는가".
 // - blogspot: Blogger API v3. refresh token이 있어야 동작(setup:blogger 1회).
-// - tistory: Playwright + 로그인된 프로필. 반자동(임시저장까지).
+//
+// 2026-09-15 티스토리 운영 중단(BLOGSPOT_ONLY_DESIGN.md) - TISTORY_CONFIG와 카테고리 매핑표를
+// 걷어냈다. .env의 TISTORY_* 값은 이제 아무도 읽지 않는다.
 
 function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) return defaultValue;
@@ -30,13 +32,6 @@ export type BloggerConfig = {
   publishAsDraft: boolean;
 };
 
-export type TistoryConfig = {
-  enabled: boolean;
-  blogUrl: string;
-  profileDir: string;
-  dailyLimit: number;
-};
-
 export const BLOGGER_CONFIG: BloggerConfig = {
   enabled: parseBooleanEnv(process.env.BLOGGER_ENABLED, false),
   clientId: process.env.BLOGGER_CLIENT_ID || undefined,
@@ -51,23 +46,13 @@ export const BLOGGER_CONFIG: BloggerConfig = {
   publishAsDraft: parseBooleanEnv(process.env.BLOGGER_PUBLISH_AS_DRAFT, true),
 };
 
-export const TISTORY_CONFIG: TistoryConfig = {
-  enabled: parseBooleanEnv(process.env.TISTORY_ENABLED, false),
-  blogUrl: process.env.TISTORY_BLOG_URL || "https://wooahpapa.tistory.com/",
-  profileDir: process.env.TISTORY_PROFILE_DIR || ".local/tistory-publish-profile",
-  dailyLimit: parseIntEnv(process.env.TISTORY_DAILY_LIMIT, 5),
-};
-
-/** 내부 category → 각 채널 분류 (SPRINT_5_DESIGN.md §9-1 / §9-2). */
-export const TISTORY_CATEGORY_BY_INTERNAL: Record<string, string> = {
-  entertainment: "연예계 뉴스",
-  ott: "영화, 드라마, OTT",
-  parenting: "육아팁 나누기",
-  living: "일상 생활 정보",
-  community: "일상 생활 정보",
-};
-
+/**
+ * 내부 category -> Blogspot 라벨 (SPRINT_5_DESIGN.md §9-2).
+ * 2026-09-15 단독 운영 전환으로 사회 이슈(incident)·생활(living)도 여기로 오므로 라벨을 추가했다 -
+ * 예전엔 이 두 카테고리가 티스토리 담당이라 이 표에 없었다.
+ */
 export const BLOGSPOT_LABEL_BY_INTERNAL: Record<string, string> = {
+  incident: "사건사고",
   entertainment: "연예",
   ott: "OTT",
   parenting: "육아",

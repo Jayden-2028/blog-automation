@@ -1,15 +1,15 @@
-// approved인데 아직 채널 원고를 안 만든 job을 fan-out하는 폴러 (publishApprovedArticles.ts의
+// approved인데 아직 원고를 안 만든 job을 처리하는 폴러 (publishApprovedArticles.ts의
 // 반자동 업로드를 대체, 2026-09-05). 새 job status 값을 추가하려면 article_jobs_status_check
 // 마이그레이션(승인 필요)이 들어가므로, 완료 표시는 status 대신 metadata 플래그
 // (channelManuscriptsReadyAt)로 한다 - status는 approved 그대로 둔다.
 //
-// job당 배정된 채널(티스토리 또는 블로그스팟) 1곳에만 배리에이션 LLM을 돌리지만(2026-09-07 채널
-// 전담제 개편), 그래도 여러 job을 한 번에 처리하면 오래 걸리므로 publishApprovedArticles.ts와 같은
-// 이유로 maxJobsPerRun 상한을 둔다. 성공한 job만 manifest에 반영하고 페이지를 한 번만 다시 그린다.
+// job당 Blogspot 원고 1건만 만들지만(2026-09-15 단독 운영), 배리에이션 LLM + 이미지 생성이
+// 붙어 있어 여러 job을 한 번에 처리하면 오래 걸린다. publishApprovedArticles.ts와 같은 이유로
+// maxJobsPerRun 상한을 둔다. 성공한 job만 manifest에 반영하고 페이지를 한 번만 다시 그린다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
-import { prepareChannelManuscripts } from "./prepareChannelManuscripts.js";
-import type { PrepareChannelManuscriptsResult } from "./prepareChannelManuscripts.js";
+import { prepareManuscript } from "./prepareManuscript.js";
+import type { PrepareManuscriptResult } from "./prepareManuscript.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
@@ -22,12 +22,12 @@ import type { ArticleJobRow } from "../../types/database.js";
 
 export type JobManuscriptsResult = {
   job: ArticleJobRow;
-  result: PrepareChannelManuscriptsResult;
+  result: PrepareManuscriptResult;
 };
 
 export type PrepareApprovedManuscriptsOptions = {
   loadApprovedJobs?: () => Promise<ArticleJobRow[]>;
-  prepareJob?: (job: ArticleJobRow) => Promise<PrepareChannelManuscriptsResult>;
+  prepareJob?: (job: ArticleJobRow) => Promise<PrepareManuscriptResult>;
   markPrepared?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
   loadManifest?: () => Promise<ManuscriptManifest>;
   saveManifest?: (manifest: ManuscriptManifest) => Promise<void>;
@@ -47,7 +47,7 @@ export async function prepareApprovedManuscripts(
   options: PrepareApprovedManuscriptsOptions = {}
 ): Promise<JobManuscriptsResult[]> {
   const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listByStatus("approved", 20));
-  const prepareJob = options.prepareJob ?? ((job) => prepareChannelManuscripts(job));
+  const prepareJob = options.prepareJob ?? ((job) => prepareManuscript(job));
   const markPrepared =
     options.markPrepared ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
   const loadManifestFn = options.loadManifest ?? (() => loadManifest());
@@ -70,6 +70,10 @@ export async function prepareApprovedManuscripts(
       manifest ??= await loadManifestFn();
       manifest = upsertTopicEntry(manifest, result.topic);
       await markPrepared(job.id, { channelManuscriptsReadyAt: result.topic.readyAt });
+      // 이미지 실패는 원고 준비를 막지 않는다 - 로그로만 남겨 뒤에 사람이 알 수 있게 한다.
+      for (const failure of result.imageFailures) {
+        console.warn(`⚠️ [manuscripts] ${job.keyword}: ${failure}`);
+      }
     }
   }
 

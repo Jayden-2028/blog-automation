@@ -1,7 +1,13 @@
-// 채널별 원고 열람 페이지(manuscripts/index.html)가 읽는 인덱스. 날짜 -> 주제(job) -> 채널 3개
-// 구조를 그대로 담아, renderManuscriptPage가 이 파일 하나만 보고 트리를 그릴 수 있게 한다.
+// 원고 열람 페이지(manuscripts/index.html)가 읽는 인덱스. 날짜 -> 주제(job) 구조를 담아,
+// renderManuscriptPage가 이것 하나만 보고 트리를 그릴 수 있게 한다.
 //
 // job 1건 = topic 1건(jobId로 upsert). 재실행해도 같은 topic 슬롯을 덮어쓴다(중복 생성 방지).
+//
+// 2026-09-15 Blogspot 단독 운영(BLOGSPOT_ONLY_DESIGN.md §2): 주제 하나에 원고도 하나다.
+// DB의 `channels`(jsonb 배열) 컬럼은 **그대로 둔다** - 컬럼을 바꾸면 migration이 필요하고 그건
+// 승인 게이트다(CLAUDE.md). 대신 읽기/쓰기 경계에서만 배열 1칸 <-> 단일 객체로 매핑한다.
+// 과거에 쌓인 행(channel이 "tistory"였던 것 포함)도 [0]을 집으면 그대로 읽히므로 뷰어에서
+// 사라지지 않는다 - 그 행의 channel 필드는 무시한다.
 //
 // 2026-09-15: 로컬 파일(manuscripts/manifest.json) 대신 Supabase manuscript_manifest_topics
 // 테이블에 저장한다. GitHub Actions(job-publish-prepare.yml)는 매번 새로 체크아웃되는 일회용
@@ -16,10 +22,25 @@
 
 import { supabase } from "../../services/supabase/client.js";
 import type { ManuscriptManifestTopicRow } from "../../types/database.js";
-import type { ManuscriptChannel } from "../../config/pipelinePaths.js";
 
-export type ManuscriptChannelEntry = {
-  channel: ManuscriptChannel;
+/** 자동 생성된 이미지 1장. index는 본문 [IMAGE: ] 마커 순서(1부터)와 일치한다. */
+export type ManuscriptImage = {
+  index: number;
+  /** [IMAGE: 설명]의 설명. 뷰어에서 캡션으로도 쓴다. */
+  description: string;
+  /** [IMAGE PROMPT: ...]. 생성에 실제로 쓴 프롬프트. */
+  prompt: string | null;
+  /** Supabase Storage 공개 URL. 생성/업로드에 실패하면 null(원고 자체는 그대로 진행한다). */
+  url: string | null;
+  /** "openai" | "gemini". A/B 비교 모드에서는 같은 index가 provider만 다르게 2장 들어온다. */
+  provider: string | null;
+  /** 로컬 미러 파일명(npm run sync:images가 이 이름으로 내려받는다). */
+  fileName: string;
+  /** 생성 실패 사유(있으면). 뷰어가 "이미지 없음" 자리에 보여준다. */
+  error?: string | null;
+};
+
+export type ManuscriptEntry = {
   title: string;
   searchDescription: string | null;
   slug: string | null;
@@ -29,8 +50,11 @@ export type ManuscriptChannelEntry = {
    * body에 등장하는 [IMAGE: 설명] 마커와 같은 순서로 짝을 맞추는 이미지 제작 프롬프트
    * (job.metadata.imagePrompts, parseDraftFile.ts가 본문에서 빼내 둔 것). parseManuscriptBlocks가
    * 렌더링 시 이 배열과 본문의 마커 개수를 대조한다 - 개수가 안 맞으면 프롬프트 없이 보여준다.
+   * images가 채워지면 그쪽이 우선이고, 이 배열은 과거 행 폴백으로 남는다.
    */
   imagePrompts: string[];
+  /** 자동 생성된 이미지. 아직 생성 전이거나 과거 행이면 빈 배열. */
+  images: ManuscriptImage[];
   /** PIPELINE_ROOT 기준 상대 경로(표시용). 본문 자체는 body에 인라인으로 들어 있다. */
   filePath: string;
 };
@@ -42,7 +66,7 @@ export type ManuscriptTopicEntry = {
   /** Asia/Seoul 기준 YYYY-MM-DD. */
   date: string;
   readyAt: string;
-  channels: ManuscriptChannelEntry[];
+  manuscript: ManuscriptEntry;
 };
 
 export type ManuscriptManifest = {
@@ -51,14 +75,38 @@ export type ManuscriptManifest = {
 
 const EMPTY_MANIFEST: ManuscriptManifest = { topics: [] };
 
+const EMPTY_ENTRY: ManuscriptEntry = {
+  title: "",
+  searchDescription: null,
+  slug: null,
+  tags: [],
+  body: "",
+  imagePrompts: [],
+  images: [],
+  filePath: "",
+};
+
+/**
+ * jsonb `channels` 배열의 첫 칸을 단일 원고로 읽는다. 과거 행은 channel/imagePrompts만 있고
+ * images가 없으므로 기본값으로 채운다 - 그래야 뷰어가 옛 원고에서도 터지지 않는다.
+ */
 function rowToTopic(row: ManuscriptManifestTopicRow): ManuscriptTopicEntry {
+  const raw = ((row.channels as Partial<ManuscriptEntry>[] | null) ?? [])[0];
   return {
     jobId: row.job_id,
     keyword: row.keyword,
     category: row.category,
     date: row.date,
     readyAt: row.ready_at,
-    channels: (row.channels as ManuscriptChannelEntry[] | null) ?? [],
+    manuscript: raw
+      ? {
+          ...EMPTY_ENTRY,
+          ...raw,
+          tags: raw.tags ?? [],
+          imagePrompts: raw.imagePrompts ?? [],
+          images: raw.images ?? [],
+        }
+      : { ...EMPTY_ENTRY },
   };
 }
 
@@ -88,7 +136,7 @@ export async function saveManifest(manifest: ManuscriptManifest): Promise<void> 
     category: topic.category,
     date: topic.date,
     ready_at: topic.readyAt,
-    channels: topic.channels,
+    channels: [topic.manuscript],
     updated_at: now,
   }));
   const { error } = await supabase.from("manuscript_manifest_topics").upsert(rows, { onConflict: "job_id" });

@@ -6,7 +6,7 @@
 //
 // runArticleJobCli.ts와 같은 이유로 재작성 결과는 새 article row로 저장한다(같은 job의 기준
 // 원고가 재작성으로 여러 건 남을 수 있다 - articleRepository.ts listArticlesByJobId 주석 참고).
-// 재사용 경로(prepareChannelManuscripts.ts)는 항상 최신 platform=null row를 쓰므로 자동으로
+// 재사용 경로(prepareManuscript.ts)는 항상 최신 platform=null row를 쓰므로 자동으로
 // 이 재작성본을 기준 삼는다.
 //
 // 사용법:

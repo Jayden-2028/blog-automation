@@ -1,5 +1,5 @@
 // generateArticleVariant를 실제 claude -p로 1회 실행해 샘플을 파일로 뽑는다(리뷰용).
-// 발행/DB 쓰기 없음. 실행: npx tsx scripts/genVariantSample.ts <jobId> <blogspot|tistory>
+// 발행/DB 쓰기 없음. 실행: npx tsx scripts/genVariantSample.ts <jobId>
 import "dotenv/config";
 import { mkdirSync, writeFileSync } from "node:fs";
 
@@ -7,9 +7,9 @@ import { listArticlesByJobId } from "../src/services/supabase/repositories/artic
 import { generateArticleVariant } from "../src/workflows/writing/generateArticleVariant.js";
 
 async function main(): Promise<void> {
-  const [jobId, channel] = process.argv.slice(2);
-  if (!jobId || (channel !== "blogspot" && channel !== "tistory")) {
-    console.error("사용법: npx tsx scripts/genVariantSample.ts <jobId> <blogspot|tistory>");
+  const [jobId] = process.argv.slice(2);
+  if (!jobId) {
+    console.error("사용법: npx tsx scripts/genVariantSample.ts <jobId>");
     process.exit(1);
   }
   const articles = await listArticlesByJobId(jobId);
@@ -19,10 +19,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`▶ ${channel} 배리에이션 생성 중 (claude -p, 수 분)...`);
+  console.log("▶ Blogspot 배리에이션 생성 중 (claude -p, 수 분)...");
   const started = Date.now();
   const result = await generateArticleVariant({
-    channel,
     category: null,
     baseTitle: base.title ?? "",
     baseBody: base.content ?? "",

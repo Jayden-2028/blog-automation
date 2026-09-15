@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   // 5) 전체 채널이 QUIET(already_done/skipped/deferred)면 조용히 넘어간다(기존 동작 유지).
   const allQuiet = result(job("e"), [
     { channel: "naver", status: "already_done", url: "https://n/x" },
-    { channel: "tistory", status: "deferred", reason: "카카오 로그인 필요" },
+    { channel: "blogspot", status: "deferred", reason: "일일 상한 초과" },
   ]);
   assert(!hasReportableChange(allQuiet), "전부 QUIET면 조용히 넘어가야 한다");
   console.log("✅ 전부 already_done/skipped/deferred -> 조용히 무시(기존 동작 유지)");

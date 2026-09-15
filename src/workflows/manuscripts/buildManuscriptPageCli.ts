@@ -12,7 +12,7 @@ import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
 import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
-import { prepareChannelManuscripts } from "./prepareChannelManuscripts.js";
+import { prepareManuscript } from "./prepareManuscript.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 
@@ -33,8 +33,8 @@ async function buildOne(jobId: string): Promise<void> {
     return;
   }
 
-  console.log(`▶ 채널 원고 준비: ${job.keyword}`);
-  const result = await prepareChannelManuscripts(job);
+  console.log(`▶ 원고 준비: ${job.keyword}`);
+  const result = await prepareManuscript(job);
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.reason}`);
     process.exitCode = 1;
@@ -46,7 +46,7 @@ async function buildOne(jobId: string): Promise<void> {
   await writePage(renderManuscriptPage(manifest));
   await ArticleJobRepository.mergeMetadata(job.id, { channelManuscriptsReadyAt: result.topic.readyAt });
 
-  console.log(`✅ 준비 완료 - 채널 ${result.topic.channels.length}개`);
+  console.log(`✅ 준비 완료 - 이미지 ${result.topic.manuscript.images.length}장`);
   console.log(`   열기: open ${manuscriptIndexPagePath()}`);
 
   const deployResult = await deployManuscriptsPage();
@@ -56,14 +56,14 @@ async function buildOne(jobId: string): Promise<void> {
 }
 
 async function buildPending(): Promise<void> {
-  console.log("▶ approved 대기열에서 채널 원고 준비 중...");
+  console.log("▶ approved 대기열에서 원고 준비 중...");
   const results = await prepareApprovedManuscripts();
   if (results.length === 0) {
     console.log("대기 중인 job 없음(모두 준비 완료거나 approved 없음)");
     return;
   }
   for (const { job, result } of results) {
-    if (result.status === "success") console.log(`✅ ${job.keyword} - 채널 ${result.topic.channels.length}개`);
+    if (result.status === "success") console.log(`✅ ${job.keyword} - 이미지 ${result.topic.manuscript.images.length}장`);
     else console.log(`❌ ${job.keyword} - ${result.reason}`);
   }
   console.log(`\n열기: open ${manuscriptIndexPagePath()}`);

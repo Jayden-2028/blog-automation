@@ -21,18 +21,16 @@ function makeTopic(jobId: string, keyword: string): ManuscriptTopicEntry {
     category: "test",
     date: "2099-01-01",
     readyAt: new Date().toISOString(),
-    channels: [
-      {
-        channel: "tistory",
-        title: keyword,
-        searchDescription: null,
-        slug: null,
-        tags: [],
-        body: "테스트 본문",
-        imagePrompts: [],
-        filePath: "manuscripts/2099-01-01/test/tistory.md",
-      },
-    ],
+    manuscript: {
+      title: keyword,
+      searchDescription: null,
+      slug: null,
+      tags: [],
+      body: "테스트 본문",
+      imagePrompts: [],
+      images: [],
+      filePath: "manuscripts/2099-01-01/test.md",
+    },
   };
 }
 

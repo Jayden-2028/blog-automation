@@ -1,5 +1,7 @@
-// 승인된 네이버 기준 원고 -> 채널별(blogspot/tistory) SEO 배리에이션 원고 1건.
-// SPRINT_5_DESIGN.md §3. 네이버 원고 집필(runArticleJob)과 같은 헤드리스 경로(claude -p +
+// 작성 단계 기준 원고 -> Blogspot SEO 배리에이션 원고 1건.
+// SPRINT_5_DESIGN.md §3. 2026-09-15 티스토리 운영 중단으로 채널 인자가 사라졌다
+// (BLOGSPOT_ONLY_DESIGN.md §6) - 이 함수는 항상 Blogspot용 1건만 만든다.
+// 원고 집필(runArticleJob)과 같은 헤드리스 경로(claude -p +
 // moai-marketer:content-blog + moai-writer:korean-humanize)를 쓴다.
 //
 // 왜 "의미 있는 재작성"인가: 같은 사람이 운영하는 서로 다른 도메인에 거의 같은 글이 올라가면
@@ -26,12 +28,10 @@ export const VARIANT_OUTPUT_MARKERS = {
   body: "### BODY",
 } as const;
 
-export type VariantChannel = "blogspot" | "tistory";
-
 export type ArticleVariant = {
   title: string;
   searchDescription: string | null;
-  /** blogspot만 의미 있음(영문 kebab permalink). tistory는 null. */
+  /** 영문 kebab permalink. 모델이 쓸 만한 값을 못 주면 null. */
   slug: string | null;
   tags: string[];
   /** 마크다운 부분집합(## / ** / - / [](): / ![](): ). convertArticleToHtml이 HTML로 바꾼다. */
@@ -42,33 +42,26 @@ export type GenerateArticleVariantResult =
   | { status: "success"; variant: ArticleVariant; durationMs: number }
   | { status: "failed"; error: string };
 
-const CHANNEL_LABEL: Record<VariantChannel, string> = {
-  blogspot: "구글 Blogspot(Blogger)",
-  tistory: "티스토리",
-};
+const CHANNEL_LABEL = "구글 Blogspot(Blogger)";
 
 export type GenerateArticleVariantInput = {
-  channel: VariantChannel;
   /** 내부 category (entertainment/ott/parenting/living/community). 톤 참고용. */
   category: string | null;
   baseTitle: string;
-  /** 네이버 기준 원고 본문(마크다운). 해시태그 줄 포함. */
+  /** 작성 단계 기준 원고 본문(마크다운). 해시태그 줄 포함. */
   baseBody: string;
   /** 테스트 주입 지점. 기본은 runHeadlessClaude(claude -p). */
   generate?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
 };
 
 function buildPrompt(input: GenerateArticleVariantInput): string {
-  const { channel, category, baseTitle, baseBody } = input;
+  const { category, baseTitle, baseBody } = input;
   const M = VARIANT_OUTPUT_MARKERS;
-  const slugRule =
-    channel === "blogspot"
-      ? `- ${M.slug} 다음 줄에 영문 소문자 kebab-case 슬러그 1줄(핵심 키워드의 로마자 표기, 4~6단어, 날짜·숫자 금지).`
-      : `- ${M.slug} 다음 줄에 "-" 한 글자만(티스토리는 슬러그를 지정하지 않는다).`;
+  const slugRule = `- ${M.slug} 다음 줄에 영문 소문자 kebab-case 슬러그 1줄(핵심 키워드의 로마자 표기, 4~6단어, 날짜·숫자 금지).`;
 
   return [
-    `당신은 ${CHANNEL_LABEL[channel]}에 올릴 SEO 최적화 블로그 글을 쓴다.`,
-    `아래 "기준 원고"(네이버 블로그용)를 소스로, ${CHANNEL_LABEL[channel]} 독자와 구글 검색에 맞춘`,
+    `당신은 ${CHANNEL_LABEL}에 올릴 SEO 최적화 블로그 글을 쓴다.`,
+    `아래 "기준 원고"를 소스로, ${CHANNEL_LABEL} 독자와 구글 검색에 맞춘`,
     `배리에이션 글을 만든다. moai-marketer:content-blog 스킬로 작성하고 moai-writer:korean-humanize로 마무리한다.`,
     ``,
     `먼저 prompts/writing/writer.md를 Read해 문체·구조·사실 태도(§4 확인/헤지 금지) 원칙을 따른다.`,
@@ -134,7 +127,7 @@ function sliceBetween(text: string, startMarker: string, endMarkers: string[]): 
   return text.slice(from, to).trim();
 }
 
-export function parseVariantOutput(raw: string, channel: VariantChannel, fallbackTitle: string): ArticleVariant {
+export function parseVariantOutput(raw: string, fallbackTitle: string): ArticleVariant {
   const M = VARIANT_OUTPUT_MARKERS;
   const order: string[] = [M.title, M.searchDescription, M.slug, M.tags, M.body];
   const after = (marker: string): string[] => order.slice(order.indexOf(marker) + 1);
@@ -144,18 +137,16 @@ export function parseVariantOutput(raw: string, channel: VariantChannel, fallbac
 
   const slugRaw = sliceBetween(raw, M.slug, after(M.slug)).split("\n")[0]?.trim() ?? "";
   const slug =
-    channel === "blogspot"
-      ? slugRaw
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, "")
-          .trim()
-          .replace(/\s+/g, "-")
-          .replace(/-+/g, "-")
-          .slice(0, 80) || null
-      : null;
+    slugRaw
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 80) || null;
 
   const tagsRaw = sliceBetween(raw, M.tags, after(M.tags));
-  // 티스토리 해시태그는 10개 이상 확보해 두는 게 목표라(2026-09-06) 상한을 자르지 않는다.
+  // 해시태그는 10개 이상 확보해 두는 게 목표라(2026-09-06) 상한을 자르지 않는다.
   const tags = tagsRaw
     .split(/[,\n]/)
     .map((t) => t.replace(/^#/, "").trim())
@@ -216,7 +207,7 @@ export async function generateArticleVariant(
     };
   }
 
-  const variant = parseVariantOutput(result.output, input.channel, input.baseTitle);
+  const variant = parseVariantOutput(result.output, input.baseTitle);
   if (!variant.body || variant.body.length < 300) {
     return { status: "failed", error: `배리에이션 본문이 너무 짧습니다 (${variant.body.length}자)` };
   }

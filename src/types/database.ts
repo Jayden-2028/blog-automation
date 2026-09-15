@@ -94,7 +94,7 @@ export type ArticleRow = {
   content: string | null;
   status: ArticleStatus;
   ai_model: string | null;
-  /** null = 기준 원고(네이버). "blogspot"/"tistory" = 그 채널용 OSMU 배리에이션(SPRINT_5_DESIGN.md §7 A1). */
+  /** null = 작성 단계 기준 원고. "blogspot" = 발행용 배리에이션(2026-09-15 단독 운영 전엔 "tistory"도 있었다). */
   platform: string | null;
   created_at: string;
   updated_at: string;

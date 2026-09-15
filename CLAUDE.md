@@ -43,27 +43,34 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   (`research/[키워드].md`, `drafts/[키워드].md`).
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
   researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
-- 원고 내 이미지: API 자동생성은 **보류**다(`ARTICLE_IMAGE_GENERATION` 기본 false). 생성 코드·
-  provider는 유지하되, 당분간 writer가 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍을 남기고
-  사용자가 그 프롬프트를 그대로 복사해 AI 생성 도구나 이미지 검색창에 붙여넣어 이미지를 구해
-  삽입한 뒤 발행한다(`prompts/writing/writer.md` §8). `IMAGE PROMPT`는 획득 방식에 따라 AI 생성
-  프롬프트(영어) 또는 웹 검색 검색어(한국어)이며, 두 경우 모두 지시문이 아니라 그대로 붙여넣을
-  수 있는 완성된 문자열이어야 한다. 시스템 안정화 후 자동생성 재개. 불안정기 유료 호출 회피가 목적.
-- 발행: 네이버·티스토리·블로거 반자동 업로드(Playwright/API)는 **일단 중단**이다(2026-09-05,
-  원고 품질이 아직 반자동 업로드분을 매번 재작성 수준으로 고쳐야 하는 상태라 자동화가 오히려
-  일을 늘렸다). 대신 텔레그램에서 원고를 승인(✅)하면 `publishPollJob`(`prepareApprovedManuscripts()`)이
-  `config/channelRouting.ts`가 job의 category로 배정한 **채널 1곳**(티스토리 또는 블로그스팟 -
-  2026-09-07 채널 전담제 개편으로 네이버는 라우팅에서 완전히 제외됨, 배정 실패 시 명시적 실패
-  처리)의 배리에이션 원고를 준비해 `manuscripts/<날짜>/<주제>/*.md`에 저장하고
-  `manuscripts/index.html`(날짜→주제→채널 트리, 수정/복사 버튼)을 갱신한다. 작성 단계 산출물
-  (예전에 "네이버 기준 원고"라 부르던 platform=null article)은 여전히 존재하지만 그 자체로 발행
-  채널이 되지 않고 배정된 채널 배리에이션을 만드는 재료로만 쓰인다. 사용자가 그 페이지에서 직접
-  복사해 블로그에 붙여넣는다. 트리거는 2026-09-14부터 폴링이 아니라 **승인 콜백 직후 이벤트
-  기반**이다(`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분 폴링(`publish-poll` launchd)은
-  영구 비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가 같은 스크립트를 재사용해 실행한다.
-  반자동 업로드 코드(`publishApprovedArticles.ts` 등)는 지우지 않고 호출만 끊었다 - 원고 품질이
-  올라오면 `src/jobs/publishPollJob.ts`의 호출부만 되돌리면 재개된다. `BLOGGER_PUBLISH_AS_DRAFT`
-  등 발행 환경변수는 그대로 두되(재개 대비) 지금은 이 폴러가 쓰이지 않는다.
+- **채널은 Blogspot 하나다**(2026-09-15 사용자 결정, `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`).
+  티스토리는 로그인이 자주 풀리고 공식 API가 없어 풀 자동화가 불가능해 운영을 접었고, 관련 코드는
+  전부 삭제했다(복구는 git revert). 카테고리→채널 배정(`config/channelRouting.ts`)도 함께 사라졌다 -
+  이제 모든 카테고리가 Blogspot으로 간다. 네이버 관련 dormant 코드는 사용자가 별도 프로세스로
+  재설계 예정이라 그대로 둔다(2026-09-07 결정 유지).
+- 원고 내 이미지: writer가 남긴 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍으로 **승인 이후**
+  자동 생성한다(`workflows/images/generateManuscriptImages.ts`). 기본은 꺼져 있다 -
+  `MANUSCRIPT_IMAGE_GENERATION=true` + `OPENAI_API_KEY`/`GEMINI_API_KEY`가 있어야 실제로 호출한다
+  (유료 API라 켜는 것은 사용자 결정). 지금은 `IMAGE_AB_COMPARE=true`로 프롬프트 1개당 OpenAI·Gemini
+  양쪽을 만들어 뷰어에 나란히 띄우고, 사용자가 고른 뒤 한쪽으로 고정한다. 생성 이미지는 Supabase
+  Storage(`article-images`)가 원본이고 `npm run sync:images`가 맥으로 내려받는다. 옛 경로
+  (`ARTICLE_IMAGE_GENERATION` + `workflows/writing/generateArticleImages.ts`, 자체 브리프 생성 후
+  본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
+  `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
+  (`prompts/writing/writer.md` §8).
+- 발행: 반자동 업로드(Playwright/API)는 **여전히 중단**이다(2026-09-05). 대신 텔레그램에서 원고를
+  승인(✅)하면 `publishPollJob`(`prepareApprovedManuscripts()`)이 Blogspot 배리에이션 원고 1건을
+  만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 생성한 뒤
+  `manuscripts/index.html`(날짜→주제 2단 트리, 복사/수정 버튼, 이미지 인라인)을 갱신한다.
+  작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고 배리에이션의 재료로만 쓰인다.
+  사용자가 그 페이지에서 복사해 Blogger에 붙여넣는다. 트리거는 2026-09-14부터 폴링이 아니라
+  **승인 콜백 직후 이벤트 기반**이다(`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분
+  폴링(`publish-poll` launchd)은 영구 비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가
+  같은 스크립트를 재사용해 실행한다.
+- **자동 업로드는 아직 켜지 않는다.** Blogger API v3 + 만료 없는 refresh token은 이미 준비돼
+  있지만(`publishArticleToBlogspot.ts`), 켜는 기준은 "원고·이미지 품질이 보장됐다"는 **사용자
+  판단**이다. 코드가 준비돼도 사용자 승인 전에는 `BLOGGER_ENABLED`/`BLOGGER_AUTO_PUBLISH`를
+  건드리지 않는다. `BLOGGER_PUBLISH_AS_DRAFT`는 true 유지(1단계는 비공개 초안까지).
 
 ## 승인 없이는 금지
 
@@ -78,6 +85,8 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 
 ## 현재 핵심 문서
 
+- Blogspot 단독 운영 재설계: `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`
+- 진척 원장(데일리 데스크 대시보드가 읽는다): `docs/ai-handoff/PROGRESS.md`
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
 - 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`

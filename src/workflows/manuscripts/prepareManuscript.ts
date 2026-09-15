@@ -1,30 +1,27 @@
-// 승인된 job 1건 -> 배정된 채널(티스토리 또는 블로그스팟) 원고 1건 준비 (반자동 업로드 대체,
-// 2026-09-05; 채널 전담제 개편 2026-09-07).
+// 승인된 job 1건 -> Blogspot 원고 1건 준비 (반자동 업로드 대체, 2026-09-05).
 //
-// 채널은 job.category로 정해진다(config/channelRouting.ts) - 사회 이슈는 티스토리, 연예·OTT는
-// 블로그스팟, 커뮤니티 화제는 키워드 내용으로 둘 중 하나. 배정표에 없는 카테고리(육아 등)면 실패
-// 처리한다 - 육아는 애초에 수집 단계에서 걸러지므로(config/keywordExclusionRules.ts) 정상 운영에서는
-// 도달하지 않지만, 과거에 이미 만들어진 job 등을 방어적으로 처리한다.
+// 2026-09-15 Blogspot 단독 운영 결정(BLOGSPOT_ONLY_DESIGN.md)으로 채널 배정이 사라졌다.
+// 예전에는 config/channelRouting.ts가 job.category로 티스토리/블로그스팟을 갈랐고, 배정표에
+// 없는 카테고리는 실패였다. 이제 모든 원고가 Blogspot으로 간다 - 실패 경로가 하나 줄었다.
 //
-// 네이버는 이번 개편에서 완전히 뺐다(사용자가 별도 프로세스로 재설계 예정, 2026-09-07) - 작성 단계
-// 산출물(platform=null article, 예전에 "네이버 기준 원고"라 부르던 것)은 여전히 존재하지만 그 자체로
-// 채널이 되지는 않고, 배정된 채널의 배리에이션을 만드는 재료로만 쓴다.
-//
-// 기존 publishArticleToBlogspot.ts/publishArticleToTistory.ts 안에 있던 배리에이션 생성 로직
-// (generateArticleVariant)을 발행과 분리해 이 단계에서만 돈다. Playwright/API 업로드는 하지 않는다 -
-// 결과를 로컬 .md 파일로 저장해 사람이 직접 복사해 붙여넣는다.
+// 작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고 Blogspot 배리에이션을
+// 만드는 재료로만 쓴다. Playwright/API 업로드는 여기서 하지 않는다 - 결과를 로컬 .md 파일로
+// 저장해 사람이 뷰어에서 복사해 붙여넣는다(자동 업로드는 품질 확인 후 별도 단계).
 //
 // 배리에이션 article이 DB에 이미 있으면(재실행, 또는 과거 발행 시도 잔재) 재사용해 LLM 비용을
-// 아낀다 - publishArticleToBlogspot.ts와 같은 이유(§주석)로, articles 테이블 자체에는
-// searchDescription/slug/tags 컬럼이 없어 재사용 경로에서 article row만 봐서는 이 값들을 알 수
-// 없다. 대신 최초 생성 시 job.metadata.channelMeta.<channel>에 함께 적어 두고, 재사용 시 거기서
-// 복구한다(2026-09-15 - 태그가 재사용마다 0개로 비어 원고 페이지 하단 해시태그 줄이 안 나오던
-// 문제를 사용자가 리포트해서 발견). article_jobs.metadata는 jsonb라 마이그레이션 없이 바로 쓴다.
+// 아낀다 - articles 테이블 자체에는 searchDescription/slug/tags 컬럼이 없어 재사용 경로에서
+// article row만 봐서는 이 값들을 알 수 없다. 대신 최초 생성 시 job.metadata.channelMeta.blogspot에
+// 함께 적어 두고, 재사용 시 거기서 복구한다(2026-09-15 - 태그가 재사용마다 0개로 비어 원고
+// 페이지 하단 해시태그 줄이 안 나오던 문제를 사용자가 리포트해서 발견). article_jobs.metadata는
+// jsonb라 마이그레이션 없이 바로 쓴다. 키 이름 `channelMeta.blogspot`은 과거 job의 값을 그대로
+// 읽기 위해 유지한다(이름만 남은 화석 - 채널 개념은 없다).
+//
+// 이미지 자동 생성은 여기서 원고가 확정된 직후에 한 번 돈다(BLOGSPOT_ONLY_DESIGN.md §3-2) -
+// 승인된 원고에만 비용을 쓰기 위해서다. best-effort라 실패해도 원고 준비는 success로 끝낸다.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, relative } from "node:path";
 
-import { resolvePublishChannel } from "../../config/channelRouting.js";
 import { manuscriptFilePath, PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import {
@@ -32,36 +29,48 @@ import {
   listArticlesByJobId,
 } from "../../services/supabase/repositories/articleRepository.js";
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
-import type { GenerateArticleVariantResult, VariantChannel } from "../writing/generateArticleVariant.js";
-import type { ManuscriptChannelEntry, ManuscriptTopicEntry } from "./manuscriptManifest.js";
+import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
+import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
+import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 
-/** job.metadata.channelMeta.<channel>에 저장하는 형태 - articles 테이블에 없는 필드를 보존한다. */
-type ChannelMetaEntry = { searchDescription: string | null; slug: string | null; tags: string[] };
-type ChannelMetaMap = Partial<Record<VariantChannel, ChannelMetaEntry>>;
+/** platform 컬럼 값이자 metadata.channelMeta의 키. 채널 개념은 없지만 과거 행 호환으로 유지한다. */
+export const BLOGSPOT_PLATFORM = "blogspot";
 
-export type PrepareChannelManuscriptsResult =
-  | { status: "success"; topic: ManuscriptTopicEntry }
+/** job.metadata.channelMeta.blogspot에 저장하는 형태 - articles 테이블에 없는 필드를 보존한다. */
+type ChannelMetaEntry = { searchDescription: string | null; slug: string | null; tags: string[] };
+type ChannelMetaMap = Record<string, ChannelMetaEntry>;
+
+export type PrepareManuscriptResult =
+  | { status: "success"; topic: ManuscriptTopicEntry; imageFailures: string[] }
   | { status: "failed"; reason: string };
 
-export type PrepareChannelManuscriptsOptions = {
+export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
   createVariantArticle?: (input: {
     jobId: string;
-    channel: VariantChannel;
     title: string;
     content: string;
     aiModel: string | null;
   }) => Promise<ArticleRow>;
   generateVariant?: (input: {
-    channel: VariantChannel;
     category: string | null;
     baseTitle: string;
     baseBody: string;
   }) => Promise<GenerateArticleVariantResult>;
   writeManuscriptFile?: (path: string, content: string) => Promise<void>;
-  /** 새로 생성한 채널 배리에이션의 searchDescription/slug/tags를 job.metadata에 보존(재사용 시 복구용). */
+  /** 새로 생성한 배리에이션의 searchDescription/slug/tags를 job.metadata에 보존(재사용 시 복구용). */
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
+  /** 이미지 자동 생성. 기본은 generateManuscriptImages. false를 주면 건너뛴다(테스트/재실행). */
+  generateImages?:
+    | false
+    | ((input: {
+        jobId: string;
+        keyword: string;
+        date: string;
+        body: string;
+        imagePrompts: string[];
+      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
   /** 테스트 주입용. 기본은 현재 시각(Asia/Seoul). */
   now?: () => Date;
 };
@@ -99,7 +108,7 @@ function reinsertImagePrompts(body: string, imagePrompts: string[]): string {
 /**
  * job.metadata.imagePrompts는 parseDraftFile.ts가 본문에서 빼낸 "[IMAGE PROMPT: ...]" 지시를
  * 등장 순서대로 담은 배열이다(runArticleJob.ts). 기준 원고와 배리에이션 모두 같은 순서로
- * "[IMAGE: 설명]" 마커를 남기므로(generateArticleVariant.ts 프롬프트 지시) 배정된 채널도 같은
+ * "[IMAGE: 설명]" 마커를 남기므로(generateArticleVariant.ts 프롬프트 지시) 배리에이션도 같은
  * imagePrompts를 그대로 쓴다 - 실제 대응은 parseManuscriptBlocks가 마커 개수와 대조해 검증한다.
  */
 function readImagePrompts(job: ArticleJobRow): string[] {
@@ -107,7 +116,7 @@ function readImagePrompts(job: ArticleJobRow): string[] {
   return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string") : [];
 }
 
-function frontMatterFile(entry: Omit<ManuscriptChannelEntry, "filePath">): string {
+function frontMatterFile(entry: Omit<ManuscriptEntry, "filePath">): string {
   const tagsLine = entry.tags.length > 0 ? entry.tags.join(", ") : "";
   return [
     "---",
@@ -127,25 +136,22 @@ async function defaultWriteManuscriptFile(path: string, content: string): Promis
   await writeFile(path, content, "utf8");
 }
 
-export async function prepareChannelManuscripts(
+export async function prepareManuscript(
   job: ArticleJobRow,
-  options: PrepareChannelManuscriptsOptions = {}
-): Promise<PrepareChannelManuscriptsResult> {
+  options: PrepareManuscriptOptions = {}
+): Promise<PrepareManuscriptResult> {
   const loadArticles = options.loadArticles ?? listArticlesByJobId;
   const createVariantArticle =
     options.createVariantArticle ??
-    (({ jobId, channel, title, content, aiModel }) =>
-      createArticle({ job_id: jobId, title, content, status: "approved", ai_model: aiModel, platform: channel }));
+    (({ jobId, title, content, aiModel }) =>
+      createArticle({ job_id: jobId, title, content, status: "approved", ai_model: aiModel, platform: BLOGSPOT_PLATFORM }));
   const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const writeManuscriptFile = options.writeManuscriptFile ?? defaultWriteManuscriptFile;
   const mergeJobMetadata =
     options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
+  const generateImages =
+    options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
   const now = options.now ?? (() => new Date());
-
-  const channel = resolvePublishChannel(job.category, job.keyword);
-  if (!channel) {
-    return { status: "failed", reason: `채널 배정 불가 (category: ${job.category ?? "없음"})` };
-  }
 
   const articles = await loadArticles(job.id);
   const baseArticle = [...articles].reverse().find((a) => a.platform == null);
@@ -154,7 +160,7 @@ export async function prepareChannelManuscripts(
   const date = kstDateString(now());
   const imagePrompts = readImagePrompts(job);
 
-  const existing = [...articles].reverse().find((a) => a.platform === channel) ?? null;
+  const existing = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
   const channelMeta = (job.metadata?.channelMeta as ChannelMetaMap | undefined) ?? {};
 
   let title: string;
@@ -169,7 +175,7 @@ export async function prepareChannelManuscripts(
     // articles 테이블엔 searchDescription/slug/tags 컬럼이 없다 - 최초 생성 시 job.metadata에
     // 함께 저장해 둔 값이 있으면 여기서 복구한다(2026-09-15 이전에 만들어진 job은 이 값이 없어
     // 계속 비어 있다 - 그 경우 원고를 새로 만들어야 채워진다).
-    const saved = channelMeta[channel];
+    const saved = channelMeta[BLOGSPOT_PLATFORM];
     if (saved) {
       searchDescription = saved.searchDescription;
       slug = saved.slug;
@@ -177,50 +183,76 @@ export async function prepareChannelManuscripts(
     }
   } else {
     const result = await generateVariant({
-      channel,
       category: job.category,
       baseTitle: baseArticle.title ?? job.keyword,
       baseBody: baseArticle.content ?? "",
     });
     if (result.status !== "success") {
-      return { status: "failed", reason: `${channel} 배리에이션 실패: ${result.error}` };
+      return { status: "failed", reason: `Blogspot 원고 생성 실패: ${result.error}` };
     }
     title = result.variant.title;
     content = result.variant.body;
     searchDescription = result.variant.searchDescription;
     slug = result.variant.slug;
     tags = result.variant.tags;
-    await createVariantArticle({ jobId: job.id, channel, title, content, aiModel: baseArticle.ai_model });
+    await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
     await mergeJobMetadata(job.id, {
-      channelMeta: { ...channelMeta, [channel]: { searchDescription, slug, tags } } satisfies ChannelMetaMap,
+      channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags } } satisfies ChannelMetaMap,
     });
   }
 
-  const entry: ManuscriptChannelEntry = {
-    channel,
+  // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
+  // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
+  let images: ManuscriptImage[] = readSavedImages(job);
+  const imageFailures: string[] = [];
+  if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
+    const outcome = await generateImages({
+      jobId: job.id,
+      keyword: job.keyword,
+      date,
+      body: content,
+      imagePrompts,
+    });
+    images = outcome.images;
+    imageFailures.push(...outcome.failures);
+    if (images.length > 0) {
+      await mergeJobMetadata(job.id, { imagesReadyAt: now().toISOString(), images });
+    }
+  }
+
+  const entry: ManuscriptEntry = {
     title,
     searchDescription,
     slug,
     tags,
     body: content,
     imagePrompts,
-    filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword, channel)),
+    images,
+    filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
   };
 
   await writeManuscriptFile(
-    manuscriptFilePath(date, job.keyword, channel),
+    manuscriptFilePath(date, job.keyword),
     frontMatterFile({ ...entry, body: reinsertImagePrompts(entry.body, entry.imagePrompts) })
   );
 
   return {
     status: "success",
+    imageFailures,
     topic: {
       jobId: job.id,
       keyword: job.keyword,
       category: job.category,
       date,
       readyAt: now().toISOString(),
-      channels: [entry],
+      manuscript: entry,
     },
   };
+}
+
+/** 이전 실행이 만들어 job.metadata.images에 넣어 둔 이미지를 되살린다(재실행 시 재생성 방지). */
+function readSavedImages(job: ArticleJobRow): ManuscriptImage[] {
+  const raw = job.metadata?.images;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((i): i is ManuscriptImage => !!i && typeof i === "object" && "index" in i);
 }

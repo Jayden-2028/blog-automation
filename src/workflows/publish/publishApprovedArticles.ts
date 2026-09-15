@@ -1,23 +1,26 @@
 // approved인데 아직 발행되지 않은 job을 활성 채널로 fan-out하는 폴러. SPRINT_5_DESIGN.md §5.
 //
-// 승인 콜백 안에서 발행하지 않는 이유(§5): 티스토리 Playwright/배리에이션 LLM이 수 분 걸려
+// 2026-09-15: 이 폴러는 dormant다(CLAUDE.md 원고 파이프라인 운영 규칙 - 반자동 업로드 중단).
+// 같은 날 티스토리 운영 중단으로 티스토리 분기를 걷어냈다(BLOGSPOT_ONLY_DESIGN.md §6).
+// 네이버 분기는 사용자가 별도 프로세스로 재설계 예정이라 그대로 둔다.
+//
+// 승인 콜백 안에서 발행하지 않는 이유(§5): Playwright/배리에이션 LLM이 수 분 걸려
 // 콜백이 멈추고, 잠자기 중 죽으면 발행이 유실된다. approved는 "발행 완료"가 아니라 "발행 대기열"이고,
 // 이 폴러가 launchd 주기로 큐를 비운다. 재시도·부분성공·상한초과가 자연스럽게 처리된다.
 //
 // 채널 실패 격리: 한 채널이 실패해도 다른 채널을 막지 않는다. job.status는 활성 채널이 전부
 // "성공(또는 임시저장)"일 때만 published로 넘긴다.
 
-import { BLOGGER_CONFIG, TISTORY_CONFIG } from "../../config/publishTargets.js";
+import { BLOGGER_CONFIG } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
 import { listImagesByArticleId } from "../../services/supabase/repositories/imageRepository.js";
 import { listPublicationsByArticleId } from "../../services/supabase/repositories/publicationRepository.js";
 import { publishArticleToNaver } from "../../services/publish/publishArticleToNaver.js";
 import { BLOGSPOT_PLATFORM, publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
-import { publishArticleToTistory } from "./publishArticleToTistory.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
-export type ChannelName = "naver" | "blogspot" | "tistory";
+export type ChannelName = "naver" | "blogspot";
 
 export type ChannelOutcome =
   | { channel: ChannelName; status: "published"; url: string }
@@ -38,7 +41,6 @@ export type PublishApprovedArticlesOptions = {
   loadApprovedJobs?: () => Promise<ArticleJobRow[]>;
   publishNaver?: (jobId: string) => ReturnType<typeof publishArticleToNaver>;
   publishBlogspot?: (jobId: string) => ReturnType<typeof publishArticleToBlogspot>;
-  publishTistory?: (jobId: string) => ReturnType<typeof publishArticleToTistory>;
   markJobPublished?: (jobId: string) => Promise<unknown>;
   /** job이 발행 가능한 상태인지 사전 점검. 반환값이 문자열이면 그 사유로 job 전체를 건너뛴다(deferred). */
   preflight?: (job: ArticleJobRow) => Promise<string | null>;
@@ -90,7 +92,6 @@ function resolveActiveChannels(override?: ChannelName[]): ChannelName[] {
   if (override) return override;
   const channels: ChannelName[] = ["naver"]; // 반자동 임시저장 - 항상 돈다
   if (BLOGGER_CONFIG.enabled) channels.push("blogspot");
-  if (TISTORY_CONFIG.enabled) channels.push("tistory");
   return channels;
 }
 
@@ -100,7 +101,6 @@ export async function publishApprovedArticles(
   const loadApprovedJobs = options.loadApprovedJobs ?? (() => ArticleJobRepository.listByStatus("approved", 20));
   const publishNaver = options.publishNaver ?? ((jobId) => publishArticleToNaver(jobId));
   const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
-  const publishTistory = options.publishTistory ?? ((jobId) => publishArticleToTistory(jobId));
   const markJobPublished = options.markJobPublished ?? ((jobId) => ArticleJobRepository.updateStatus(jobId, "published"));
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
   const preflight = options.preflight ?? defaultPreflight;
@@ -139,7 +139,7 @@ export async function publishApprovedArticles(
           } else {
             channels.push({ channel, status: "failed", reason: r.detail });
           }
-        } else if (channel === "blogspot") {
+        } else {
           const r = await publishBlogspot(job.id);
           if (r.ok) {
             channels.push(
@@ -152,23 +152,6 @@ export async function publishApprovedArticles(
           } else if (r.reason === "disabled" || r.reason === "job_not_approved") {
             channels.push({ channel, status: "skipped", reason: r.detail });
           } else if (r.reason === "daily_limit") {
-            channels.push({ channel, status: "deferred", reason: r.detail });
-          } else {
-            channels.push({ channel, status: "failed", reason: r.detail });
-          }
-        } else {
-          // tistory: 임시저장까지만(네이버와 동일 반자동).
-          const r = await publishTistory(job.id);
-          if (r.ok) {
-            channels.push(
-              r.alreadyDone
-                ? { channel, status: "already_done", url: r.draftUrl }
-                : { channel, status: "draft", url: r.draftUrl }
-            );
-          } else if (r.reason === "disabled" || r.reason === "job_not_approved") {
-            channels.push({ channel, status: "skipped", reason: r.detail });
-          } else if (r.reason === "daily_limit" || r.reason === "login_required") {
-            // login_required: 카카오 세션 만료. 재시도 대기(로그인은 사람이 setup:tistory로).
             channels.push({ channel, status: "deferred", reason: r.detail });
           } else {
             channels.push({ channel, status: "failed", reason: r.detail });

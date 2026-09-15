@@ -1,4 +1,5 @@
-# 클라우드 이전 Phase 4(마지막 조각) - approved job의 채널 원고 준비 + manuscripts 페이지
+# 클라우드 이전 Phase 4(마지막 조각) - approved job의 Blogspot 원고 준비 + 이미지 자동 생성 +
+# manuscripts 페이지
 # Cloudflare Pages 재배포(prepareApprovedManuscripts, 로컬 publish-poll이 10분 주기 폴링으로
 # 하던 일).
 #
@@ -13,6 +14,11 @@
 # Cloudflare Pages 배포(deployManuscriptsPage.ts, npx wrangler pages deploy)에 필요한 시크릿
 # 3종(CLOUDFLARE_API_TOKEN/ACCOUNT_ID/PAGES_PROJECT_NAME)이 필요 - 기존 Pages 배포용 토큰 재사용
 # (Workers 토큰과 다름, 이미 로컬 .env에 있던 것 그대로).
+#
+# 2026-09-15 이미지 자동 생성(BLOGSPOT_ONLY_DESIGN.md §3): 원고가 확정된 직후 여기서 함께 돈다.
+# **기본은 꺼져 있다** - 유료 API라 MANUSCRIPT_IMAGE_GENERATION vars가 "true"이고 OPENAI_API_KEY
+# 또는 GEMINI_API_KEY secret이 있어야 실제로 호출한다. 비교 기간(IMAGE_AB_COMPARE)에는 프롬프트
+# 1개당 2장을 만들므로 호출이 2배다 - 고른 뒤 vars에서 false로 내린다.
 
 name: job-publish-prepare
 
@@ -53,4 +59,10 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MANUSCRIPT_IMAGE_GENERATION: ${{ vars.MANUSCRIPT_IMAGE_GENERATION }}
+          IMAGE_AB_COMPARE: ${{ vars.IMAGE_AB_COMPARE }}
+          IMAGE_PROVIDER: ${{ vars.IMAGE_PROVIDER }}
+          IMAGE_MAX_PER_ARTICLE: ${{ vars.IMAGE_MAX_PER_ARTICLE }}
         run: npm run job:publish-poll

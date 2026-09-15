@@ -33,14 +33,16 @@ export function draftFilePath(keyword: string, suffix?: string): string {
   return resolve(PIPELINE_ROOT, "drafts", `${name}.md`);
 }
 
-// ---------- 채널별 원고(반자동 업로드 대체) ----------
-// 승인된 job마다 배정된 채널 원고를 로컬 .md 파일로도 저장(사람이 직접 열어볼 때용 참고 사본)하고,
-// 이를 한 화면에서 열람·복사할 수 있는 index.html을 만든다. 목록 자체(어떤 job이 준비됐는지, 본문
+// ---------- 원고 보관(반자동 업로드 대체) ----------
+// 승인된 job마다 원고를 로컬 .md 파일로도 저장(사람이 직접 열어볼 때용 참고 사본)하고, 이를 한
+// 화면에서 열람·복사할 수 있는 index.html을 만든다. 목록 자체(어떤 job이 준비됐는지, 본문
 // 인라인 포함)의 단일 소스는 Supabase manuscript_manifest_topics 테이블이다(manuscriptManifest.ts,
 // 2026-09-15 - GitHub Actions처럼 매번 새 컴퓨터에서 도는 실행 환경에서는 로컬 파일이 공유되지
 // 않아 목록이 유실되는 사고가 있었다).
-
-export type ManuscriptChannel = "naver" | "tistory" | "blogspot";
+//
+// 2026-09-15 Blogspot 단독 운영 결정(BLOGSPOT_ONLY_DESIGN.md)으로 경로에서 채널 단계가 빠졌다.
+// 예전: manuscripts/<날짜>/<주제>/<채널>.md  ->  지금: manuscripts/<날짜>/<주제>.md
+// 주제 디렉터리는 그 주제의 이미지를 담는 용도로 남는다(manuscriptImageDir).
 
 export const MANUSCRIPTS_DIR = "manuscripts";
 
@@ -48,8 +50,13 @@ export function manuscriptTopicDir(date: string, keyword: string): string {
   return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, date, keywordSlug(keyword));
 }
 
-export function manuscriptFilePath(date: string, keyword: string, channel: ManuscriptChannel): string {
-  return resolve(manuscriptTopicDir(date, keyword), `${channel}.md`);
+export function manuscriptFilePath(date: string, keyword: string): string {
+  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, date, `${keywordSlug(keyword)}.md`);
+}
+
+/** 그 주제의 생성 이미지를 로컬에 미러링하는 디렉터리(npm run sync:images). */
+export function manuscriptImageDir(date: string, keyword: string): string {
+  return manuscriptTopicDir(date, keyword);
 }
 
 export function manuscriptIndexPagePath(): string {

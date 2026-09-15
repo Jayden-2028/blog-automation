@@ -33,15 +33,23 @@ function successResult(j: ArticleJobRow): JobManuscriptsResult {
     job: j,
     result: {
       status: "success",
+      imageFailures: [],
       topic: {
         jobId: j.id,
         keyword: j.keyword,
         category: j.category,
         date: "2026-09-06",
         readyAt: "2026-09-06T00:00:00Z",
-        channels: [
-          { channel: "naver", title: "제목", searchDescription: null, slug: null, tags: [], body: "본문", imagePrompts: [], filePath: "x" },
-        ],
+        manuscript: {
+          title: "제목",
+          searchDescription: null,
+          slug: null,
+          tags: [],
+          body: "본문",
+          imagePrompts: [],
+          images: [],
+          filePath: "x",
+        },
       },
     },
   };
@@ -56,11 +64,11 @@ async function main(): Promise<void> {
   assert(m1.text.includes("manuscripts/index.html") || m1.text.includes("<code>"), "미설정이면 로컬 경로 문구가 있어야 한다");
   console.log("✅ Cloudflare 미설정 -> 로컬 경로 텍스트 폴백");
 
-  // 2) Cloudflare 설정됨 -> 딥링크 버튼(jobId:channel), 로컬 경로 문구 없음
+  // 2) Cloudflare 설정됨 -> 딥링크 버튼(#jobId), 로컬 경로 문구 없음
   const m2 = buildManuscriptReadyMessage(successResult(job("b")), "https://test-project.pages.dev");
-  assert(m2.replyMarkup?.inline_keyboard[0][0].url === "https://test-project.pages.dev/#b:naver", `딥링크 URL 실패 (${JSON.stringify(m2.replyMarkup)})`);
+  assert(m2.replyMarkup?.inline_keyboard[0][0].url === "https://test-project.pages.dev/#b", `딥링크 URL 실패 (${JSON.stringify(m2.replyMarkup)})`);
   assert(!m2.text.includes("manuscripts/index.html"), "설정됐으면 로컬 경로 문구가 없어야 한다");
-  console.log("✅ Cloudflare 설정됨 -> #jobId:channel 딥링크 버튼");
+  console.log("✅ Cloudflare 설정됨 -> #jobId 딥링크 버튼");
 
   // 3) 실패 케이스는 URL 설정 여부와 무관하게 항상 같은 형태
   const failed: JobManuscriptsResult = { job: job("c"), result: { status: "failed", reason: "타임아웃" } };

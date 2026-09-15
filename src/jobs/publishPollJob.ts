@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   let hadFailure = false;
   for (const { job, result } of results) {
     if (result.status === "success") {
-      console.log(`   ✅ ${job.keyword} - 채널 ${result.topic.channels.length}개 준비 완료`);
+      console.log(`   ✅ ${job.keyword} - 원고 준비 완료(이미지 ${result.topic.manuscript.images.length}장)`);
     } else {
       console.log(`   ❌ ${job.keyword} - ${result.reason}`);
       hadFailure = true;

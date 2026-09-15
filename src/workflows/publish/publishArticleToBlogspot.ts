@@ -88,9 +88,7 @@ export async function publishArticleToBlogspot(
     (({ articleId, status, publishedUrl }) =>
       createPublication({ article_id: articleId, platform: BLOGSPOT_PLATFORM, status, published_url: publishedUrl }));
   const countToday = options.countToday ?? countTodayPublicationsByPlatform;
-  const generateVariant =
-    options.generateVariant ??
-    ((input) => generateArticleVariant({ channel: "blogspot", ...input }));
+  const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const insertPost = options.insertPost ?? ((input) => new BloggerClient().insertPost(input));
 
   const job = await loadJob(jobId);

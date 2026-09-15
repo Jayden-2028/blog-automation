@@ -14,7 +14,6 @@ import type { ChannelName, JobPublishResult } from "./publishApprovedArticles.js
 const CHANNEL_LABEL: Record<string, string> = {
   naver: "🟢 네이버",
   blogspot: "🔵 Blogspot",
-  tistory: "🟠 티스토리",
 };
 
 const STATUS_LINE: Record<string, string> = {
@@ -73,11 +72,8 @@ export function buildMultiPublishMessage(result: JobPublishResult): TelegramOutg
   }
   lines.push(
     "",
-    "네이버·티스토리·Blogspot 모두 임시저장(draft)까지입니다. 본문 [IMAGE: ...] 자리에 이미지를 삽입한 뒤 앱/편집화면에서 직접 '발행'을 눌러주세요."
+    "네이버·Blogspot 모두 임시저장(draft)까지입니다. 본문 [IMAGE: ...] 자리에 이미지를 삽입한 뒤 앱/편집화면에서 직접 '발행'을 눌러주세요."
   );
-  if (channels.some((c) => c.channel === "tistory" && (c.status === "draft" || c.status === "already_done"))) {
-    lines.push("(티스토리 임시저장 글은 글쓰기 화면 하단 '임시저장' 숫자 버튼을 눌러 목록에서 확인)");
-  }
 
   return {
     text: lines.join("\n"),

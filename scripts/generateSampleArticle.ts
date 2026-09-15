@@ -98,19 +98,17 @@ async function main(): Promise<void> {
     "utf-8"
   );
 
-  // 3) 티스토리 / 블로그스팟 배리에이션
-  for (const channel of ["tistory", "blogspot"] as const) {
-    console.log(`\n3) ${channel} 배리에이션 생성 중 (claude -p, 수 분)...`);
-    const t0 = Date.now();
-    const v = await generateArticleVariant({ channel, category, baseTitle: base.title, baseBody: base.body });
-    if (v.status !== "success") {
-      console.error(`   ${channel} 실패:`, v.error);
-      continue;
-    }
+  // 3) Blogspot 배리에이션 (2026-09-15 단독 운영 - 채널 루프가 사라졌다)
+  console.log("\n3) Blogspot 배리에이션 생성 중 (claude -p, 수 분)...");
+  const t0 = Date.now();
+  const v = await generateArticleVariant({ category, baseTitle: base.title, baseBody: base.body });
+  if (v.status !== "success") {
+    console.error("   Blogspot 실패:", v.error);
+  } else {
     console.log(`   ${Math.round((Date.now() - t0) / 1000)}초, 제목: "${v.variant.title}", 본문 ${v.variant.body.length}자, 태그 ${v.variant.tags.length}개`);
     writeFileSync(
-      `${dir}/02-${channel}.md`,
-      `# ${v.variant.title}\n\n> ${channel} 배리에이션` +
+      `${dir}/02-blogspot.md`,
+      `# ${v.variant.title}\n\n> Blogspot 배리에이션` +
         `\n> slug: ${v.variant.slug ?? "-"}` +
         `\n> searchDescription: ${v.variant.searchDescription ?? "-"}` +
         `\n> tags: ${v.variant.tags.join(", ")}\n\n---\n\n${v.variant.body}`,

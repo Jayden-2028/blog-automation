@@ -10,6 +10,11 @@ export type UploadArticleImageInput = {
   jobId: string;
   /** 같은 job에 이미지가 여러 장이므로 순번을 파일명에 넣는다. */
   index: number;
+  /**
+   * 같은 순번의 이미지를 여러 벌 올릴 때 파일명을 가르는 꼬리표(2026-09-15 A/B 비교).
+   * 예: index=1 + variant="openai" -> "1-openai.png". 없으면 예전처럼 "1.png".
+   */
+  variant?: string;
   imageBuffer: Buffer;
   mimeType: string;
 };
@@ -23,7 +28,8 @@ function extensionFor(mimeType: string): string {
 }
 
 export async function uploadArticleImage(input: UploadArticleImageInput): Promise<UploadArticleImageResult> {
-  const path = `${input.jobId}/${input.index}.${extensionFor(input.mimeType)}`;
+  const name = input.variant ? `${input.index}-${input.variant}` : String(input.index);
+  const path = `${input.jobId}/${name}.${extensionFor(input.mimeType)}`;
 
   const { error: uploadError } = await supabase.storage
     .from(ARTICLE_IMAGES_BUCKET)
