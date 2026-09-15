@@ -22,8 +22,10 @@ on:
         required: true
         type: string
 
+# job-research.yml과 같은 전역 그룹(heavy-pipeline) - 2026-09-15 발견 사고 참고
+# (job-research.yml의 concurrency 주석). 자료조사·집필·수정재작성이 서로도 겹치지 않게 한다.
 concurrency:
-  group: job-revise-${{ inputs.job_id }}
+  group: heavy-pipeline
   cancel-in-progress: false
 
 jobs:

@@ -27,8 +27,16 @@ permissions:
   contents: read
   actions: write
 
+# job별이 아니라 전역 1개 그룹이다(2026-09-15 발견) - 텔레그램에서 Go를 연달아 누르면
+# job-research 실행이 여러 개 동시에 GH Actions 러너에서 도는데, 같은 Claude 구독 계정의
+# claude -p 자원을 나눠 쓰면서 개별 조사가 평소보다 오래 걸려 18분 타임아웃(RESEARCH_TIMEOUT_MS)에
+# 걸렸다(96a224e9... job, 4건 동시 실행 중 1건만 18분22초 걸려 실패, 나머지 3건은 6~8분).
+# job-write.yml/job-revise.yml과 같은 그룹 이름(heavy-pipeline)을 써서 셋이 서로도 겹치지
+# 않게 한다 - 예전 로컬 heavyPipelineLock.ts(단일 파일 락, 클라우드 이전 후 무력화됨)가 하려던
+# 것을 GitHub Actions 자체의 큐로 대체한다. 대기 시간은 job의 timeout-minutes에 포함되지 않는다
+# (큐에서 대기하는 동안은 타이머가 안 돎).
 concurrency:
-  group: job-research-${{ inputs.job_id }}
+  group: heavy-pipeline
   cancel-in-progress: false
 
 jobs:
