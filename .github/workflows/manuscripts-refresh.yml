@@ -1,0 +1,58 @@
+# 원고 뷰어(렌더러) 코드가 main에 들어오면 페이지를 자동으로 다시 그려 배포한다.
+#
+# 왜 필요한가(2026-09-16 실측 사고): 원고 페이지는 "승인 원고를 실제로 처리할 때만" 다시 그려지고
+# 배포됐다(prepareApprovedManuscripts.ts의 `if (manifest)` - 처리한 job이 0건이면 렌더도 배포도
+# 건너뜀). 그래서 09-15 15:26의 뷰어 전면 재설계가 배포되지 않은 채, 그보다 33분 앞선 14:53에
+# 만들어진 옛 HTML이 12시간 가까이 운영에 떠 있었다. 사용자가 "화면이 그대로"라고 리포트하기
+# 전까지 아무 경고도 없었다 - 디자인만 바뀐 변경은 다음 원고 승인을 하염없이 기다리는 구조였다.
+#
+# 이 워크플로우는 렌더 결과에 영향을 주는 파일이 바뀐 push에만 반응해
+# `manuscripts:build -- --refresh`를 돌린다. 저장된 manifest(Supabase)만 읽어 페이지를 다시 그리고
+# 배포할 뿐, LLM·이미지 생성을 전혀 호출하지 않고 DB 원고 데이터도 바꾸지 않는다(비용 0).
+# 그래서 claude CLI 설치 단계도 없다 - job-publish-prepare.yml보다 훨씬 가볍고 빠르다.
+
+name: manuscripts-refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # 페이지 HTML 산출에 직접 영향을 주는 파일들만. 여기 없는 파일이 뷰어 모양을 바꾸게 되면
+      # 이 목록도 같이 늘려야 한다(안 늘리면 또 조용히 반영 안 되는 그 사고가 재현된다).
+      - "src/workflows/manuscripts/renderManuscriptPage.ts"
+      - "src/workflows/manuscripts/parseManuscriptBlocks.ts"
+      - "src/workflows/manuscripts/manuscriptManifest.ts"
+      - "src/workflows/manuscripts/buildManuscriptPageCli.ts"
+      - "src/workflows/manuscripts/deployManuscriptsPage.ts"
+      - ".github/workflows/manuscripts-refresh.yml"
+  workflow_dispatch: {}
+
+# 렌더는 멱등이다(항상 "지금 DB 상태"를 그린다) - 여러 push가 몰리면 마지막 것만 돌면 충분하고,
+# 앞선 실행이 취소돼도 잃는 게 없다. job-research/write 쪽에서 취소가 위험했던 이유(취소된 job의
+# 작업 자체가 영영 사라짐)가 여기엔 해당하지 않아 cancel-in-progress를 켠다.
+concurrency:
+  group: manuscripts-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run manuscripts:build -- --refresh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+        run: npm run manuscripts:build -- --refresh
