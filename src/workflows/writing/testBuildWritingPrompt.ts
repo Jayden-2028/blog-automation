@@ -18,6 +18,8 @@ function main(): void {
   });
 
   assert(prompt.includes("prompts/writing/writer.md"), "writer.md를 Read하라는 지시");
+  assert(prompt.includes("prompts/writing/rules/facts-and-hedging.md"), "구조 분리된 사실·헤지 규칙 파일을 Read하라는 지시(2026-09-15)");
+  assert(prompt.includes("prompts/writing/rules/output-format.md"), "구조 분리된 출력 형식 계약 파일을 Read하라는 지시(2026-09-15)");
   assert(prompt.includes("docs/seo-guide.md"), "seo-guide.md 참조");
   assert(prompt.includes("/repo/research/한강-불꽃축제-2026.md"), "자료조사 파일 경로가 사실 출처로 명시");
   assert(prompt.includes("/repo/drafts/한강-불꽃축제-2026.md"), "정확한 출력 경로가 박혀 있어야 한다");

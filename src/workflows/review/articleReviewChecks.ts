@@ -286,3 +286,62 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
 
   return checks;
 }
+
+// ---------- 인용/헤지 문체 (2026-09-15) ----------
+//
+// writer.md §4/§4-1/§4-2가 금지하는 세 가지 패턴을 규칙으로 한 번 더 잡는다. 프롬프트 준수만으로는
+// 부족하다는 게 실측으로 나왔다(CURRENT_STATE.md 2026-09-15, "경복궁 구멍 뚫기" 원고) - writer.md가
+// 620줄을 넘어가면서 §4-1/§4-2에 예시까지 박아뒀는데도 모델이 놓친 사례가 나왔다. 여기 걸려도
+// 차단은 아니고 다른 검사와 같이 참고용이다(설계 6절과 동일한 원칙).
+
+/** "보도에 따르면"류 인용 표시. §4 표는 처음 1회는 자연스럽다고 허용하므로 2회 이상만 문제다. */
+const REPEATED_ATTRIBUTION_PATTERN = /라고\s*보도(?:됐|했|되었|하였)|보도에\s*따르면|라고\s*전(?:해졌|했)/g;
+
+/** 보도 경위(누가 언제·몇 곳이 보도했는지) 서술. §4-2. */
+const COVERAGE_NARRATIVE_PATTERN =
+  /인용해\s*전(?:한|했)|취재진이\s*확보|함께\s*보도(?:했|됐)|보도로\s*확산|이어\s*[^.!?\n]{0,12}보도(?:했|됐)/g;
+
+/**
+ * 부분 데이터 갭을 대조로 알리는 문장. §4-1.
+ * "아직 공개되지 않았습니다"처럼 승인된 단일 서술은 안 걸리게, 대조를 만드는
+ * "별도로/따로/구체적으로 + 안 나왔다" 조합만 잡는다(오탐 축소 - 2026-09-15 실측 문구 기준).
+ */
+const PARTIAL_GAP_CONTRAST_PATTERN = /(?:별도로|따로|구체적으로)\s*(?:나오지|제시되지|확인되지|언급되지)\s*않았/g;
+
+/** 참고 자료 이후는 남의 글 링크 제목이라 대상이 아니다(stripReferencesSection과 같은 이유). */
+export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+  const body = stripReferencesSection(rawBody);
+  const checks: ReviewCheck[] = [];
+
+  const attributionMatches = body.match(REPEATED_ATTRIBUTION_PATTERN);
+  if (attributionMatches && attributionMatches.length >= 2) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `"보도에 따르면/~라고 보도했다"류 인용 표현이 ${attributionMatches.length}회 반복됩니다(writer.md §4 - 1회만 자연스럽게 허용)`,
+    });
+  }
+
+  // 전역(g) 정규식의 lastIndex는 .test() 호출 사이에 상태가 남는다 - 매번 0으로 되돌린다
+  // (checkLegal의 SPECULATIVE_PATTERNS와 같은 이유).
+  COVERAGE_NARRATIVE_PATTERN.lastIndex = 0;
+  if (COVERAGE_NARRATIVE_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: "보도 경위(어느 매체가 언제·몇 곳 보도했는지)를 본문에 서술한 것으로 보입니다(writer.md §4-2)",
+    });
+  }
+
+  PARTIAL_GAP_CONTRAST_PATTERN.lastIndex = 0;
+  if (PARTIAL_GAP_CONTRAST_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '자료에 없는 항목을 "별도로/따로 나오지 않았다"처럼 대조해서 언급한 것으로 보입니다(writer.md §4-1)',
+    });
+  }
+
+  return checks;
+}

@@ -16,6 +16,11 @@
 //   "`##`를 유지하라"고 오버라이드했는데, writer.md 쪽 규칙만 바뀌고 이 파일은 안 바뀌어서
 //   실제 발행되는 네이버 기준 원고만 계속 `##`로 나오는 결함이 있었다(실측, 2026-09-06).
 // - 사실 출처는 research/[키워드].md 하나뿐 - 웹 검색 없음(감사기록 유지).
+//
+// 2026-09-15: writer.md(654줄)를 구조 분리했다(원고 퀄리티 점검 - 사실 태도 규칙이 형식 규칙
+// 사이에 묻혀 새 모양의 위반을 못 잡은 사례가 나왔다). §4는 rules/facts-and-hedging.md, §6~10은
+// rules/output-format.md로 옮겼다. 이 프롬프트도 세 파일을 모두 Read하도록 갱신했다 - 하나라도
+// 빠지면 사실 태도나 출력 형식 규칙이 조용히 누락된다.
 
 import type { ArticleJobRow } from "../../types/database.js";
 
@@ -52,8 +57,10 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "너는 네이버 블로그 원고를 쓰는 편집자다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",
     "규격이나 자료조사 파일을 못 읽으면 draft 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
     "",
-    "- prompts/writing/writer.md   (문체·구조·사실 태도·규칙 충돌 해소·저장 전 체크리스트)",
-    "- docs/seo-guide.md           (제목·본문·키워드·이미지·태그 규칙)",
+    "- prompts/writing/writer.md                       (라우팅·입력 계약·제목·저장 전 체크리스트)",
+    "- prompts/writing/rules/facts-and-hedging.md      (사실 태도·헤지 금지 - 항상 최우선, 구 §4)",
+    "- prompts/writing/rules/output-format.md          (출력 형식 계약 - 구 §6~10, 코드와 직결)",
+    "- docs/seo-guide.md                                (제목·본문·키워드·이미지·태그 규칙)",
     `- ${styleFile}   (이 카테고리의 실제 발행 최종본 기반 문체·구조 - 반드시 이 목소리로 쓴다)`,
     `- ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
     "",
