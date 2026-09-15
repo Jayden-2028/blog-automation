@@ -202,6 +202,14 @@ alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
   교환 + 대상 블로그 접근까지 실측 검증.
 - 대상 블로그 확인: blog ID `6088186200818704009` = **"남매둥이 우아 아빠의 육아 생활"**
   (`https://wooahpapa.blogspot.com/`).
+  - ⚠️ **2026-09-16 변경**: 대상 블로그가 **`1894600431607107632` = "왜지금"
+    (`https://whynowissue.blogspot.com/`)** 으로 바뀌었다(`.env`의 `BLOGGER_BLOG_ID` 갱신 완료,
+    기존 refresh token으로 접근 가능한 것까지 실측 확인). 위 `wooahpapa`는 네이버+블로그스팟
+    듀얼 운영 시절의 블로그다 - 이후 카테고리별 채널 분담(육아=네이버 / 사회=티스토리 /
+    엔터=블로그스팟)을 거쳐, 티스토리 운영 중단(2026-09-15)으로 **육아(네이버, 별도 프로젝트로
+    분리)를 뺀 나머지 전부가 "왜지금" 한 곳**으로 모였다. 코드는 09-15에 Blogspot 단독으로
+    바뀌었는데 blog ID만 옛 값으로 남아 있었다 - `BLOGGER_ENABLED`를 켰다면 엉뚱한 블로그에
+    발행됐을 상태였다.
 - ✅ **OAuth 동의 화면 프로덕션 게시 완료**(2026-08-31) → refresh token 만료 없음. 홈페이지/
   개인정보처리방침은 Google Sites로 만들었다(`https://sites.google.com/view/blog-automation-wooahpapa/`
   + `/privacy`). blogspot.com은 public suffix라 승인 도메인으로 거부됨 - Google Sites(`google.com`
