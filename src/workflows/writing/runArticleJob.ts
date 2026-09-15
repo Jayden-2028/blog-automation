@@ -402,8 +402,16 @@ function dedupeSourceInserts(items: SourceInsert[]): SourceInsert[] {
 // ---------- 2단계: 원고 생성 ----------
 
 export type RunWritingStageOptions = {
-  /** 테스트 주입: 헤드리스 writer 실행을 대체한다. */
-  runWriter?: (prompt: string, draftPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  /**
+   * 테스트 주입: 헤드리스 writer 실행을 대체한다. rawOutput은 성공 시에도 채운다(2026-09-15) -
+   * 모델이 도구 실행 자체는 "성공"(exit 0)으로 끝냈지만 draft 파일을 안 쓴 경우(마커 형식 대신
+   * 확인 요청/거부성 응답 등, 민감한 실제 사건 소재에서 관측됨), 그 실제 응답 내용을 알 방법이
+   * 전혀 없었다 - 아래 draft 파일 유무 검사가 실패하면 이 값을 에러 메시지에 잘라 붙인다.
+   */
+  runWriter?: (
+    prompt: string,
+    draftPath: string
+  ) => Promise<{ ok: true; rawOutput: string } | { ok: false; error: string }>;
   /** 테스트 주입: draft 파일 읽기를 대체한다. */
   readDraftFile?: (path: string) => Promise<string | null>;
   /** 이미 조사된 근거를 넘기면 재수집하지 않는다. 생략하면 DB에서 먼저 찾고, 없으면 조사부터 한다. */
@@ -414,7 +422,7 @@ export type RunWritingStageOptions = {
   generateImages?: boolean;
 };
 
-async function defaultRunWriter(prompt: string): Promise<{ ok: true } | { ok: false; error: string }> {
+async function defaultRunWriter(prompt: string): Promise<{ ok: true; rawOutput: string } | { ok: false; error: string }> {
   // defaultRunResearcher와 같은 이유(위 주석 참고) - 집필도 동시에 여러 job이 detached로 뜰 수 있다.
   return runWithHeavyPipelineLock(async () => {
     const result = await runHeadlessClaude({
@@ -424,7 +432,7 @@ async function defaultRunWriter(prompt: string): Promise<{ ok: true } | { ok: fa
       cwd: PIPELINE_ROOT,
       timeoutMs: WRITE_TIMEOUT_MS,
     });
-    return result.ok ? { ok: true } : { ok: false, error: result.error };
+    return result.ok ? { ok: true, rawOutput: result.output } : { ok: false, error: result.error };
   });
 }
 
@@ -519,6 +527,11 @@ async function runWritingStageInner(
   await mkdir(dirname(draftPath), { recursive: true });
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 
+  // 모델이 draft 파일을 안 썼을 때(아래 draftText 빈 값 검사) 무슨 응답을 했길래 그랬는지 에러
+  // 메시지에 붙이려고 밖에 둔다(2026-09-15) - 민감한 실제 사건 소재에서 writer가 마커 형식 대신
+  // 확인 요청/거부성 텍스트로 응답하는 경우가 있는데, 그동안은 이 내용이 완전히 유실됐다.
+  let rawOutput: string | null = null;
+
   if (fileModifiedWithin(draftPath, 2 * 60 * 60 * 1000)) {
     console.log(`ℹ️ [writing] 최근 draft 파일 재사용(재작성 생략): ${draftPath}`);
   } else {
@@ -536,13 +549,15 @@ async function runWritingStageInner(
       // status는 되돌리지 않는다(writing 유지) - 이미 모은 근거·자료조사 파일은 재사용할 수 있다.
       return { status: "failed", error: ran.error };
     }
+    rawOutput = ran.rawOutput;
   }
   const durationMs = Date.now() - startedAt;
 
   const readDraftFile = options.readDraftFile ?? defaultReadDraftFile;
   const draftText = await readDraftFile(draftPath);
   if (!draftText || draftText.trim().length === 0) {
-    const error = `writer가 draft 파일을 만들지 않았습니다: ${draftPath}`;
+    const outputSnippet = rawOutput ? ` - 모델 응답: ${rawOutput.trim().slice(0, 500)}` : "";
+    const error = `writer가 draft 파일을 만들지 않았습니다: ${draftPath}${outputSnippet}`;
     await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${error}` });
     return { status: "failed", error };
   }
