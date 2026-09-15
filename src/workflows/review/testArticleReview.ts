@@ -8,7 +8,7 @@
 //   3. 프롬프트가 요구한 작성 시점 명시 문구가 미검출 날짜로 잡힘
 //   4. 평문 URL 출처를 링크 없음으로 오판
 
-import { checkAdDisclosure, checkFacts, checkLegal, checkQuality } from "./articleReviewChecks.js";
+import { checkAdDisclosure, checkAttributionHedging, checkFacts, checkLegal, checkQuality } from "./articleReviewChecks.js";
 import { formatReviewLines, runArticleReview } from "./runArticleReview.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -213,6 +213,42 @@ function main(): void {
   });
   assert(duplicated.some((c) => c.message.includes("중복 문장")), "중복 문장을 경고해야 한다");
   console.log("✅ 품질: 중복 문장 탐지");
+
+  // ---------- 인용/헤지 문체(2026-09-15, "경복궁 구멍 뚫기" 원고 실측) ----------
+
+  // 15-1) "~라고 보도했다"류가 1회면 자연스러운 표시로 보고 통과한다(writer.md §4).
+  const singleAttribution = checkAttributionHedging("문화재청은 원상 복구 공사에 들어간다고 밝혔습니다. 훼손 원인의 60%는 관람객 요인으로 나타났습니다.");
+  assert(singleAttribution.length === 0, `1회 인용 표시는 통과해야 한다 (실제: ${JSON.stringify(singleAttribution)})`);
+  console.log("✅ 인용/헤지: 1회 인용 표시는 오탐 아님");
+
+  // 15-2) "~라고 보도했다"류가 2회 이상 반복되면 경고한다.
+  const repeatedAttribution = checkAttributionHedging(
+    "국세청은 지급 일정을 8월 27일로 안내했다고 밝혔습니다. 이 소식은 여러 매체가 8월 27일 지급이라고 보도했습니다. " +
+      "다른 매체도 지급일이 8월 27일이라고 전했습니다."
+  );
+  assert(repeatedAttribution.some((c) => c.message.includes("반복")), "인용 표현 반복은 경고해야 한다");
+  console.log("✅ 인용/헤지: '보도에 따르면'류 반복 탐지");
+
+  // 15-3) 보도 경위(누가 언제·몇 곳 보도했는지) 서술 탐지 - 사용자가 실제로 지적한 문장 그대로.
+  const coverageNarrative = checkAttributionHedging(
+    "이 보도는 채널A 취재진이 현장에서 확보한 영상을 머니투데이가 인용해 전한 것입니다. " +
+      "같은 소식을 머니투데이 외에도 이데일리, 서플 등 여러 매체가 같은 날 함께 보도했습니다."
+  );
+  assert(coverageNarrative.some((c) => c.message.includes("보도 경위")), "보도 경위 서술을 경고해야 한다");
+  console.log("✅ 인용/헤지: 보도 경위(취재진·인용·확산) 서술 탐지");
+
+  // 15-4) 부분 데이터 갭을 대조로 알리는 문장 탐지 - 사용자가 실제로 지적한 문장 그대로.
+  const partialGap = checkAttributionHedging(
+    "다만 60%라는 구체 수치는 관람객 요인에 대해서만 제시됐고, 조류로 인한 훼손 비율은 별도로 나오지 않았습니다."
+  );
+  assert(partialGap.some((c) => c.message.includes("대조")), "부분 데이터 갭 대조 문장을 경고해야 한다");
+  console.log("✅ 인용/헤지: 부분 데이터 갭 대조 문장 탐지");
+
+  // 15-5) writer.md가 승인한 "아직 공개되지 않았습니다" 단일 서술은 오탐이 아니어야 한다
+  // (§4-1 (O) 예시 - "별도로/따로/구체적으로" 대조 접속어가 없으면 걸리지 않는다).
+  const approvedAbsence = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다. 2024년 기준으로는 1만 5,000원 안팎이었습니다.");
+  assert(approvedAbsence.length === 0, `승인된 미확정 서술은 통과해야 한다 (실제: ${JSON.stringify(approvedAbsence)})`);
+  console.log("✅ 인용/헤지: 승인된 '아직 공개되지 않았습니다' 단일 서술은 오탐 아님");
 
   // ---------- 통합 ----------
 
