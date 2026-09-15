@@ -28,12 +28,13 @@
 - [x] 텔레그램 간소화 — 키워드 20자 요약, 조사→집필 자동 연결, 수정 피드백 자동 재작성
 - [x] 전역 직렬화 — 조사·집필·재작성 GH Actions를 heavy-pipeline 그룹 1개로
 - [x] Blogspot 단독 운영 결정 + 전체 재설계 문서화
-- [ ] 티스토리 완전 삭제 + 채널 단일화 (타입·경로·manifest·배리에이션·테스트)
-- [ ] 원고 뷰어 재설계 (viewer.html 레이아웃 이식, 오렌지 포인트, 날짜→주제 2단)
-- [ ] 이미지 자동 생성 — writer 프롬프트 → 생성 → Supabase Storage
+- [x] 티스토리 완전 삭제 + 채널 단일화 (타입·경로·manifest·배리에이션·테스트)
+- [x] 원고 뷰어 재설계 (viewer.html 레이아웃 이식, 오렌지 포인트, 날짜→주제 2단)
+- [x] 뷰어에 실제 이미지 인라인 + 캡션 표 + A/B 나란히 보기
+- [x] 이미지 자동 생성 코드 — writer 프롬프트 → 생성 → Supabase Storage
+- [x] 이미지 로컬 미러 CLI (npm run sync:images)
+- [ ] 이미지 생성 켜기 — GitHub secret/variable 등록 후 첫 실측 (사용자 조치)
 - [ ] 이미지 A/B 비교 (OpenAI vs Gemini) 후 provider 확정
-- [ ] 이미지 로컬 미러 (npm run sync:images)
-- [ ] 뷰어에 실제 이미지 인라인 + 캡션 표
 - [ ] 로컬 폴더 정리 (~/blog-automation/{repo,prod,kw})
 - [ ] Blogspot 자동 업로드 — 비공개 초안까지 (품질 확인 후 착수)
 - [ ] Blogspot 자동 발행 — 공개 (별도 결정)
