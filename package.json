@@ -73,6 +73,7 @@
     "test:manuscript-manifest": "tsx src/workflows/manuscripts/testManuscriptManifest.ts",
     "test:prepare-manuscripts": "tsx src/workflows/manuscripts/testPrepareManuscripts.ts",
     "test:manuscript-images": "tsx src/workflows/images/testGenerateManuscriptImages.ts",
+    "test:generate-image": "tsx src/services/images/testGenerateImage.ts",
     "test:deploy-manuscripts-page": "tsx src/workflows/manuscripts/testDeployManuscriptsPage.ts",
     "test:notify-manuscripts-ready": "tsx src/workflows/manuscripts/testNotifyManuscriptsReady.ts",
     "manuscripts:build": "tsx src/workflows/manuscripts/buildManuscriptPageCli.ts",

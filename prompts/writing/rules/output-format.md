@@ -209,7 +209,7 @@ Q. / A. 3~5개, 답변 각 2~3문장               (AEO)
 
 ```
 [IMAGE: 수면 루틴 4단계를 정리한 일러스트 카드 — AI 생성]
-[IMAGE PROMPT: A warm minimal flat illustration of a bedtime routine for a toddler,
+[IMAGE PROMPT: A warm minimal flat illustration of a bedtime routine in a Korean home,
 four simple scenes left to right: warm bath, dim lamp, picture book, sleeping child.
 Soft beige and muted blue palette, rounded shapes, no text, no letters.
 Clean white background, gentle evening lighting. 4:3 aspect ratio.]
@@ -226,10 +226,11 @@ Clean white background, gentle evening lighting. 4:3 aspect ratio.]
 - **영어로 쓴다.** 이미지 모델이 영어 지시를 훨씬 정확히 따른다.
 - **글자를 넣지 않는다.** `no text, no letters`를 반드시 포함한다. 이미지 모델은 한글을 거의 항상 깨뜨린다. 문구가 필요하면 생성 후 편집기에서 얹는 것을 전제로 하고, 첫 줄 설명에 "생성 후 '4단계' 문구 삽입"처럼 적는다.
 - **여섯 요소를 순서대로** 담는다: 대상 → 동작·구성 → 배경 → 색감·팔레트 → 조명 → 스타일. 마지막에 비율.
-- **비율은 `4:3`을 기본**으로 한다. 네이버 블로그 본문 가로 이미지 기준이다. 세로 컷이 필요하면 `3:4`, 표·카드뉴스형은 `1:1`.
+- **비율은 `4:3`을 기본**으로 한다. 네이버 블로그 본문 가로 이미지 기준이다. 세로 컷이 필요하면 `3:4`, 표·카드뉴스형은 `1:1`. 이 표기는 실제로 API 요청 크기로 변환된다(`4:3` → 1024x768) — 적지 않으면 기본 4:3으로 나간다.
+- **한국 이야기면 한국 배경임을 명시한다.** `in Korea`, `Korean street`, `Korean police car`, `Korean cafe signage`처럼 국가·문화 맥락을 프롬프트에 직접 넣는다. 안 적으면 모델이 서구권 기본값으로 그린다 — 실측에서 한국 사건 기사에 **미국식 경찰차**와 **영어 간판의 서양 카페**(컵에 "SARAH L." 같은 영문 이름)가 생성됐다. 인물이 필요 없더라도 소품·간판·차량·거리 풍경이 한국이어야 본문과 따로 놀지 않는다.
 - **실존 인물·브랜드·저작물을 생성하지 않는다.** 배우 얼굴, 드라마 스틸, 로고, 캐릭터는 AI로 만들지 말고 첫 줄을 `웹 검색`으로 바꾼다.
 - **아이가 등장하는 이미지**는 실제 인물을 특정하지 않는 일반적 묘사로만 쓴다. 지아·지우를 프롬프트로 재현하려 하지 않는다.
-- 프롬프트는 3~6줄. 한 줄짜리 프롬프트는 결과가 뻔하고, 10줄이 넘으면 모델이 앞부분만 반영한다.
+- **프롬프트는 3~6줄로 쓴다.** 여섯 요소를 각각 한 줄 안팎으로 펼쳐 적고, 마지막 줄에 비율을 둔다. 한 줄로 몰아쓰면 결과가 스톡 이미지처럼 뻔해진다(실측 - 한 줄 프롬프트로 만든 커피컵·전화기 일러스트가 기사 맥락과 무관한 전형적 클립아트로 나왔다). 10줄이 넘으면 모델이 앞부분만 반영한다.
 
 **웹 검색 프롬프트(검색어) 규칙**:
 
@@ -241,7 +242,7 @@ Clean white background, gentle evening lighting. 4:3 aspect ratio.]
 
 ### 획득 방식 배분
 
-seo-guide는 직접 촬영·실사 이미지를 우대하고, AI 이미지로만 채운 글에 감점 신호가 있다고 본다. 이미지 자동 생성이 보류된 지금은 "직접 촬영"을 지시할 수 없으니, 대신 아래 기준으로 균형을 맞춘다.
+seo-guide는 직접 촬영·실사 이미지를 우대하고, AI 이미지로만 채운 글에 감점 신호가 있다고 본다. `AI 생성` 마커는 2026-09-15부터 실제로 자동 생성되지만(OpenAI `gpt-image-2`), "직접 촬영"은 여전히 지시할 수 없으니 아래 기준으로 균형을 맞춘다.
 
 - 한 편에서 **AI 생성은 절반까지.** 5쌍이면 AI 2~3개, 나머지는 웹 검색.
 - 후기·리뷰·경험담 성격의 글은 **웹 검색(실사) 비중을 더 높인다.**
