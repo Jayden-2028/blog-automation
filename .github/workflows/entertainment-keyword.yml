@@ -12,9 +12,11 @@ name: entertainment-keyword
 
 on:
   schedule:
-    # 00:10 UTC = 09:10 KST. social-issue-keyword.yml(00:00 UTC) 다음에 돌아야 오늘자
-    # trend_candidates를 읽을 수 있다 - 10분 간격 유지. 로컬 launchd는 2026-09-13 내림.
-    - cron: "10 0 * * *"
+    # 00:17 UTC = 09:17 KST. social-issue-keyword.yml(00:07 UTC)의 10분 뒤에 돌아야 오늘자
+    # trend_candidates를 읽을 수 있다 - 간격은 그대로 유지. 로컬 launchd는 2026-09-13 내림.
+    # 정각(0 0 * * *)+10분에서 밀린 이유는 social-issue-keyword.yml의 2026-09-15 메모 참고
+    # (매 정시 주변 cron 스케줄 누락 사고).
+    - cron: "17 0 * * *"
   workflow_dispatch: {}
 
 concurrency:
