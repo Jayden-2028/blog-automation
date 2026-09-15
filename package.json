@@ -79,6 +79,7 @@
     "manuscripts:build": "tsx src/workflows/manuscripts/buildManuscriptPageCli.ts",
     "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "debug:live-blogspot": "tsx src/workflows/publish/debug/liveBlogspotTest.ts",
+    "blogspot:schedule": "tsx src/workflows/publish/scheduleBlogspotPostCli.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
     "test:revise-article": "tsx src/workflows/writing/testReviseArticleWithFeedback.ts",

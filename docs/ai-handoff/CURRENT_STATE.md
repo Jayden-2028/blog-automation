@@ -2,6 +2,44 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속6) — Blogspot 글 설정 자동화 범위 확정(실측) + 댓글 비허용·예약 발행 구현
+
+**계기**: 사용자가 Blogger "글 설정" 항목(퍼머링크/예약/위치/검색 설명/댓글/맞춤 로봇 태그)의
+자동화 가능 여부를 물었다. 공식 문서만으로는 불명확해서 **실제 초안에 API를 쏴서 하나씩 확인**했다
+(남양주 카페 초안 post 3897743818873956983, DRAFT 유지).
+
+**실측 결과**:
+
+| 항목 | 가능 | 근거 |
+|---|---|---|
+| 맞춤 퍼머링크 | ❌ | `url`은 읽기 전용. PATCH가 200을 주지만 값이 안 바뀜 |
+| 게시글 예약 | ✅ | `posts.publish?publishDate=` |
+| 위치 | ✅ | `location{name,lat,lng}` 저장 확인 |
+| **검색 설명** | ❌ | **`customMetaData`가 200을 주고도 저장 안 됨**(GET에 필드 없음) |
+| 댓글 허용/비허용 | ✅ | `readerComments` - 유효값 `ALLOW`/`DONT_ALLOW_SHOW_EXISTING`/`DONT_ALLOW_HIDE_EXISTING` (그 외 400) |
+| 맞춤 로봇 태그 | ❌ | Post 리소스에 필드 없음 |
+
+**구현**:
+- `BLOGGER_CONFIG.readerComments` 신설(기본 `DONT_ALLOW_HIDE_EXISTING` - 사용자 결정 "댓글 안 받음").
+  `BLOGGER_READER_COMMENTS` env로 덮어쓸 수 있고, 유효하지 않은 값은 기본값으로 떨어진다.
+- `BloggerClient.insertPost`가 `readerComments`를 함께 보낸다.
+- **`customMetaData` 전송 제거.** 조용히 버려지는 호출을 남겨두면 "보냈으니 됐겠지"가 된다 -
+  오늘 하루 종일 잡은 "조용한 실패"와 같은 유형이라 아예 끊고 주석으로 이유를 남겼다.
+- `BloggerClient.publishPost(postId, publishDate?)` 신설 + `npm run blogspot:schedule -- <postId>
+  ["2026-09-17 09:00"]` CLI(KST 해석, 과거 시각 거부). **파이프라인에서 자동 호출하지 않는다** -
+  공개는 발행 게이트라 사용자가 직접 실행한다.
+- `test:blogger-client`에 4케이스 추가(댓글 기본/명시, customMetaData 미전송, 예약·즉시 구분,
+  publish 실패 stage).
+
+**⚠️ 자동화 불가라 사람이 해야 하는 단계**(임시저장 후 Blogger UI에서):
+1. **맞춤 퍼머링크** - 한글 제목은 `/2026/09/blog-post.html` 류가 된다. 원고의 `slug`가 뷰어에
+   있으니 복사해 넣는다.
+2. **검색 설명** - 원고 뷰어의 "검색 설명"을 복사해 넣는다.
+3. **웹 검색 마커 자리 이미지** - `[IMAGE: ... — 웹 검색]` 텍스트가 본문에 남아 있다.
+
+**맞춤 로봇 태그는 건드리지 않는 것을 권장**한다 - 개별 글에 설정하면 그 글에서 별도 robots
+메타가 출력돼, 테마에 넣은 `max-image-preview:large`와 충돌할 수 있다.
+
 ## 2026-09-16 세션(후속5) — 구글 디스커버 기준 이미지 규격 + 발행 대상 블로그 오설정 발견·수정
 
 **1. 이미지 크기를 구글 디스커버 요건으로 전환**(사용자 지시). 디스커버가 큰 썸네일을 띄우는
