@@ -4,7 +4,9 @@
 //   npm run status:all              origin fetch 후 현황 출력 + logs/status.html 생성
 //   npm run status:all -- --no-fetch  네트워크 없이 로컬이 아는 정보만으로
 //
-// 운영 worktree 경로는 BLOG_PROD_PATH 환경변수로 바꿀 수 있다(기본 ~/blog-automation-prod).
+// 운영 worktree 경로는 BLOG_PROD_PATH 환경변수로 바꿀 수 있다(기본 ~/blog-automation/prod).
+// 2026-09-15 폴더 정리로 ~/blog-automation-prod -> ~/blog-automation/prod로 옮겼다. 옛 경로가
+// 아직 남아 있는 환경(이동 전 체크아웃)을 위해 폴백으로 둘 다 본다.
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -15,7 +17,13 @@ import { dirname, resolve } from "node:path";
 import { buildStatusReportHtml, summarize } from "../src/workflows/reports/buildStatusReportHtml.js";
 import type { BranchStatus, ProdStatus } from "../src/workflows/reports/buildStatusReportHtml.js";
 
-const PROD_PATH = process.env.BLOG_PROD_PATH || resolve(homedir(), "blog-automation-prod");
+function resolveProdPath(): string {
+  if (process.env.BLOG_PROD_PATH) return process.env.BLOG_PROD_PATH;
+  const current = resolve(homedir(), "blog-automation", "prod");
+  return existsSync(current) ? current : resolve(homedir(), "blog-automation-prod");
+}
+
+const PROD_PATH = resolveProdPath();
 const OUTPUT_PATH = resolve("logs/status.html");
 
 /** git 실행 헬퍼. 실패해도 예외 대신 null을 돌려 현황 출력 자체가 죽지 않게 한다. */

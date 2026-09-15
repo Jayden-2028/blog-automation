@@ -1,7 +1,23 @@
 # 작업 흐름 — 폴더·브랜치·배포
 
-기준일: 2026-09-04 (⚠️ 2026-09-14 클라우드 이전 Phase 2~4 완료로 §1/§4/§5 일부 낡음 - 아래
-"2026-09-14 갱신" 박스부터 읽을 것)
+기준일: 2026-09-15 (⚠️ 2026-09-14 클라우드 이전 Phase 2~4 완료로 §1/§4/§5 일부 낡음 - 아래
+갱신 박스부터 읽을 것)
+
+> ## 2026-09-15 갱신 — 폴더를 `~/blog-automation/` 아래로 모았다
+>
+> 흩어져 있던 폴더 3개를 한곳에 모았다. **역할과 규칙은 그대로이고 위치만 바뀌었다.**
+>
+> | 예전 | 지금 | 역할 |
+> |---|---|---|
+> | `~/Documents/blog-automation` | `~/blog-automation/repo` | 메인 저장소(개발 브랜치) |
+> | `~/blog-automation-prod` | `~/blog-automation/prod` | worktree · **항상 `main` 고정** |
+> | `~/blog-automation-kw` | `~/blog-automation/kw` | worktree · 키워드 수집 브랜치 |
+> | — | `~/blog-automation/manuscripts` | `~/Documents/blog-manuscripts` 심볼릭 링크 |
+>
+> 원고 폴더는 **옮기지 않았다** - 그 아래 `naver-parenting`은 이 파이프라인과 무관한 별개 수동
+> 프로젝트라 내부 경로를 흔들면 안 된다. 링크만 걸었다.
+>
+> 아래 §1 표의 경로는 이동 전 이름이다. 읽을 때 위 표로 치환할 것.
 
 세션(창)을 기능별로 여러 개 열어 병렬 작업하면서 "어디에 뭐가 있고 뭐가 반영됐는지"를 놓치는
 일이 반복돼 만든 문서다. **헷갈릴 때 여기부터 본다.**
@@ -20,7 +36,7 @@
 > 영향을 주지 않는다.
 >
 > **그래도 두 폴더 구분은 유지한다** - 이유가 "launchd 오염 방지"에서 "작업 중인 Claude 세션이
-> `main`을 실수로 건드리지 않게" 로 바뀌었을 뿐이다. `~/blog-automation-prod`는 여전히 `main`
+> `main`을 실수로 건드리지 않게" 로 바뀌었을 뿐이다. `~/blog-automation/prod`는 여전히 `main`
 > 고정 워크트리로 쓰고, 실제 코드 수정은 개발 폴더/작업 브랜치에서 한다.
 >
 > **"배포"의 의미도 바뀌었다** - 예전엔 §4처럼 운영 폴더에서 `git pull` + `npm run build`가
@@ -119,9 +135,9 @@ git push origin temp-merge:main
 `main` push만으로 GitHub Actions는 최신 코드를 쓴다):
 
 ```
-git -C ~/blog-automation-prod pull
-npm --prefix ~/blog-automation-prod ci
-npm --prefix ~/blog-automation-prod run build
+git -C ~/blog-automation/prod pull
+npm --prefix ~/blog-automation/prod ci
+npm --prefix ~/blog-automation/prod run build
 ```
 
 배포 후 `npm run status:all`로 "배포 최신"이 뜨는지 확인한다.
