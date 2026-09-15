@@ -90,7 +90,10 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
 - 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`
-- 집필 규격: `prompts/writing/writer.md`
+- 집필 규격(라우팅·입력계약·체크리스트): `prompts/writing/writer.md`
+  - 사실·헤지 규칙(항상 최우선, 구 writer.md §4): `prompts/writing/rules/facts-and-hedging.md`
+  - 출력 형식 계약(코드와 직결, 구 writer.md §6~10): `prompts/writing/rules/output-format.md`
+  - 카테고리별 문체: `prompts/writing/style/{parenting,entertainment,trend,incident}.md`
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md`
 - Codex 위임 양식: `docs/ai-handoff/CODEX_TASK_TEMPLATE.md`
 - Codex 위임 스킬: `.claude/skills/delegate-codex/SKILL.md`

@@ -2,6 +2,63 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속3) — writer.md 구조 분리 리팩터(654줄 → 3개 파일)
+
+**계기**: 09-15 세션에서 인용/헤지 규칙이 다른 모양으로 재발한 사고를 진단한 뒤, 사용자가 "writer/
+researcher 규칙을 완전히 리셋하고 발행된 최종 원고 기준으로 새로 만드는 건 어떠냐"고 물었다.
+완전 리셋은 반대했다 - writer.md의 상당수 규칙(incident 신원보호, 소제목 볼드 서식, IMAGE PROMPT
+형식)이 `parseDraftFile.ts`/`convertArticleToHtml.ts`/`generateManuscriptImages.ts`/
+`articleReviewChecks.ts`와 직접 맞물려 있어, 톤 좋게 새로 쓰다가 이 코드 결합을 놓치면 파이프라인이
+깨질 위험이 크기 때문이다. 대신 **구조 분리 리팩터**를 제안했고 사용자가 승인해 이 세션에서 실행,
+main까지 병합했다.
+
+**한 것**: `prompts/writing/writer.md`(654줄)를 내용 손실 없이 3개 파일로 쪼갰다(문장은 그대로,
+위치만 이동 - §번호는 유지해 기존 코드 주석·문서의 "writer.md §N" 참조가 개념적으로 계속 유효하다).
+
+- `prompts/writing/writer.md`(219줄, 핵심만) - 로딩 순서(§1), 카테고리 라우팅+사건사고(§2/§2-1),
+  입력 계약(§3), 제목(§5), 저장 전 체크리스트(§11), 실패 처리(§12).
+- `prompts/writing/rules/facts-and-hedging.md`(신규, 145줄, 구 §4) - 사실 태도·등급별 서술 강도·
+  4-1(애매한 내용 생략)·4-2(보도 경위 금지)·헤지 금지·verdict 처리. **항상 최우선**이라고 명시.
+- `prompts/writing/rules/output-format.md`(신규, 332줄, 구 §6~10) - 규칙 충돌 해소·본문 구조·
+  이미지 마커·출력 형식·윤문. 코드와 직결된다는 경고를 상단에 박아뒀다.
+
+**왜 이 분리가 "리셋보다 안전"한가**: 사실·헤지 규칙(가장 자주 위반되는 부분)을 형식 규칙과
+물리적으로 분리해 항상 눈에 띄게 만들되, 문장 자체는 09-03/09-15에 검증된 그대로 보존했다 -
+사용자가 우려한 "톤은 좋아지고 파이프라인은 깨지는" 리스크 없이 "규칙이 묻혀서 새 위반을 못 잡는"
+문제만 표적으로 고쳤다.
+
+**코드 배선**: 헤드리스 에이전트에게 `writer.md`를 Read하라고 지시하던 3곳(원고 집필
+`buildWritingPrompt.ts`, Blogspot 배리에이션 `generateArticleVariant.ts`, 수정 피드백 반영
+`reviseArticleWithFeedback.ts`)을 전부 찾아 `rules/facts-and-hedging.md`·`rules/output-format.md`도
+같이 Read하도록 프롬프트를 갱신했다. `CLAUDE.md` "현재 핵심 문서" 목록도 갱신. 코드 주석에 흩어진
+"writer.md §N" 참조 30여 곳(순수 설명용, LLM에게 보내는 프롬프트 아님)은 §번호를 유지했으므로
+그대로 뒀다 - 굳이 파일명까지 바꿔 적을 필요가 없었다.
+
+**검증**: `npm run build` 통과. 관련 테스트 24종 전부 통과(writing-prompt/article-prompt/
+article-variant/revise-article/article-review/parse-draft/parse-research/research-prompt/
+gemini-research-prompt/fact-card/fact-tokens/manuscript-blocks/notify-article/
+notify-revised-article/notify-publish/notify-manuscripts-ready/notify-image-brief/html-generic/
+naver-html/telegraph-nodes/image-brief/image-copyright/medical-topic/source-authority/
+keyword-category/keyword-exclusion). `test:manuscript-manifest`/`test:prepare-manuscripts`/
+`test:manuscript-images`/`test:notify-multi-publish`는 이 세션 컨테이너에 Supabase 자격증명이
+없어서 실패(내 변경과 무관 - 모듈 로드 시점에 클라이언트를 만들어 그렇다).
+
+**브랜치 처리**: `claude/manuscript-quality-control-oasnpf`에서 작업(09-03에 만든 브랜치, 이후
+세션들이 이어서 씀). 세션 시작 시 origin/main이 4커밋 앞서 있어 `git merge --no-ff origin/main`으로
+먼저 받았다(충돌 없음). 작업 완료 후 WORKFLOW.md §4 절차(임시 브랜치로 origin/main에 병합 후
+push)대로 **main에 직접 병합 완료**.
+
+**남은 것**:
+- ⬜ 다음 실제 원고 생성 때 이 구조가 실제로 규칙 준수를 개선하는지 관찰 필요(정적 검증만 마침 -
+  09-15 수정과 같은 한계).
+- ⬜ researcher.md는 이번에 손대지 않았다(270줄대로 비교적 짧고, writer.md처럼 여러 세션에 걸쳐
+  누적 패치된 이력이 없어 우선순위가 낮다고 판단). 나중에 같은 증상(새 위반이 재발)이 나오면
+  그때 검토.
+- ⬜ 사용자가 원래 요청했던 "발행된 최종 원고 전체로 문체 파일 재작성"은 이번 범위에서 뺐다 -
+  구조 리팩터와 별개 작업이고, 그동안 실제 발행된 원고 목록/링크가 필요하다(지금 `prompts/writing/
+  style/*.md`는 09-03 세션에서 확보한 5편 기준). 필요하면 발행 이력 접근 방법을 사용자와 정해서
+  별도로 진행.
+
 ## 2026-09-16 세션(후속2) — 승인된 원고가 뷰어에 영영 안 나타나던 사고(조회 창 밖으로 밀려남)
 
 **사고**: 사용자가 텔레그램에서 "남양주 카페 갑질 테러"를 승인(23:27 KST)했는데 뷰어에 안 나타남.
