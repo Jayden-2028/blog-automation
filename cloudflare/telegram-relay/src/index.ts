@@ -30,6 +30,31 @@ export interface Env {
   GH_DISPATCH_TOKEN: string;
   GITHUB_OWNER: string;
   GITHUB_REPO: string;
+  /** 버튼 클릭 즉시 "접수됨" 토스트용(answerCallbackQuery). 없으면 토스트만 생략하고 나머지는 그대로 동작한다. */
+  TELEGRAM_BOT_TOKEN?: string;
+}
+
+/**
+ * 2026-09-16: 버튼을 누른 순간 텔레그램에 "접수됨" 토스트를 띄운다. 실제 처리(GH Actions 러너
+ * 부팅 + npm ci + claude CLI 설치 + 제목 생성)는 60초 안팎이라, 그동안 버튼이 계속 로딩 상태로
+ * 남아 사용자가 "안 눌렸나?" 하고 다시 누르는 원인이 됐다(더블탭 → 취소·중복 사고의 출발점).
+ * TelegramBot.ts의 answerCallbackQuery는 러너에서 뒤늦게 호출돼 이미 만료돼 있어 어차피 한 번도
+ * 보인 적이 없다(그 코드는 실패를 무시하도록 돼 있어 여기서 먼저 답해도 충돌하지 않는다). 실제
+ * 결과("키워드 선택 완료", "승인됨" 등)는 지금처럼 러너가 sendMessage로 보낸다.
+ */
+const CALLBACK_ACK_TEXT = "⏳ 접수됐습니다. 처리 결과는 곧 메시지로 알려드립니다.";
+
+async function answerCallbackQuery(env: Env, callbackQueryId: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN) return;
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text: CALLBACK_ACK_TEXT }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error("answerCallbackQuery 실패:", res.status, text.slice(0, 200));
+  }
 }
 
 /**
@@ -69,7 +94,7 @@ async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
     }
@@ -96,6 +121,10 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
+    const callbackQueryId = isCallbackQuery
+      ? (update as { callback_query?: { id?: unknown } }).callback_query?.id
+      : undefined;
+
     const dispatchResponse = await fetch(
       `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/dispatches`,
       {
@@ -116,6 +145,11 @@ export default {
       console.error("GitHub dispatch 실패:", dispatchResponse.status, text.slice(0, 300));
       // 5xx를 돌려주면 텔레그램이 webhook 재시도 정책에 따라 나중에 다시 보낸다.
       return new Response("Upstream dispatch failed", { status: 502 });
+    }
+
+    // 디스패치가 실제로 성공한 뒤에만 "접수됨"을 띄운다(실패면 위에서 502 → 텔레그램 재전송).
+    if (typeof callbackQueryId === "string" && callbackQueryId) {
+      ctx.waitUntil(answerCallbackQuery(env, callbackQueryId));
     }
 
     return new Response("OK", { status: 200 });

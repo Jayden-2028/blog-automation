@@ -2,6 +2,51 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속10) — 텔레그램 클릭 자체가 유실되던 두 번째 구멍(telegram-update concurrency) + 즉시 접수 토스트
+
+**계기**: 후속9(DB 큐)를 배포한 뒤에도 사용자가 "두쥐안 수정 답장 → 수정고 안 옴, 날아올라라 나비
+승인 → 최종고 안 옴, 커뮤니티 키워드 2건(아이돌 티켓 싹쓸이·심정지 오수혈) Go → 반응 없음"을
+리포트. DB를 보니 두쥐안은 `editRequestMessageId`가 소비되지 않은 채 남아 있고(답장이 처리된 적
+없음), 나비는 `reviewDecision`이 비어 있으며(승인 콜백이 처리된 적 없음), 커뮤니티 2건은
+article_jobs 행 자체가 없다(Go 콜백이 처리된 적 없음). 즉 **원고 파이프라인이 아니라 그 앞단,
+텔레그램 클릭 수신 자체가 유실**된 것.
+
+**원인**: `telegram-update.yml`에도 `concurrency: group: telegram-update`("실행 1 + 대기 1")가
+걸려 있었다. Cloudflare Worker가 update 1건을 `repository_dispatch`의 client_payload로 넘기고
+텔레그램에는 즉시 200을 돌려주므로, 대기 중이던 실행이 취소되면 그 클릭은 어디에도 남지 않는다
+(재전송도 없다). 실행 1건이 ~40초(러너 부팅 + npm ci + claude CLI 설치)라 40초 안에 버튼을 3번만
+눌러도 세 번째가 두 번째를 밀어냈다. `gh run list`로 09-16 하루 취소 14건 확인 - 05:16~05:17 UTC
+3건(Go 연타), 05:31 1건, 05:57 2건(커뮤니티 Go 2건 또는 두쥐안 답장), 09:11:13 1건(나비 승인 -
+앞뒤 09:11:11/09:11:14 성공 실행이 추석·버즈4 승인이었음을 로그로 대조). heavy-pipeline 사고와
+**완전히 같은 GitHub 큐 한도 문제의 두 번째 발현**이다.
+
+**수정**:
+- `telegram-update.yml`의 concurrency group **삭제** → 클릭마다 실행이 병렬로 돌고 절대 취소되지
+  않는다. 직렬화가 필요 없는 근거(파일 상단 주석에 기록): 같은 키워드 Go 중복은
+  `uq_article_jobs_run_rank` unique index가(ArticleJobRepository가 23505를 "이미 선택됨"으로
+  해석), 검수 버튼 중복은 후속9의 idempotency 가드가, heavy-pipeline 발화 순서는 DB 락(원자적
+  CAS)이 각각 막는다. job-publish-prepare는 자기 그룹이 따로 있고 "마지막 실행이 승인된 job
+  전부를 훑는" 구조라 대기 취소가 나도 결과가 안 빠진다.
+- Worker(`cloudflare/telegram-relay/src/index.ts`): GitHub dispatch가 성공한 직후
+  `answerCallbackQuery`로 **"⏳ 접수됐습니다" 토스트를 즉시** 띄운다(`ctx.waitUntil`, 응답 지연
+  없음). 지금까지는 러너가 60초 뒤에 answerCallbackQuery를 불러 이미 만료돼 한 번도 보인 적이
+  없었고(TelegramBot.ts 주석에도 "만료 무시"로 명시), 그 사이 버튼이 계속 로딩이라 사용자가
+  "안 눌렸나?" 하고 다시 누르는 것이 더블탭 사고의 출발점이었다. 새 Worker secret
+  `TELEGRAM_BOT_TOKEN` 필요(없으면 토스트만 생략, 릴레이는 그대로 동작). 사용자 요청 5번("GO를
+  누르면 즉시 알람, 작업은 대기열로")의 1차 대응 - 대기열 쪽은 후속9의 DB 큐가 이미 담당.
+
+**오늘 유실된 클릭 복구 방법**(DB를 만지지 않는다 - 사용자가 다시 누르면 정상 경로로 처리됨):
+두쥐안은 "이 메시지에 답장으로 수정 방향을 적어주세요" 메시지(id 884)에 **다시 답장**,
+나비는 초안 메시지의 **✅ 승인 다시 탭**, 커뮤니티 2건은 키워드 목록의 **Go 다시 탭**.
+
+**검증**: `wrangler deploy --dry-run` 번들 통과, YAML 정적 점검(concurrency 0개/permissions 1개).
+Worker 배포 + secret 등록 + push는 사용자 승인 후.
+
+**남은 위험**: 러너 1회 ~40초는 그대로다(npm ci + claude CLI 설치). 토스트로 "눌렸다"는 확신은
+주지만 "키워드 선택 완료" 메시지 자체는 여전히 60초 안팎 뒤에 온다. 더 줄이려면 Worker가 update를
+Supabase 인박스에 적재하고 러너 1개가 배치로 비우는 구조(러너 부팅 1회로 여러 클릭 처리)가
+다음 단계 후보 - 오늘은 하지 않았다.
+
 ## 2026-09-16 세션(후속8) — 인용/헤지 3차 재발: "1회 허용" 예외를 완전 폐기
 
 **계기**: 구조 분리 리팩터(후속3) 바로 다음 날에도 사용자가 같은 계열 문제를 또 지적했다.

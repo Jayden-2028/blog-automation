@@ -17,7 +17,8 @@
 현재: Blogspot 초안 자동화 안정화 — heavy-pipeline DB 큐로 원고 유실 근본 수정
 
 마지막 세션: 2026-09-16 — job-research/write/revise 유실 사고(이틀 연속) DB 큐로 근본 수정,
-검수 버튼 더블탭 방어, Blogspot 초안 자동 저장 켬
+검수 버튼 더블탭 방어, Blogspot 초안 자동 저장 켬, 텔레그램 클릭 수신 유실(telegram-update
+concurrency) 제거 + 클릭 즉시 "접수됨" 토스트
 
 ## 마일스톤
 
@@ -32,6 +33,8 @@
 - [x] heavy-pipeline DB 큐 — GitHub 큐 의존 제거, Supabase 큐+싱글턴 락으로 원고 유실 근본 수정
       (2026-09-16, `pipeline_dispatch_queue`/`pipeline_lock`, 라이브 스모크 검증 완료)
 - [x] 검수 버튼(승인/수정/반려) 더블탭 방어 — 재클릭 시 중복 발송·데이터 덮어쓰기 방지 (2026-09-16)
+- [x] 텔레그램 클릭 수신 유실 제거 — telegram-update concurrency 삭제(병렬 처리), Worker가 클릭
+      즉시 "접수됨" 토스트 (2026-09-16, 하루 취소 14건 실측 후)
 - [x] Blogspot 단독 운영 결정 + 전체 재설계 문서화
 - [x] 티스토리 완전 삭제 + 채널 단일화 (타입·경로·manifest·배리에이션·테스트)
 - [x] 원고 뷰어 재설계 (viewer.html 레이아웃 이식, 오렌지 포인트, 날짜→주제 2단)
@@ -57,4 +60,7 @@
 - ✅ 해결(2026-09-16): OpenAI 이미지 모델을 `gpt-image-1` → `gpt-image-2`로 교체했다. 공식 deprecation 문서 기준 `gpt-image-1` 종료일은 2026-12-01(예전에 여기 적혀 있던 2026-10-23은 오기)이고 권장 대체가 `gpt-image-2`이며 단가도 더 싸다.
 - ✅ 해결(2026-09-16): heavy-pipeline(조사/집필/재작성) 원고 유실이 이틀 연속 재발했다 - GitHub Actions concurrency 큐 의존을 걷어내고 Supabase 기반 자체 큐(`pipeline_dispatch_queue`/`pipeline_lock`)로 근본 수정했다.
 - 공개 발행(`BLOGGER_PUBLISH_AS_DRAFT=false`)을 켜는 기준은 "원고·이미지 품질이 보장됐다"는 사용자 판단이다 - 초안 자동 저장까지는 이미 켰다(2026-09-16). 켜기 전에 미충족 이미지 마커 제거(완료)와 사람이 채우는 3영역(퍼머링크/검색설명/웹검색이미지) 절차를 사용자가 숙지해야 한다.
-- ⬜ 새 DB 큐가 실제 사용자 클릭 패턴(여러 건 몰림)에서도 유실 없이 동작하는지 며칠 더 관찰 필요 - 오늘은 라이브 스모크 테스트로 로직만 검증했다.
+- ✅ 해결(2026-09-16): 텔레그램 클릭 자체가 유실됐다(telegram-update.yml의 concurrency 큐 - 대기 취소 시 클릭 내용이 영구 소실). concurrency 삭제로 병렬 처리. 오늘 유실된 클릭(두쥐안 답장·나비 승인·커뮤니티 Go 2건)은 사용자가 다시 누르면 정상 처리된다.
+- ⬜ 새 DB 큐 + 병렬 telegram-update가 실제 사용자 클릭 패턴(여러 건 몰림)에서도 유실 없이 동작하는지 며칠 더 관찰 필요 - `gh run list --workflow=telegram-update.yml`에 cancelled가 0건이어야 한다.
+- ⬜ 이미지 프롬프트가 원고 내용과 동떨어짐(예: 아시안게임 대진표 이미지에 실제 팀이 없음) - 사용자 지적, 설계 논의 중.
+- ⬜ 원고별 문체·어투 불일치 - 카테고리 스킬 4종의 문체를 하나로 통일하는 방향 사용자 지적, 설계 논의 중.
