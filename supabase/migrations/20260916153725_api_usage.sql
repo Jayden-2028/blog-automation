@@ -15,7 +15,9 @@
 -- article_jobs를 FK로 참조하지 않는 이유: manuscript_manifest_topics와 같은 판단. 비용 원장은
 -- job이 나중에 정리돼도 독립적으로 남아 있어야 한다(지출 기록이 사라지면 월 합계가 틀어진다).
 --
--- 주의: 이 migration은 파일 작성 후 사용자 승인을 받아 `supabase db push`로 적용한다.
+-- 적용 완료: 2026-09-16, 사용자 승인 후 Supabase MCP(apply_migration)로 원격에 적용했다. 파일명 타임스탬프는
+-- 원격 migration history에 기록된 version(20260916153725)에 맞춰 두었다 - 어긋나면 나중에
+-- `supabase db push`가 이미 적용된 migration을 다시 실행하려 든다.
 
 create table if not exists public.api_usage (
   id uuid primary key default gen_random_uuid(),

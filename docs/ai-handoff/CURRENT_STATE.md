@@ -18,7 +18,7 @@
 그래서 **이 시스템에는 지출 기록이 단 한 건도 없었다.**
 
 **구현(A: 계측 / B: 노출)**:
-1. `api_usage` 테이블 신설(migration `20260916140000_api_usage.sql`). 호출 1건 = row 1건.
+1. `api_usage` 테이블 신설(migration `20260916153725_api_usage.sql`). 호출 1건 = row 1건.
    `cost_source`(metered/reported) 컬럼을 지금 만들어 뒀다 - 나중에 청구액 API를 붙일 때 컬럼
    추가 migration을 다시 승인받지 않아도 되게.
 2. 단가표 `src/config/apiPricing.ts`. **실제로 호출하는 모델만** 등록한다(gpt-image-2 /
@@ -49,8 +49,15 @@
 통과. 계측 주입 지점이 없어 테스트가 조용히 Supabase로 네트워크를 타던 것도 같이 막았다.
 
 **남은 것**:
-- ⬜ **migration 미적용**. `supabase db push`로 `api_usage`를 올려야 기록이 시작된다(되돌리기:
-  `drop table public.api_usage`). 이게 적용되기 전까지 cost.json은 전부 0이다.
+- ✅ **migration 적용 완료**(2026-09-16, 사용자 승인). Supabase MCP `apply_migration`으로 원격
+  프로젝트(`blog_automation` / ref `exbhtdearvxjorwqlqno`)에 올렸고, 테이블·인덱스·주석·권한까지
+  실제 스키마로 확인했다. 원격 migration history의 version이 `20260916153725`로 기록돼 로컬
+  파일명도 거기에 맞췄다 - 어긋난 채 두면 나중에 `supabase db push`가 이미 적용된 migration을
+  다시 실행하려 든다. 되돌리기: `drop table public.api_usage`.
+  보안 advisor는 `rls_enabled_no_policy`(INFO)를 띄우는데, 이 프로젝트 16개 테이블 전부가 같은
+  모양이다(service_role 전용, anon/authenticated revoke) - 의도된 설계라 조치하지 않는다.
+- ⬜ 첫 실측: 다음 원고 승인(또는 `npm run manuscripts:build -- --refresh`) 때 첫 행이 쌓인다.
+  `npm run report:cost`로 바로 확인할 수 있다.
 - ⬜ 대시보드(`제이든의 데일리 데스크`) 패널에서 cost.json을 fetch하도록 연결 - 아티팩트 쪽
   작업이라 이 저장소 밖이다. 공개 URL은 `https://<pages 프로젝트>.pages.dev/cost.json`.
 - ⬜ 고정비 금액 미입력(`FIXED_COST_CLAUDE_USD` 등). 넣으면 합계에 잡힌다.

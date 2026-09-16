@@ -485,7 +485,7 @@ export type AnalyticsUpdate = Partial<AnalyticsInsert>;
 
 // ---------- api_usage ----------
 // 유료 API 호출 1건 = row 1건. 대시보드(manuscripts/cost.json)가 이 테이블만 보고 비용을 집계한다.
-// 스키마: supabase/migrations/20260916140000_api_usage.sql.
+// 스키마: supabase/migrations/20260916153725_api_usage.sql.
 
 export type ApiUsageCostSource = "metered" | "reported";
 
