@@ -60,6 +60,8 @@
     "sync:images": "tsx src/workflows/images/syncManuscriptImagesCli.ts",
     "manuscript:export": "tsx src/workflows/manuscripts/exportManuscriptCli.ts",
     "images:collect": "tsx src/workflows/images/collectWebImagesCli.ts",
+    "images:refix": "tsx src/workflows/images/refixImageMarkersCli.ts",
+    "test:refix-image-markers": "tsx src/workflows/images/testRefixImageMarkers.ts",
     "test:collect-web-images": "tsx src/workflows/images/testCollectWebImages.ts",
     "test:manuscript-export": "tsx src/workflows/manuscripts/testExportManuscript.ts",
     "job:publish": "tsx src/services/publish/publishNaverDraftCli.ts",

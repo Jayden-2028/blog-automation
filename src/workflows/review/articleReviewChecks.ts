@@ -423,6 +423,19 @@ const NEWS_EVENT_HINT =
 
 const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
 
+/** 이미지 마커 설명이 어떤 규칙을 어겼는지. 위반이 없으면 null. */
+export type ImageMarkerViolation = "screen_capture" | "news_event";
+
+/**
+ * 마커 설명 하나를 규칙에 비춰 판정한다. 검수(checkImagePrompts)와 마커 교체 도구
+ * (refixImageMarkers)가 같은 기준을 써야 해서 패턴을 여기 한 곳에만 둔다.
+ */
+export function classifyImageMarker(description: string): ImageMarkerViolation | null {
+  if (SCREEN_CAPTURE_HINT.test(description)) return "screen_capture";
+  if (NEWS_EVENT_HINT.test(description)) return "news_event";
+  return null;
+}
+
 export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
   if (!rawBody) return [];
 
@@ -440,7 +453,7 @@ export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
     });
   }
 
-  const screens = descriptions.filter((d) => SCREEN_CAPTURE_HINT.test(d));
+  const screens = descriptions.filter((d) => classifyImageMarker(d) === "screen_capture");
   if (screens.length > 0) {
     checks.push({
       category: "quality",
@@ -451,7 +464,7 @@ export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
     });
   }
 
-  const newsEvents = descriptions.filter((d) => NEWS_EVENT_HINT.test(d));
+  const newsEvents = descriptions.filter((d) => classifyImageMarker(d) === "news_event");
   if (newsEvents.length > 0) {
     checks.push({
       category: "quality",
