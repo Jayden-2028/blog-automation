@@ -173,7 +173,10 @@ async function main(): Promise<void> {
 
   // 4) 정상 선택: job 생성 + 제목 생성 + metadata 저장 + 확인 메시지.
   //    자동 흐름(2026-08-31): 추천 제목은 확인 메시지가 아니라 조사 완료 알림에서 보여준다.
-  //    확인 메시지는 "자료조사 시작"만 알린다(자료조사 자체는 pollOnce가 이어서 돌린다).
+  //    확인 메시지 문구는 2026-09-16부터 "자료조사 시작"이 아니라 "원고 초안 준비중"을 안내한다 -
+  //    조사 완료 후 확인 없이 곧장 집필까지 자동 진행되므로, 사용자가 실제로 기다리는 결과물
+  //    기준으로 문구를 바꿨다(testTelegramBot.ts 상단이 아니라 TelegramBot.ts의
+  //    buildConfirmationMessage 주석 참고).
   {
     const calls = newCalls();
     const bot = makeBot({ ranking: makeRanking(), calls });
@@ -182,9 +185,9 @@ async function main(): Promise<void> {
     assert(calls.create === 1, `job 생성은 1회여야 한다 (실제: ${calls.create})`);
     assert(calls.titles === 1, `제목 생성은 1회여야 한다 (실제: ${calls.titles})`);
     assert(calls.saveTitles === 1, "생성된 제목을 metadata에 저장해야 한다");
-    assert(result.message.includes("자료조사"), "확인 메시지에 자료조사 시작 안내가 들어가야 한다");
+    assert(result.message.includes("원고 초안"), "확인 메시지에 원고 초안 준비 안내가 들어가야 한다");
     assert(result.message.includes("양준모"), "확인 메시지에 선택한 키워드가 들어가야 한다");
-    console.log("✅ 정상 선택 -> job 생성 + 제목 3개 + 자료조사 시작 안내");
+    console.log("✅ 정상 선택 -> job 생성 + 제목 3개 + 원고 초안 준비 안내");
   }
 
   // 4-1) jobFromFreshSelection: 자료조사 자동 시작 대상 판정.
@@ -487,6 +490,69 @@ async function main(): Promise<void> {
     assert(calls.updateStatus === 1, "article이 없어도 job.status는 approved로 바뀌어야 한다");
     assert(calls.updateArticleStatus === 0, "article이 없으면 article.status 갱신을 시도하면 안 된다");
     console.log("✅ confirm(article 없음) -> job만 approved, 예외 없이 안전 처리");
+  }
+
+  // 7-7) 더블탭 방어(2026-09-16 실측 사고): 검수 버튼은 결정 후에도 재클릭 가능한 상태로 남는다
+  // (markReviewButtonsDecided가 라벨만 바꾸고 버튼을 없애지 않는다). 실제로 같은 버튼이 서로 다른
+  // update_id로 두 번 눌린 사례를 GH Actions 로그로 확인했다 - "수정 필요"를 두 번 누르면 두 번째
+  // 호출이 editRequestMessageId를 덮어써서, 사용자가 먼저 받은 메시지에 답장해도 매칭이 끊겨 그
+  // 답장이 영영 무시됐다(원고가 통째로 멈추는 가장 심각한 사례). 이미 같은 결정이 내려져 있으면
+  // 부작용 없이 짧은 안내만 돌려줘야 한다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob({ status: "rejected" }), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:discard:${REVIEW_JOB_ID}`));
+    assert(
+      result.outcome.status === "already_reviewed" && result.outcome.action === "discard",
+      `이미 반려된 job의 재클릭은 already_reviewed여야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.updateStatus === 0 && calls.mergeJobMetadata === 0, "이미 반려된 job을 재클릭해도 DB를 다시 건드리면 안 된다");
+    assert(result.message.includes("이미 반려된"), "이미 반려됐다는 안내여야 한다");
+    console.log("✅ discard 재클릭(이미 rejected) -> already_reviewed, DB 미갱신");
+  }
+
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({ job: makeReviewJob({ status: "approved" }), calls });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:confirm:${REVIEW_JOB_ID}`));
+    assert(
+      result.outcome.status === "already_reviewed" && result.outcome.action === "confirm",
+      `이미 승인된 job의 재클릭은 already_reviewed여야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.updateStatus === 0 && calls.mergeJobMetadata === 0, "이미 승인된 job을 재클릭해도 DB를 다시 건드리면 안 된다");
+    assert(result.message.includes("이미 승인된"), "이미 승인됐다는 안내여야 한다");
+    console.log("✅ confirm 재클릭(이미 approved) -> already_reviewed, DB 미갱신, 재발행 트리거 없음");
+  }
+
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({
+      job: makeReviewJob({ metadata: { reviewDecision: "needs_edit", editRequestMessageId: 883 } }),
+      calls,
+    });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:edit:${REVIEW_JOB_ID}`));
+    assert(
+      result.outcome.status === "already_reviewed" && result.outcome.action === "edit",
+      `아직 답장을 기다리는 중인 edit 재클릭은 already_reviewed여야 한다 (실제: ${JSON.stringify(result.outcome)})`
+    );
+    assert(calls.mergeJobMetadata === 0, "이미 대기 중인 수정 요청을 재클릭해도 editRequestMessageId를 덮어쓰면 안 된다");
+    assert(calls.sentMessages.length === 0, "새 '답장해주세요' 프롬프트를 또 보내면 안 된다(먼저 보낸 메시지의 id가 덮여씌워진다)");
+    assert(result.message.includes("이미 수정 필요"), "이미 대기 중이라는 안내여야 한다");
+    console.log("✅ edit 재클릭(답장 대기 중) -> already_reviewed, editRequestMessageId 보존(답장 유실 방지)");
+  }
+
+  // 7-8) 단, 이전 수정 요청이 이미 답장으로 소비됐다면(editRequestMessageId가 null로 비워짐) 새
+  // "수정 필요"는 정상적인 새 요청이다 - 무한정 막으면 안 된다.
+  {
+    const calls = newReviewCalls();
+    const bot = makeReviewBot({
+      job: makeReviewJob({ metadata: { reviewDecision: "needs_edit", editRequestMessageId: null } }),
+      calls,
+    });
+    const result = await bot.handleArticleReviewCallback(reviewQuery(`review:edit:${REVIEW_JOB_ID}`));
+    assert(result.outcome.status === "reviewed" && result.outcome.action === "edit", "답장으로 이미 소비된 뒤의 재요청은 정상 처리돼야 한다");
+    assert(calls.sentMessages.length === 1, "소비된 뒤의 새 요청은 새 프롬프트를 보내야 한다");
+    console.log("✅ edit 재요청(이전 요청은 이미 소비됨) -> 정상적인 새 요청으로 처리");
   }
 
   // 7-7) 키워드 선택 콜백과 원고 검수 콜백이 같은 폴링 루프에서 서로를 침범하지 않는지 -
