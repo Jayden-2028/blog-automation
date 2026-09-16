@@ -1,0 +1,182 @@
+// collectWebImages 테스트. Codex 실행과 다운로드를 전부 주입해 슬롯 추출·프롬프트·검증만 본다.
+// 외부 호출 없음(Codex도 네트워크도 부르지 않는다).
+
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+
+import { buildPrompt, buildWebImageSlots, collectWebImages } from "./collectWebImages.js";
+import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`❌ ${message}`);
+}
+
+const BODY = [
+  "카페 픽업대 앞에 줄이 늘어섰습니다. 사장은 음료 제공을 거부했습니다.",
+  "[IMAGE: 카페 픽업대에 놓인 테이크아웃 음료 사진 — 웹 검색]",
+  "**법은 무엇을 정하고 있나**\n산업안전보건법 제41조는 고객응대근로자 보호 조치를 사업주 의무로 정합니다.",
+  "[IMAGE: 국가법령정보센터 산업안전보건법 제41조 화면 — 웹 검색]",
+  "[IMAGE: 종이컵에서 김이 나는 커피 일러스트 — AI 생성]",
+  "마무리 문단입니다.",
+].join("\n\n");
+
+const PROMPTS = [
+  "카페 테이크아웃 음료 픽업대",
+  "국가법령정보센터 산업안전보건법 41조",
+  "A warm flat illustration of a paper coffee cup, no text. 16:9.",
+];
+
+const PNG_1200 = (() => {
+  // 1200×100 PNG 헤더만 흉내 낸다(readImageSize는 IHDR만 읽는다).
+  const buffer = Buffer.alloc(24);
+  buffer.write("\x89PNG\r\n\x1a\n", 0, "binary");
+  buffer.writeUInt32BE(1200, 16);
+  buffer.writeUInt32BE(100, 20);
+  return buffer;
+})();
+
+const PNG_300 = (() => {
+  const buffer = Buffer.from(PNG_1200);
+  buffer.writeUInt32BE(300, 16);
+  return buffer;
+})();
+
+const codexReply = (slots: unknown[]) => async () => ({ ok: true as const, data: { slots }, durationMs: 1 });
+
+const slotReply = (over: Record<string, unknown> = {}) => ({
+  index: 1,
+  imageUrl: "https://example.com/a.png",
+  sourcePage: "https://example.com/article",
+  alt: "카페 픽업대 사진",
+  caption: "픽업대에 놓인 음료",
+  license: "공공저작물",
+  rationale: "문단이 말하는 픽업대 상황을 보여준다",
+  skipped: false,
+  skipReason: "",
+  ...over,
+});
+
+const okFetch = async () => ({ ok: true as const, buffer: PNG_1200, contentType: "image/png" });
+
+async function main(): Promise<void> {
+  console.log("▶ collectWebImages 테스트 시작\n");
+
+  // 1) 웹 검색 자리만 뽑고, index는 전체 마커 기준이며, 바로 위 문단이 맥락으로 붙는다.
+  const slots = buildWebImageSlots(BODY, PROMPTS);
+  assert(slots.length === 2, `웹 검색 자리 2개여야 한다 (${slots.length})`);
+  assert(slots[0].index === 1 && slots[1].index === 2, "index는 전체 마커 순서여야 한다");
+  assert(slots[0].context.includes("픽업대 앞에 줄이"), "바로 위 문단이 맥락으로 붙어야 한다");
+  assert(slots[1].context.includes("제41조는 고객응대근로자"), "소제목 블록도 맥락이 돼야 한다");
+  assert(slots[1].query === PROMPTS[1], "원고가 제안한 검색어가 넘어가야 한다");
+  assert(!slots.some((s) => s.description.includes("AI 생성")), "AI 생성 자리는 빠져야 한다");
+  console.log("✅ 웹 검색 자리만 추출 + 전체 마커 기준 index + 바로 위 문단 맥락");
+
+  // 2) 프롬프트에 판단 기준과 자리별 맥락이 실린다.
+  const prompt = buildPrompt("남양주 카페 갑질", slots);
+  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "§8-1 판단 기준이 실려야 한다");
+  assert(prompt.includes("이미지를 만들지 않는다"), "생성이 아니라 검색이라는 점을 못박아야 한다");
+  assert(prompt.includes("픽업대 앞에 줄이"), "자리별 문단 원문이 실려야 한다");
+  assert(prompt.includes("자리 1") && prompt.includes("자리 2"), "자리 번호가 실려야 한다");
+  console.log("✅ 프롬프트 - 검색 기준 + 저작권 우선순위 + 자리별 문단");
+
+  const dir = await mkdtemp(resolve(tmpdir(), "collect-web-images-"));
+  try {
+    // 3) 정상 경로: 파일과 사이드카(web-images.json)가 쓰인다.
+    const ok = await collectWebImages(
+      { keyword: "남양주 카페 갑질", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply()]), fetchImage: okFetch }
+    );
+    assert(ok.found.length === 1 && ok.failures.length === 0, `1장 찾아야 한다 (${JSON.stringify(ok.failures)})`);
+    assert(ok.found[0].fileName.startsWith("01-"), `파일명이 자리 번호로 시작해야 한다 (${ok.found[0].fileName})`);
+    assert(ok.found[0].fileName.endsWith(".png"), "content-type에서 확장자를 정해야 한다");
+    assert(ok.found[0].sourcePage === "https://example.com/article", "출처 페이지가 기록돼야 한다");
+
+    const sidecar = JSON.parse(await readFile(resolve(dir, "web-images.json"), "utf-8"));
+    assert(sidecar.images.length === 1 && sidecar.images[0].license === "공공저작물", "사이드카에 출처/라이선스가 남아야 한다");
+    await readFile(resolve(dir, ok.found[0].fileName));
+    console.log("✅ 정상 경로 - 파일 저장 + web-images.json 사이드카");
+
+    // 4) 이미지가 아닌 것(검색 결과 페이지 HTML 등)은 저장하지 않는다.
+    const html = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        runCodex: codexReply([slotReply({ imageUrl: "https://example.com/page" })]),
+        fetchImage: async () => ({ ok: true as const, buffer: Buffer.from("<html>"), contentType: "text/html" }),
+      }
+    );
+    assert(html.found.length === 0, "HTML을 이미지로 저장하면 안 된다");
+    assert(html.failures[0].includes("이미지가 아닙니다"), `사유가 분명해야 한다 (${html.failures[0]})`);
+    console.log("✅ content-type이 이미지가 아니면 거부");
+
+    // 5) 너무 작은 이미지는 거부하고, 애매한 크기는 경고하되 저장한다.
+    const small = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply()]), fetchImage: async () => ({ ok: true as const, buffer: PNG_300, contentType: "image/png" }) }
+    );
+    assert(small.found.length === 0 && small.failures[0].includes("너무 작습니다"), `300px는 거부해야 한다 (${JSON.stringify(small.failures)})`);
+    console.log("✅ 최소 해상도 미달 거부");
+
+    // 6) Codex가 못 찾았다고(skipped) 하면 빈 자리로 남기고 사유를 전한다 - 억지로 채우지 않는다.
+    const skipped = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply({ skipped: true, skipReason: "공식 배포 이미지를 못 찾음", imageUrl: "" })]), fetchImage: okFetch }
+    );
+    assert(skipped.found.length === 0 && skipped.failures[0].includes("공식 배포 이미지를 못 찾음"), "skip 사유가 전달돼야 한다");
+    console.log("✅ Codex가 못 찾은 자리는 빈 자리로 유지");
+
+    // 7) URL이 아닌 값, Codex 실행 실패는 예외 없이 사유로 돌아온다.
+    const badUrl = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply({ imageUrl: "그냥 텍스트" })]), fetchImage: okFetch }
+    );
+    assert(badUrl.found.length === 0 && badUrl.failures[0].includes("URL 형식"), "URL 검증이 있어야 한다");
+
+    const codexDown = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: async () => ({ ok: false as const, error: "codex 없음", durationMs: 1 }), fetchImage: okFetch }
+    );
+    assert(codexDown.found.length === 0 && codexDown.failures[0].includes("codex 없음"), "실행 실패가 사유로 와야 한다");
+    console.log("✅ 잘못된 URL / Codex 실행 실패 - 예외 없이 사유 반환");
+
+    // 8) 웹 검색 자리가 없으면 Codex를 아예 부르지 않는다(불필요한 유료 호출 방지).
+    let called = 0;
+    const none = await collectWebImages(
+      { keyword: "k", dir, slots: [] },
+      {
+        runCodex: async () => {
+          called += 1;
+          return { ok: true as const, data: { slots: [] }, durationMs: 1 };
+        },
+      }
+    );
+    assert(called === 0 && none.found.length === 0, "자리가 없으면 Codex를 부르면 안 된다");
+    console.log("✅ 웹 검색 자리 없음 -> Codex 미호출");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+
+  // 9) codex exec 출력에서 마지막 JSON만 골라낸다(세션 헤더·경고·"tokens used" 잡음 섞임).
+  const noisy = [
+    "OpenAI Codex v0.149.1",
+    "--------",
+    "workdir: /repo",
+    "ERROR codex_core: failed to load skill ...",
+    "codex",
+    '{"slots":[{"index":1}]}',
+    "tokens used",
+    "21,944",
+    '{"slots":[{"index":1}]}',
+  ].join("\n");
+  const parsed = extractTrailingJson(noisy) as { slots: { index: number }[] };
+  assert(parsed?.slots?.[0]?.index === 1, `잡음 속에서 JSON을 찾아야 한다 (${JSON.stringify(parsed)})`);
+  assert(extractTrailingJson("아무 JSON도 없음") === null, "JSON이 없으면 null이어야 한다");
+  console.log("✅ codex 출력 잡음 속 JSON 추출");
+
+  console.log("\n✅ collectWebImages 테스트 전체 통과");
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
+});

@@ -12,14 +12,12 @@
 
 ---
 
-기준일: 2026-09-16
+기준일: 2026-09-17
 
-현재: Blogspot 초안 자동화 안정화 — heavy-pipeline DB 큐로 원고 유실 근본 수정
+현재: 원고·이미지 품질 끌어올리기 — 웹 검색 이미지를 Codex가 찾고 로컬 보관함으로 내보냄
 
-마지막 세션: 2026-09-16 — job-research/write/revise 유실 사고(이틀 연속) DB 큐로 근본 수정,
-검수 버튼 더블탭 방어, Blogspot 초안 자동 저장 켬, 텔레그램 클릭 수신 유실(telegram-update
-concurrency) 제거 + 클릭 즉시 "접수됨" 토스트, 공통 문체 voice.md로 어투 통일 + 이미지 프롬프트
-"문단 한 장 요약" 규칙
+마지막 세션: 2026-09-17 — 웹 검색 마커에 AI 이미지를 생성하던 버그 수정, Codex(`--search`)로
+웹 검색 이미지 수집, 승인 원고를 ~/Documents/blog-manuscripts/whyissuenow로 내보내기
 
 ## 마일스톤
 
@@ -40,6 +38,9 @@ concurrency) 제거 + 클릭 즉시 "접수됨" 토스트, 공통 문체 voice.m
       검수 `checkVoice` (2026-09-16)
 - [x] 이미지 프롬프트 "바로 위 문단을 한 장으로 요약" 규칙 + 데이터형(대진표·표) AI 생성 금지,
       검수 `checkImagePrompts` (2026-09-16)
+- [x] 웹 검색 마커 AI 생성 중단 — 한국어 검색어가 이미지 프롬프트로 들어가던 경로 차단 (2026-09-17)
+- [x] Codex 웹 검색 이미지 수집 — `npm run images:collect`, 출처·해상도 검증 (2026-09-17)
+- [x] 로컬 보관함 내보내기 — `npm run manuscript:export`, 날짜>주제 폴더 + image-metadata.md (2026-09-17)
 - [x] Blogspot 단독 운영 결정 + 전체 재설계 문서화
 - [x] 티스토리 완전 삭제 + 채널 단일화 (타입·경로·manifest·배리에이션·테스트)
 - [x] 원고 뷰어 재설계 (viewer.html 레이아웃 이식, 오렌지 포인트, 날짜→주제 2단)
@@ -52,8 +53,8 @@ concurrency) 제거 + 클릭 즉시 "접수됨" 토스트, 공통 문체 voice.m
 - [x] **Blogspot 자동 업로드 — 비공개 초안까지** (2026-09-16 켬: `BLOGGER_ENABLED=true` +
       `BLOGGER_PUBLISH_AS_DRAFT=true`. 텔레그램 최종 승인 → 원고·이미지 준비 → 초안 자동 저장)
 - [ ] **Blogspot 자동 발행 — 공개** (스위치는 `BLOGGER_PUBLISH_AS_DRAFT=false`. 사용자 별도 결정)
-- [ ] 사람이 채우는 3영역 자동화 검토 — 퍼머링크 / 검색 설명 / 웹 검색 이미지
-      (API로 안 되는 것들. 우회안은 CURRENT_STATE 2026-09-16 후속6 참고)
+- [ ] 사람이 채우는 3영역 자동화 검토 — 퍼머링크 / 검색 설명 (웹 검색 이미지는 2026-09-17에
+      `images:collect`로 상당 부분 자동화됨. 나머지는 CURRENT_STATE 2026-09-16 후속6 참고)
 - [ ] 예약 발행을 원고 뷰어에서 시간 지정으로 (후순위 기능 패치 — 지금은 CLI
       `npm run blogspot:schedule`로만 가능)
 - [ ] 로컬 폴더 정리 (~/blog-automation/{repo,prod,kw})
@@ -67,6 +68,9 @@ concurrency) 제거 + 클릭 즉시 "접수됨" 토스트, 공통 문체 voice.m
 - 공개 발행(`BLOGGER_PUBLISH_AS_DRAFT=false`)을 켜는 기준은 "원고·이미지 품질이 보장됐다"는 사용자 판단이다 - 초안 자동 저장까지는 이미 켰다(2026-09-16). 켜기 전에 미충족 이미지 마커 제거(완료)와 사람이 채우는 3영역(퍼머링크/검색설명/웹검색이미지) 절차를 사용자가 숙지해야 한다.
 - ✅ 해결(2026-09-16): 텔레그램 클릭 자체가 유실됐다(telegram-update.yml의 concurrency 큐 - 대기 취소 시 클릭 내용이 영구 소실). concurrency 삭제로 병렬 처리. 오늘 유실된 클릭(두쥐안 답장·나비 승인·커뮤니티 Go 2건)은 사용자가 다시 누르면 정상 처리된다.
 - ⬜ 새 DB 큐 + 병렬 telegram-update가 실제 사용자 클릭 패턴(여러 건 몰림)에서도 유실 없이 동작하는지 며칠 더 관찰 필요 - `gh run list --workflow=telegram-update.yml`에 cancelled가 0건이어야 한다.
+- ✅ 해결(2026-09-17): `웹 검색` 마커에 AI 이미지를 생성하던 버그(한국어 검색어가 그대로 gpt-image-2로). 획득 방식을 읽어 건너뛴다.
+- ⬜ 09-16 이전 원고의 웹 검색 자리에는 이미 저품질 AI 이미지가 남아 있다 - `images:collect`가 같은 자리에 제대로 된 이미지를 추가하므로 사람이 고르고 지워야 한다.
+- ⬜ 관공서 화면·법령 조문처럼 직접 이미지 URL이 없는 자료는 Codex가 건너뛴다 - 사람이 직접 캡처해야 한다.
 - ✅ 해결(2026-09-16): 이미지 프롬프트가 원고 내용과 동떨어짐 - output-format.md §8-1 "문단 한 장 요약" 규칙 + 데이터형 이미지 AI 생성 금지(웹 검색으로) + `checkImagePrompts` 검수.
 - ✅ 해결(2026-09-16): 원고별 문체·어투 불일치 - `style/voice.md` 하나로 통일(trend 기준, incident 예외) + `checkVoice` 검수.
 - ⬜ 위 두 건은 프롬프트 규칙 변경이라 **다음 실제 원고에서 어투 통일·이미지-문단 일치를 눈으로 확인**해야 한다(헤지 규칙 3회 재발 전례). 계정 레벨 스킬 원본(`/trend-blog-writer` 등)은 저장소 밖이라 미수정.
