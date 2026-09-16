@@ -38,7 +38,7 @@ import {
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
-import { substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
+import { manuscriptBodyWithoutImages, substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
 import type { BloggerInsertInput, BloggerInsertResult } from "../../services/publish/blogger/BloggerClient.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
@@ -179,7 +179,17 @@ export async function publishArticleToBlogspot(
   // [IMAGE: 설명] 마커 자리에 확정된 것만(정확히 1장) 실제 이미지로 바꿔 넣은 뒤 HTML로 변환한다.
   const confirmedImages = readJobManuscriptImages(job);
   const bodyWithImages = substituteConfirmedImages(variantArticle.content ?? "", confirmedImages);
-  const contentHtml = convertArticleToHtml(bodyWithImages);
+
+  // 채워지지 않고 남은 마커(주로 `— 웹 검색` 자리)를 어떻게 할지는 **초안이냐 공개냐**로 갈린다.
+  //  - 초안(BLOGGER_PUBLISH_AS_DRAFT=true): 그대로 둔다. 편집 화면에서 "여기에 자료를 넣어라"는
+  //    TODO 표시로 쓰인다(현행 운영 흐름 - 사람이 퍼머링크·검색 설명과 함께 채운 뒤 공개).
+  //  - 공개(=false): **반드시 지운다.** 안 지우면 `[IMAGE: ... — 웹 검색]`이라는 글자가 독자에게
+  //    그대로 보인다(convertArticleToHtml의 placeholder 경로가 <p>로 렌더한다). 공개 자동화로
+  //    내리는 순간 터지는 사고라 모드 분기를 둔다(2026-09-16).
+  const isDraft = BLOGGER_CONFIG.publishAsDraft;
+  const publishBody = isDraft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages);
+
+  const contentHtml = convertArticleToHtml(publishBody);
   const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
 
   const inserted = await insertPost({
@@ -187,7 +197,7 @@ export async function publishArticleToBlogspot(
     contentHtml,
     labels: label ? [label] : undefined,
     searchDescription,
-    isDraft: BLOGGER_CONFIG.publishAsDraft,
+    isDraft,
   });
 
   if (!inserted.ok) {
