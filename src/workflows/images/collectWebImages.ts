@@ -26,6 +26,46 @@ import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
 const PREFERRED_MIN_WIDTH = 1200;
 /** 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다. */
 const HARD_MIN_WIDTH = 600;
+/** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
+const MIN_LANDSCAPE_RATIO = 1.3;
+/** 첫 자리는 대표 이미지(디스커버·소셜 미리보기)라 16:9(1.78)에 가까워야 한다. 여유를 둬 1.5로 자른다. */
+const FIRST_SLOT_MIN_RATIO = 1.5;
+
+/**
+ * 재사용 권한 분류. Codex가 자유 문장이 아니라 **이 값 중 하나를 고르게** 한다.
+ *
+ * 왜 자유 문자열이 아닌가(2026-09-17 실측): 처음엔 Codex가 쓴 `license` 문장을 정규식으로 걸렀는데,
+ * 같은 "남의 저작물"을 "설계사 공식 프로젝트 페이지"라고 적어 놓으면 `포트폴리오` 패턴에 안 걸린다.
+ * 표현은 무한하고 규정은 유한하니, 판단을 문장이 아니라 **분류**로 받는다. 자유 문장(`license`)은
+ * 메타데이터 표기용으로 그대로 두고, 저장 여부는 이 분류로만 결정한다.
+ *
+ * 배경: 이 블로그는 광고가 붙는 상업적 이용이고 이미지를 크롭·리사이즈해서 쓴다. 첫 배치에서
+ * 경찰서 청사 사진이 `CC BY-NC-ND`인 채로 저장됐는데 NC는 광고 블로그에서 위반이고 ND는 크롭조차
+ * 막는다. 방송사 공식 포스터·스틸은 허용한다(사용자 결정, 2026-09-17 - 홍보 목적 배포물).
+ */
+const REUSE_PERMISSIONS = [
+  "public_domain", // CC0·퍼블릭도메인
+  "public_nuri", // 공공누리 1·2유형
+  "cc_by", // CC BY (NC·ND 없음)
+  "official_press_release", // 정부·공공기관 보도자료·배포 이미지
+  "official_company", // 기업 공식 홈페이지·공식 SNS
+  "broadcaster_promo", // 방송사·배급사 홍보용 공식 포스터·스틸
+  "cc_nc_or_nd", // NC/ND 붙음 - 거부
+  "third_party_photo", // 개인·회사 포트폴리오, 사진작가, 뉴스사 자체 촬영 - 거부
+  "marketplace_repost", // 가격비교·쇼핑몰·오픈마켓 재배포본 - 거부
+  "unclear", // 확인 불가 - 거부
+] as const;
+
+type ReusePermission = (typeof REUSE_PERMISSIONS)[number];
+
+const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>([
+  "public_domain",
+  "public_nuri",
+  "cc_by",
+  "official_press_release",
+  "official_company",
+  "broadcaster_promo",
+]);
 
 export type WebImageSlot = {
   index: number;
@@ -86,11 +126,23 @@ const OUTPUT_SCHEMA = {
           alt: { type: "string" },
           caption: { type: "string" },
           license: { type: "string" },
+          reusePermission: { type: "string", enum: [...REUSE_PERMISSIONS] },
           rationale: { type: "string" },
           skipped: { type: "boolean" },
           skipReason: { type: "string" },
         },
-        required: ["index", "imageUrl", "sourcePage", "alt", "caption", "license", "rationale", "skipped", "skipReason"],
+        required: [
+          "index",
+          "imageUrl",
+          "sourcePage",
+          "alt",
+          "caption",
+          "license",
+          "reusePermission",
+          "rationale",
+          "skipped",
+          "skipReason",
+        ],
         additionalProperties: false,
       },
     },
@@ -114,9 +166,25 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     "   (실패 예: 한국 카페 사건 기사에 캐나다 공항 스타벅스 매장 소개 페이지의 사진을 고른 경우.)",
     "3. **한국 이야기면 한국에서 찍힌/만들어진 자료여야 한다.** 간판·차량·제복·화폐·문서 양식이 한국이어야",
     "   본문과 따로 놀지 않는다. 해외 자료로 대신하지 않는다.",
-    "4. 저작권이 안전한 쪽을 우선한다: 공공저작물, 정부·공공기관 배포 이미지, 기업 공식 보도자료·공식",
-    "   홈페이지, 공식 SNS. 연예인 프로필, 뉴스사 자체 촬영 사진, 드라마 스틸컷은 피한다.",
-    "5. 너비 1200px 이상, 가로형(16:9 근처)을 우선한다. 600px 미만은 고르지 않는다.",
+    "4. **라이선스를 실제로 확인한다. 출처가 있다는 것과 써도 된다는 것은 다르다.**",
+    "   이 블로그는 광고가 붙는 **상업적 이용**이고, 이미지를 크롭·리사이즈해서 쓴다.",
+    "   `reusePermission`에 아래 분류 중 하나를 **정확히** 고른다(자유롭게 쓰지 말고 값 그대로):",
+    "   - `public_domain` — CC0·퍼블릭도메인",
+    "   - `public_nuri` — 공공누리 제1·2유형",
+    "   - `cc_by` — CC BY (NC도 ND도 붙지 않은 것만)",
+    "   - `official_press_release` — 정부·공공기관이 배포한 보도자료 사진",
+    "   - `official_company` — 기업 공식 홈페이지·공식 SNS가 배포한 자료",
+    "   - `broadcaster_promo` — 방송사·배급사가 홍보용으로 배포한 공식 포스터·스틸컷",
+    "   여기까지가 쓸 수 있는 것이다. 아래에 해당하면 그 자리는 **건너뛴다**(`skipped: true`):",
+    "   - `cc_nc_or_nd` — CC에 NC(비영리)나 ND(변경금지)가 붙음",
+    "   - `third_party_photo` — 건축사무소·사진작가 등 개인·회사가 촬영한 사진, 뉴스사 자체 보도사진",
+    "   - `marketplace_repost` — 가격비교·쇼핑몰·오픈마켓이 재배포한 상품 이미지",
+    "   - `unclear` — 재사용 근거를 확인하지 못함",
+    "   **애매하면 `unclear`를 고른다.** 쓸 수 있는 쪽으로 넘겨짚지 않는다.",
+    "   `license`에는 사람이 읽을 근거를 한 줄로 적는다(예: \"공공누리 제1유형\", \"삼성전자 공식 홈페이지\").",
+    "5. **가로 16:9에 가까운 것을 고른다.** 정사각(1:1)과 세로는 구글 디스커버 썸네일 후보에서 빠진다 -",
+    "   특히 **자리 1은 대표 이미지**라 반드시 가로여야 한다. 너비는 1200px 이상, 600px 미만은 고르지 않는다.",
+    "   글자가 화면 대부분을 덮는 홍보 배너보다 **실사 사진**을 우선한다.",
     "6. `imageUrl`은 반드시 이미지 파일 자체의 직접 URL이어야 한다(.jpg/.png/.webp 등). 검색 결과",
     "   페이지나 기사 본문 URL을 넣지 않는다. `sourcePage`에 그 이미지가 실린 페이지 URL을 따로 적는다.",
     "",
@@ -183,6 +251,7 @@ type CodexSlotResult = {
   alt: string;
   caption: string;
   license: string;
+  reusePermission: string;
   rationale: string;
   skipped: boolean;
   skipReason: string;
@@ -237,6 +306,14 @@ export async function collectWebImages(
       continue;
     }
 
+    // 라이선스는 내려받기 **전에** 본다 - 쓸 수 없는 이미지를 디스크에 남길 이유가 없다.
+    if (!ALLOWED_PERMISSIONS.has(result.reusePermission)) {
+      failures.push(
+        `[자리 ${slot.index}] 재사용 권한이 없어 건너뜁니다(${result.reusePermission}: ${result.license}) - 광고가 붙는 블로그에서 쓸 수 없거나 근거가 확인되지 않은 자료입니다.`
+      );
+      continue;
+    }
+
     const downloaded = await fetchImage(result.imageUrl);
     if (!downloaded.ok || !downloaded.buffer) {
       failures.push(`[자리 ${slot.index}] 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}`);
@@ -255,6 +332,19 @@ export async function collectWebImages(
     if (size && size.width < HARD_MIN_WIDTH) {
       failures.push(`[자리 ${slot.index}] 너무 작습니다(${size.width}×${size.height}, 최소 ${HARD_MIN_WIDTH}px).`);
       continue;
+    }
+
+    const ratio = size ? size.width / size.height : null;
+    // 자리 1은 디스커버·소셜 미리보기가 집어가는 대표 이미지다 - 세로·정사각이면 큰 썸네일을 못 받으므로
+    // 저장하지 않고 다시 찾게 한다. 나머지 자리는 아쉬울 뿐이라 경고만 남기고 저장한다.
+    if (ratio !== null && slot.index === 1 && ratio < FIRST_SLOT_MIN_RATIO) {
+      failures.push(
+        `[자리 1] 대표 이미지가 가로가 아닙니다(${size?.width}×${size?.height}) - 16:9 가로만 큰 썸네일을 받습니다.`
+      );
+      continue;
+    }
+    if (ratio !== null && ratio < MIN_LANDSCAPE_RATIO) {
+      failures.push(`[자리 ${slot.index}] ⚠️ 정사각·세로입니다(${size?.width}×${size?.height}) - 디스커버 썸네일 후보에서 빠지지만 저장했습니다.`);
     }
     if (size && size.width < PREFERRED_MIN_WIDTH) {
       failures.push(`[자리 ${slot.index}] ⚠️ 너비 ${size.width}px - 디스커버 큰 썸네일 기준(${PREFERRED_MIN_WIDTH}px) 미달이지만 저장했습니다.`);

@@ -51,6 +51,7 @@ const slotReply = (over: Record<string, unknown> = {}) => ({
   alt: "카페 픽업대 사진",
   caption: "픽업대에 놓인 음료",
   license: "공공저작물",
+  reusePermission: "public_nuri",
   rationale: "문단이 말하는 픽업대 상황을 보여준다",
   skipped: false,
   skipReason: "",
@@ -116,6 +117,48 @@ async function main(): Promise<void> {
     );
     assert(small.found.length === 0 && small.failures[0].includes("너무 작습니다"), `300px는 거부해야 한다 (${JSON.stringify(small.failures)})`);
     console.log("✅ 최소 해상도 미달 거부");
+
+    // 5-1) 라이선스가 맞지 않으면 내려받기 전에 거부한다(2026-09-17 실측: CC BY-NC-ND 청사 사진이
+    //      그대로 저장됐다 - NC는 광고 블로그에서 위반, ND는 크롭조차 막는다).
+    let fetched = 0;
+    const countingFetch = async () => {
+      fetched += 1;
+      return { ok: true as const, buffer: PNG_1200, contentType: "image/png" };
+    };
+    for (const bad of ["cc_nc_or_nd", "third_party_photo", "marketplace_repost", "unclear", "made_up_value"]) {
+      const rejected = await collectWebImages(
+        { keyword: "k", dir, slots: [slots[0]] },
+        { runCodex: codexReply([slotReply({ reusePermission: bad, license: "그럴듯하게 적힌 출처 문장" })]), fetchImage: countingFetch }
+      );
+      assert(rejected.found.length === 0, `"${bad}"는 거부해야 한다`);
+      assert(rejected.failures[0].includes("재사용 권한"), `사유가 재사용 권한이어야 한다 (${rejected.failures[0]})`);
+    }
+    assert(fetched === 0, "권한에서 걸리면 내려받지도 말아야 한다");
+
+    // 방송사 공식 포스터·스틸은 허용한다(사용자 결정, 2026-09-17).
+    const broadcaster = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply({ reusePermission: "broadcaster_promo", license: "JTBC 배포 공식 포스터" })]), fetchImage: okFetch }
+    );
+    assert(broadcaster.found.length === 1, `방송사 공식 포스터는 통과해야 한다 (${JSON.stringify(broadcaster.failures)})`);
+
+    console.log("✅ 재사용 권한 분류로 거부/허용(자유 문장이 아니라 enum) + 방송사 공식 포스터 허용");
+
+    // 5-2) 자리 1은 대표 이미지라 가로가 아니면 거부, 나머지 자리는 경고만 하고 저장한다.
+    const squareFirst = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 1200, height: 1200 }) }
+    );
+    assert(squareFirst.found.length === 0, "자리 1이 정사각이면 거부해야 한다");
+    assert(squareFirst.failures[0].includes("대표 이미지"), `대표 이미지 사유여야 한다 (${squareFirst.failures[0]})`);
+
+    const squareOther = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[1]] },
+      { runCodex: codexReply([slotReply({ index: slots[1].index })]), fetchImage: okFetch, readSize: () => ({ width: 1200, height: 1200 }) }
+    );
+    assert(squareOther.found.length === 1, "자리 1이 아니면 정사각이어도 저장한다");
+    assert(squareOther.failures.some((f) => f.includes("정사각·세로")), `경고는 남겨야 한다 (${JSON.stringify(squareOther.failures)})`);
+    console.log("✅ 비율 검증 - 자리 1은 가로 필수, 나머지는 경고 후 저장");
 
     // 6) Codex가 못 찾았다고(skipped) 하면 빈 자리로 남기고 사유를 전한다 - 억지로 채우지 않는다.
     const skipped = await collectWebImages(
