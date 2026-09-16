@@ -48,6 +48,68 @@
 구조(researcher.md)에서 오는 것으로 보인다 - 다음에 또 재발하면 researcher.md가 만드는 리서치
 파일의 구조 자체(예: 매체명·발행일을 얼마나 눈에 띄게 기록하는지)를 재검토할 필요가 있다.
 다음 실제 원고 생성 결과를 반드시 확인할 것.
+## 2026-09-16 세션(후속9) — heavy-pipeline 원고 유실 재발 + DB 큐로 근본 수정, 검수 더블탭 방어
+
+**계기**: 사용자가 "오전 사회 키워드 4개 선택 → 2개만 원고 도착"을 리포트. GH Actions 로그 대조
+결과 7건 중 4건이 job-research 단계에서 취소됨을 확인 - **09-15 저녁에 고쳤다고 보고한 바로 그
+GitHub Actions concurrency 큐 취소 버그가 09-16에도 재발**했다. 원인: 그 수정("대기 후
+디스패치")의 대기 상한(3~5분)이 실제 소요 시간(15~25분)보다 훨씬 짧아, 같은 목록에서 Go를
+30~90초 간격으로 몇 번만 눌러도 대기 상한을 넘겨 그냥 디스패치 → 취소를 그대로 유발했다.
+
+**근본 수정 - DB 기반 진짜 대기열**(사용자 승인, `supabase db push` 완료): GitHub Actions
+concurrency 큐(대기 1개 한도)에 전혀 의존하지 않는 자체 큐를 만들었다.
+- 신규 테이블 `pipeline_dispatch_queue`(대기 항목) + `pipeline_lock`(싱글턴 뮤텍스) -
+  `supabase/migrations/20260916060000_pipeline_dispatch_queue.sql`.
+- `src/services/github/pipelineQueue.ts` - `enqueueAndMaybeDispatch()`(큐에 쌓고, 비어 있으면
+  즉시 디스패치) / `markDoneAndDrain()`(워크플로우 종료 시 락 해제 + 다음 대기 항목 자동
+  디스패치 - 체인). 락 획득은 `UPDATE ... WHERE is_busy=false`(Postgres 행 잠금 기반 원자적
+  compare-and-swap)라 여러 프로세스가 동시에 시도해도 정확히 하나만 성공한다. 락이 30분
+  (STALE_LOCK_MS) 넘게 안 풀리면 다음 시도가 자동 회수(러너 강제 종료 등 극단적 상황 대비 -
+  영구 정지 방지).
+- `runTelegramUpdateCli.ts`(triggerResearch/triggerWriting/triggerRevision)와
+  `runResearchStageCli.ts`(조사 성공 → 집필 자동 연결)가 `dispatchGithubWorkflow` 직접 호출
+  대신 이 큐를 거치도록 배선. `job-publish-prepare.yml`은 heavy-pipeline이 아니라(별도
+  concurrency group, 충돌 이력 없음) 그대로 직접 호출 유지.
+- `.github/workflows/{job-research,job-write,job-revise}.yml`에 선택적 `queue_id` 입력 추가 +
+  마지막 스텝(`if: always()`)이 `npm run job:pipeline-drain`으로 큐 행을 마감하고 다음 항목을
+  깨운다. `queue_id` 없이 수동 `gh workflow run`(복구 등)해도 그 스텝이 조용히 스킵돼 그대로
+  동작한다. 기존 `concurrency: group: heavy-pipeline`은 지우지 않고 2차 안전망으로 남겼다(DB
+  큐가 정상 동작하는 한 "대기 1개"를 절대 안 넘으므로 무해).
+- 검증: 목 테스트 6케이스(`test:pipeline-queue`) + **실제 Supabase에 대고 라이브 스모크 테스트**
+  (enqueue A(즉시 디스패치) → enqueue B(대기, 취소 없이 pending) → A 완료 → B 자동 디스패치,
+  전 과정 실측 확인 후 정리). 락/큐 최종 상태 idle·0행 확인.
+
+**검수 버튼 더블탭 방어**(같은 세션, 별도 사고): "수정 필요"를 두 번 눌러(GH Actions 로그로
+`update_id`가 다른 **진짜 별개의 탭 2건** 확인 - 웹훅 중복 아님) 두 번째 클릭이
+`editRequestMessageId`를 덮어써서, 사용자가 먼저 받은 메시지에 답장해도 매칭이 끊겨 그 답장이
+영구 무시된 사고("추석 앞두고 두쥐안 태풍" 건). 원인: 검수 버튼은 결정 후에도 재클릭 가능한
+상태로 남는다(`markReviewButtonsDecided`가 라벨만 바꾸고 버튼을 안 없앰). 같은 구조가 승인/반려
+중복 응답 메시지의 원인이기도 했다. `TelegramBot.handleArticleReviewCallback`에 이미 같은 결정이
+내려진 경우의 가드 3종(`already_reviewed` outcome)을 추가 - 부작용(재발송·메타데이터 덮어쓰기)
+없이 짧은 안내만 돌려준다. 단, 이전 요청이 이미 답장으로 소비됐으면(`editRequestMessageId`
+null) 새 "수정 필요"는 정상 요청으로 통과시킨다(무한정 막지 않음). 테스트 8케이스 추가.
+
+**키워드 알림 문구**: `NOTIFICATION_HEADER`에서 매체명 제거("오전 사회 이슈 키워드"/"오전 연예
+OTT 키워드"/"오후 커뮤니티 키워드"). Go 확인 메시지도 "자료조사 시작"(내부 단계명) 대신 "원고
+초안 준비중"(실제 기다리는 결과물)으로 - 09-15부터 조사 완료 후 확인 없이 곧장 집필까지 자동
+진행되므로 문구도 그에 맞췄다. 시간 추정도 조사+집필 합산 실측(15~25분)으로 올렸다.
+
+**알림 시간 간격 확대**(사용자 요청, `cloudflare/telegram-relay`): 09:00/09:10/13:00 →
+09:00/**11:00**/13:00. 카테고리 간 충돌은 줄지만, 오늘 실제 사고는 **같은 카테고리 안에서**
+클릭이 몰린 게 주 원인이라 이것만으로는 안 풀린다는 점을 인지하고 진행 - 실제 해법은 위 DB 큐.
+
+**막혀 있던 job 4건 복구**: 홍대 술집 난동(성공) · 추석 민생지원금(진행 중) · 날아올라라 나비 ·
+삼성 갤럭시 버즈4 — `gh workflow run job-research.yml -f job_id=...`로 한 번에 하나씩 순서대로
+재실행(새 DB 큐 배선 이후 실행이면 대기열에 안전하게 쌓인다).
+
+**남은 것**:
+- ⬜ 내일 이후 실제 운영에서 Go 여러 건이 몰릴 때 취소 없이 전부 처리되는지 관찰 필요(오늘은
+  라이브 스모크로 로직만 검증, 실제 사용자 클릭 패턴으로는 아직).
+- ⬜ 09-14자 오래된 stuck job(`be5c17c1`, 지드래곤 맥도날드)은 이번 복구에서 제외 - 별도 확인
+  필요.
+- ⬜ `dispatchWorkflow.ts`의 `concurrencyGroupWorkflows` 대기 기능은 이제 heavy-pipeline
+  호출부에서 안 쓴다(대신 pipelineQueue.ts) - 코드/테스트는 남겨뒀다(다른 그룹에 재사용 가능한
+  일반 유틸이라 죽은 코드는 아님).
 
 ## 2026-09-16 세션(후속7) — 키워드 알림 매체명 제거 + 스케줄 지연 근본 수정(Cloudflare Cron Trigger)
 

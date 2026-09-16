@@ -15,32 +15,23 @@
 import "dotenv/config";
 
 import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
-import { dispatchGithubWorkflow, HEAVY_PIPELINE_WORKFLOWS } from "../../services/github/dispatchWorkflow.js";
+import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
 import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
 import { runResearchStage } from "../writing/runArticleJob.js";
 
 /**
- * job-research.yml의 timeout-minutes(25분) 안에서 도는 호출이라 job:write 대기 여유가
- * telegram-update.yml보다 크다 - 그래도 연구 자체가 오래 걸렸을 경우를 대비해 5분으로 잡는다
- * (2026-09-15, dispatchWorkflow.ts 상단 주석 참고 - 이 호출이 정확히 "경복궁 구멍 뚫기" job을
- * 밀어낸 원인이었다: 연구 완료 직후 곧바로 job-write를 디스패치하며 대기 중이던 다른 조사를
- * 취소시킴).
- */
-const RESEARCH_TO_WRITE_DISPATCH_MAX_WAIT_MS = 5 * 60 * 1000;
-
-/**
- * job:write를 곧바로 이어서 발화한다. GITHUB_TOKEN이 있으면(GH Actions 러너) job-write.yml을
- * workflow_dispatch로 새로 발화하고, 없으면(로컬 수동 실행) 기존 방식대로 detached 자식으로 띄운다
- * - TelegramBot.ts의 triggerWriting 기본값과 같은 분기 원칙.
+ * job:write를 곧바로 이어서 발화한다. GITHUB_TOKEN이 있으면(GH Actions 러너) heavy-pipeline
+ * DB 큐(pipelineQueue.ts)에 올려 job-write.yml을 깨우고, 없으면(로컬 수동 실행) 기존 방식대로
+ * detached 자식으로 띄운다 - TelegramBot.ts의 triggerWriting 기본값과 같은 분기 원칙.
+ *
+ * 2026-09-16: 예전엔 여기서 dispatchGithubWorkflow를 대기 후 직접 호출했는데(GitHub Actions
+ * concurrency 큐의 "대기 1개" 한도에 맞춰 최대 5분 대기), 그 대기 상한이 실제 조사 소요 시간보다
+ * 짧아 이 호출이 정확히 다른 job(예: "경복궁 구멍 뚫기")을 밀어내 유실시킨 원인이었다. 이제는
+ * GitHub 큐에 전혀 의존하지 않는 DB 큐를 거친다 - pipelineQueue.ts 상단 주석 참고.
  */
 async function triggerWriting(jobId: string): Promise<void> {
   if (process.env.GITHUB_TOKEN) {
-    await dispatchGithubWorkflow({
-      workflowFile: "job-write.yml",
-      inputs: { job_id: jobId },
-      concurrencyGroupWorkflows: HEAVY_PIPELINE_WORKFLOWS,
-      avoidEvictionMaxWaitMs: RESEARCH_TO_WRITE_DISPATCH_MAX_WAIT_MS,
-    });
+    await enqueueAndMaybeDispatch({ jobId, workflowFile: "job-write.yml" });
     return;
   }
   spawnDetachedTask("job:write", [jobId]);

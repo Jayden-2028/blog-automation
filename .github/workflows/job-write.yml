@@ -16,6 +16,9 @@
 # 에이전트가 처음부터 다시 조사하느라 18분 41초나 걸렸다(보통 훨씬 빠름). 치명적은 아니었지만
 # (자동 폴백으로 완료는 됨) 품질/속도 저하라 추가함.
 
+# 2026-09-16: 실행 순서는 GitHub concurrency 큐가 아니라 pipeline_dispatch_queue(Supabase, DB
+# 큐)가 관리한다 - 근거는 job-research.yml 상단 주석 참고(같은 사고, 같은 수정). 이 워크플로우도
+# 항상 DB 큐를 통해서만 발화되고, 마지막 스텝이 큐 행을 마감하고 다음 대기 항목을 깨운다.
 name: job-write
 
 on:
@@ -25,9 +28,17 @@ on:
         description: "article_jobs.id (UUID)"
         required: true
         type: string
+      queue_id:
+        description: "pipeline_dispatch_queue.id (DB 큐를 거치지 않은 수동 실행이면 비워둔다)"
+        required: false
+        type: string
 
-# job-research.yml과 같은 전역 그룹(heavy-pipeline) - 2026-09-15 발견 사고 참고
-# (job-research.yml의 concurrency 주석). 자료조사·집필·수정재작성이 서로도 겹치지 않게 한다.
+permissions:
+  contents: read
+  actions: write
+
+# job-research.yml과 같은 전역 그룹(heavy-pipeline). DB 큐가 정상 동작하는 한 절대 "대기 1개"를
+# 넘지 않으므로 취소를 유발하지 않는 2차 안전망으로만 남겨둔다.
 concurrency:
   group: heavy-pipeline
   cancel-in-progress: false
@@ -62,3 +73,13 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: npm run job:write -- "${{ inputs.job_id }}"
+
+      # job-research.yml과 같은 이유(2026-09-16) - always()로 돌아 큐 행을 마감하고 다음 대기
+      # 항목을 스스로 깨운다. queue_id가 없으면(수동 실행) 조용히 아무것도 안 한다.
+      - name: Drain pipeline queue
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run job:pipeline-drain -- "${{ inputs.queue_id }}" "${{ job.status }}"

@@ -7,12 +7,20 @@
 # 실패 알림은 이 CLI(runResearchStageCli.ts)가 기존 코드 그대로 직접 텔레그램에 보낸다.
 #
 # 2026-09-15: 조사가 끝나면(성공 시) "원고를 쓸까요?" 확인 없이 이 CLI가 곧바로 job-write.yml을
-# workflow_dispatch로 발화한다(runResearchStageCli.ts의 triggerWriting 참고) - telegram-update.yml
-# 과 같은 이유로 permissions.actions: write + GITHUB_TOKEN이 필요하다.
+# 큐에 올린다(runResearchStageCli.ts의 triggerWriting 참고) - telegram-update.yml과 같은 이유로
+# permissions.actions: write + GITHUB_TOKEN이 필요하다.
 #
 # claude -p 사용(WebSearch/WebFetch, RESEARCH_PROVIDER=claude 기본) - CLAUDE_CODE_OAUTH_TOKEN 필요.
 # 최대 소요 18분(RESEARCH_TIMEOUT_MS) - 타임아웃 여유를 넉넉히 둔다.
-
+#
+# 2026-09-16: 실행 순서는 GitHub concurrency 큐가 아니라 pipeline_dispatch_queue(Supabase, DB
+# 큐)가 관리한다 - GH concurrency 큐는 "실행 중 1개 + 대기 1개"까지만 허용해서, Go를 연달아 누르면
+# 대기가 넘쳐 조용히 취소되는 사고가 이틀 연속 있었다(대기 후 디스패치하는 이전 완화책도 대기
+# 상한이 실제 소요 시간보다 짧아 뚫렸다). 이제 이 워크플로우는 항상 DB 큐를 통해서만 발화되고
+# (직접 workflow_dispatch로 부르지 않음 - queue_id로 어느 큐 행인지 안다), 마지막 스텝이 그 큐
+# 행을 마감하고 다음 대기 항목을 스스로 깨운다(체인) - src/services/github/pipelineQueue.ts 참고.
+# 아래 concurrency group은 그 DB 큐 로직의 버그에 대비한 2차 안전망으로 그대로 둔다(정상 동작
+# 중엔 절대 "대기 1개"를 넘지 않으므로 취소를 유발할 일이 없다).
 name: job-research
 
 on:
@@ -22,19 +30,15 @@ on:
         description: "article_jobs.id (UUID)"
         required: true
         type: string
+      queue_id:
+        description: "pipeline_dispatch_queue.id (DB 큐를 거치지 않은 수동 실행이면 비워둔다)"
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: write
 
-# job별이 아니라 전역 1개 그룹이다(2026-09-15 발견) - 텔레그램에서 Go를 연달아 누르면
-# job-research 실행이 여러 개 동시에 GH Actions 러너에서 도는데, 같은 Claude 구독 계정의
-# claude -p 자원을 나눠 쓰면서 개별 조사가 평소보다 오래 걸려 18분 타임아웃(RESEARCH_TIMEOUT_MS)에
-# 걸렸다(96a224e9... job, 4건 동시 실행 중 1건만 18분22초 걸려 실패, 나머지 3건은 6~8분).
-# job-write.yml/job-revise.yml과 같은 그룹 이름(heavy-pipeline)을 써서 셋이 서로도 겹치지
-# 않게 한다 - 예전 로컬 heavyPipelineLock.ts(단일 파일 락, 클라우드 이전 후 무력화됨)가 하려던
-# 것을 GitHub Actions 자체의 큐로 대체한다. 대기 시간은 job의 timeout-minutes에 포함되지 않는다
-# (큐에서 대기하는 동안은 타이머가 안 돎).
 concurrency:
   group: heavy-pipeline
   cancel-in-progress: false
@@ -67,3 +71,14 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run job:research -- "${{ inputs.job_id }}"
+
+      # 2026-09-16: 성공/실패/타임아웃 무관하게 항상 돈다(if: always()) - 이 실행이 DB 큐 행을
+      # 대신하고 있었다면 마감하고 락을 풀어 다음 대기 항목을 스스로 깨운다. queue_id가 없으면
+      # (수동 gh workflow run 복구 실행 등) CLI가 조용히 아무것도 안 하고 끝난다.
+      - name: Drain pipeline queue
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: npm run job:pipeline-drain -- "${{ inputs.queue_id }}" "${{ job.status }}"
