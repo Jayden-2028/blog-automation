@@ -370,3 +370,57 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
 
   return checks;
 }
+
+// ---------- 공통 문체(voice) + 이미지 프롬프트 (2026-09-16) ----------
+//
+// 사용자 지적 두 건을 규칙으로 잡는다. (1) 원고마다 어투가 달라 블로그 톤이 흔들린다 -
+// style/voice.md로 어미를 통일했고, 그 파일이 금지한 구어 어미를 여기서 1건이라도 경고한다.
+// (2) 이미지가 본문과 따로 논다(아시안게임 대진표 이미지에 팀이 없음) - output-format.md §8-1이
+// "문단을 한 장으로 요약"하라고 정했고, 그중 코드로 잡을 수 있는 "데이터형 이미지를 AI 생성으로
+// 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
+
+/**
+ * style/voice.md §2가 금지한 구어 어미. 어미 뒤에 문장부호·공백·줄끝이 와야 종결로 본다
+ * ("고요한 밤"의 "고요"는 뒤에 "한"이 붙어 안 걸린다).
+ */
+const BANNED_COLLOQUIAL_ENDINGS = /(더라고요|거든요|잖아요|답니다|네요|고요)(?=[.!?)"'”’\s]|$)/gm;
+
+export function checkVoice(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+  const body = stripReferencesSection(rawBody);
+
+  const found = [...body.matchAll(BANNED_COLLOQUIAL_ENDINGS)].map((m) => m[1]);
+  if (found.length === 0) return [];
+
+  const unique = [...new Set(found)];
+  return [
+    {
+      category: "quality",
+      severity: "warning",
+      message: `공통 문체가 금지한 구어 어미 ${found.length}건: ${unique.map((e) => `~${e}`).join(", ")} (style/voice.md §2 - 정보는 합니다체, 반응은 해요체)`,
+    },
+  ];
+}
+
+/** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(output-format.md §8-1). */
+const DATA_IMAGE_HINT = /대진표|일정표|순위표|시간표|비교표|금액표|요금표|차트|그래프|도표|지역별\s*(?:금액|지원금|요금|현황)/;
+
+const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
+
+export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+
+  const descriptions = [...rawBody.matchAll(IMAGE_DESCRIPTION_PATTERN)].map((m) => m[1].trim());
+  const dataAsAi = descriptions.filter((d) => /AI\s*생성/.test(d) && DATA_IMAGE_HINT.test(d));
+  if (dataAsAi.length === 0) return [];
+
+  return [
+    {
+      category: "quality",
+      severity: "warning",
+      message:
+        `글자·데이터가 핵심인 이미지를 AI 생성으로 지정한 마커 ${dataAsAi.length}개: "${dataAsAi[0].slice(0, 30)}…"` +
+        " (output-format.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
+    },
+  ];
+}

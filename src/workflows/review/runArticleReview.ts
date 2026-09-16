@@ -6,7 +6,15 @@
 //
 // ⚠️ 이 결과는 원고를 차단하지 않는다(설계 6절). 알림에 함께 표시되고 사람이 판단한다.
 
-import { checkAdDisclosure, checkAttributionHedging, checkFacts, checkLegal, checkQuality } from "./articleReviewChecks.js";
+import {
+  checkAdDisclosure,
+  checkAttributionHedging,
+  checkFacts,
+  checkImagePrompts,
+  checkLegal,
+  checkQuality,
+  checkVoice,
+} from "./articleReviewChecks.js";
 import type { ReviewCheck } from "./articleReviewChecks.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
 
@@ -38,6 +46,8 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
       isMedical: input.isMedical,
     }),
     ...checkAttributionHedging(input.article.content),
+    ...checkVoice(input.article.content),
+    ...checkImagePrompts(input.article.content),
   ];
 
   // error를 먼저 보여준다 - 알림에서 잘릴 때 중요한 것이 남아야 한다.

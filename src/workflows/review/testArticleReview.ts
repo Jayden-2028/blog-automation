@@ -8,7 +8,15 @@
 //   3. 프롬프트가 요구한 작성 시점 명시 문구가 미검출 날짜로 잡힘
 //   4. 평문 URL 출처를 링크 없음으로 오판
 
-import { checkAdDisclosure, checkAttributionHedging, checkFacts, checkLegal, checkQuality } from "./articleReviewChecks.js";
+import {
+  checkAdDisclosure,
+  checkAttributionHedging,
+  checkFacts,
+  checkImagePrompts,
+  checkLegal,
+  checkQuality,
+  checkVoice,
+} from "./articleReviewChecks.js";
 import { formatReviewLines, runArticleReview } from "./runArticleReview.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -267,6 +275,44 @@ function main(): void {
   const approvedAbsence = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다. 2024년 기준으로는 1만 5,000원 안팎이었습니다.");
   assert(approvedAbsence.length === 0, `승인된 미확정 서술은 통과해야 한다 (실제: ${JSON.stringify(approvedAbsence)})`);
   console.log("✅ 인용/헤지: 승인된 '아직 공개되지 않았습니다' 단일 서술은 오탐 아님");
+
+  // ---------- 공통 문체(voice) (2026-09-16) ----------
+
+  // v1) voice.md §2가 금지한 구어 어미는 1건이라도 경고 + 어떤 어미인지 표시.
+  const voiceBad = checkVoice("저희 쌍둥이도 그랬거든요. 처음엔 잘 안 되더라고요.\n지원금은 30만 원이라고 하네요.");
+  assert(voiceBad.length === 1 && voiceBad[0].severity === "warning", "금지 구어 어미는 warning 1건으로 묶여야 한다");
+  assert(
+    voiceBad[0].message.includes("3건") && voiceBad[0].message.includes("~거든요") && voiceBad[0].message.includes("~더라고요") && voiceBad[0].message.includes("~네요"),
+    `걸린 어미와 개수를 보여줘야 한다 (실제: ${voiceBad[0].message})`
+  );
+  console.log("✅ voice: 금지 구어 어미(거든요/더라고요/네요) 경고 + 어미 표시");
+
+  // v2) 규칙대로 쓴 문장은 통과. "고요한"처럼 낱말 안의 "고요"는 종결이 아니라 안 걸린다.
+  const voiceOk = checkVoice("지원금은 2026년 8월 기준 30만 원입니다. 저는 이 부분이 제일 반가웠어요.\n고요한 밤이었습니다. 신청 전에 지역부터 확인해 보세요.");
+  assert(voiceOk.length === 0, `합니다체/해요체 + 낱말 안의 '고요'는 통과해야 한다 (실제: ${JSON.stringify(voiceOk)})`);
+  console.log("✅ voice: 합니다체·해요체 통과, '고요한' 오탐 없음");
+
+  // v3) 참고 자료 이후(남의 글 제목)는 대상이 아니다.
+  const voiceRefs = checkVoice("본문은 규칙대로입니다.\n\n**참고 자료**\n\n- [이거 진짜 좋더라고요](https://example.com)");
+  assert(voiceRefs.length === 0, "참고 자료 링크 제목의 구어 어미는 걸리면 안 된다");
+  console.log("✅ voice: 참고 자료 섹션 제외");
+
+  // ---------- 이미지 프롬프트 (2026-09-16) ----------
+
+  // i1) 데이터형(대진표·일정표) 이미지를 AI 생성으로 지정하면 경고 - 실측(아시안게임 야구 대진표에 팀이 없음).
+  const imageBad = checkImagePrompts(
+    "[IMAGE: 8강 대진표 — AI 생성]\n[IMAGE PROMPT: A tournament bracket graphic, no text, 16:9]\n\n본문.\n\n[IMAGE: 지역별 지원금 비교표 — AI 생성]\n[IMAGE PROMPT: A comparison table, no text]"
+  );
+  assert(imageBad.length === 1 && imageBad[0].severity === "warning", "데이터형 AI 생성 마커는 warning 1건으로 묶여야 한다");
+  assert(imageBad[0].message.includes("2개") && imageBad[0].message.includes("대진표"), `개수와 첫 설명을 보여줘야 한다 (실제: ${imageBad[0].message})`);
+  console.log("✅ image: 대진표·비교표를 AI 생성으로 지정 -> 경고");
+
+  // i2) 같은 대진표라도 웹 검색이면 통과, 데이터가 아닌 장면 이미지는 AI 생성이어도 통과.
+  const imageOk = checkImagePrompts(
+    "[IMAGE: 한국·일본·대만·호주 8강 대진표 — 웹 검색]\n[IMAGE PROMPT: 2026 아시안게임 야구 대진표 공식]\n\n[IMAGE: 저녁 7시 목욕부터 취침까지 4단계 루틴 — AI 생성]\n[IMAGE PROMPT: A warm flat illustration, no text, 16:9]"
+  );
+  assert(imageOk.length === 0, `웹 검색 대진표 + 장면형 AI 생성은 통과해야 한다 (실제: ${JSON.stringify(imageOk)})`);
+  console.log("✅ image: 웹 검색 대진표·장면형 AI 생성 통과");
 
   // ---------- 통합 ----------
 

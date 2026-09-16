@@ -65,8 +65,12 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `배리에이션 글을 만든다. moai-marketer:content-blog 스킬로 작성하고 moai-writer:korean-humanize로 마무리한다.`,
     ``,
     `먼저 prompts/writing/writer.md와 prompts/writing/rules/facts-and-hedging.md를 Read해`,
-    `문체·구조·사실 태도(확인/헤지 금지 - 2026-09-15부터 writer.md §4가 이 파일로 옮겨졌다) 원칙을`,
+    `구조·사실 태도(확인/헤지 금지 - 2026-09-15부터 writer.md §4가 이 파일로 옮겨졌다) 원칙을`,
     `따른다. prompts/writing/rules/output-format.md(구 §6~10)의 소제목·이미지 마커 서식도 그대로 따른다.`,
+    category === "incident"
+      ? `어투는 prompts/writing/style/incident.md(습니다체 통일·1인칭 금지)를 Read해 그대로 따른다.`
+      : `어투·어미·인칭은 prompts/writing/style/voice.md(공통 문체, 2026-09-16)를 Read해 그대로 따른다 -`,
+    category === "incident" ? `` : `카테고리와 무관하게 이 한 목소리다.`,
     `단, 출력은 output-format.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 하고, 사실은 기준`,
     `원고에서만 가져온다(자료조사 파일·웹 검색 없음).`,
     ``,
@@ -98,7 +102,7 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `- 이미지: 기준 원고에 ![alt](url) 이미지가 있으면 같은 URL로 본문 흐름에 맞는 위치에 그대로`,
     `  넣고 alt 텍스트에 키워드가 들어가도록 다듬는다. 기준 원고에 "[IMAGE: 설명]" 마커만 있으면`,
     `  배리에이션에도 대응되는 위치에 "[IMAGE: 설명]" 마커로 남긴다(이미지는 사람이 나중에 삽입).`,
-    category ? `- 카테고리: ${category}. 그 분야 개인 블로그 톤을 유지한다.` : ``,
+    category ? `- 카테고리: ${category}. 구조·흐름은 그 분야 style 파일, 어투는 위에서 Read한 문체 파일을 따른다.` : ``,
     ``,
     `## 출력 형식 (아래 마커를 정확히 그대로, 순서대로)`,
     `${M.title}`,
