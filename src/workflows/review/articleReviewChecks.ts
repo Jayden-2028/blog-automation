@@ -413,6 +413,14 @@ const DATA_IMAGE_HINT = /대진표|일정표|순위표|시간표|비교표|금�
 const SCREEN_CAPTURE_HINT =
   /(?:법령|조문|포털|홈페이지|웹사이트|사이트|정부24|국가법령정보센터|누리집|앱)[^.\n\]]{0,15}(?:화면|캡처)|화면\s*캡처|캡처\s*화면|스크린샷/;
 
+/**
+ * 특정 날짜의 회의·발표·의회 현장(output-format.md §8-3, 2026-09-17). 그런 사진은 거의 항상 언론사
+ * 저작물이라 광고가 붙는 블로그에서 못 쓴다 - 실측에서 정책 기사 7자리가 이 이유로 전멸했다.
+ * 제작발표회·기자간담회는 배급사·방송사 배포 사진이 있어 일부러 뺐다(§8-2가 권하는 대안이기도 하다).
+ */
+const NEWS_EVENT_HINT =
+  /보도\s*사진|(?:\d{1,2}월\s*\d{1,2}일|제\s*\d+\s*회)[^.\n\]]{0,25}(?:회의|본회의|의회|브리핑|국정감사|대정부질문)|(?:시|군|구|도)의회[^.\n\]]{0,20}(?:부결|가결|통과|의결)/;
+
 const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
 
 export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
@@ -440,6 +448,17 @@ export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
       message:
         `화면 캡처를 이미지 자리로 만든 마커 ${screens.length}개: "${screens[0].slice(0, 30)}…"` +
         " (output-format.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
+    });
+  }
+
+  const newsEvents = descriptions.filter((d) => NEWS_EVENT_HINT.test(d));
+  if (newsEvents.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message:
+        `특정 날짜의 회의·발표 현장을 이미지 자리로 만든 마커 ${newsEvents.length}개: "${newsEvents[0].slice(0, 30)}…"` +
+        " (output-format.md §8-3 - 언론사 사진이라 쓸 수 없다, 제도가 적용되는 일반적 현장으로)",
     });
   }
 
