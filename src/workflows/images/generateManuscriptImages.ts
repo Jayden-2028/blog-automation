@@ -41,6 +41,11 @@ export type GenerateManuscriptImagesOptions = {
   providers?: ImageProvider[];
   /** 비용 원장 기록. 테스트에서 Supabase를 타지 않도록 주입 지점을 연다. */
   record?: typeof recordApiUsage;
+  /**
+   * 지정하면 이 마커 번호(1부터)만 생성한다. 이미 이미지가 있는 원고에서 **빈 자리만** 채울 때 쓴다
+   * (images:fill). 생략하면 지금까지처럼 AI 생성 자리 전부가 대상이다.
+   */
+  onlyIndexes?: number[];
 };
 
 export type GenerateManuscriptImagesResult = {
@@ -93,9 +98,11 @@ export async function generateManuscriptImages(
   //
   // index는 **원래 마커 순서**(1-based)를 유지한다 - 뷰어(renderManuscriptPage)가 이 번호로 본문 블록과
   // 이미지를 짝지으므로, 건너뛴 자리만큼 번호를 당기면 이미지가 엉뚱한 문단에 붙는다.
+  const onlyIndexes = options.onlyIndexes ? new Set(options.onlyIndexes) : null;
   const aiSlots = imageBlocks
     .map((block, i) => ({ block, index: i + 1 }))
-    .filter(({ block }) => block.acquisition !== "search");
+    .filter(({ block }) => block.acquisition !== "search")
+    .filter(({ index }) => !onlyIndexes || onlyIndexes.has(index));
 
   const targets = aiSlots.slice(0, config.maxPerArticle);
   if (aiSlots.length > targets.length) {
