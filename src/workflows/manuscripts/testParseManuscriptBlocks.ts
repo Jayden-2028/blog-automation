@@ -47,6 +47,28 @@ async function main(): Promise<void> {
   );
   console.log("✅ 텍스트/이미지/소제목+문단/소제목+목록 - 블록 분할과 프롬프트 매칭");
 
+  // 1-1) 획득 방식(output-format.md §8)을 설명에서 읽는다. 이게 없으면 generateManuscriptImages가
+  //      웹 검색 마커의 한국어 검색어까지 이미지 모델에 넣는다(2026-09-16 실측 사고).
+  assert(blocks[1].type === "image" && blocks[1].acquisition === "search", "`— 웹 검색`은 search여야 한다");
+  assert(blocks[3].type === "image" && blocks[3].acquisition === "ai", "`— AI 생성`은 ai여야 한다");
+
+  const acquisitions = parseManuscriptBlocks(
+    [
+      "[IMAGE: 표기 없는 옛 원고 마커]",
+      "",
+      "[IMAGE: 기상청 브리핑 사진 - 웹검색, 출처 표기 필요]",
+      "",
+      "[IMAGE: 루틴 카드 – ai 생성]",
+    ].join("\n")
+  ).filter((b) => b.type === "image");
+  assert(acquisitions[0].type === "image" && acquisitions[0].acquisition === "unknown", "표기 없으면 unknown(옛 원고 호환)");
+  assert(
+    acquisitions[1].type === "image" && acquisitions[1].acquisition === "search",
+    "대시 종류·띄어쓰기·뒤 단서가 달라도 웹 검색을 잡아야 한다"
+  );
+  assert(acquisitions[2].type === "image" && acquisitions[2].acquisition === "ai", "소문자 ai 생성도 잡아야 한다");
+  console.log("✅ 획득 방식 파싱(웹 검색/AI 생성/표기 없음, 표기 흔들림 허용)");
+
   // 2) 마커 개수와 imagePrompts 길이가 다르면(배리에이션이 마커를 빠뜨리는 등) 프롬프트 없이 표시
   const mismatched = parseManuscriptBlocks(body, ["프롬프트 1개뿐"]);
   const images = mismatched.filter((b) => b.type === "image");

@@ -17,6 +17,7 @@ import type { GenerateImageResult, ImageProvider } from "../../services/images/g
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
 import type { UploadArticleImageResult } from "../../services/supabase/storage/uploadArticleImage.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
+import type { ManuscriptBlock } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
 export type GenerateManuscriptImagesInput = {
@@ -75,21 +76,29 @@ export async function generateManuscriptImages(
   // 프롬프트 없는 마커는 생성 대상이 아니다 - 억지로 설명(한국어)을 프롬프트로 쓰면 품질이 크게
   // 떨어지고 저작권 가드(실존 인물·로고 회피)가 프롬프트에 안 실린다.
   const imageBlocks = parseManuscriptBlocks(input.body, input.imagePrompts).filter(
-    (b): b is { type: "image"; description: string; prompt: string | null } => b.type === "image"
+    (b): b is Extract<ManuscriptBlock, { type: "image" }> => b.type === "image"
   );
 
   const images: ManuscriptImage[] = [];
   const failures: string[] = [];
 
-  const targets = imageBlocks.slice(0, config.maxPerArticle);
-  if (imageBlocks.length > targets.length) {
-    failures.push(`이미지 마커 ${imageBlocks.length}개 중 상한(${config.maxPerArticle})까지만 생성했습니다.`);
+  // `웹 검색` 마커는 애초에 생성 대상이 아니다(2026-09-16). 그 마커의 프롬프트는 검색창에 칠
+  // 한국어 검색어라, 이미지 모델에 넣으면 규격 밖 프롬프트로 저품질 이미지가 나온다 -
+  // parseManuscriptBlocks의 ImageAcquisition 주석에 실측 경위가 있다. 이 자리는 사람이(또는 Codex가)
+  // 실제 사진을 찾아 채우고, 뷰어는 채워지지 않은 자리로 잡아 "발행 전 채울 것"에 검색어와 함께 띄운다.
+  //
+  // index는 **원래 마커 순서**(1-based)를 유지한다 - 뷰어(renderManuscriptPage)가 이 번호로 본문 블록과
+  // 이미지를 짝지으므로, 건너뛴 자리만큼 번호를 당기면 이미지가 엉뚱한 문단에 붙는다.
+  const aiSlots = imageBlocks
+    .map((block, i) => ({ block, index: i + 1 }))
+    .filter(({ block }) => block.acquisition !== "search");
+
+  const targets = aiSlots.slice(0, config.maxPerArticle);
+  if (aiSlots.length > targets.length) {
+    failures.push(`AI 생성 대상 ${aiSlots.length}개 중 상한(${config.maxPerArticle})까지만 생성했습니다.`);
   }
 
-  for (let i = 0; i < targets.length; i++) {
-    const block = targets[i];
-    const index = i + 1;
-
+  for (const { block, index } of targets) {
     if (!block.prompt) {
       failures.push(`[이미지 ${index}] 프롬프트를 찾지 못해 건너뜁니다(마커 수와 imagePrompts 길이 불일치).`);
       images.push({

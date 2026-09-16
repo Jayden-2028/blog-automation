@@ -149,6 +149,46 @@ async function main(): Promise<void> {
   assert(capped.failures.some((f) => f.includes("상한")), "상한으로 잘렸다는 사실을 남겨야 한다");
   console.log("✅ maxPerArticle 상한 적용");
 
+  // 8) `웹 검색` 마커는 생성하지 않는다(2026-09-16 실측 사고 - 한국어 검색어가 그대로 이미지
+  //    프롬프트로 들어가 저품질 이미지가 쏟아졌다). 그리고 건너뛴 자리만큼 index를 당기면 안 된다 -
+  //    뷰어가 이 번호로 본문 블록과 짝을 맞추므로 이미지가 엉뚱한 문단에 붙는다.
+  const mixedBody = [
+    "도입 문단입니다.",
+    "[IMAGE: 카페 픽업대에 놓인 테이크아웃 음료 사진 — 웹 검색]",
+    "**첫 소제목**\n소제목 문단입니다.",
+    "[IMAGE: 종이컵에서 김이 나는 뜨거운 커피 일러스트 — AI 생성]",
+    "[IMAGE: 국가법령정보센터 산업안전보건법 제41조 화면 — 웹 검색]",
+    "마무리 문단입니다.",
+  ].join("\n\n");
+  const mixedPrompts = [
+    "카페 테이크아웃 음료 픽업대",
+    "A warm flat illustration of steam rising from a paper coffee cup, no text, no letters. 16:9.",
+    "국가법령정보센터 산업안전보건법 41조",
+  ];
+
+  const seen: string[] = [];
+  const mixed = await generateManuscriptImages(
+    { ...input, body: mixedBody, imagePrompts: mixedPrompts },
+    {
+      config: cfg(),
+      generate: async (i) => {
+        seen.push(i.prompt);
+        return okGenerate(i);
+      },
+      upload: okUpload,
+    }
+  );
+  assert(seen.length === 1, `웹 검색 2개는 건너뛰고 AI 생성 1개만 호출해야 한다 (실제 ${seen.length}건)`);
+  assert(seen[0] === mixedPrompts[1], `AI 생성 슬롯의 프롬프트여야 한다 (실제: ${seen[0]})`);
+  assert(
+    !seen.some((p) => /웹|검색|법령/.test(p)),
+    `한국어 검색어가 이미지 모델에 들어가면 안 된다 (${JSON.stringify(seen)})`
+  );
+  assert(mixed.images.length === 1, `생성된 항목만 남아야 한다 (${mixed.images.length})`);
+  assert(mixed.images[0].index === 2, `원래 마커 순서(2번째)를 유지해야 한다 (실제: ${mixed.images[0].index})`);
+  assert(mixed.failures.length === 0, "웹 검색 건너뜀은 실패가 아니다(정상 동작)");
+  console.log("✅ 웹 검색 마커 건너뜀 + 원래 index 유지 + 실패로 잡지 않음");
+
   console.log("\n✅ 전체 통과");
 }
 

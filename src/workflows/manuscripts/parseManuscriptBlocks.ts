@@ -25,14 +25,39 @@
 
 import type { ManuscriptImage } from "./manuscriptManifest.js";
 
+/**
+ * 이미지 자리를 무엇으로 채우는가(output-format.md §8 "획득 방식"). 설명 끝의 `— AI 생성` /
+ * `— 웹 검색`에서 읽는다.
+ *
+ * 왜 필요한가(2026-09-16 실측 사고): 이 구분이 없어서 generateManuscriptImages가 마커를 가리지 않고
+ * 전부 생성했다. `웹 검색` 마커의 "프롬프트"는 한국어 검색어 한 줄인데(예: "2026 아시안게임 야구
+ * 대진표 조 편성 공식"), 그게 그대로 gpt-image-2에 이미지 생성 프롬프트로 들어갔다 - output-format.md
+ * §8이 AI 생성 프롬프트에 요구하는 영어·`no text, no letters`·3~6줄 규격이 하나도 안 실린 채로다.
+ * 09-16 남양주 카페 원고는 마커 5개 중 3개가 웹 검색이었고 그 3장이 전부 이 경로로 나왔다.
+ *
+ * `unknown`은 획득 방식을 안 적은 옛 원고다. 기존 동작(생성)을 유지한다.
+ */
+export type ImageAcquisition = "ai" | "search" | "unknown";
+
 export type ManuscriptBlock =
   | { type: "text"; content: string }
   | { type: "heading"; heading: string; body: string }
-  | { type: "image"; description: string; prompt: string | null };
+  | { type: "image"; description: string; prompt: string | null; acquisition: ImageAcquisition };
 
 const IMAGE_LINE_RE = /^\[IMAGE:\s*([\s\S]*?)\]\s*$/;
 const IMAGE_PROMPT_LINE_RE = /^\[IMAGE PROMPT:\s*([\s\S]*?)\]\s*$/;
 const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
+
+/**
+ * 설명에서 획득 방식을 읽는다. 규격은 `설명 — 웹 검색`이지만 대시 종류(—/–/-)와 뒤에 붙는 단서
+ * ("웹 검색, 출처 표기 필요")가 실제 원고마다 흔들려서, 구분자에 기대지 않고 표기 자체를 찾는다.
+ * 둘 다 있으면 `search`가 이긴다 - 잘못 생성하는 쪽이 안 만드는 쪽보다 비싸다(유료 API + 저품질 이미지).
+ */
+export function parseImageAcquisition(description: string): ImageAcquisition {
+  if (/웹\s*검색/.test(description)) return "search";
+  if (/AI\s*생성/i.test(description)) return "ai";
+  return "unknown";
+}
 
 /** raw 블록이 이미지 마커(단독, 또는 바로 다음 줄에 IMAGE PROMPT가 붙은 형태)인지 판정한다. */
 function matchImageBlock(raw: string): { description: string; inlinePrompt: string | null } | null {
@@ -62,6 +87,7 @@ export function parseManuscriptBlocks(body: string, imagePrompts: string[] = [])
         type: "image",
         description: imageMatch.description,
         prompt: imageMatch.inlinePrompt ?? (promptsAligned ? imagePrompts[imageIndex] : null),
+        acquisition: parseImageAcquisition(imageMatch.description),
       });
       imageIndex += 1;
       continue;
