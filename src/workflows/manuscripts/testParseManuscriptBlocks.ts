@@ -162,6 +162,42 @@ async function main(): Promise<void> {
   assert(substituted3.includes("[IMAGE: 카페 사진"), "url 없는(실패) 이미지는 치환하면 안 된다");
   console.log("✅ substituteConfirmedImages - 생성 실패(url 없음)는 마커 유지");
 
+  // 2026-09-17 회귀: [IMAGE PROMPT:]가 여러 줄이어도 이미지 블록으로 인식해야 한다.
+  // output-format.md §8이 AI 프롬프트를 3~6줄로 쓰라고 하므로, 규칙대로 쓴 원고일수록 이 모양이 된다.
+  // 예전 구현은 정확히 2줄만 인정해서 마커가 본문 텍스트로 새어나갔다(30건 중 5건, 마커 10개).
+  const multiline = [
+    "도입 문단입니다.",
+    "",
+    "[IMAGE: 수면 루틴 4단계 카드 — AI 생성]",
+    "[IMAGE PROMPT: A warm minimal flat illustration of a bedtime routine in a Korean home,",
+    "four simple scenes left to right: warm bath, dim lamp, picture book, sleeping child.",
+    "Soft beige palette, no text, no letters. 16:9.]",
+    "",
+    "마무리 문단입니다.",
+  ].join("\n");
+
+  const multiBlocks = parseManuscriptBlocks(multiline);
+  const imageBlocks = multiBlocks.filter((b) => b.type === "image");
+  assert(imageBlocks.length === 1, `여러 줄 프롬프트도 이미지 블록 1개여야 한다 (${imageBlocks.length})`);
+  assert(
+    imageBlocks[0].type === "image" && imageBlocks[0].description === "수면 루틴 4단계 카드 — AI 생성",
+    "설명이 그대로 읽혀야 한다"
+  );
+  assert(
+    imageBlocks[0].type === "image" && imageBlocks[0].prompt?.includes("bedtime routine") && imageBlocks[0].prompt?.includes("16:9"),
+    `여러 줄 프롬프트가 한 줄로 합쳐져야 한다 (${imageBlocks[0].type === "image" ? imageBlocks[0].prompt : ""})`
+  );
+  assert(
+    !multiBlocks.some((b) => b.type !== "image" && JSON.stringify(b).includes("[IMAGE")),
+    "마커가 본문 텍스트 블록으로 새면 안 된다"
+  );
+
+  const stripped = manuscriptBodyWithoutImages(multiline);
+  assert(!stripped.includes("[IMAGE"), `본문에서 마커가 통째로 지워져야 한다\n${stripped}`);
+  assert(!stripped.includes("four simple scenes"), "프롬프트 가운데 줄도 남으면 안 된다");
+  assert(stripped.includes("도입 문단입니다.") && stripped.includes("마무리 문단입니다."), "본문 문장은 남아야 한다");
+  console.log("✅ 여러 줄 IMAGE PROMPT도 이미지 블록으로 인식 + 본문에서 통째로 제거(2026-09-17 회귀)");
+
   console.log("\n✅ parseManuscriptBlocks 테스트 전체 통과");
 }
 

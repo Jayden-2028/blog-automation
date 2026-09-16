@@ -12,7 +12,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import { classifyImageMarker } from "../review/articleReviewChecks.js";
 import type { ImageMarkerViolation } from "../review/articleReviewChecks.js";
-import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
+import { matchImageBlock, parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 
 export type MarkerViolation = {
   /** 본문 마커 순서(1부터). imagePrompts 인덱스와 짝이 맞는다. */
@@ -194,26 +194,71 @@ export async function proposeMarkerFixes(
 }
 
 /**
- * 본문의 해당 `[IMAGE:]` 줄과 imagePrompts 항목만 갈아끼운다. 마커 개수와 순서는 그대로라
- * 이미 생성된 다른 이미지의 index 짝짓기가 깨지지 않는다.
+ * 이미지 블록 판정은 **parseManuscriptBlocks의 것을 그대로 쓴다**(2026-09-17 사고 2회차).
+ * 처음엔 여기에 같은 로직을 복제했는데, 파서가 여러 줄 IMAGE PROMPT를 인식하도록 고쳐졌을 때
+ * 이쪽만 옛 기준(2줄 고정)으로 남아 블록 수가 어긋났다 - 판정이 두 벌이면 반드시 갈라진다.
  */
-export function applyMarkerFixes(
-  body: string,
-  imagePrompts: string[],
-  fixes: MarkerFix[]
-): { body: string; imagePrompts: string[] } {
+function isImageBlock(raw: string): { hasInlinePrompt: boolean } | null {
+  const matched = matchImageBlock(raw.trim());
+  return matched ? { hasInlinePrompt: matched.inlinePrompt !== null } : null;
+}
+
+export type ApplyMarkerFixesResult =
+  | { ok: true; body: string; imagePrompts: string[] }
+  | { ok: false; reason: string };
+
+/**
+ * 본문의 해당 이미지 블록과 imagePrompts 항목만 갈아끼운다.
+ *
+ * **번호는 반드시 블록 기준이다**(2026-09-17 사고): 처음엔 `[IMAGE:` 로 시작하는 **줄**을 셌는데,
+ * findMarkerViolations는 parseManuscriptBlocks의 **블록**을 센다. 마커가 빈 줄 없이 붙어 있는 원고
+ * (심정지 원고: 줄 5 / 블록 3)에서 둘이 어긋나 **엉뚱한 자리를 바꿨다.** 파이프라인의 다른 코드
+ * (생성·수집·뷰어)가 전부 블록 기준 index로 이미지를 짝지으므로 블록 기준이 정본이다.
+ *
+ * 줄 수와 블록 수가 다르면 그 원고는 출력 형식 계약(output-format.md §8 - 마커 앞뒤 빈 줄 2개)을
+ * 어긴 것이라 안전하게 짝지을 수 없다. 고치지 않고 거부한다 - 잘못 바꾸느니 그대로 두는 게 낫다.
+ */
+export function applyMarkerFixes(body: string, imagePrompts: string[], fixes: MarkerFix[]): ApplyMarkerFixesResult {
+  // 구분자를 배열에 남기는 split - 빈 줄 개수까지 그대로 보존한다(짝수 index = 블록).
+  const parts = body.split(/(\n{2,})/);
+  const markerLineCount = body.split("\n").filter((l) => /^\[IMAGE:\s*/.test(l.trim())).length;
+  const blockCount = parts.filter((p, i) => i % 2 === 0 && isImageBlock(p) !== null).length;
+
+  if (markerLineCount !== blockCount) {
+    return {
+      ok: false,
+      reason:
+        `마커 줄 ${markerLineCount}개와 이미지 블록 ${blockCount}개가 다릅니다 - 마커 앞뒤가 빈 줄로 ` +
+        `떨어져 있지 않아(output-format.md §8) 자리를 안전하게 짝지을 수 없습니다.`,
+    };
+  }
+
+  // 프롬프트가 어디 있느냐로 쓰는 곳이 갈린다.
+  // - 배열이 블록 수와 맞으면(정상 원고) 배열에 쓴다 - 본문 변화가 가장 적다.
+  // - 어긋나면(옛 파서가 인라인 프롬프트를 못 빼내 배열이 짧게 남은 원고) 배열은 이미 무의미하다.
+  //   parseManuscriptBlocks도 정렬이 깨지면 배열을 통째로 무시하므로, 프롬프트를 **본문에 인라인으로**
+  //   써서 그 자리만은 자기 완결되게 만든다. 거부하면 영영 못 고치는 원고가 남는다.
+  const promptsAligned = imagePrompts.length === blockCount;
   const byIndex = new Map(fixes.map((f) => [f.index, f]));
-  const lines = body.split("\n");
   let imageIndex = 0;
 
-  const nextLines = lines.map((line) => {
-    if (!/^\[IMAGE:\s*/.test(line.trim())) return line;
+  const nextParts = parts.map((part, i) => {
+    if (i % 2 === 1) return part;
+    const block = isImageBlock(part);
+    if (!block) return part;
     imageIndex += 1;
     const fix = byIndex.get(imageIndex);
-    return fix ? `[IMAGE: ${fix.after.description}]` : line;
+    if (!fix) return part;
+
+    const keepInline = block.hasInlinePrompt || !promptsAligned;
+    return keepInline
+      ? `[IMAGE: ${fix.after.description}]\n[IMAGE PROMPT: ${fix.after.prompt}]`
+      : `[IMAGE: ${fix.after.description}]`;
   });
 
-  const nextPrompts = imagePrompts.map((prompt, i) => byIndex.get(i + 1)?.after.prompt ?? prompt);
+  const nextPrompts = promptsAligned
+    ? imagePrompts.map((prompt, i) => byIndex.get(i + 1)?.after.prompt ?? prompt)
+    : imagePrompts;
 
-  return { body: nextLines.join("\n"), imagePrompts: nextPrompts };
+  return { ok: true, body: nextParts.join(""), imagePrompts: nextPrompts };
 }

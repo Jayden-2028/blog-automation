@@ -116,7 +116,9 @@ async function main(): Promise<void> {
     },
   ];
 
-  const next = applyMarkerFixes(BODY, PROMPTS, fixes);
+  const applied = applyMarkerFixes(BODY, PROMPTS, fixes);
+  assert(applied.ok, `정상 본문은 교체돼야 한다 (${applied.ok ? "" : applied.reason})`);
+  const next = applied;
   const markers = next.body.split("\n").filter((l) => l.startsWith("[IMAGE:"));
   assert(markers.length === 4, `마커 개수가 유지돼야 한다 (${markers.length})`);
   assert(markers[0] === "[IMAGE: 카페 픽업대에 놓인 테이크아웃 음료 사진 — 웹 검색]", "자리 1은 그대로여야 한다");
@@ -137,6 +139,55 @@ async function main(): Promise<void> {
   const after = findMarkerViolations(next.body, next.imagePrompts);
   assert(after.length === 0, `교체 후에는 위반이 없어야 한다 (${JSON.stringify(after)})`);
   console.log("✅ 왕복 확인 - 교체 후 위반 0");
+
+  // 7) **2026-09-17 사고 회귀**: 마커가 빈 줄 없이 붙어 있으면 줄 기준과 블록 기준 번호가 어긋난다
+  //    (실제 원고: 줄 5 / 블록 3). 그 상태로 바꾸면 엉뚱한 자리가 교체된다 - 거부해야 한다.
+  const MALFORMED = [
+    "도입 문단입니다.",
+    "[IMAGE: 첫 번째 — AI 생성]\n[IMAGE: 두 번째 — AI 생성]\n[IMAGE: 세 번째 — AI 생성]",
+    "[IMAGE: 조문 화면 — 웹 검색]",
+    "마무리 문단입니다.",
+  ].join("\n\n");
+  const malformedResult = applyMarkerFixes(MALFORMED, ["a", "b"], [fixes[0]]);
+  assert(!malformedResult.ok, "줄/블록 수가 다르면 거부해야 한다");
+  assert(!malformedResult.ok && malformedResult.reason.includes("빈 줄"), `사유가 분명해야 한다 (${JSON.stringify(malformedResult)})`);
+
+  // 배열이 블록 수와 어긋나는 원고(옛 파서가 인라인 프롬프트를 못 빼내 배열이 짧게 남은 경우)는
+  // 거부하지 않는다 - 배열이 이미 무의미하므로 프롬프트를 본문에 인라인으로 써서 자기 완결시킨다.
+  const promptMismatch = applyMarkerFixes(BODY, ["하나뿐"], [fixes[0]]);
+  assert(promptMismatch.ok, `배열이 어긋나도 인라인으로 고쳐야 한다 (${promptMismatch.ok ? "" : promptMismatch.reason})`);
+  assert(
+    promptMismatch.ok && promptMismatch.body.includes("[IMAGE: 카페 카운터에서 응대하는 직원 — AI 생성]\n[IMAGE PROMPT: A Korean cafe counter. 16:9.]"),
+    "프롬프트가 본문에 인라인으로 붙어야 한다"
+  );
+  assert(promptMismatch.ok && promptMismatch.imagePrompts.length === 1, "정렬이 깨진 배열은 건드리지 않는다");
+  console.log("✅ 줄/블록 불일치는 거부, 배열 불일치는 인라인으로 자기 완결");
+
+  // 8) 인라인 [IMAGE PROMPT:]가 붙은 블록도 짝을 맞춰 함께 바꾼다.
+  const INLINE = ["문단.", "[IMAGE: 조문 화면 — 웹 검색]\n[IMAGE PROMPT: 옛 검색어]", "끝."].join("\n\n");
+  const inlineResult = applyMarkerFixes(INLINE, ["옛 검색어"], [
+    { index: 1, rule: "screen_capture", before: { description: "x", prompt: null },
+      after: { description: "카운터 직원 — AI 생성", prompt: "A Korean counter, no text. 16:9." }, reason: "" },
+  ]);
+  assert(inlineResult.ok, "인라인 프롬프트 블록도 처리돼야 한다");
+  assert(inlineResult.ok && inlineResult.body.includes("[IMAGE PROMPT: A Korean counter, no text. 16:9.]"), "인라인 프롬프트도 갈려야 한다");
+  console.log("✅ 인라인 IMAGE PROMPT 블록도 함께 교체");
+
+  // 9) **2026-09-17 사고 2회차 회귀**: 블록 판정을 복제하면 파서만 고쳤을 때 갈라진다.
+  //    여러 줄 IMAGE PROMPT가 붙은 블록도 여기서 같은 기준으로 세어야 한다.
+  const MULTILINE = [
+    "문단 하나.",
+    "[IMAGE: 조문 화면 — 웹 검색]\n[IMAGE PROMPT: A long prompt line one,\nline two continues,\nline three ends. 16:9.]",
+    "문단 둘.",
+  ].join("\n\n");
+  const multiResult = applyMarkerFixes(MULTILINE, ["기존 프롬프트"], [
+    { index: 1, rule: "screen_capture", before: { description: "x", prompt: null },
+      after: { description: "카운터 직원 — AI 생성", prompt: "A Korean counter, no text. 16:9." }, reason: "" },
+  ]);
+  assert(multiResult.ok, `여러 줄 프롬프트 블록도 교체돼야 한다 (${multiResult.ok ? "" : multiResult.reason})`);
+  assert(multiResult.ok && multiResult.body.includes("[IMAGE: 카운터 직원 — AI 생성]"), "설명이 바뀌어야 한다");
+  assert(multiResult.ok && !multiResult.body.includes("line two continues"), "옛 여러 줄 프롬프트가 남으면 안 된다");
+  console.log("✅ 여러 줄 IMAGE PROMPT 블록도 같은 기준으로 인식(판정 복제 회귀)");
 
   console.log("\n✅ refixImageMarkers 테스트 전체 통과");
 }

@@ -59,16 +59,25 @@ export function parseImageAcquisition(description: string): ImageAcquisition {
   return "unknown";
 }
 
-/** raw 블록이 이미지 마커(단독, 또는 바로 다음 줄에 IMAGE PROMPT가 붙은 형태)인지 판정한다. */
-function matchImageBlock(raw: string): { description: string; inlinePrompt: string | null } | null {
+/**
+ * raw 블록이 이미지 마커(단독, 또는 뒤에 IMAGE PROMPT가 붙은 형태)인지 판정한다.
+ *
+ * IMAGE PROMPT가 **여러 줄**일 수 있다(2026-09-17 실측 사고): rules/output-format.md §8은 AI 생성
+ * 프롬프트를 "3~6줄로 쓴다"고 요구하는데, 예전 구현은 정확히 2줄짜리 블록만 이미지로 인정했다.
+ * 그래서 규칙대로 쓴 원고일수록 마커가 이미지로 인식되지 않고 **본문 텍스트로 새어나갔다** -
+ * 뷰어에 이미지 자리로 안 뜨고, 생성·수집 대상에서도 빠지고, 발행 본문에 `[IMAGE: ...]`가 글자
+ * 그대로 남는다. 실측 당시 30건 중 5건에서 마커 10개가 이 상태였다.
+ */
+export function matchImageBlock(raw: string): { description: string; inlinePrompt: string | null } | null {
   const lines = raw.split("\n");
   const first = lines[0].match(IMAGE_LINE_RE);
   if (!first) return null;
   if (lines.length === 1) return { description: first[1].trim(), inlinePrompt: null };
-  if (lines.length === 2) {
-    const second = lines[1].match(IMAGE_PROMPT_LINE_RE);
-    if (second) return { description: first[1].trim(), inlinePrompt: second[1].trim() };
-  }
+
+  // 둘째 줄부터 끝까지를 한 덩어리로 보고 [IMAGE PROMPT: ...]인지 본다(줄 수 무관).
+  const rest = lines.slice(1).join("\n").trim();
+  const second = rest.match(IMAGE_PROMPT_LINE_RE);
+  if (second) return { description: first[1].trim(), inlinePrompt: second[1].trim().replace(/\s*\n\s*/g, " ") };
   return null;
 }
 
@@ -109,13 +118,11 @@ export function parseManuscriptBlocks(body: string, imagePrompts: string[] = [])
 /** 이미지 마커 줄(과 바로 붙은 IMAGE PROMPT 줄)을 뺀 본문. "복사" 버튼이 붙여넣을 때 마커
  *  텍스트가 섞이지 않게 한다. */
 export function manuscriptBodyWithoutImages(body: string): string {
+  // 줄 단위로 거르면 여러 줄짜리 [IMAGE PROMPT: ...]의 가운데·끝 줄이 남는다(matchImageBlock 주석의
+  // 같은 사고) - 마커를 통째로 지운 뒤 빈 줄을 정리한다.
   return body
-    .split("\n")
-    .filter((line) => {
-      const trimmed = line.trim();
-      return !IMAGE_LINE_RE.test(trimmed) && !IMAGE_PROMPT_LINE_RE.test(trimmed);
-    })
-    .join("\n")
+    .replace(/^[ \t]*\[IMAGE PROMPT:[\s\S]*?\][ \t]*$/gm, "")
+    .replace(/^[ \t]*\[IMAGE:[^\]]*\][ \t]*$/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

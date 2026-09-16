@@ -104,6 +104,10 @@ async function main(): Promise<void> {
     }
 
     const next = applyMarkerFixes(topic.manuscript.body, topic.manuscript.imagePrompts, fixes);
+    if (!next.ok) {
+      console.log(`   ⚠️ 바꾸지 않습니다: ${next.reason}\n`);
+      continue;
+    }
 
     const articleError = await updateBlogspotArticleBody(topic.jobId, next.body);
     if (articleError) {
