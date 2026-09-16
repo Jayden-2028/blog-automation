@@ -7,6 +7,7 @@
 // 사용법:
 //   npm run images:collect -- <jobId>
 //   npm run images:collect -- --date 2026-09-16
+//   npm run images:collect -- <jobId> --no-verify   비전 검증 건너뛰기(빠르지만 설명↔실물 불일치를 못 잡는다)
 import "dotenv/config";
 
 import { collectWebImages, buildWebImageSlots } from "./collectWebImages.js";
@@ -49,9 +50,12 @@ async function main(): Promise<void> {
     // 폴더가 없을 수 있으므로(내보내기를 아직 안 돌린 경우) 먼저 한 번 내보낸다.
     const exported = await exportManuscript(topic);
     console.log(`   보관함: ${exported.dir}`);
-    console.log(`   웹 검색 자리 ${slots.length}개 - Codex로 찾는 중(수 분 걸립니다)...`);
+    const verify = !args.includes("--no-verify");
+    console.log(
+      `   웹 검색 자리 ${slots.length}개 - Codex로 찾는 중(수 분 걸립니다)${verify ? " · 찾은 이미지는 Claude가 열어 보고 검증합니다" : ""}...`
+    );
 
-    const result = await collectWebImages({ keyword: topic.keyword, dir: exported.dir, slots });
+    const result = await collectWebImages({ keyword: topic.keyword, dir: exported.dir, slots }, { verify });
 
     for (const image of result.found) {
       console.log(`   ✅ [${image.index}] ${image.fileName}`);

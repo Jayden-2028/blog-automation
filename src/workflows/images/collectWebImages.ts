@@ -13,11 +13,12 @@
 // 판단 기준은 rules/output-format.md §8-1("바로 위 문단을 한 장으로 요약")을 그대로 쓴다 -
 // 그래서 슬롯마다 바로 위 문단 원문을 함께 넘긴다.
 
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { keywordSlug } from "../../config/pipelinePaths.js";
-import { runHeadlessCodex } from "../../services/llm/runHeadlessCodex.js";
+import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { extractTrailingJson, runHeadlessCodex } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
@@ -81,11 +82,27 @@ export type CollectWebImagesResult = {
   failures: string[];
 };
 
+export type VerifyImageInput = {
+  /** 내려받아 저장한 파일의 절대 경로. 검증자가 직접 열어 본다. */
+  filePath: string;
+  /** Codex가 적은 설명(alt). 실제 이미지와 어긋나는지 보는 기준이다. */
+  alt: string;
+  /** 이 이미지가 요약해야 할 문단. */
+  context: string;
+  keyword: string;
+};
+
+export type VerifyImageResult = { ok: boolean; reason: string };
+
 export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 codex 실행. */
   runCodex?: typeof runHeadlessCodex;
   fetchImage?: (url: string) => Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }>;
   readSize?: (buffer: Buffer) => { width: number; height: number } | null;
+  /** 내려받은 이미지를 실제로 열어 보고 판정한다. 기본은 Claude(claude -p + Read). */
+  verifyImage?: (input: VerifyImageInput) => Promise<VerifyImageResult>;
+  /** false면 비전 검증을 건너뛴다(시간·호출을 아끼고 싶을 때). 기본 true. */
+  verify?: boolean;
 };
 
 /**
@@ -255,6 +272,52 @@ async function defaultFetchImage(
   }
 }
 
+/**
+ * 내려받은 이미지를 **실제로 열어 보고** 그 자리에 맞는지 판정한다.
+ *
+ * 왜 필요한가(2026-09-17 실측): Codex는 URL과 페이지 맥락만 보고 고를 뿐 **이미지를 보지 않는다.**
+ * 대만 OTT에서 가져온 파일은 `alt`에 "공식 포스터"라고 적혀 있었지만 실제 내용은 스틸컷이었다.
+ * 설명과 실물이 어긋나면 캡션·ALT가 통째로 거짓말이 되므로 발행 전에 걸러야 한다.
+ *
+ * 왜 Codex가 아니라 Claude가 보는가: 고른 쪽이 자기 선택을 검수하면 같은 착각을 반복한다. 다른
+ * 모델이 독립적으로 보는 편이 낫고, CLAUDE.md의 역할 분담(Claude가 최종 검증)과도 맞는다.
+ */
+async function defaultVerifyImage(input: VerifyImageInput): Promise<VerifyImageResult> {
+  const prompt = [
+    "아래 이미지 파일을 Read 도구로 열어 실제 내용을 보고, 블로그 원고의 그 자리에 쓸 수 있는지 판정한다.",
+    "",
+    `파일: ${input.filePath}`,
+    `원고 주제: ${input.keyword}`,
+    `이 자리에 들어가야 할 것(수집기가 적은 설명): ${input.alt}`,
+    "이 이미지가 요약해야 할 문단:",
+    `"""${input.context.slice(0, 600)}"""`,
+    "",
+    "하나라도 어긋나면 불합격이다:",
+    "1. 이미지의 **실제 내용이 위 설명과 일치**하는가? (설명은 '포스터'인데 실제는 스틸컷이면 불합격)",
+    "2. 그 문단이 말하는 것을 보여주는가? 분위기만 맞는 무관한 사진이면 불합격.",
+    "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 불합격.",
+    "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 불합격.",
+    "",
+    '마지막 줄에 JSON 한 줄만 답한다: {"ok": true, "reason": "한 문장"}',
+  ].join("\n");
+
+  const result = await runHeadlessClaude({
+    prompt,
+    allowedTools: ["Read"],
+    permissionMode: "acceptEdits",
+    timeoutMs: 120_000,
+  });
+
+  // 검증자가 못 돌면 이미지를 버리지 않는다 - 판정 불가와 불합격은 다르다. 사람이 보도록 남긴다.
+  if (!result.ok) return { ok: true, reason: `검증 건너뜀(${result.error})` };
+
+  const parsed = extractTrailingJson(result.output) as { ok?: unknown; reason?: unknown } | null;
+  if (!parsed || typeof parsed.ok !== "boolean") {
+    return { ok: true, reason: "검증 결과를 읽지 못해 그대로 둡니다" };
+  }
+  return { ok: parsed.ok, reason: typeof parsed.reason === "string" ? parsed.reason : "" };
+}
+
 type CodexSlotResult = {
   index: number;
   imageUrl: string;
@@ -285,6 +348,8 @@ export async function collectWebImages(
 ): Promise<CollectWebImagesResult> {
   const runCodex = options.runCodex ?? runHeadlessCodex;
   const fetchImage = options.fetchImage ?? defaultFetchImage;
+  const verifyImage = options.verifyImage ?? defaultVerifyImage;
+  const verify = options.verify ?? true;
   const failures: string[] = [];
 
   if (input.slots.length === 0) return { found: [], failures };
@@ -363,7 +428,23 @@ export async function collectWebImages(
 
     const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
     const fileName = `${stem}.${extension}`;
-    await writeFile(resolve(input.dir, fileName), downloaded.buffer);
+    const filePath = resolve(input.dir, fileName);
+    await writeFile(filePath, downloaded.buffer);
+
+    // 검증자가 파일을 열어 봐야 하므로 저장한 뒤에 본다. 불합격이면 지운다.
+    if (verify) {
+      const verdict = await verifyImage({
+        filePath,
+        alt: result.alt || slot.description,
+        context: slot.context,
+        keyword: input.keyword,
+      });
+      if (!verdict.ok) {
+        await rm(filePath, { force: true });
+        failures.push(`[자리 ${slot.index}] 이미지가 설명과 맞지 않아 버렸습니다: ${verdict.reason}`);
+        continue;
+      }
+    }
 
     found.push({
       index: slot.index,
