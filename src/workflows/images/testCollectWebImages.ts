@@ -216,6 +216,39 @@ async function main(): Promise<void> {
     assert(verifyCalls === 0 && skippedVerify.found.length === 1, "verify:false면 검증을 부르지 않고 그대로 채택한다");
     console.log("✅ 비전 검증 - 불합격 시 파일까지 삭제, 근거 전달, --no-verify로 생략");
 
+    // 5-4) 핫링크 차단(2026-09-17 실측: 경복궁 3자리 전부 HTTP 403) 대응. 이미지가 실린 페이지를
+    //      Referer로 넘겨야 통과하는 서버가 많다. 실패하면 사람이 직접 받을 수 있게 URL을 남긴다.
+    const fetchArgs: { url: string; referer: string }[] = [];
+    await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        verifyImage: okVerify,
+        runCodex: codexReply([slotReply()]),
+        fetchImage: async (i) => {
+          fetchArgs.push(i);
+          return { ok: true as const, buffer: PNG_1200, contentType: "image/png" };
+        },
+      }
+    );
+    assert(fetchArgs.length === 1, "다운로더가 호출돼야 한다");
+    assert(fetchArgs[0].url === "https://example.com/a.png", "이미지 URL을 넘겨야 한다");
+    assert(fetchArgs[0].referer === "https://example.com/article", "출처 페이지를 Referer로 넘겨야 한다");
+
+    const blocked = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        verifyImage: okVerify,
+        runCodex: codexReply([slotReply()]),
+        fetchImage: async () => ({ ok: false as const, error: "HTTP 403" }),
+      }
+    );
+    assert(blocked.found.length === 0, "403이면 채택하지 않는다");
+    assert(
+      blocked.failures[0].includes("https://example.com/a.png") && blocked.failures[0].includes("https://example.com/article"),
+      `실패 사유에 이미지·출처 URL이 있어야 사람이 직접 받는다 (${blocked.failures[0]})`
+    );
+    console.log("✅ 핫링크 차단 대응 - 출처를 Referer로 전달, 실패 시 URL 안내");
+
     // 6) Codex가 못 찾았다고(skipped) 하면 빈 자리로 남기고 사유를 전한다 - 억지로 채우지 않는다.
     const skipped = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },

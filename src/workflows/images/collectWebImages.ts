@@ -97,7 +97,11 @@ export type VerifyImageResult = { ok: boolean; reason: string };
 export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 codex 실행. */
   runCodex?: typeof runHeadlessCodex;
-  fetchImage?: (url: string) => Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }>;
+  /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
+  fetchImage?: (input: {
+    url: string;
+    referer: string;
+  }) => Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }>;
   readSize?: (buffer: Buffer) => { width: number; height: number } | null;
   /** 내려받은 이미지를 실제로 열어 보고 판정한다. 기본은 Claude(claude -p + Read). */
   verifyImage?: (input: VerifyImageInput) => Promise<VerifyImageResult>;
@@ -253,14 +257,40 @@ function extensionFor(contentType: string): string | null {
   return null;
 }
 
-async function defaultFetchImage(
-  url: string
+/**
+ * 브라우저가 페이지 안에서 이미지를 불러올 때 실제로 보내는 헤더들.
+ *
+ * 왜 이만큼 흉내 내는가(2026-09-17 실측): 경복궁 원고 3자리가 전부 HTTP 403으로 막혔다. 원인은
+ * **핫링크 차단**이다 - 많은 사이트가 `Referer`가 자기 도메인이 아니면 이미지를 거부한다. UA만
+ * 바꿔서는 안 뚫린다. 우리는 Codex가 그 페이지에서 찾은 이미지를 받는 것이므로, 그 페이지를
+ * `Referer`로 보내는 것이 실제 상황과도 맞는다(위장이 아니라 출처 그대로다).
+ */
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+  "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Sec-Fetch-Dest": "image",
+  "Sec-Fetch-Mode": "no-cors",
+  "Sec-Fetch-Site": "same-origin",
+};
+
+async function fetchOnce(
+  url: string,
+  referer: string | null
 ): Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }> {
   try {
-    const response = await fetch(url, {
-      // 일부 사이트는 기본 UA를 막는다. 사람이 브라우저로 여는 것과 같은 자료를 받으려는 것뿐이다.
-      headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36" },
-    });
+    const headers = { ...BROWSER_HEADERS };
+    if (referer) {
+      headers.Referer = referer;
+      // 같은 사이트에서 온 것처럼 보이게 한다 - 핫링크 차단은 대개 이 조합을 본다.
+      try {
+        headers.Origin = new URL(referer).origin;
+      } catch {
+        // referer가 URL로 안 파싱되면 Origin은 빼고 진행한다.
+      }
+    }
+    const response = await fetch(url, { headers, redirect: "follow" });
     if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
     return {
       ok: true,
@@ -270,6 +300,20 @@ async function defaultFetchImage(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function defaultFetchImage(input: {
+  url: string;
+  referer: string;
+}): Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }> {
+  const withReferer = await fetchOnce(input.url, input.referer);
+  if (withReferer.ok) return withReferer;
+
+  // 반대 방향으로 막는 서버도 있다(크로스 오리진 Referer 자체를 거부). 한 번만 더 시도한다.
+  const bare = await fetchOnce(input.url, null);
+  if (bare.ok) return bare;
+
+  return { ok: false, error: `${withReferer.error} (Referer 없이 재시도: ${bare.error})` };
 }
 
 /**
@@ -390,9 +434,12 @@ export async function collectWebImages(
       continue;
     }
 
-    const downloaded = await fetchImage(result.imageUrl);
+    const downloaded = await fetchImage({ url: result.imageUrl, referer: result.sourcePage });
     if (!downloaded.ok || !downloaded.buffer) {
-      failures.push(`[자리 ${slot.index}] 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}`);
+      // URL을 같이 남긴다 - 자동으로 못 받은 이미지는 사람이 브라우저로 직접 저장할 수 있다.
+      failures.push(
+        `[자리 ${slot.index}] 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${result.imageUrl}\n      출처: ${result.sourcePage}`
+      );
       continue;
     }
 
