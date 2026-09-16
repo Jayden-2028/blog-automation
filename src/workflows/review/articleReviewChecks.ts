@@ -405,22 +405,43 @@ export function checkVoice(rawBody: string | null): ReviewCheck[] {
 /** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(output-format.md §8-1). */
 const DATA_IMAGE_HINT = /대진표|일정표|순위표|시간표|비교표|금액표|요금표|차트|그래프|도표|지역별\s*(?:금액|지원금|요금|현황)/;
 
+/**
+ * 웹사이트·앱 화면 캡처(output-format.md §8-2, 2026-09-17 사용자 결정). 획득 방식과 무관하게 금지다 -
+ * 웹에 이미지 파일로 존재하지 않아 자동 수집이 못 채우고, 글자 이미지라 디스커버 썸네일에도 불리하다.
+ * 트리거 낱말 없이 "~ 화면"만 쓴 경우는 일부러 안 잡는다(공식 배포 안내 그래픽과 구분이 안 된다).
+ */
+const SCREEN_CAPTURE_HINT =
+  /(?:법령|조문|포털|홈페이지|웹사이트|사이트|정부24|국가법령정보센터|누리집|앱)[^.\n\]]{0,15}(?:화면|캡처)|화면\s*캡처|캡처\s*화면|스크린샷/;
+
 const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
 
 export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
   if (!rawBody) return [];
 
   const descriptions = [...rawBody.matchAll(IMAGE_DESCRIPTION_PATTERN)].map((m) => m[1].trim());
-  const dataAsAi = descriptions.filter((d) => /AI\s*생성/.test(d) && DATA_IMAGE_HINT.test(d));
-  if (dataAsAi.length === 0) return [];
+  const checks: ReviewCheck[] = [];
 
-  return [
-    {
+  const dataAsAi = descriptions.filter((d) => /AI\s*생성/.test(d) && DATA_IMAGE_HINT.test(d));
+  if (dataAsAi.length > 0) {
+    checks.push({
       category: "quality",
       severity: "warning",
       message:
         `글자·데이터가 핵심인 이미지를 AI 생성으로 지정한 마커 ${dataAsAi.length}개: "${dataAsAi[0].slice(0, 30)}…"` +
         " (output-format.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
-    },
-  ];
+    });
+  }
+
+  const screens = descriptions.filter((d) => SCREEN_CAPTURE_HINT.test(d));
+  if (screens.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message:
+        `화면 캡처를 이미지 자리로 만든 마커 ${screens.length}개: "${screens[0].slice(0, 30)}…"` +
+        " (output-format.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
+    });
+  }
+
+  return checks;
 }

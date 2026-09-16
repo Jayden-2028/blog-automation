@@ -314,6 +314,21 @@ function main(): void {
   assert(imageOk.length === 0, `웹 검색 대진표 + 장면형 AI 생성은 통과해야 한다 (실제: ${JSON.stringify(imageOk)})`);
   console.log("✅ image: 웹 검색 대진표·장면형 AI 생성 통과");
 
+  // i3) 화면 캡처는 획득 방식과 무관하게 경고(output-format.md §8-2, 2026-09-17).
+  const screens = checkImagePrompts(
+    "[IMAGE: 국가법령정보센터의 산업안전보건법 제41조 조문 화면 — 웹 검색]\n[IMAGE PROMPT: 산업안전보건법 41조]\n\n[IMAGE: 정부24 지원금 신청 화면 — 웹 검색]\n[IMAGE PROMPT: 정부24 신청]"
+  );
+  assert(screens.length === 1 && screens[0].severity === "warning", "화면 캡처 마커는 warning 1건으로 묶여야 한다");
+  assert(screens[0].message.includes("2개") && screens[0].message.includes("§8-2"), `개수와 근거를 보여줘야 한다 (${screens[0].message})`);
+  console.log("✅ image: 법령 조문·정부 포털 화면 캡처 -> 경고");
+
+  // i4) 현장 실사로 바꾼 자리와, 공식 배포 안내 그래픽("~ 안내 화면")은 걸리지 않아야 한다.
+  const screensOk = checkImagePrompts(
+    "[IMAGE: 카페 카운터에서 고객을 응대하는 직원 — 웹 검색]\n[IMAGE PROMPT: 카페 카운터 직원 응대 사진]\n\n[IMAGE: SPOTV의 아시안게임 생중계 안내 화면 — 웹 검색]\n[IMAGE PROMPT: SPOTV 아시안게임 중계 안내]"
+  );
+  assert(screensOk.length === 0, `현장 실사·공식 안내 그래픽은 통과해야 한다 (${JSON.stringify(screensOk)})`);
+  console.log("✅ image: 현장 실사·공식 안내 그래픽은 오탐 없음");
+
   // ---------- 통합 ----------
 
   // 16) 전부 통과하면 passed=true, 알림은 한 줄.
