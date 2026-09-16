@@ -483,6 +483,51 @@ export type AnalyticsInsert = {
 
 export type AnalyticsUpdate = Partial<AnalyticsInsert>;
 
+// ---------- api_usage ----------
+// 유료 API 호출 1건 = row 1건. 대시보드(manuscripts/cost.json)가 이 테이블만 보고 비용을 집계한다.
+// 스키마: supabase/migrations/20260916140000_api_usage.sql.
+
+export type ApiUsageCostSource = "metered" | "reported";
+
+export type ApiUsageRow = {
+  id: string;
+  occurred_at: string;
+  provider: string;
+  model: string;
+  operation: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  quantity: number;
+  /** numeric(12,6)은 supabase-js에서 number로 온다. 단가 미등록이면 null(0이 아니다). */
+  cost_usd: number | null;
+  cost_source: ApiUsageCostSource;
+  job_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+// id/occurred_at/created_at은 DB default가 있어 생략 가능하다(migration에서 직접 부여했다 -
+// ImageInsert처럼 형제 테이블 관례를 추정한 경우와 달리 근거가 확실하다).
+export type ApiUsageInsert = {
+  id?: string;
+  occurred_at?: string;
+  provider: string;
+  model: string;
+  operation: string;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  total_tokens?: number | null;
+  quantity?: number;
+  cost_usd?: number | null;
+  cost_source?: ApiUsageCostSource;
+  job_id?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type ApiUsageUpdate = Partial<ApiUsageInsert>;
+
 // ---------- Supabase client generic ----------
 
 export type Database = {
@@ -564,6 +609,12 @@ export type Database = {
         Row: AnalyticsRow;
         Insert: AnalyticsInsert;
         Update: AnalyticsUpdate;
+        Relationships: [];
+      };
+      api_usage: {
+        Row: ApiUsageRow;
+        Insert: ApiUsageInsert;
+        Update: ApiUsageUpdate;
         Relationships: [];
       };
     };

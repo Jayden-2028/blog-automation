@@ -23,11 +23,25 @@ import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
 import { prepareManuscript } from "./prepareManuscript.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
+import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
 
 async function writePage(html: string): Promise<void> {
   const path = manuscriptIndexPagePath();
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, html, "utf8");
+}
+
+/**
+ * 배포 직전에 비용 스냅샷(cost.json)을 같은 디렉터리로 떨군다. 배포 단위가 디렉터리 하나라
+ * 여기서 써야 함께 올라간다. best-effort - 실패해도 페이지 배포는 그대로 진행한다.
+ */
+async function writeCostSnapshotBeforeDeploy(): Promise<void> {
+  const result = await writeCostSnapshot();
+  if (result.status === "failed") {
+    console.warn(`⚠️ 비용 스냅샷 생성 실패(무시하고 계속): ${result.error}`);
+    return;
+  }
+  console.log(`✅ 비용 스냅샷 - 오늘 $${result.summary.today.costUsd} / 이번 달 $${result.summary.month.costUsd}`);
 }
 
 async function buildOne(jobId: string): Promise<void> {
@@ -57,6 +71,7 @@ async function buildOne(jobId: string): Promise<void> {
   console.log(`✅ 준비 완료 - 이미지 ${result.topic.manuscript.images.length}장`);
   console.log(`   열기: open ${manuscriptIndexPagePath()}`);
 
+  await writeCostSnapshotBeforeDeploy();
   const deployResult = await deployManuscriptsPage();
   if (deployResult.status === "success") console.log(`✅ 배포 완료: ${deployResult.url}`);
   else if (deployResult.status === "failed") console.error(`⚠️ 배포 실패: ${deployResult.error}`);
@@ -90,6 +105,7 @@ async function refreshPage(): Promise<void> {
   console.log(`✅ 페이지 재생성 - 원고 ${manifest.topics.length}건`);
   console.log(`   열기: open ${manuscriptIndexPagePath()}`);
 
+  await writeCostSnapshotBeforeDeploy();
   const deployResult = await deployManuscriptsPage();
   if (deployResult.status === "success") console.log(`✅ 배포 완료: ${deployResult.url}`);
   else if (deployResult.status === "failed") console.error(`⚠️ 배포 실패: ${deployResult.error}`);

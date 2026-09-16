@@ -14,6 +14,7 @@ import { MANUSCRIPT_IMAGE_CONFIG } from "../../config/manuscriptImages.js";
 import { keywordSlug } from "../../config/pipelinePaths.js";
 import { generateImage, resolveImageProvider } from "../../services/images/generateImage.js";
 import type { GenerateImageResult, ImageProvider } from "../../services/images/generateImage.js";
+import { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
 import type { UploadArticleImageResult } from "../../services/supabase/storage/uploadArticleImage.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
@@ -37,6 +38,8 @@ export type GenerateManuscriptImagesOptions = {
   config?: typeof MANUSCRIPT_IMAGE_CONFIG;
   /** 비교 모드에서 쓸 provider 목록. 기본 ["openai", "gemini"]. */
   providers?: ImageProvider[];
+  /** 비용 원장 기록. 테스트에서 Supabase를 타지 않도록 주입 지점을 연다. */
+  record?: typeof recordApiUsage;
 };
 
 export type GenerateManuscriptImagesResult = {
@@ -67,6 +70,7 @@ export async function generateManuscriptImages(
 
   const generate = options.generate ?? generateImage;
   const upload = options.upload ?? uploadArticleImage;
+  const record = options.record ?? recordApiUsage;
   const providers: ImageProvider[] = config.abCompare
     ? options.providers ?? ["openai", "gemini"]
     : [resolveImageProvider()];
@@ -110,6 +114,19 @@ export async function generateManuscriptImages(
       const result: GenerateImageResult = await generate({ prompt: block.prompt }, provider);
       const variant = providers.length > 1 ? provider : undefined;
       const stem = fileStem(index, block.description);
+
+      // 성공한 호출만 원장에 남긴다. 실패 응답(4xx/5xx·타임아웃)은 과금되지 않으므로 $0짜리 행을
+      // 쌓으면 "호출 N건" 같은 수치만 부풀고 금액은 그대로다. 실패는 failures로 이미 드러난다.
+      if (result.ok) {
+        await record({
+          provider,
+          model: result.model,
+          operation: "image.generate",
+          usage: result.usage,
+          jobId: input.jobId,
+          metadata: { keyword: input.keyword, imageIndex: index },
+        });
+      }
 
       if (!result.ok) {
         failures.push(`[이미지 ${index}/${provider}] 생성 실패: ${result.error}`);

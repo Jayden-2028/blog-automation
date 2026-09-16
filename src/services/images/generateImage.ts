@@ -15,9 +15,73 @@ export type GenerateImageInput = {
   prompt: string;
 };
 
+/**
+ * 공급자가 응답에 실어 주는 사용량. 비용 계측(services/usage/recordApiUsage.ts)의 입력이다.
+ * 2026-09-16 이전에는 이 값을 받아만 놓고 그대로 버렸다 - 그래서 시스템에 지출 기록이 0건이었다.
+ * 공급자가 usage를 생략하면 null이고, 그 경우 금액도 null로 남는다(0으로 적지 않는다).
+ */
+export type GenerateImageUsage = {
+  inputTokens: number | null;
+  /** 참조 이미지를 같이 보낸 경우(이미지 편집). 텍스트→이미지 호출에서는 0 또는 null. */
+  imageInputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
 export type GenerateImageResult =
-  | { ok: true; imageBuffer: Buffer; mimeType: string; provider: ImageProvider }
-  | { ok: false; error: string };
+  | {
+      ok: true;
+      imageBuffer: Buffer;
+      mimeType: string;
+      provider: ImageProvider;
+      /** 실제로 호출한 모델 ID. 단가표(config/apiPricing.ts)의 키와 같다. */
+      model: string;
+      usage: GenerateImageUsage | null;
+    }
+  | { ok: false; error: string; provider: ImageProvider; model: string };
+
+/**
+ * OpenAI images API의 usage -> 공통 형태.
+ *
+ * input_tokens는 텍스트와 이미지 입력을 합친 값이고 둘의 단가가 다르다($5 vs $8). 그래서
+ * input_tokens_details로 쪼갤 수 있으면 쪼갠다 - 지금 파이프라인은 텍스트→이미지뿐이라 이미지
+ * 입력이 0이지만, 나중에 참조 이미지를 붙이면 details 없이는 조용히 과소집계된다.
+ */
+export function parseOpenAIUsage(usage: {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+} | undefined): GenerateImageUsage | null {
+  if (!usage) return null;
+
+  const imageInputTokens = usage.input_tokens_details?.image_tokens ?? null;
+  const textInputTokens =
+    usage.input_tokens_details?.text_tokens ??
+    (usage.input_tokens != null ? usage.input_tokens - (imageInputTokens ?? 0) : null);
+
+  return {
+    inputTokens: textInputTokens,
+    imageInputTokens,
+    outputTokens: usage.output_tokens ?? null,
+    totalTokens: usage.total_tokens ?? null,
+  };
+}
+
+/** Gemini usageMetadata -> 공통 형태. 이 호출의 candidates 토큰은 전부 이미지다(단가 $30/1M). */
+export function parseGeminiUsage(usage: {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+} | undefined): GenerateImageUsage | null {
+  if (!usage) return null;
+  return {
+    inputTokens: usage.promptTokenCount ?? null,
+    imageInputTokens: null,
+    outputTokens: usage.candidatesTokenCount ?? null,
+    totalTokens: usage.totalTokenCount ?? null,
+  };
+}
 
 const OPENAI_IMAGE_TIMEOUT_MS = 120_000;
 
@@ -83,7 +147,7 @@ export function resolveOpenAIImageSize(prompt: string): string {
 
 async function generateWithOpenAI(input: GenerateImageInput): Promise<GenerateImageResult> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY가 설정되지 않았습니다." };
+  if (!apiKey) return { ok: false, error: "OPENAI_API_KEY가 설정되지 않았습니다.", provider: "openai", model: OPENAI_IMAGE_MODEL };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OPENAI_IMAGE_TIMEOUT_MS);
@@ -106,17 +170,37 @@ async function generateWithOpenAI(input: GenerateImageInput): Promise<GenerateIm
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
-      return { ok: false, error: `OpenAI images API 실패: ${response.status} ${response.statusText} - ${bodyText.slice(0, 300)}` };
+      return {
+        ok: false,
+        error: `OpenAI images API 실패: ${response.status} ${response.statusText} - ${bodyText.slice(0, 300)}`,
+        provider: "openai",
+        model: OPENAI_IMAGE_MODEL,
+      };
     }
 
-    const json = (await response.json()) as { data?: Array<{ b64_json?: string }> };
+    const json = (await response.json()) as {
+      data?: Array<{ b64_json?: string }>;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        total_tokens?: number;
+        input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+      };
+    };
     const b64 = json.data?.[0]?.b64_json;
-    if (!b64) return { ok: false, error: "OpenAI 응답에 이미지 데이터(b64_json)가 없습니다." };
+    if (!b64) return { ok: false, error: "OpenAI 응답에 이미지 데이터(b64_json)가 없습니다.", provider: "openai", model: OPENAI_IMAGE_MODEL };
 
-    return { ok: true, imageBuffer: Buffer.from(b64, "base64"), mimeType: "image/png", provider: "openai" };
+    return {
+      ok: true,
+      imageBuffer: Buffer.from(b64, "base64"),
+      mimeType: "image/png",
+      provider: "openai",
+      model: OPENAI_IMAGE_MODEL,
+      usage: parseOpenAIUsage(json.usage),
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `OpenAI 이미지 생성 중 오류: ${message}` };
+    return { ok: false, error: `OpenAI 이미지 생성 중 오류: ${message}`, provider: "openai", model: OPENAI_IMAGE_MODEL };
   } finally {
     clearTimeout(timer);
   }
@@ -131,7 +215,7 @@ const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 
 async function generateWithGemini(input: GenerateImageInput): Promise<GenerateImageResult> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { ok: false, error: "GEMINI_API_KEY가 설정되지 않았습니다." };
+  if (!apiKey) return { ok: false, error: "GEMINI_API_KEY가 설정되지 않았습니다.", provider: "gemini", model: GEMINI_IMAGE_MODEL };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEMINI_IMAGE_TIMEOUT_MS);
@@ -154,25 +238,33 @@ async function generateWithGemini(input: GenerateImageInput): Promise<GenerateIm
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => "");
-      return { ok: false, error: `Gemini API 실패: ${response.status} ${response.statusText} - ${bodyText.slice(0, 300)}` };
+      return {
+        ok: false,
+        error: `Gemini API 실패: ${response.status} ${response.statusText} - ${bodyText.slice(0, 300)}`,
+        provider: "gemini",
+        model: GEMINI_IMAGE_MODEL,
+      };
     }
 
     const json = (await response.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> } }>;
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
     };
     const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
     const b64 = part?.inlineData?.data;
-    if (!b64) return { ok: false, error: "Gemini 응답에 이미지 데이터가 없습니다." };
+    if (!b64) return { ok: false, error: "Gemini 응답에 이미지 데이터가 없습니다.", provider: "gemini", model: GEMINI_IMAGE_MODEL };
 
     return {
       ok: true,
       imageBuffer: Buffer.from(b64, "base64"),
       mimeType: part?.inlineData?.mimeType ?? "image/png",
       provider: "gemini",
+      model: GEMINI_IMAGE_MODEL,
+      usage: parseGeminiUsage(json.usageMetadata),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `Gemini 이미지 생성 중 오류: ${message}` };
+    return { ok: false, error: `Gemini 이미지 생성 중 오류: ${message}`, provider: "gemini", model: GEMINI_IMAGE_MODEL };
   } finally {
     clearTimeout(timer);
   }

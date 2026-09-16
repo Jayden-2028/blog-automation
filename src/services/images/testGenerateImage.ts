@@ -6,7 +6,7 @@
 //
 // 크기 기준은 **구글 디스커버**다(사용자 지시): 큰 썸네일 조건이 "너비 1200px 이상 + 총 픽셀
 // 30만 초과 + 16:9 가로"라, 가로 비율은 전부 이 선을 넘겨야 한다.
-import { resolveOpenAIImageSize } from "./generateImage.js";
+import { parseGeminiUsage, parseOpenAIUsage, resolveOpenAIImageSize } from "./generateImage.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -65,6 +65,39 @@ async function main(): Promise<void> {
     assert(w * h > 300_000, `${ratio} -> 총 픽셀 ${w * h}는 30만을 넘어야 한다`);
   }
   console.log("✅ 세로·정사각도 총 픽셀 30만 초과");
+
+  // 8) usage 파싱(2026-09-16 비용 계측). 이 값을 버리고 있었던 탓에 시스템에 지출 기록이 0건이었다.
+  const openai = parseOpenAIUsage({
+    input_tokens: 30,
+    output_tokens: 120,
+    total_tokens: 150,
+    input_tokens_details: { text_tokens: 30, image_tokens: 0 },
+  });
+  assert(openai?.inputTokens === 30 && openai?.outputTokens === 120, "OpenAI usage를 그대로 읽어야 한다");
+  assert(openai?.imageInputTokens === 0, "참조 이미지가 없으면 image_tokens는 0이다");
+  console.log("✅ OpenAI usage 파싱");
+
+  // details가 없으면 input_tokens 전체를 텍스트로 본다(텍스트→이미지 호출에서는 그게 맞다).
+  const noDetails = parseOpenAIUsage({ input_tokens: 42, output_tokens: 120 });
+  assert(noDetails?.inputTokens === 42 && noDetails?.imageInputTokens === null, "details 없으면 전부 텍스트 입력");
+
+  // 참조 이미지를 같이 보낸 호출은 단가가 다르므로($5 vs $8) 반드시 쪼개져야 한다.
+  const withImageInput = parseOpenAIUsage({
+    input_tokens: 1150,
+    output_tokens: 120,
+    input_tokens_details: { text_tokens: 30, image_tokens: 1120 },
+  });
+  assert(withImageInput?.inputTokens === 30, "텍스트 입력만 inputTokens에 들어가야 한다");
+  assert(withImageInput?.imageInputTokens === 1120, "이미지 입력은 따로 잡혀야 한다(단가가 다르다)");
+  console.log("✅ 이미지 입력 토큰 분리");
+
+  // 공급자가 usage를 생략하면 null이다 - 0으로 만들면 "공짜"로 오해된다.
+  assert(parseOpenAIUsage(undefined) === null, "usage 없으면 null");
+  assert(parseGeminiUsage(undefined) === null, "usageMetadata 없으면 null");
+
+  const gemini = parseGeminiUsage({ promptTokenCount: 15, candidatesTokenCount: 1120, totalTokenCount: 1135 });
+  assert(gemini?.inputTokens === 15 && gemini?.outputTokens === 1120, "Gemini usageMetadata 파싱");
+  console.log("✅ Gemini usage 파싱 / usage 누락 시 null");
 
   console.log("\n✅ 전체 통과");
 }

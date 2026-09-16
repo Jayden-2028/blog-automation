@@ -12,11 +12,11 @@
 
 ---
 
-기준일: 2026-09-15
+기준일: 2026-09-16
 
 현재: Blogspot 단독 운영 재설계 — 채널 단일화·뷰어 재설계·이미지 자동생성 착수
 
-마지막 세션: 2026-09-15 — 티스토리 운영 중단 결정, 전체 재설계 (BLOGSPOT_ONLY_DESIGN.md)
+마지막 세션: 2026-09-16 — API 사용량·비용 계측 추가, 개인 대시보드용 cost.json 생성
 
 ## 마일스톤
 
@@ -33,6 +33,7 @@
 - [x] 뷰어에 실제 이미지 인라인 + 캡션 표 + A/B 나란히 보기
 - [x] 이미지 자동 생성 코드 — writer 프롬프트 → 생성 → Supabase Storage
 - [x] 이미지 로컬 미러 CLI (npm run sync:images)
+- [x] 비용 계측 — api_usage 원장 + 단가표 + cost.json (migration 적용은 사용자 조치)
 - [ ] 이미지 생성 켜기 — GitHub secret/variable 등록 후 첫 실측 (사용자 조치)
 - [ ] 이미지 A/B 비교 (OpenAI vs Gemini) 후 provider 확정
 - [ ] 로컬 폴더 정리 (~/blog-automation/{repo,prod,kw})
