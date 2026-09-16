@@ -2,6 +2,46 @@
 
 기준일: 2026-09-16 (Asia/Seoul)
 
+## 2026-09-16 세션(후속7) — 키워드 알림 매체명 제거 + 스케줄 지연 근본 수정(Cloudflare Cron Trigger)
+
+**1. 알림 헤더에서 매체명 제거**(사용자 요청 - 지금은 Blogspot 단일 채널이라 "티스토리용"/
+"블로그스팟용" 표기가 오해를 준다): `socialIssueKeywordJob.ts`/`entertainmentKeywordJob.ts`/
+`communityKeywordJob.ts`의 `NOTIFICATION_HEADER`를 각각 "오전 사회 이슈 키워드" / "오전 연예 OTT
+키워드" / "오후 커뮤니티 키워드"로 정리.
+
+**2. 스케줄 지연 원인 규명 + 근본 수정.** 사용자가 09:00/09:10 KST 알림이 13:4X KST에 온 걸
+리포트. 실측: 사회이슈/연예OTT/커뮤니티 세 워크플로우 모두 `schedule:` 트리거 예정 시각보다
+**매일 4~5시간 늦게** 발동(하루는 아예 미발동 - 09-15 사고, 이미 알려져 있었음). `created_at ==
+run_started_at`인 걸 보면 일단 실행이 만들어지면 바로 도는데, **GitHub이 그 실행 자체를 늦게
+만든다** - 정시 근처가 아닌 04:07 UTC(커뮤니티)도 똑같이 5시간 넘게 늦어, 09-15에 이미 했던
+"정시 피해서 분 단위로 밀기" 조치로는 못 고치는 문제였다. GitHub 공식 문서: "schedule 이벤트는
+부하가 높으면 지연되거나 아예 드롭될 수 있다" - 애초에 시각을 보장하지 않는 기능.
+
+반면 `workflow_dispatch`(REST API 명시 호출)는 이 저장소 실측에서 항상 호출 즉시 정확히 돌았다
+(오늘 세션에서 수십 번 확인). 그래서 **"언제 돌지"를 GitHub의 schedule에 맡기지 않고 Cloudflare
+Worker의 Cron Trigger가 결정**하도록 바꿨다 - 이미 텔레그램 릴레이용으로 떠 있는
+`cloudflare/telegram-relay` Worker에 `scheduled()` 핸들러를 추가해, 정확한 시각(00:00/00:10/
+04:00 UTC = 09:00/09:10/13:00 KST)에 `workflow_dispatch` API로 세 워크플로우를 깨운다. 기존
+`GH_DISPATCH_TOKEN`을 재사용하려 했으나, 이 토큰은 `repository_dispatch`용으로만 발급돼
+`workflow` 스코프가 없어 **403 Resource not accessible**로 실패 - 스코프 포함해 토큰을 새로
+발급받아 교체했다(중간에 `wrangler secret put`을 대화형으로 실행해 빈 값이 등록되는 사고가
+한 번 더 있었다 - 이 환경은 대화형 프롬프트를 지원하지 않아 `echo -n "값" | wrangler secret
+put`처럼 값을 명령에 직접 실려 보내는 방식만 써야 한다). 1분 주기 임시 cron으로 실제
+`workflow_dispatch` 성공(run 35061289498)까지 확인 후 실 스케줄로 원복.
+GitHub Actions 쪽 `.github/workflows/{social-issue,entertainment,community}-keyword.yml`의
+`schedule:` 블록은 전부 제거(`workflow_dispatch`만 남김) - Cloudflare가 유일한 트리거 경로다.
+
+⚠️ 검증 과정에서 사용자가 새 GitHub PAT 값을 대화창에 직접 붙여넣었다 - 세션 로그에 평문으로
+남아있을 수 있으니 **폐기 후 재발급 권장**.
+
+**남은 것**:
+- ⬜ 위 경고대로 토큰 재발급 필요(사용자 조치).
+- ⬜ 내일 09:00/09:10/13:00 KST 실제 발화로 최종 확인(오늘은 배선 직후라 검증은 커뮤니티
+  워크플로우 1분 주기 테스트로만 함 - 사회이슈/연예OTT는 아직 실제 시각 발화 미확인).
+- ⬜ Cloudflare Worker가 이제 "텔레그램 릴레이 + 키워드 수집 스케줄러" 두 역할을 겸한다 - 이름
+  (`blog-automation-telegram-relay`)이 더 이상 역할과 안 맞지만, 이름 변경은 웹훅 URL이 걸린
+  다른 설정(텔레그램 setWebhook)에 영향을 줄 수 있어 이번엔 손대지 않음.
+
 ## 2026-09-16 세션(후속6) — Blogspot 글 설정 자동화 범위 확정(실측) + 댓글 비허용·예약 발행 구현
 
 **계기**: 사용자가 Blogger "글 설정" 항목(퍼머링크/예약/위치/검색 설명/댓글/맞춤 로봇 태그)의

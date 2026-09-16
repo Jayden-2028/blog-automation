@@ -19,7 +19,8 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
-const NOTIFICATION_HEADER = "🎬 <b>오전 연예·OTT 키워드 (블로그스팟용)</b>";
+// 2026-09-16 사용자 요청: 알림 문구에서 매체명을 뺀다 - socialIssueKeywordJob.ts 참고.
+const NOTIFICATION_HEADER = "🎬 <b>오전 연예 OTT 키워드</b>";
 
 const job: SchedulerJob = {
   name: "entertainment-keyword",

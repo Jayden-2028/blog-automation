@@ -12,12 +12,52 @@
 // handleEditFeedbackMessage가 한다 - 여기는 "이 모양이면 넘길 가치가 있다"는 최소 필터일 뿐,
 // 그 이상의 판단은 하지 않는다). 답장이 아닌 일반 메시지(잡담 등)는 여기서 걸러 GitHub Actions를
 // 깨우지 않는다 - setWebhook의 allowed_updates에도 message가 추가돼 있어야 애초에 여기까지 온다.
+//
+// 2026-09-16: 키워드 수집 3종의 GitHub Actions `schedule:` 트리거를 걷어내고 이 Worker의 Cron
+// Triggers로 대체한다(scheduled() 핸들러). 이유(실측) - GH Actions의 네이티브 schedule 이벤트는
+// "베스트 에포트"일 뿐 시각을 보장하지 않는다(공식 문서: 부하가 높으면 지연되거나 아예 드롭될 수
+// 있음). 실제로 사회이슈/연예OTT/커뮤니티 세 워크플로우가 매일 4~5시간씩 늦었고 하루는 아예
+// 발동하지 않았다(정시 근처를 피해 7분/17분 밀어도 고쳐지지 않음 - 09-15 커밋 e11e511). 반면
+// `workflow_dispatch`(REST API로 명시 호출)는 이 저장소 실측에서 항상 호출 즉시 정확히 돌았다 -
+// 그래서 "언제 돌지"는 Cloudflare Cron Triggers(별도 인프라, 분 단위 정밀도)가 결정하고, 실제
+// 실행은 GitHub API를 통해 workflow_dispatch로만 깨운다. `GH_DISPATCH_TOKEN`은 `workflow`
+// 스코프가 있는 새 PAT로 교체했다 - 기존 값은 `repository_dispatch`용으로만 발급돼 있어
+// workflow_dispatch 호출이 403(Resource not accessible)으로 실패했다(실측 확인). 1분 주기
+// 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
 export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
   GH_DISPATCH_TOKEN: string;
   GITHUB_OWNER: string;
   GITHUB_REPO: string;
+}
+
+/** cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 09:00/09:10/13:00에 맞춘 것이다. */
+const SCHEDULED_WORKFLOWS: Record<string, string> = {
+  "0 0 * * *": "social-issue-keyword.yml", // 09:00 KST
+  "10 0 * * *": "entertainment-keyword.yml", // 09:10 KST - social-issue가 채운 trend_candidates를 읽음
+  "0 4 * * *": "community-keyword.yml", // 13:00 KST
+};
+
+async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {
+  const res = await fetch(
+    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "blog-automation-telegram-relay",
+      },
+      body: JSON.stringify({ ref: "main" }),
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error(`workflow_dispatch 실패(${workflowFile}):`, res.status, text.slice(0, 300));
+  }
 }
 
 export default {
@@ -71,5 +111,14 @@ export default {
     }
 
     return new Response("OK", { status: 200 });
+  },
+
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const workflowFile = SCHEDULED_WORKFLOWS[event.cron];
+    if (!workflowFile) {
+      console.error(`알 수 없는 cron 표현식: ${event.cron}`);
+      return;
+    }
+    ctx.waitUntil(dispatchWorkflow(env, workflowFile));
   },
 };

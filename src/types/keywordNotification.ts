@@ -46,7 +46,7 @@ export type SendKeywordNotificationOptions = {
   topN?: number;
   /** 조회할 discovery_run id. 생략하면 가장 최근에 완료된 run을 찾는다(fetchTopKeywordsForNotification 참고). */
   runId?: number;
-  /** 알림 헤더 첫 줄 override. 오후 커뮤니티 전용 run이 "📡 오후 커뮤니티 인기 키워드" 문구를 넘긴다. */
+  /** 알림 헤더 첫 줄 override. 오후 커뮤니티 전용 run이 "📡 오후 커뮤니티 키워드" 문구를 넘긴다. */
   headerTitle?: string;
 };
 
