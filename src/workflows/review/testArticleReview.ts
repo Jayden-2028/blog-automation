@@ -329,6 +329,37 @@ function main(): void {
   assert(screensOk.length === 0, `현장 실사·공식 안내 그래픽은 통과해야 한다 (${JSON.stringify(screensOk)})`);
   console.log("✅ image: 현장 실사·공식 안내 그래픽은 오탐 없음");
 
+  // i5) 특정 날짜의 회의·발표·의회 현장(§8-3, 2026-09-17) - 언론사 사진이라 못 쓴다.
+  //     실측 문구를 그대로 픽스처로 고정한다(정책 기사 7자리가 이 유형으로 전멸했다).
+  const newsEvents = checkImagePrompts(
+    [
+      "[IMAGE: 9월 16일 국가정책조정회의에서 보건복지부가 도입 방침을 보고하는 현장 사진 — 웹 검색]",
+      "[IMAGE PROMPT: 국가정책조정회의 미프진]",
+      "",
+      "[IMAGE: 강릉시의회 지원금 조례안 부결 관련 보도 사진 — 웹 검색]",
+      "[IMAGE PROMPT: 강릉시의회 조례안 부결]",
+      "",
+      "[IMAGE: 9월 14일 국회 대정부질문이 열린 본회의장 전경 — 웹 검색]",
+      "[IMAGE PROMPT: 국회 본회의장]",
+    ].join("\n")
+  );
+  assert(newsEvents.length === 1 && newsEvents[0].message.includes("§8-3"), `§8-3 경고가 있어야 한다 (${JSON.stringify(newsEvents)})`);
+  assert(newsEvents[0].message.includes("3개"), `세 자리 모두 잡아야 한다 (${newsEvents[0].message})`);
+  console.log("✅ image: 특정 날짜 회의·발표·의회 현장 -> 경고");
+
+  // i6) 제작발표회·기상청 브리핑처럼 배포 사진이 있는 자리와, 일반적 현장으로 바꾼 자리는 통과.
+  const newsEventsOk = checkImagePrompts(
+    [
+      "[IMAGE: 그 프로그램 제작발표회 현장 사진 — 웹 검색]",
+      "[IMAGE PROMPT: 드라마 제작발표회]",
+      "",
+      "[IMAGE: 지역 주민센터 창구에서 지원금을 신청하는 시민 — AI 생성]",
+      "[IMAGE PROMPT: A Korean community center counter, no text, 16:9.]",
+    ].join("\n")
+  );
+  assert(newsEventsOk.length === 0, `배포 사진 있는 자리·일반적 현장은 통과해야 한다 (${JSON.stringify(newsEventsOk)})`);
+  console.log("✅ image: 제작발표회·일반적 현장은 오탐 없음");
+
   // ---------- 통합 ----------
 
   // 16) 전부 통과하면 passed=true, 알림은 한 줄.
