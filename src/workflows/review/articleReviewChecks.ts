@@ -287,26 +287,42 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
   return checks;
 }
 
-// ---------- 인용/헤지 문체 (2026-09-15) ----------
+// ---------- 인용/헤지 문체 (2026-09-15, 2026-09-16 강화) ----------
 //
-// writer.md §4/§4-1/§4-2가 금지하는 세 가지 패턴을 규칙으로 한 번 더 잡는다. 프롬프트 준수만으로는
-// 부족하다는 게 실측으로 나왔다(CURRENT_STATE.md 2026-09-15, "경복궁 구멍 뚫기" 원고) - writer.md가
-// 620줄을 넘어가면서 §4-1/§4-2에 예시까지 박아뒀는데도 모델이 놓친 사례가 나왔다. 여기 걸려도
-// 차단은 아니고 다른 검사와 같이 참고용이다(설계 6절과 동일한 원칙).
+// rules/facts-and-hedging.md 핵심 원칙 1·2(보도 경위 언급 금지, 확인/확정 여부 언급 금지)를
+// 규칙으로 한 번 더 잡는다. 프롬프트 준수만으로는 부족하다는 게 이틀 연속 실측으로 나왔다
+// (CURRENT_STATE.md 2026-09-15 "경복궁 구멍 뚫기", 2026-09-16 "임신 9주"/두리랜드 재발) -
+// 09-15에 넣은 "1회는 허용" 예외가 그 자체로 구멍이었다("말한 것으로 보도됐습니다" 같은 문장이
+// 그 구멍으로 계속 나왔다). 그래서 09-16부터는 **횟수와 무관하게 1건이라도 걸리면 경고한다.**
+// 여기 걸려도 차단은 아니고 다른 검사와 같이 참고용이다(설계 6절과 동일한 원칙).
 
-/** "보도에 따르면"류 인용 표시. §4 표는 처음 1회는 자연스럽다고 허용하므로 2회 이상만 문제다. */
-const REPEATED_ATTRIBUTION_PATTERN = /라고\s*보도(?:됐|했|되었|하였)|보도에\s*따르면|라고\s*전(?:해졌|했)/g;
+/**
+ * 보도·매체에 소식의 출처를 돌리는 모든 표현. 2026-09-16부터 횟수 무관 - 1건만 있어도 경고.
+ * 예외(의도적으로 안 잡음): 실제 인물·기관을 문장의 주어로 쓴 직접 인용("OOO는 ~라고
+ * 밝혔습니다") - "보도/전해지다/매체" 단어 자체가 없으면 이 패턴에 안 걸린다.
+ */
+const MEDIA_ATTRIBUTION_PATTERN =
+  /라고\s*보도(?:됐|했|되었|하였)|것으로\s*보도(?:됐|했)|보도에\s*따르면|라고\s*전(?:해졌|했)|것으로\s*전(?:해졌|했)|라는\s*소식(?:입니다|이다)|매체(?:가|들이|마다)[^.!?\n]{0,20}(?:전했|보도)|보도마다/g;
 
-/** 보도 경위(누가 언제·몇 곳이 보도했는지) 서술. §4-2. */
+/** 보도 경위(누가 언제·몇 곳이 보도했는지) 서술. facts-and-hedging.md §4-2. */
 const COVERAGE_NARRATIVE_PATTERN =
   /인용해\s*전(?:한|했)|취재진이\s*확보|함께\s*보도(?:했|됐)|보도로\s*확산|이어\s*[^.!?\n]{0,12}보도(?:했|됐)/g;
 
 /**
- * 부분 데이터 갭을 대조로 알리는 문장. §4-1.
- * "아직 공개되지 않았습니다"처럼 승인된 단일 서술은 안 걸리게, 대조를 만드는
- * "별도로/따로/구체적으로 + 안 나왔다" 조합만 잡는다(오탐 축소 - 2026-09-15 실측 문구 기준).
+ * 우리 취재·검증 과정의 확인/확정 여부를 원고 내용으로 서술하는 것. facts-and-hedging.md
+ * 핵심 원칙 2번 - "아직 공개되지 않았습니다"(세상에 대한 사실)는 다른 동사라 안 걸린다.
  */
-const PARTIAL_GAP_CONTRAST_PATTERN = /(?:별도로|따로|구체적으로)\s*(?:나오지|제시되지|확인되지|언급되지)\s*않았/g;
+const VERIFICATION_STATUS_PATTERN =
+  /확인되지\s*않았|확정되지\s*않았|확인되지\s*않고|확인해\s*주는[^.!?\n]{0,20}(?:없다|없습니다|여전히)/g;
+
+/**
+ * 부분 데이터 갭을 알리는 문장. facts-and-hedging.md §4-1.
+ * "아직 공개되지 않았습니다"처럼 승인된 단일 서술은 안 걸리게, 이 항목은 없다는 사실 자체를
+ * 알리는 특정 동사 조합만 잡는다(오탐 축소 - 2026-09-15/16 실측 문구 기준). 대조 접속어
+ * (별도로/따로/구체적으로)가 없는 단독 문장("~뿐 ~는 밝히지 않았다")도 2026-09-16부터 포함.
+ */
+const PARTIAL_GAP_PATTERN =
+  /(?:별도로|따로|구체적으로)\s*(?:나오지|제시되지|확인되지|언급되지)\s*않았|(?:밝히지|명시하지)\s*않았습니다/g;
 
 /** 참고 자료 이후는 남의 글 링크 제목이라 대상이 아니다(stripReferencesSection과 같은 이유). */
 export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
@@ -314,32 +330,116 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
   const body = stripReferencesSection(rawBody);
   const checks: ReviewCheck[] = [];
 
-  const attributionMatches = body.match(REPEATED_ATTRIBUTION_PATTERN);
-  if (attributionMatches && attributionMatches.length >= 2) {
+  // 전역(g) 정규식의 lastIndex는 .test() 호출 사이에 상태가 남는다 - 매번 0으로 되돌린다
+  // (checkLegal의 SPECULATIVE_PATTERNS와 같은 이유).
+  MEDIA_ATTRIBUTION_PATTERN.lastIndex = 0;
+  if (MEDIA_ATTRIBUTION_PATTERN.test(body)) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: `"보도에 따르면/~라고 보도했다"류 인용 표현이 ${attributionMatches.length}회 반복됩니다(writer.md §4 - 1회만 자연스럽게 허용)`,
+      message: '"보도되었습니다/~라는 소식입니다"류 매체 인용 표현이 있습니다(facts-and-hedging.md §4 - 몇 회든 금지, 2026-09-16부터 예외 없음)',
     });
   }
 
-  // 전역(g) 정규식의 lastIndex는 .test() 호출 사이에 상태가 남는다 - 매번 0으로 되돌린다
-  // (checkLegal의 SPECULATIVE_PATTERNS와 같은 이유).
   COVERAGE_NARRATIVE_PATTERN.lastIndex = 0;
   if (COVERAGE_NARRATIVE_PATTERN.test(body)) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: "보도 경위(어느 매체가 언제·몇 곳 보도했는지)를 본문에 서술한 것으로 보입니다(writer.md §4-2)",
+      message: "보도 경위(어느 매체가 언제·몇 곳 보도했는지)를 본문에 서술한 것으로 보입니다(facts-and-hedging.md §4-2)",
     });
   }
 
-  PARTIAL_GAP_CONTRAST_PATTERN.lastIndex = 0;
-  if (PARTIAL_GAP_CONTRAST_PATTERN.test(body)) {
+  VERIFICATION_STATUS_PATTERN.lastIndex = 0;
+  if (VERIFICATION_STATUS_PATTERN.test(body)) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: '자료에 없는 항목을 "별도로/따로 나오지 않았다"처럼 대조해서 언급한 것으로 보입니다(writer.md §4-1)',
+      message: '"확인되지 않았다/확정되지 않았다"처럼 우리 취재 과정의 확인 여부를 서술한 것으로 보입니다(facts-and-hedging.md 핵심 원칙 2번 - 확인 안 됐으면 그 문장을 아예 쓰지 않는다)',
+    });
+  }
+
+  PARTIAL_GAP_PATTERN.lastIndex = 0;
+  if (PARTIAL_GAP_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '자료에 없는 항목의 부재 자체를 언급한 것으로 보입니다(facts-and-hedging.md §4-1 - 없으면 그 항목을 그냥 다루지 않는다)',
+    });
+  }
+
+  return checks;
+}
+
+// ---------- 공통 문체(voice) + 이미지 프롬프트 (2026-09-16) ----------
+//
+// 사용자 지적 두 건을 규칙으로 잡는다. (1) 원고마다 어투가 달라 블로그 톤이 흔들린다 -
+// style/voice.md로 어미를 통일했고, 그 파일이 금지한 구어 어미를 여기서 1건이라도 경고한다.
+// (2) 이미지가 본문과 따로 논다(아시안게임 대진표 이미지에 팀이 없음) - output-format.md §8-1이
+// "문단을 한 장으로 요약"하라고 정했고, 그중 코드로 잡을 수 있는 "데이터형 이미지를 AI 생성으로
+// 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
+
+/**
+ * style/voice.md §2가 금지한 구어 어미. 어미 뒤에 문장부호·공백·줄끝이 와야 종결로 본다
+ * ("고요한 밤"의 "고요"는 뒤에 "한"이 붙어 안 걸린다).
+ */
+const BANNED_COLLOQUIAL_ENDINGS = /(더라고요|거든요|잖아요|답니다|네요|고요)(?=[.!?)"'”’\s]|$)/gm;
+
+export function checkVoice(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+  const body = stripReferencesSection(rawBody);
+
+  const found = [...body.matchAll(BANNED_COLLOQUIAL_ENDINGS)].map((m) => m[1]);
+  if (found.length === 0) return [];
+
+  const unique = [...new Set(found)];
+  return [
+    {
+      category: "quality",
+      severity: "warning",
+      message: `공통 문체가 금지한 구어 어미 ${found.length}건: ${unique.map((e) => `~${e}`).join(", ")} (style/voice.md §2 - 정보는 합니다체, 반응은 해요체)`,
+    },
+  ];
+}
+
+/** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(output-format.md §8-1). */
+const DATA_IMAGE_HINT = /대진표|일정표|순위표|시간표|비교표|금액표|요금표|차트|그래프|도표|지역별\s*(?:금액|지원금|요금|현황)/;
+
+/**
+ * 웹사이트·앱 화면 캡처(output-format.md §8-2, 2026-09-17 사용자 결정). 획득 방식과 무관하게 금지다 -
+ * 웹에 이미지 파일로 존재하지 않아 자동 수집이 못 채우고, 글자 이미지라 디스커버 썸네일에도 불리하다.
+ * 트리거 낱말 없이 "~ 화면"만 쓴 경우는 일부러 안 잡는다(공식 배포 안내 그래픽과 구분이 안 된다).
+ */
+const SCREEN_CAPTURE_HINT =
+  /(?:법령|조문|포털|홈페이지|웹사이트|사이트|정부24|국가법령정보센터|누리집|앱)[^.\n\]]{0,15}(?:화면|캡처)|화면\s*캡처|캡처\s*화면|스크린샷/;
+
+const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
+
+export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+
+  const descriptions = [...rawBody.matchAll(IMAGE_DESCRIPTION_PATTERN)].map((m) => m[1].trim());
+  const checks: ReviewCheck[] = [];
+
+  const dataAsAi = descriptions.filter((d) => /AI\s*생성/.test(d) && DATA_IMAGE_HINT.test(d));
+  if (dataAsAi.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message:
+        `글자·데이터가 핵심인 이미지를 AI 생성으로 지정한 마커 ${dataAsAi.length}개: "${dataAsAi[0].slice(0, 30)}…"` +
+        " (output-format.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
+    });
+  }
+
+  const screens = descriptions.filter((d) => SCREEN_CAPTURE_HINT.test(d));
+  if (screens.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message:
+        `화면 캡처를 이미지 자리로 만든 마커 ${screens.length}개: "${screens[0].slice(0, 30)}…"` +
+        " (output-format.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
     });
   }
 

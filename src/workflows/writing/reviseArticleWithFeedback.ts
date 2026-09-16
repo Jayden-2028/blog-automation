@@ -50,6 +50,10 @@ function buildPrompt(input: ReviseArticleInput): string {
     `먼저 prompts/writing/writer.md, prompts/writing/rules/facts-and-hedging.md(사실 태도·헤지`,
     `금지 - 2026-09-15부터 writer.md §4가 이 파일로 옮겨졌다), prompts/writing/rules/output-format.md`,
     `(서식 규칙 - 구 §6~10: 소제목은 "**볼드**" 한 줄, [IMAGE: ...] 마커 등)를 Read해 그 원칙을 따른다.`,
+    category === "incident"
+      ? `어투는 prompts/writing/style/incident.md(습니다체 통일·1인칭 금지)를 Read해 그대로 유지한다.`
+      : `어투·어미·인칭은 prompts/writing/style/voice.md(공통 문체, 2026-09-16)를 Read해 따른다 - 원문이`,
+    category === "incident" ? `` : `그 규칙에 어긋나는 어미(~더라고요/~네요/~거든요 등)를 쓰고 있었다면 이번 재작성에서 함께 바로잡는다.`,
     `단, 출력은 output-format.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 한다.`,
     ``,
     `## 절대 규칙 - 사실 보존`,
@@ -63,7 +67,7 @@ function buildPrompt(input: ReviseArticleInput): string {
     `- [IMAGE: 설명] 마커가 원문에 있으면, 피드백이 이미지 관련 수정을 요구하지 않는 한 같은 자리에`,
     `  같은 설명으로 그대로 남긴다(이미지는 사람이 나중에 삽입한다).`,
     `- 원고 끝의 해시태그 줄(#으로 시작하는 줄)이 있으면 그대로 유지한다.`,
-    category ? `- 카테고리: ${category}. 그 분야 개인 블로그 톤을 유지한다.` : ``,
+    category ? `- 카테고리: ${category}. 구조·흐름은 그 분야 style 파일, 어투는 위에서 Read한 문체 파일을 따른다.` : ``,
     ``,
     `## 출력 형식 (아래 마커를 정확히 그대로, 순서대로)`,
     `${M.title}`,

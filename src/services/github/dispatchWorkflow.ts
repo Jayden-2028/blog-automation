@@ -22,7 +22,16 @@
 
 const GITHUB_API_BASE_URL = "https://api.github.com";
 
-/** job-research.yml/job-write.yml/job-revise.yml이 공유하는 concurrency group 멤버 목록. */
+/**
+ * job-research.yml/job-write.yml/job-revise.yml이 공유하는 concurrency group 멤버 목록.
+ *
+ * ⚠️ 2026-09-16부터 이 셋의 실행 순서는 `concurrencyGroupWorkflows`(이 상수를 넘기는 대기 후
+ * 디스패치 방식)가 아니라 `pipelineQueue.ts`의 DB 큐가 관리한다 - 대기 상한이 실제 소요 시간보다
+ * 짧아 취소를 유발하던 걸 GitHub 큐 의존 자체를 없애는 쪽으로 근본 수정했다(CURRENT_STATE.md
+ * 2026-09-16 후속8 참고). 그래서 지금은 프로덕션 호출부에서 이 상수를 안 쓴다 - 지우지 않은
+ * 이유는 `dispatchGithubWorkflow`의 `concurrencyGroupWorkflows` 대기 기능 자체는 여전히 다른
+ * concurrency group(heavy-pipeline이 아닌 것)에 재사용 가능한 일반 유틸이라서다.
+ */
 export const HEAVY_PIPELINE_WORKFLOWS = ["job-research.yml", "job-write.yml", "job-revise.yml"];
 
 export type DispatchWorkflowInput = {

@@ -30,7 +30,26 @@ export type BloggerConfig = {
   dailyLimit: number;
   /** 가동 초기 관찰용. true면 posts.insert 시 isDraft로 올린다(비공개). */
   publishAsDraft: boolean;
+  /**
+   * 글별 댓글 허용 설정(Blogger `readerComments`). 사용자 결정(2026-09-16): 댓글을 받지 않는다.
+   * 실측으로 확인한 유효값은 셋뿐이다 - `ALLOW` / `DONT_ALLOW_SHOW_EXISTING` /
+   * `DONT_ALLOW_HIDE_EXISTING`(그 외 값은 400 Invalid value).
+   */
+  readerComments: BloggerReaderComments;
 };
+
+export type BloggerReaderComments = "ALLOW" | "DONT_ALLOW_SHOW_EXISTING" | "DONT_ALLOW_HIDE_EXISTING";
+
+const READER_COMMENTS_VALUES: readonly BloggerReaderComments[] = [
+  "ALLOW",
+  "DONT_ALLOW_SHOW_EXISTING",
+  "DONT_ALLOW_HIDE_EXISTING",
+];
+
+function parseReaderComments(raw: string | undefined): BloggerReaderComments {
+  const value = raw?.trim() as BloggerReaderComments | undefined;
+  return value && READER_COMMENTS_VALUES.includes(value) ? value : "DONT_ALLOW_HIDE_EXISTING";
+}
 
 export const BLOGGER_CONFIG: BloggerConfig = {
   enabled: parseBooleanEnv(process.env.BLOGGER_ENABLED, false),
@@ -44,6 +63,7 @@ export const BLOGGER_CONFIG: BloggerConfig = {
   // 자동생성이 보류 상태라 원고에 이미지가 비어 있고, 사용자가 편집화면에서 이미지를 삽입한 뒤
   // 직접 발행한다. 시스템 안정화 전까지 BLOGGER_PUBLISH_AS_DRAFT=false로 바꾸지 않는다.
   publishAsDraft: parseBooleanEnv(process.env.BLOGGER_PUBLISH_AS_DRAFT, true),
+  readerComments: parseReaderComments(process.env.BLOGGER_READER_COMMENTS),
 };
 
 /**

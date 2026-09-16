@@ -430,6 +430,54 @@ export type ManuscriptManifestTopicInsert = {
 
 export type ManuscriptManifestTopicUpdate = Partial<ManuscriptManifestTopicInsert>;
 
+// ---------- pipeline_dispatch_queue / pipeline_lock ----------
+// heavy-pipeline(조사/집필/재작성) 디스패치 순서를 GitHub Actions concurrency 큐 대신 여기서
+// 직접 관리한다. supabase/migrations/20260916060000_pipeline_dispatch_queue.sql 참고.
+
+export type PipelineQueueStatus = "pending" | "dispatched" | "done" | "failed";
+
+export type PipelineDispatchQueueRow = {
+  id: number;
+  job_id: string;
+  workflow_file: string;
+  inputs: Record<string, string>;
+  status: PipelineQueueStatus;
+  created_at: string;
+  dispatched_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+};
+
+export type PipelineDispatchQueueInsert = {
+  id?: number;
+  job_id: string;
+  workflow_file: string;
+  inputs?: Record<string, string>;
+  status?: PipelineQueueStatus;
+  created_at?: string;
+  dispatched_at?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+};
+
+export type PipelineDispatchQueueUpdate = Partial<PipelineDispatchQueueInsert>;
+
+export type PipelineLockRow = {
+  id: number;
+  is_busy: boolean;
+  current_queue_id: number | null;
+  locked_at: string | null;
+};
+
+export type PipelineLockInsert = {
+  id?: number;
+  is_busy?: boolean;
+  current_queue_id?: number | null;
+  locked_at?: string | null;
+};
+
+export type PipelineLockUpdate = Partial<PipelineLockInsert>;
+
 // ---------- images ----------
 // 원고에 연결된 이미지와 출처·저작권·대체 텍스트 정보를 보관한다.
 
@@ -597,6 +645,18 @@ export type Database = {
         Row: ManuscriptManifestTopicRow;
         Insert: ManuscriptManifestTopicInsert;
         Update: ManuscriptManifestTopicUpdate;
+        Relationships: [];
+      };
+      pipeline_dispatch_queue: {
+        Row: PipelineDispatchQueueRow;
+        Insert: PipelineDispatchQueueInsert;
+        Update: PipelineDispatchQueueUpdate;
+        Relationships: [];
+      };
+      pipeline_lock: {
+        Row: PipelineLockRow;
+        Insert: PipelineLockInsert;
+        Update: PipelineLockUpdate;
         Relationships: [];
       };
       images: {

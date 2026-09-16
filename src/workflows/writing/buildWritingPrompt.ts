@@ -61,7 +61,12 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- prompts/writing/rules/facts-and-hedging.md      (사실 태도·헤지 금지 - 항상 최우선, 구 §4)",
     "- prompts/writing/rules/output-format.md          (출력 형식 계약 - 구 §6~10, 코드와 직결)",
     "- docs/seo-guide.md                                (제목·본문·키워드·이미지·태그 규칙)",
-    `- ${styleFile}   (이 카테고리의 실제 발행 최종본 기반 문체·구조 - 반드시 이 목소리로 쓴다)`,
+    `- ${styleFile}   (이 카테고리의 실제 발행 최종본 기반 구조·흐름·제목 기법)`,
+    // 2026-09-16: 어투·어미는 카테고리와 무관하게 voice.md 하나다(카테고리마다 어미 규칙이 달라
+    // 원고마다 톤이 흔들리던 문제). incident만 제외 - incident.md의 습니다체·1인칭 금지가 그대로다.
+    job.category === "incident"
+      ? null
+      : "- prompts/writing/style/voice.md                 (공통 어투·어미·인칭 - 카테고리 파일은 구조만, 목소리는 이 파일)",
     `- ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
     "",
     "이 job의 입력:",
@@ -75,8 +80,9 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     `- 출력은 writer.md §9의 이름·경로 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${draftFilePath}`,
     "- writer.md §9 frontmatter(keyword·title·char_count·hashtags·verdict_from_research 등)를 그대로 채운다.",
     "- writer.md §2의 Skill 호출(/parenting-blog-writer 등) 대신 moai-marketer:content-blog 스킬로",
-    `  초안을 쓰되, 문체·구조는 위에서 Read한 ${styleFile}를 그대로 따른다(§2의 문체 표보다 이 파일이`,
-    "  우선 - 더 구체적이고 실제 발행본 기반이다). §10대로 moai-writer:korean-humanize로 마무리한다.",
+    `  초안을 쓰되, 구조·흐름은 위에서 Read한 ${styleFile}를, 어투·어미는 style/voice.md를 그대로 따른다`,
+    "  (§2의 문체 표보다 이 파일들이 우선 - 더 구체적이고 실제 발행본 기반이다). §10대로",
+    "  moai-writer:korean-humanize로 마무리한다.",
     // 사건·사고는 문체 선택의 문제가 아니라 무죄추정·신원보호·자극적 묘사 금지 규칙이라,
     // "문체는 style 파일을 따른다"에 묻히면 안 된다. 구속력을 따로 못박는다.
     job.category === "incident"
@@ -89,6 +95,9 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "  본문 맨 위 제목은 이 규칙과 별개로 `# ` 한 줄로 둔다(frontmatter 없을 때 title 폴백용).",
     "- 본문에 `[IMAGE: 설명]` 마커를 섹션 전환마다 최소 5개 넣는다(writer.md §8). 실제 이미지는",
     "  사람이 나중에 삽입하므로 마커만 정확히 남긴다.",
+    "- 각 마커의 프롬프트는 **바로 위 문단을 한 장으로 요약**한다(output-format.md §8-1) - 그 문단의",
+    "  구체 요소(누가·무엇·몇 개·어떤 구조)를 2개 이상 담고, 문단과 무관한 분위기 컷을 만들지 않는다.",
+    "  대진표·일정표·순위·금액표처럼 글자가 핵심인 자리는 AI 생성이 아니라 웹 검색으로 지정한다.",
     "- 사실은 위 자료조사 파일에서만 가져온다. WebSearch를 쓰지 않는다.",
     "",
     `완료하면 파일을 저장한 뒤 마지막 줄에 \`SAVED: ${draftFilePath}\`만 답하라.`,

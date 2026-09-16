@@ -1,5 +1,6 @@
 // publishArticleToBlogspot 오케스트레이션 테스트. 모든 의존성(DB/LLM/Blogger)을 주입한다.
 import { publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
+import { BLOGGER_CONFIG } from "../../config/publishTargets.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -197,6 +198,40 @@ async function main(): Promise<void> {
   assert(withAbImages.ok === true, "A/B 미확정 케이스도 발행은 진행돼야 한다");
   assert(insertedHtmlAb.includes("[IMAGE:"), "A/B 후보가 2장이면(미확정) 마커를 그대로 두고 발행해야 한다");
   console.log("✅ A/B 비교 미확정(후보 2장) -> 마커 유지한 채 발행");
+
+  // 10) 초안 vs 공개에서 미충족 마커 처리가 갈린다(2026-09-16).
+  //     초안: TODO 표시로 남긴다 / 공개: 독자에게 보이면 안 되므로 제거한다.
+  const bodyWithWebSearchMarker =
+    "본문 시작\n\n[IMAGE: 국가법령정보센터 조문 화면 — 웹 검색]\n\n본문 끝";
+  const runWith = async (publishAsDraft: boolean): Promise<string> => {
+    const original = BLOGGER_CONFIG.publishAsDraft;
+    (BLOGGER_CONFIG as { publishAsDraft: boolean }).publishAsDraft = publishAsDraft;
+    let html = "";
+    try {
+      await publishArticleToBlogspot("job-1", {
+        ...baseDeps,
+        loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: bodyWithWebSearchMarker })],
+        generateVariant: async () => {
+          throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
+        },
+        insertPost: async (input) => {
+          html = input.contentHtml;
+          return { ok: true as const, postId: "p", url: "u", isDraft: publishAsDraft };
+        },
+      });
+    } finally {
+      (BLOGGER_CONFIG as { publishAsDraft: boolean }).publishAsDraft = original;
+    }
+    return html;
+  };
+
+  const draftHtml = await runWith(true);
+  assert(draftHtml.includes("[IMAGE:"), "초안에서는 마커를 TODO로 남겨야 한다");
+
+  const publicHtml = await runWith(false);
+  assert(!publicHtml.includes("[IMAGE:"), `공개 발행에서는 마커가 독자에게 보이면 안 된다 (${publicHtml})`);
+  assert(publicHtml.includes("본문 시작") && publicHtml.includes("본문 끝"), "마커만 지우고 본문은 살려야 한다");
+  console.log("✅ 초안 -> 마커 유지(TODO) / 공개 -> 마커 제거, 본문은 보존");
 
   console.log("\n✅ 전체 테스트 통과");
 }

@@ -8,7 +8,15 @@
 //   3. 프롬프트가 요구한 작성 시점 명시 문구가 미검출 날짜로 잡힘
 //   4. 평문 URL 출처를 링크 없음으로 오판
 
-import { checkAdDisclosure, checkAttributionHedging, checkFacts, checkLegal, checkQuality } from "./articleReviewChecks.js";
+import {
+  checkAdDisclosure,
+  checkAttributionHedging,
+  checkFacts,
+  checkImagePrompts,
+  checkLegal,
+  checkQuality,
+  checkVoice,
+} from "./articleReviewChecks.js";
 import { formatReviewLines, runArticleReview } from "./runArticleReview.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -214,22 +222,25 @@ function main(): void {
   assert(duplicated.some((c) => c.message.includes("중복 문장")), "중복 문장을 경고해야 한다");
   console.log("✅ 품질: 중복 문장 탐지");
 
-  // ---------- 인용/헤지 문체(2026-09-15, "경복궁 구멍 뚫기" 원고 실측) ----------
+  // ---------- 인용/헤지 문체(2026-09-15 "경복궁 구멍 뚫기", 2026-09-16 "임신 9주"/두리랜드 재발) ----------
 
-  // 15-1) "~라고 보도했다"류가 1회면 자연스러운 표시로 보고 통과한다(writer.md §4).
-  const singleAttribution = checkAttributionHedging("문화재청은 원상 복구 공사에 들어간다고 밝혔습니다. 훼손 원인의 60%는 관람객 요인으로 나타났습니다.");
-  assert(singleAttribution.length === 0, `1회 인용 표시는 통과해야 한다 (실제: ${JSON.stringify(singleAttribution)})`);
-  console.log("✅ 인용/헤지: 1회 인용 표시는 오탐 아님");
+  // 15-1) 실제 기관을 주어로 쓴 직접 인용("~라고 밝혔습니다")은 "보도/전해지다"가 없으므로 통과한다.
+  const directAttribution = checkAttributionHedging("문화재청은 원상 복구 공사에 들어간다고 밝혔습니다. 훼손 원인의 60%는 관람객 요인으로 나타났습니다.");
+  assert(directAttribution.length === 0, `실제 기관 주어의 직접 인용은 통과해야 한다 (실제: ${JSON.stringify(directAttribution)})`);
+  console.log("✅ 인용/헤지: 실제 기관 주어의 직접 인용은 오탐 아님");
 
-  // 15-2) "~라고 보도했다"류가 2회 이상 반복되면 경고한다.
-  const repeatedAttribution = checkAttributionHedging(
-    "국세청은 지급 일정을 8월 27일로 안내했다고 밝혔습니다. 이 소식은 여러 매체가 8월 27일 지급이라고 보도했습니다. " +
-      "다른 매체도 지급일이 8월 27일이라고 전했습니다."
-  );
-  assert(repeatedAttribution.some((c) => c.message.includes("반복")), "인용 표현 반복은 경고해야 한다");
-  console.log("✅ 인용/헤지: '보도에 따르면'류 반복 탐지");
+  // 15-2) "~라고 보도했다"류는 2026-09-16부터 1건만 있어도 경고한다("1회 허용" 예외 폐기 -
+  // 그 구멍으로 "말한 것으로 보도됐습니다"가 계속 나왔다).
+  const singleReportedAttribution = checkAttributionHedging("OOO가 시행을 검토하고 있다고 말한 것으로 보도됐습니다.");
+  assert(singleReportedAttribution.some((c) => c.message.includes("매체 인용")), "1건이라도 보도 인용 표현은 경고해야 한다");
+  console.log("✅ 인용/헤지: '~것으로 보도됐다' 1건도 경고(2026-09-16 강화)");
 
-  // 15-3) 보도 경위(누가 언제·몇 곳 보도했는지) 서술 탐지 - 사용자가 실제로 지적한 문장 그대로.
+  // 15-3) "여러 매체가 함께 전했다"류 - 사용자가 실제로 지적한 문장 그대로.
+  const mediaTogether = checkAttributionHedging("같은 날 여러 매체가 이 소식을 함께 전했습니다.");
+  assert(mediaTogether.some((c) => c.message.includes("매체 인용")), "'여러 매체가 함께 전했다'는 경고해야 한다");
+  console.log("✅ 인용/헤지: '여러 매체가 함께 전했다' 탐지");
+
+  // 15-4) 보도 경위(누가 언제·몇 곳 보도했는지) 서술 탐지 - 사용자가 실제로 지적한 문장 그대로.
   const coverageNarrative = checkAttributionHedging(
     "이 보도는 채널A 취재진이 현장에서 확보한 영상을 머니투데이가 인용해 전한 것입니다. " +
       "같은 소식을 머니투데이 외에도 이데일리, 서플 등 여러 매체가 같은 날 함께 보도했습니다."
@@ -237,18 +248,86 @@ function main(): void {
   assert(coverageNarrative.some((c) => c.message.includes("보도 경위")), "보도 경위 서술을 경고해야 한다");
   console.log("✅ 인용/헤지: 보도 경위(취재진·인용·확산) 서술 탐지");
 
-  // 15-4) 부분 데이터 갭을 대조로 알리는 문장 탐지 - 사용자가 실제로 지적한 문장 그대로.
-  const partialGap = checkAttributionHedging(
+  // 15-5) 우리 취재 과정의 확인/확정 여부 서술(신규, 2026-09-16) - 사용자가 실제로 지적한 문장 그대로.
+  const verificationStatus1 = checkAttributionHedging(
+    "다만 임신 9주라는 적용 기준을 밝힌 정부의 공식 문서는 아직 확인되지 않았고, 시행을 목표로 하는 시점도 보도마다 엇갈립니다."
+  );
+  assert(verificationStatus1.some((c) => c.message.includes("확인 여부")), "정부 문서 확인 여부 서술을 경고해야 한다");
+  const verificationStatus2 = checkAttributionHedging("임신 9주 이하라는 기준은 아직 정부의 공식 문서로 확정되지 않았습니다.");
+  assert(verificationStatus2.some((c) => c.message.includes("확인 여부")), "확정 여부 서술을 경고해야 한다");
+  const verificationStatus3 = checkAttributionHedging("이를 직접 확인해 주는 정부·공공기관의 보도자료는 여전히 확인되지 않았습니다.");
+  assert(verificationStatus3.some((c) => c.message.includes("확인 여부")), "'확인해주는 자료는 없다'류도 경고해야 한다");
+  console.log("✅ 인용/헤지: 취재 과정 확인/확정 여부 서술 탐지(신규)");
+
+  // 15-6) 부분 데이터 갭 - 대조 문장(기존)과 단독 문장(신규, 2026-09-16) 둘 다 탐지.
+  const partialGapContrast = checkAttributionHedging(
     "다만 60%라는 구체 수치는 관람객 요인에 대해서만 제시됐고, 조류로 인한 훼손 비율은 별도로 나오지 않았습니다."
   );
-  assert(partialGap.some((c) => c.message.includes("대조")), "부분 데이터 갭 대조 문장을 경고해야 한다");
-  console.log("✅ 인용/헤지: 부분 데이터 갭 대조 문장 탐지");
+  assert(partialGapContrast.some((c) => c.message.includes("부재")), "부분 데이터 갭 대조 문장을 경고해야 한다");
+  const partialGapSingle = checkAttributionHedging(
+    "공식 보도는 훼손 관람객을 '외국인 관광객'이라고만 표현했을 뿐 국적은 밝히지 않았습니다."
+  );
+  assert(partialGapSingle.some((c) => c.message.includes("부재")), "대조 접속어 없는 단독 누락 문장도 경고해야 한다");
+  console.log("✅ 인용/헤지: 부분 데이터 갭(대조+단독) 탐지");
 
-  // 15-5) writer.md가 승인한 "아직 공개되지 않았습니다" 단일 서술은 오탐이 아니어야 한다
-  // (§4-1 (O) 예시 - "별도로/따로/구체적으로" 대조 접속어가 없으면 걸리지 않는다).
+  // 15-7) writer.md가 승인한 "아직 공개되지 않았습니다" 단일 서술은 오탐이 아니어야 한다 -
+  // "공개"는 세상에 대한 사실 동사라 "확인/확정" 패턴에도, "밝히지 않았다" 패턴에도 안 걸린다.
   const approvedAbsence = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다. 2024년 기준으로는 1만 5,000원 안팎이었습니다.");
   assert(approvedAbsence.length === 0, `승인된 미확정 서술은 통과해야 한다 (실제: ${JSON.stringify(approvedAbsence)})`);
   console.log("✅ 인용/헤지: 승인된 '아직 공개되지 않았습니다' 단일 서술은 오탐 아님");
+
+  // ---------- 공통 문체(voice) (2026-09-16) ----------
+
+  // v1) voice.md §2가 금지한 구어 어미는 1건이라도 경고 + 어떤 어미인지 표시.
+  const voiceBad = checkVoice("저희 쌍둥이도 그랬거든요. 처음엔 잘 안 되더라고요.\n지원금은 30만 원이라고 하네요.");
+  assert(voiceBad.length === 1 && voiceBad[0].severity === "warning", "금지 구어 어미는 warning 1건으로 묶여야 한다");
+  assert(
+    voiceBad[0].message.includes("3건") && voiceBad[0].message.includes("~거든요") && voiceBad[0].message.includes("~더라고요") && voiceBad[0].message.includes("~네요"),
+    `걸린 어미와 개수를 보여줘야 한다 (실제: ${voiceBad[0].message})`
+  );
+  console.log("✅ voice: 금지 구어 어미(거든요/더라고요/네요) 경고 + 어미 표시");
+
+  // v2) 규칙대로 쓴 문장은 통과. "고요한"처럼 낱말 안의 "고요"는 종결이 아니라 안 걸린다.
+  const voiceOk = checkVoice("지원금은 2026년 8월 기준 30만 원입니다. 저는 이 부분이 제일 반가웠어요.\n고요한 밤이었습니다. 신청 전에 지역부터 확인해 보세요.");
+  assert(voiceOk.length === 0, `합니다체/해요체 + 낱말 안의 '고요'는 통과해야 한다 (실제: ${JSON.stringify(voiceOk)})`);
+  console.log("✅ voice: 합니다체·해요체 통과, '고요한' 오탐 없음");
+
+  // v3) 참고 자료 이후(남의 글 제목)는 대상이 아니다.
+  const voiceRefs = checkVoice("본문은 규칙대로입니다.\n\n**참고 자료**\n\n- [이거 진짜 좋더라고요](https://example.com)");
+  assert(voiceRefs.length === 0, "참고 자료 링크 제목의 구어 어미는 걸리면 안 된다");
+  console.log("✅ voice: 참고 자료 섹션 제외");
+
+  // ---------- 이미지 프롬프트 (2026-09-16) ----------
+
+  // i1) 데이터형(대진표·일정표) 이미지를 AI 생성으로 지정하면 경고 - 실측(아시안게임 야구 대진표에 팀이 없음).
+  const imageBad = checkImagePrompts(
+    "[IMAGE: 8강 대진표 — AI 생성]\n[IMAGE PROMPT: A tournament bracket graphic, no text, 16:9]\n\n본문.\n\n[IMAGE: 지역별 지원금 비교표 — AI 생성]\n[IMAGE PROMPT: A comparison table, no text]"
+  );
+  assert(imageBad.length === 1 && imageBad[0].severity === "warning", "데이터형 AI 생성 마커는 warning 1건으로 묶여야 한다");
+  assert(imageBad[0].message.includes("2개") && imageBad[0].message.includes("대진표"), `개수와 첫 설명을 보여줘야 한다 (실제: ${imageBad[0].message})`);
+  console.log("✅ image: 대진표·비교표를 AI 생성으로 지정 -> 경고");
+
+  // i2) 같은 대진표라도 웹 검색이면 통과, 데이터가 아닌 장면 이미지는 AI 생성이어도 통과.
+  const imageOk = checkImagePrompts(
+    "[IMAGE: 한국·일본·대만·호주 8강 대진표 — 웹 검색]\n[IMAGE PROMPT: 2026 아시안게임 야구 대진표 공식]\n\n[IMAGE: 저녁 7시 목욕부터 취침까지 4단계 루틴 — AI 생성]\n[IMAGE PROMPT: A warm flat illustration, no text, 16:9]"
+  );
+  assert(imageOk.length === 0, `웹 검색 대진표 + 장면형 AI 생성은 통과해야 한다 (실제: ${JSON.stringify(imageOk)})`);
+  console.log("✅ image: 웹 검색 대진표·장면형 AI 생성 통과");
+
+  // i3) 화면 캡처는 획득 방식과 무관하게 경고(output-format.md §8-2, 2026-09-17).
+  const screens = checkImagePrompts(
+    "[IMAGE: 국가법령정보센터의 산업안전보건법 제41조 조문 화면 — 웹 검색]\n[IMAGE PROMPT: 산업안전보건법 41조]\n\n[IMAGE: 정부24 지원금 신청 화면 — 웹 검색]\n[IMAGE PROMPT: 정부24 신청]"
+  );
+  assert(screens.length === 1 && screens[0].severity === "warning", "화면 캡처 마커는 warning 1건으로 묶여야 한다");
+  assert(screens[0].message.includes("2개") && screens[0].message.includes("§8-2"), `개수와 근거를 보여줘야 한다 (${screens[0].message})`);
+  console.log("✅ image: 법령 조문·정부 포털 화면 캡처 -> 경고");
+
+  // i4) 현장 실사로 바꾼 자리와, 공식 배포 안내 그래픽("~ 안내 화면")은 걸리지 않아야 한다.
+  const screensOk = checkImagePrompts(
+    "[IMAGE: 카페 카운터에서 고객을 응대하는 직원 — 웹 검색]\n[IMAGE PROMPT: 카페 카운터 직원 응대 사진]\n\n[IMAGE: SPOTV의 아시안게임 생중계 안내 화면 — 웹 검색]\n[IMAGE PROMPT: SPOTV 아시안게임 중계 안내]"
+  );
+  assert(screensOk.length === 0, `현장 실사·공식 안내 그래픽은 통과해야 한다 (${JSON.stringify(screensOk)})`);
+  console.log("✅ image: 현장 실사·공식 안내 그래픽은 오탐 없음");
 
   // ---------- 통합 ----------
 

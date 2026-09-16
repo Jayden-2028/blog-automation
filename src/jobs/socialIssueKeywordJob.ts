@@ -24,7 +24,9 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 // 이미 만들어진 Top 10 발송을 막으면 안 된다.
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
-const NOTIFICATION_HEADER = "🏛️ <b>오전 사회이슈 키워드 (티스토리용)</b>";
+// 2026-09-16 사용자 요청: 알림 문구에서 매체명(과거 티스토리 담당 흔적)을 뺀다 - 지금은 전부
+// Blogspot 단일 채널로 가므로 채널명이 오해를 줄 뿐이다.
+const NOTIFICATION_HEADER = "🏛️ <b>오전 사회 이슈 키워드</b>";
 
 const job: SchedulerJob = {
   name: "social-issue-keyword",

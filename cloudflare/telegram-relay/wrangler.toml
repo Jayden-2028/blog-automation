@@ -6,6 +6,15 @@ compatibility_date = "2026-09-01"
 GITHUB_OWNER = "Jayden-2028"
 GITHUB_REPO = "blog-automation"
 
-# secrets(TELEGRAM_WEBHOOK_SECRET, GH_DISPATCH_TOKEN)은 평문으로 여기 안 둔다.
-# `wrangler secret put TELEGRAM_WEBHOOK_SECRET` / `wrangler secret put GH_DISPATCH_TOKEN`으로
-# 별도 등록한다(docs/ai-handoff/CLOUD_MIGRATION.md Phase 3 참고).
+# secrets(TELEGRAM_WEBHOOK_SECRET, GH_DISPATCH_TOKEN, TELEGRAM_BOT_TOKEN)은 평문으로 여기 안 둔다.
+# `echo -n "<값>" | wrangler secret put <이름>`으로 별도 등록한다(docs/ai-handoff/CLOUD_MIGRATION.md
+# Phase 3 참고). 이 환경(비대화형 셸)에서 파이프 없이 `wrangler secret put`을 치면 빈 값이 저장된
+# 채 "Success"가 찍히니 반드시 파이프로 넣을 것(09-16 실측 사고).
+# TELEGRAM_BOT_TOKEN(2026-09-16 추가)은 버튼 클릭 즉시 "접수됨" 토스트(answerCallbackQuery)에만
+# 쓴다 - 없어도 릴레이 자체는 동작하고 토스트만 생략된다(src/index.ts 참고).
+
+# 2026-09-16: 키워드 수집 3종을 여기서 깨운다(src/index.ts의 scheduled() 핸들러 + 상단 주석 참고 -
+# GitHub Actions 네이티브 schedule: 트리거가 매일 4~5시간씩 지연되던 문제의 대체). 값은 KST
+# 09:00/11:00/13:00을 UTC로 바꾼 것 - src/index.ts의 SCHEDULED_WORKFLOWS와 반드시 같이 바꿀 것.
+[triggers]
+crons = ["0 0 * * *", "0 2 * * *", "0 4 * * *"]

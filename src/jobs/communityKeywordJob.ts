@@ -26,7 +26,8 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 // (오전 job들과 동일 - config/keywordCompetition.ts 참고).
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
-const NOTIFICATION_HEADER = "📡 <b>오후 커뮤니티 인기 키워드</b>";
+// 2026-09-16 사용자 요청: "인기"를 빼고 오전 두 알림과 이름 형태를 맞춘다.
+const NOTIFICATION_HEADER = "📡 <b>오후 커뮤니티 키워드</b>";
 
 const job: SchedulerJob = {
   name: "community-keyword",

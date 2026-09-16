@@ -502,12 +502,53 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       h += '<div class="doc-title">' + esc(topic.title || topic.keyword) + '</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
 
-      h += '<div class="hint">붙여넣기 순서 — ① <b>본문 복사(서식 유지)</b>로 Blogger 편집기에 붙여넣습니다';
-      if (blocks.length > 0) {
-        h += ' ② <code>[[이미지 N]]</code> 자리에 그 번호의 이미지를 올리고 마커 줄은 지웁니다'
-           + ' ③ 이미지마다 <b>캡션</b>을 넣습니다';
+      // 2026-09-16부터 승인 시 Blogspot 초안이 자동 저장된다(제목·본문·이미지·라벨·댓글 설정까지).
+      // 그래서 안내는 "전부 복사해 붙여넣기"가 아니라 "초안에서 무엇을 더 채워야 하는가"여야 한다.
+      // 퍼머링크와 검색 설명은 Blogger API로 설정할 수 없고(2026-09-16 실측), 웹 검색 마커 자리의
+      // 이미지도 사람이 넣어야 해서 - 그 셋만 모아 아래 "발행 전 채울 것"에 띄운다.
+      var todo = [];
+      if (topic.slug) {
+        todo.push({ label: "퍼머링크", value: topic.slug, where: "글 설정 → 퍼머링크 → 맞춤 퍼머링크" });
       }
-      h += ' ④ 제목·검색 설명·슬러그를 복사해 채웁니다 (태그는 본문 맨 끝에 자동으로 붙습니다)</div>';
+      if (topic.searchDescription) {
+        todo.push({ label: "검색 설명", value: topic.searchDescription, where: "글 설정 → 검색 설명" });
+      }
+      // 본문에 실제로 박히지 못한 이미지 자리(확정 1장이 아닌 곳) - 발행 코드와 같은 기준이다.
+      var unfilled = [];
+      blocks.forEach(function (block, i) {
+        var n = i + 1;
+        if (imagesFor(topic, n).filter(function (s) { return s.url; }).length !== 1) {
+          unfilled.push({ n: n, description: block.description, prompt: block.prompt });
+        }
+      });
+
+      h += '<div class="hint"><b>초안이 Blogspot에 자동 저장됩니다</b>'
+         + ' — 제목 · 본문 · 이미지 · 라벨 · 댓글 비허용까지 들어갑니다.'
+         + ' 아래 항목만 Blogger 편집 화면에서 직접 채운 뒤 발행하세요.</div>';
+
+      if (todo.length > 0 || unfilled.length > 0) {
+        h += '<h2 class="sec">✍️ 발행 전 채울 것 ' + (todo.length + unfilled.length) + '건</h2>';
+        h += '<div class="meta-grid">';
+        todo.forEach(function (item) {
+          h += '<div class="k">' + esc(item.label) + '</div>';
+          h += '<div class="v">' + esc(item.value)
+             + '<br><span style="color:#8A7F72;font-size:12px">' + esc(item.where) + '</span></div>';
+          h += '<button class="mini" data-copy="' + esc(item.value) + '">복사</button>';
+        });
+        unfilled.forEach(function (item) {
+          h += '<div class="k">이미지 ' + item.n + '</div>';
+          h += '<div class="v">' + esc(item.description)
+             + '<br><span style="color:#8A7F72;font-size:12px">'
+             + (item.prompt ? '검색어: ' + esc(item.prompt) : '검색어 미상 - 본문 마커 참고')
+             + '</span></div>';
+          h += item.prompt
+            ? '<button class="mini" data-copy="' + esc(item.prompt) + '">검색어</button>'
+            : '<span></span>';
+        });
+        h += '</div>';
+      } else {
+        h += '<div class="hint">✅ 추가로 채울 항목이 없습니다 — 초안을 확인하고 바로 발행하면 됩니다.</div>';
+      }
 
       var hero = heroImage(topic);
       if (hero) {

@@ -31,7 +31,9 @@ function main(): void {
   assert(prompt.includes("[IMAGE: 설명]") && prompt.includes("최소 5개"), "이미지 마커 지시");
   assert(prompt.includes("WebSearch를 쓰지 않는다"), "writer는 웹 검색 없음");
   assert(prompt.includes("prompts/writing/style/trend.md"), "living은 trend 문체 참고 파일을 Read하라는 지시가 있어야 한다");
-  console.log("✅ 규격 참조 + 자료조사 경로 + 정확한 출력 경로 + 파이프라인 오버라이드 + 카테고리별 문체 파일");
+  assert(prompt.includes("prompts/writing/style/voice.md"), "공통 어투 파일 voice.md를 Read하라는 지시(2026-09-16)");
+  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "이미지 프롬프트는 문단 요약이라는 지시(output-format.md §8-1, 2026-09-16)");
+  console.log("✅ 규격 참조 + 자료조사 경로 + 정확한 출력 경로 + 파이프라인 오버라이드 + 카테고리별 문체 파일 + 공통 voice");
 
   const entertainmentPrompt = buildWritingPrompt({
     job: { keyword: "넷플릭스 신작", headline: null, category: "ott" },
@@ -50,6 +52,10 @@ function main(): void {
     today: "2026-09-01",
   });
   assert(parentingPrompt.includes("prompts/writing/style/parenting.md"), "parenting은 parenting 문체 참고 파일을 Read해야 한다");
+  assert(
+    entertainmentPrompt.includes("prompts/writing/style/voice.md") && parentingPrompt.includes("prompts/writing/style/voice.md"),
+    "일반 카테고리는 전부 voice.md를 함께 Read해야 한다(카테고리와 무관한 한 목소리)"
+  );
 
   const noCategoryPrompt = buildWritingPrompt({
     job: { keyword: "미분류 키워드", headline: null, category: null },
@@ -103,6 +109,9 @@ function main(): void {
       !incident.includes("prompts/writing/style/parenting.md"),
     "incident에 다른 카테고리 문체 파일이 섞이면 안 된다"
   );
+  // voice.md(공통 어투)는 incident에 적용하지 않는다(사용자 결정, 2026-09-16) - 습니다체·1인칭 금지는
+  // incident.md가 단독으로 정한다.
+  assert(!incident.includes("prompts/writing/style/voice.md"), "incident는 voice.md를 Read하면 안 된다");
 
   // 반대 방향: 일반 카테고리에는 이 예외 문구가 붙지 않아야 한다.
   const normal = buildWritingPrompt({

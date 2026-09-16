@@ -87,7 +87,8 @@ export type HandleCallbackResult = {
 export type HandleArticleReviewOutcome =
   | { status: "ignored"; reason: "not_a_review" | "wrong_chat" }
   | { status: "job_not_found" }
-  | { status: "reviewed"; action: ArticleReviewAction; job: ArticleJobRow };
+  | { status: "reviewed"; action: ArticleReviewAction; job: ArticleJobRow }
+  | { status: "already_reviewed"; action: ArticleReviewAction; job: ArticleJobRow };
 
 export type HandleArticleReviewResult = {
   outcome: HandleArticleReviewOutcome;
@@ -482,14 +483,18 @@ export class TelegramBot {
 
   /** 주제 + 진행 안내만 남긴다(2026-09-04 사용자 요청) - category/점수/원문은 뺀다. */
   private buildConfirmationMessage(job: ArticleJobRow): string {
-    // 추천 제목은 조사 완료 알림(notifyResearchReady)에서 요약과 함께 보여준다. 여기서는 조사가
-    // 돌고 있다는 것만 알린다 - 웹 조사가 끝나면 요약 + 제목 + [원고 작성] 버튼이 온다.
+    // 2026-09-16 사용자 요청: "자료조사 시작"은 내부 단계명이라 사용자에게 와닿지 않는다 -
+    // 실제로 기다리는 결과물(원고 초안)을 기준으로 문구를 바꾼다. 2026-09-15부터 조사 완료 후
+    // "원고를 쓸까요?" 확인 없이 곧바로 집필까지 자동 진행되므로(runResearchStageCli.ts의
+    // triggerWriting), 성공 경로에서는 이 메시지 다음으로 사용자가 실제로 받는 건 "조사 완료"가
+    // 아니라 곧장 초안 준비 완료 알림이다 - 그래서 이 확인 메시지도 조사가 아니라 초안 준비를
+    // 기준으로 안내한다. 시간 추정치도 조사(6~13분)+집필(7~11분) 합산 실측에 맞춰 올렸다.
     const lines = [
-      `✅ <b>선택 완료 · 자료조사 시작</b>`,
+      `✅ <b>키워드 선택 완료</b>`,
       ``,
       `<b>${escapeTelegramHtml(job.keyword)}</b>`,
       ``,
-      `🔍 자료조사 중입니다 (약 10~20분). 끝나면 요약과 추천 제목을 보내드립니다. 이 버튼을 다시 누르지 않아도 됩니다.`,
+      `📝 원고 초안을 준비하고 있습니다 (약 15~25분). 완료되면 초안을 보내드립니다. 이 버튼을 다시 누르지 않아도 됩니다.`,
     ];
 
     return lines.join("\n");
@@ -528,6 +533,41 @@ export class TelegramBot {
     const job = await this.loadJobById(parsed.jobId);
     if (!job) {
       return { outcome: { status: "job_not_found" }, message: "해당 원고를 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
+    }
+
+    // 2026-09-16 실측 사고: 검수 버튼(승인/수정 필요/반려)은 결정 후에도 재클릭 가능한 상태로
+    // 남는다(markReviewButtonsDecided는 라벨만 "✅ 수정 필요"처럼 바꿀 뿐 버튼을 없애지 않는다).
+    // 실수로 두 번 누르면(다른 update_id의 진짜 별개 탭 - 웹훅 중복이 아님을 GH Actions 로그로
+    // 확인) 매번 전체 로직이 다시 돈다 - "수정 필요"는 새 프롬프트를 또 보내 editRequestMessageId를
+    // 덮어써서, 사용자가 먼저 받은 메시지에 답장해도 매칭이 안 되고 그 답장이 영영 무시된다(가장
+    // 심각한 사례 - 원고가 통째로 멈춘다). "승인"/"반려"는 데이터가 깨지진 않지만 메시지가 중복
+    // 발송된다. 그래서 이미 같은 결정이 내려져 있으면 부작용(재발송/메타데이터 갱신)을 건너뛰고
+    // 짧은 안내만 돌려준다.
+    if (parsed.action === "discard" && job.status === "rejected") {
+      return {
+        outcome: { status: "already_reviewed", action: "discard", job },
+        message: `🗑 이미 반려된 원고입니다.\n${escapeTelegramHtml(job.keyword)}`,
+      };
+    }
+
+    if (
+      parsed.action === "edit" &&
+      job.metadata.reviewDecision === "needs_edit" &&
+      job.metadata.editRequestMessageId
+    ) {
+      return {
+        outcome: { status: "already_reviewed", action: "edit", job },
+        message:
+          `✏️ 이미 수정 필요로 표시돼 있습니다.\n${escapeTelegramHtml(job.keyword)}\n\n` +
+          `앞서 보낸 "이 메시지에 답장으로 수정 방향을 적어주세요" 메시지에 답장해주세요.`,
+      };
+    }
+
+    if (parsed.action === "confirm" && job.status === "approved") {
+      return {
+        outcome: { status: "already_reviewed", action: "confirm", job },
+        message: `✅ 이미 승인된 원고입니다.\n${escapeTelegramHtml(job.keyword)}`,
+      };
     }
 
     if (parsed.action === "discard") {
@@ -972,7 +1012,7 @@ export class TelegramBot {
 
     await this.answerCallbackQuery(query.id, result.message.replace(/<[^>]+>/g, "").slice(0, 200)).catch(() => {});
 
-    if (result.outcome.status === "reviewed") {
+    if (result.outcome.status === "reviewed" || result.outcome.status === "already_reviewed") {
       await this.markReviewButtonsDecided(query, result.outcome.action).catch(() => {});
     }
 

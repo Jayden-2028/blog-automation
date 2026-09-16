@@ -20,14 +20,12 @@
 
 name: social-issue-keyword
 
+# 2026-09-16: GitHub Actions 네이티브 schedule: 트리거를 걷어냈다. 정시를 피해 7분을 밀어도
+# (위 2026-09-15 메모) 매일 4~5시간씩 지연되거나 아예 발동하지 않는 사고가 계속돼, 대신
+# Cloudflare Worker(cloudflare/telegram-relay, scheduled() 핸들러)의 Cron Trigger가 정확한
+# 시각에 이 워크플로우를 workflow_dispatch로 깨운다(실측: workflow_dispatch는 항상 호출 즉시
+# 정확히 돎). 상세 근거는 docs/ai-handoff/CURRENT_STATE.md 2026-09-16 참고.
 on:
-  schedule:
-    # 00:07 UTC = 09:07 KST. 로컬 launchd(social-issue-keyword.plist)는 2026-09-13 내림 -
-    # 이 워크플로우가 유일한 실행 경로다. 정각(0 0 * * *)에서 7분 밀었다(2026-09-15) - GitHub
-    # 공식 문서가 "매 정시는 스케줄 실행이 몰려 지연·누락되기 쉽다"고 명시하는데, 실제로
-    # 2026-09-15 09:00/09:10 KST 실행이 지연이 아니라 아예 발동하지 않는 사고가 있었다(수동
-    # workflow_dispatch는 정상 완주 - 코드/시크릿 문제 아님, 순수 cron 스케줄링 이슈).
-    - cron: "7 0 * * *"
   workflow_dispatch: {}
 
 concurrency:

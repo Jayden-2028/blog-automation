@@ -8,12 +8,9 @@
 
 name: community-keyword
 
+# 2026-09-16: schedule: 제거, Cloudflare Worker Cron Trigger가 대신 깨운다(social-issue-keyword.yml
+# 상단 메모와 같은 이유 - 이 워크플로우는 04:07 UTC 근처 정시도 아닌데 매일 5시간 넘게 지연됐다).
 on:
-  schedule:
-    # 04:07 UTC = 13:07 KST. 로컬 launchd(community-keyword.plist)는 2026-09-13 내림.
-    # 정각(0 4 * * *)에서 7분 밀었다 - social-issue-keyword.yml의 2026-09-15 메모 참고
-    # (매 정시 주변 cron 스케줄 누락 사고, 실제로 이날 09:00/09:10 KST 실행이 발동조차 안 됐다).
-    - cron: "7 4 * * *"
   workflow_dispatch: {}
 
 concurrency:
