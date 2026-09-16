@@ -32,10 +32,18 @@ export interface Env {
   GITHUB_REPO: string;
 }
 
-/** cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 09:00/09:10/13:00에 맞춘 것이다. */
+/**
+ * cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 09:00/11:00/13:00에 맞춘 것이다.
+ *
+ * 2026-09-16 간격 확대(사용자 요청): 원래 09:00/09:10/13:00로 10분만 띄웠는데, 그 좁은 간격이
+ * heavy-pipeline 전체 부하를 짧은 시간에 몰아 사용자가 같은 목록에서 Go를 연달아 누르는 상황과
+ * 겹치기 쉬웠다. 카테고리 간 간격을 넓혀 시스템 전체 부하를 분산한다 - 다만 이것만으로는 **같은
+ * 카테고리 안에서** 클릭이 몰리는 문제(오늘 실제 사고의 주 원인)는 못 잡는다는 점은 알고 진행한다.
+ * 그건 dispatchWorkflow.ts의 DB 큐(2026-09-16, 아래 참고)가 담당한다.
+ */
 const SCHEDULED_WORKFLOWS: Record<string, string> = {
   "0 0 * * *": "social-issue-keyword.yml", // 09:00 KST
-  "10 0 * * *": "entertainment-keyword.yml", // 09:10 KST - social-issue가 채운 trend_candidates를 읽음
+  "0 2 * * *": "entertainment-keyword.yml", // 11:00 KST - social-issue가 채운 trend_candidates를 읽음(당일자라 간격은 무관)
   "0 4 * * *": "community-keyword.yml", // 13:00 KST
 };
 
