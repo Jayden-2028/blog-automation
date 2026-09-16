@@ -36,6 +36,7 @@ import { createSources, listSourcesByJobId } from "../../services/supabase/repos
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
 import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
@@ -129,7 +130,8 @@ function stripMarkdownFence(text: string): string {
 }
 
 type DefaultResearcherInput = {
-  job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
+  // id는 비용 원장에 "어느 원고 때문에 나간 비용인지"를 남기기 위해 필요하다(2026-09-16).
+  job: Pick<ArticleJobRow, "id" | "keyword" | "headline" | "category">;
   baselineSources: SourceInsert[];
   outputPath: string;
   today: string;
@@ -153,6 +155,17 @@ async function runGeminiResearcherAndSave(
   if (!result.ok) {
     return { ok: false, error: `[gemini] ${result.error}` };
   }
+
+  // 자료조사는 이 파이프라인에서 두 번째 유료 경로다(RESEARCH_PROVIDER=gemini일 때만 돈다).
+  // 실패한 호출은 과금되지 않으므로 성공분만 원장에 남긴다 - 이미지 쪽과 같은 규칙이다.
+  await recordApiUsage({
+    provider: "gemini",
+    model: result.model,
+    operation: "research.generate",
+    usage: result.usage,
+    jobId: input.job.id,
+    metadata: { keyword: input.job.keyword },
+  });
 
   // 실측(2026-09-03)에서 Gemini가 official/medical 항목에 실제로 grounding되지 않은 URL(최상위
   // 도메인 + 지어낸 인용문)을 붙인 사례가 나왔다 - 프롬프트 요청만으로는 안 막혀 코드로 강제한다.

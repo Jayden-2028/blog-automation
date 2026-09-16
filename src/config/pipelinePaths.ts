@@ -62,3 +62,15 @@ export function manuscriptImageDir(date: string, keyword: string): string {
 export function manuscriptIndexPagePath(): string {
   return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, "index.html");
 }
+
+/**
+ * 개인 대시보드가 읽는 비용 집계(2026-09-16). 원고 페이지와 **같은 디렉터리**에 두는 이유는
+ * 배포 단위가 이 디렉터리 하나이기 때문이다(deployManuscriptsPage가 wrangler pages deploy로
+ * 통째로 올린다). 다른 곳에 쓰면 배포에 안 실린다.
+ *
+ * ⚠️ 이 디렉터리는 공개 URL(<project>.pages.dev)로 그대로 서빙된다 - 여기 들어가는 값은
+ * 누구나 볼 수 있다고 보고 골라야 한다(집계 금액만 넣고, API 키·job 원문은 넣지 않는다).
+ */
+export function manuscriptCostSnapshotPath(): string {
+  return resolve(PIPELINE_ROOT, MANUSCRIPTS_DIR, "cost.json");
+}

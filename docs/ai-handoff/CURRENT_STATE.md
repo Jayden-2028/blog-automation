@@ -120,6 +120,70 @@ gpt-image-2에 이미지 생성 프롬프트로 들어갔다 - `rules/output-for
   둘을 구분해 준다(`유형: AI 생성 이미지` vs `유형: 웹 검색 이미지(출처)`) - 사람이 고르고 지운다.
 - 찾아온 이미지가 1200px 미만이면 저장하되 경고한다(디스커버 큰 썸네일 기준).
 
+## 2026-09-16 세션(후속12) — API 사용량·비용 계측 + 개인 대시보드용 cost.json
+
+**계기**: 사용자 질문 - "블로그 자동화에 들어간 모든 솔루션 비용을 개인 대시보드에서 실시간으로
+보고 싶다. OpenAI API 사용량·비용을 띄울 수 있나?"
+
+**조사 결과(왜 공급자 청구액 API가 본체가 될 수 없는가)**:
+- OpenAI `/v1/organization/costs`는 **하루 단위 버킷 + 수 시간 지연**이고 Admin key(조직 전체
+  읽기 권한)를 따로 발급해야 한다. "실시간"이 아니고 자격증명도 무겁다.
+- Gemini는 **키 단위 사용량/비용 조회 API가 아예 없다**(Cloud Billing → BigQuery export 경로뿐).
+- Claude는 Max 구독이라 호출당 금액이 **원리상 존재하지 않는다**(토큰을 세도 청구액이 안 변한다).
+- 결론: 우리가 호출 시점에 직접 계측하는 쪽이 본체다. 공급자 청구액 API는 나중에 대조용으로만.
+
+**발견**: 응답에 이미 실려 오던 usage를 전부 버리고 있었다(`generateImage.ts`가 `data`만 읽었다).
+그래서 **이 시스템에는 지출 기록이 단 한 건도 없었다.**
+
+**구현(A: 계측 / B: 노출)**:
+1. `api_usage` 테이블 신설(migration `20260916153725_api_usage.sql`). 호출 1건 = row 1건.
+   `cost_source`(metered/reported) 컬럼을 지금 만들어 뒀다 - 나중에 청구액 API를 붙일 때 컬럼
+   추가 migration을 다시 승인받지 않아도 되게.
+2. 단가표 `src/config/apiPricing.ts`. **실제로 호출하는 모델만** 등록한다(gpt-image-2 /
+   gemini-3.1-flash-lite-image / gemini-3.6-flash). 미등록 모델은 금액을 **0이 아니라 null**로
+   남긴다 - 0으로 적으면 "공짜로 썼다"가 되어 합계가 조용히 과소집계된다.
+   gemini-3.6-flash의 2027-01-01 단가 2배 인상이 밴드로 들어가 있다.
+3. 계측 배선: `generateImage.ts`/`runGeminiResearch.ts`가 usage와 model을 반환하고,
+   `generateManuscriptImages.ts`/`runArticleJob.ts`가 `recordApiUsage()`로 원장에 남긴다.
+   **성공한 호출만** 기록한다(실패 응답은 과금되지 않아 $0 행만 쌓인다). best-effort라 원장
+   insert가 실패해도 원고 준비는 그대로 성공한다 - 돈은 이미 나갔는데 산출물까지 잃으면 최악이다.
+4. 집계 → `manuscripts/cost.json`(`buildCostSummary.ts` + `writeCostSnapshot.ts`).
+   원고 페이지를 그리는 **모든 경로에서 배포 직전**에 같은 디렉터리로 떨군다.
+   ⚠️ cost.json만 따로 배포하지 않는 이유: `wrangler pages deploy <dir>`는 디렉터리를 통째로
+   올려서, cost.json만 든 디렉터리로 배포하면 index.html이 사라진다(09-14/15 원고 유실 사고와
+   같은 실패 유형).
+5. `npm run report:cost`로 언제든 다시 만들고 확인할 수 있다(`-- --dry`면 파일도 안 쓴다).
+
+**cost.json 계약**(대시보드 패널이 읽을 키): `today`/`month`(costUsd, calls, unknownCostCalls),
+`daily`(최근 7일, 지출 0인 날도 슬롯 유지), `byModel`, `perManuscript`(원고 1건당 평균),
+`fixed`(고정비 - 금액은 `FIXED_COST_*` 환경변수로만 받는다. 추정치를 코드에 박으면 대시보드가
+그럴듯한 거짓말을 한다), `notes`(계측 한계를 숫자와 같이 내려보낸다).
+
+**날짜 경계는 전부 Asia/Seoul이다.** UTC로 자르면 한국 시간 자정~오전 9시 지출이 전날로 밀려
+"오늘 얼마 썼나"가 매일 아침 틀리는데, 금액이 작아 눈으로는 안 보인다(테스트로 고정).
+
+**검증**: `npm run build` 통과. 신규 `test:api-pricing`/`test:cost-summary` + 기존
+`test:generate-image`/`test:manuscript-images`/`test:article-images`/`test:prepare-manuscripts`
+통과. 계측 주입 지점이 없어 테스트가 조용히 Supabase로 네트워크를 타던 것도 같이 막았다.
+
+**남은 것**:
+- ✅ **migration 적용 완료**(2026-09-16, 사용자 승인). Supabase MCP `apply_migration`으로 원격
+  프로젝트(`blog_automation` / ref `exbhtdearvxjorwqlqno`)에 올렸고, 테이블·인덱스·주석·권한까지
+  실제 스키마로 확인했다. 원격 migration history의 version이 `20260916153725`로 기록돼 로컬
+  파일명도 거기에 맞췄다 - 어긋난 채 두면 나중에 `supabase db push`가 이미 적용된 migration을
+  다시 실행하려 든다. 되돌리기: `drop table public.api_usage`.
+  보안 advisor는 `rls_enabled_no_policy`(INFO)를 띄우는데, 이 프로젝트 16개 테이블 전부가 같은
+  모양이다(service_role 전용, anon/authenticated revoke) - 의도된 설계라 조치하지 않는다.
+- ⬜ 첫 실측: 다음 원고 승인(또는 `npm run manuscripts:build -- --refresh`) 때 첫 행이 쌓인다.
+  `npm run report:cost`로 바로 확인할 수 있다.
+- ⬜ 대시보드(`제이든의 데일리 데스크`) 패널에서 cost.json을 fetch하도록 연결 - 아티팩트 쪽
+  작업이라 이 저장소 밖이다. 공개 URL은 `https://<pages 프로젝트>.pages.dev/cost.json`.
+- ⬜ 고정비 금액 미입력(`FIXED_COST_CLAUDE_USD` 등). 넣으면 합계에 잡힌다.
+- ⬜ (C단계, 선택) OpenAI Costs API 대조. Admin key 발급이 필요해 이번 범위에서 뺐다 -
+  A+B만으로 대시보드는 돈다.
+- ⚠️ cost.json은 **공개 URL로 서빙된다**(개인 지출 금액 노출). 집계 금액만 들어가고 키·원고
+  원문은 안 들어가지만, 금액 자체를 가리려면 파일명 난수화 또는 토큰 검사 Worker가 필요하다.
+
 ## 2026-09-16 세션(후속11) — 공통 문체 voice.md로 어투 통일 + 이미지 프롬프트 "문단 한 장 요약" 규칙
 
 **계기**: 사용자 지적 두 건. (6) 이미지 품질이 낮다 - 아시안게임 야구 원고의 대진표 이미지에 어느
@@ -422,6 +486,7 @@ GH_DISPATCH_TOKEN`(파이프 방식, 대화창 노출 없음)으로 재등록 �
 `[IMAGE: 설명 — 웹 검색]` **텍스트 그대로 본문에 렌더된다**(convertArticleToHtml의 placeholder
 경로). 초안 단계에선 "여기 채우세요" 표시로 유용하지만, 공개 발행으로 내리는 순간 독자에게 그대로
 노출된다. **초안이면 유지 / 공개면 제거**로 모드 분기가 필요하다.
+
 
 ## 2026-09-16 세션(후속5) — 구글 디스커버 기준 이미지 규격 + 발행 대상 블로그 오설정 발견·수정
 

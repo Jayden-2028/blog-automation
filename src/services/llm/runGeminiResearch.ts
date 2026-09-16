@@ -30,11 +30,30 @@ export type RunGeminiResearchOptions = {
 
 export type GeminiGroundingSource = { title: string | null; url: string };
 
+/**
+ * 응답에 실려 오는 사용량. 비용 계측(services/usage/recordApiUsage.ts)의 입력이다.
+ * 공급자가 생략하면 null이고, 그 경우 금액도 null로 남는다(0으로 적지 않는다).
+ */
+export type GeminiResearchUsage = {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+};
+
 export type RunGeminiResearchResult =
-  | { ok: true; text: string; groundingSources: GeminiGroundingSource[]; durationMs: number }
+  | {
+      ok: true;
+      text: string;
+      groundingSources: GeminiGroundingSource[];
+      durationMs: number;
+      /** 실제로 호출한 모델 ID. 단가표(config/apiPricing.ts)의 키와 같다. */
+      model: string;
+      usage: GeminiResearchUsage | null;
+    }
   | { ok: false; error: string; durationMs: number };
 
 type GeminiGenerateContentResponse = {
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
     finishReason?: string;
@@ -96,7 +115,15 @@ export async function runGeminiResearch(
       .filter((web): web is { uri: string; title?: string } => Boolean(web?.uri))
       .map((web) => ({ title: web.title ?? null, url: web.uri }));
 
-    return { ok: true, text, groundingSources, durationMs };
+    const usage: GeminiResearchUsage | null = data.usageMetadata
+      ? {
+          inputTokens: data.usageMetadata.promptTokenCount ?? null,
+          outputTokens: data.usageMetadata.candidatesTokenCount ?? null,
+          totalTokens: data.usageMetadata.totalTokenCount ?? null,
+        }
+      : null;
+
+    return { ok: true, text, groundingSources, durationMs, model, usage };
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     if (error instanceof Error && error.name === "AbortError") {

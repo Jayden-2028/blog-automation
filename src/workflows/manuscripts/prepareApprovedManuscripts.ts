@@ -22,6 +22,8 @@ import { renderManuscriptPage } from "./renderManuscriptPage.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import type { DeployManuscriptsPageResult } from "./deployManuscriptsPage.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
+import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
+import type { WriteCostSnapshotResult } from "../reports/writeCostSnapshot.js";
 import { publishArticleToBlogspot } from "../publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../publish/publishArticleToBlogspot.js";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -41,6 +43,8 @@ export type PrepareApprovedManuscriptsOptions = {
   saveManifest?: (manifest: ManuscriptManifest) => Promise<void>;
   writePage?: (html: string) => Promise<void>;
   deploy?: () => Promise<DeployManuscriptsPageResult>;
+  /** 비용 스냅샷(cost.json) 생성. 기본은 Supabase를 읽으므로 테스트에서는 반드시 주입한다. */
+  writeCostSnapshot?: () => Promise<WriteCostSnapshotResult>;
   /** job당 처리 상한(배리에이션 LLM 호출이 오래 걸리므로). 기본 3. */
   maxJobsPerRun?: number;
   /** 원고 준비 성공 직후 호출. 기본은 publishArticleToBlogspot(jobId) - BLOGGER_ENABLED=false면 no-op. */
@@ -67,6 +71,7 @@ export async function prepareApprovedManuscripts(
   const saveManifestFn = options.saveManifest ?? ((manifest: ManuscriptManifest) => saveManifest(manifest));
   const writePage = options.writePage ?? defaultWritePage;
   const deploy = options.deploy ?? (() => deployManuscriptsPage());
+  const writeCostSnapshotFn = options.writeCostSnapshot ?? (() => writeCostSnapshot());
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
   const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
 
@@ -107,6 +112,12 @@ export async function prepareApprovedManuscripts(
   if (manifest) {
     await saveManifestFn(manifest);
     await writePage(renderManuscriptPage(manifest));
+    // 비용 스냅샷은 배포 직전에 같은 디렉터리로 떨군다(배포 단위가 디렉터리 하나라 여기서 써야
+    // 같이 올라간다). 실패해도 원고 준비·배포에는 영향이 없다.
+    const costSnapshot = await writeCostSnapshotFn();
+    if (costSnapshot.status === "failed") {
+      console.warn(`⚠️ [manuscripts] 비용 스냅샷 생성 실패(무시하고 계속): ${costSnapshot.error}`);
+    }
     // 배포는 부가 기능이다 - 실패해도 원고 준비 자체(위 results)는 그대로 success 유지.
     // Cloudflare 미설정이면 조용히 skipped를 돌려준다(deployManuscriptsPage.ts).
     const deployResult = await deploy();

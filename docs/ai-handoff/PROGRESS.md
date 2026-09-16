@@ -49,6 +49,7 @@
 - [x] 뷰어에 실제 이미지 인라인 + 캡션 표 + A/B 나란히 보기
 - [x] 이미지 자동 생성 코드 — writer 프롬프트 → 생성 → Supabase Storage
 - [x] 이미지 로컬 미러 CLI (npm run sync:images)
+- [x] 비용 계측 — api_usage 원장 + 단가표 + cost.json (2026-09-16, migration 적용 완료)
 - [x] 이미지 생성 켜기 — GitHub secret/variable 등록 + 첫 실측 완료 (2026-09-16)
 - [x] 이미지 A/B 비교 후 provider 확정 — OpenAI(gpt-image-2) 단독, 단가 1/5.6 + 한글·맥락 우위
 - [x] 이미지 규격을 구글 디스커버 기준으로 (16:9 / 1536x864, max-image-preview:large 적용)

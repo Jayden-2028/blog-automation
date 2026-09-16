@@ -35,8 +35,17 @@ const okBrief = (label: string) =>
     durationMs: 10,
   });
 
+// model/usage는 2026-09-16 비용 계측에서 GenerateImageResult에 추가된 필드다. 이 옛 경로
+// (ARTICLE_IMAGE_GENERATION)는 계측을 붙이지 않았지만, 타입 계약은 그대로 지켜야 한다.
 const okImage = () =>
-  Promise.resolve({ ok: true as const, imageBuffer: Buffer.from("fake"), mimeType: "image/png", provider: "openai" as const });
+  Promise.resolve({
+    ok: true as const,
+    imageBuffer: Buffer.from("fake"),
+    mimeType: "image/png",
+    provider: "openai" as const,
+    model: "gpt-image-2",
+    usage: { inputTokens: 30, imageInputTokens: 0, outputTokens: 120, totalTokens: 150 },
+  });
 
 const okUpload = (index: number) =>
   Promise.resolve({ ok: true as const, url: `https://storage.example.com/job-1/${index}.png`, path: `job-1/${index}.png` });
@@ -114,7 +123,13 @@ async function main(): Promise<void> {
   // 8) 이미지 생성/업로드 실패도 같은 방식으로 처리된다.
   const genFailed = await generateArticleImages(makeInput({ maxImages: 1 }), {
     planBrief: (input) => okBrief(input.sectionHint ?? "?"),
-    generate: () => Promise.resolve({ ok: false as const, error: "이미지 생성 실패(테스트)" }),
+    generate: () =>
+      Promise.resolve({
+        ok: false as const,
+        error: "이미지 생성 실패(테스트)",
+        provider: "openai" as const,
+        model: "gpt-image-2",
+      }),
     upload: (input) => okUpload(input.index),
   });
   assert(genFailed.images.length === 0 && genFailed.failures.length === 1, "이미지 생성 실패도 failures에 기록돼야 한다");

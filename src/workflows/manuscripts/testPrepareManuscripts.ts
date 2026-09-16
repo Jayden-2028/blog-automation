@@ -7,6 +7,18 @@ import { prepareManuscript } from "./prepareManuscript.js";
 import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 import type { ManuscriptImage, ManuscriptManifest } from "./manuscriptManifest.js";
+import { buildCostSummary } from "../reports/buildCostSummary.js";
+import type { WriteCostSnapshotResult } from "../reports/writeCostSnapshot.js";
+
+/**
+ * 비용 스냅샷 스텁. 기본 구현은 Supabase를 읽으므로 주입하지 않으면 이 테스트가 조용히 네트워크를
+ * 탄다(2026-09-16). 이 파일의 다른 의존성과 같은 이유로 전부 주입한다.
+ */
+const noCostSnapshot = async (): Promise<WriteCostSnapshotResult> => ({
+  status: "success",
+  path: "(테스트 스텁 - 파일을 쓰지 않음)",
+  summary: buildCostSummary({ rows: [], fixedCosts: [] }),
+});
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -317,6 +329,7 @@ async function main(): Promise<void> {
   let deployCalled = false;
   const r11 = await prepareApprovedManuscripts({
     publishBlogspot: async () => ({ ok: false, reason: "disabled", detail: "test" }),
+    writeCostSnapshot: noCostSnapshot,
     deploy: async () => {
       deployCalled = true;
       return { status: "skipped", reason: "test" };
@@ -372,6 +385,7 @@ async function main(): Promise<void> {
   // 12) maxJobsPerRun 제한 + 전부 실패하면 페이지 갱신도 배포도 안 함
   let deployCalledOnAllFailure = false;
   const r12 = await prepareApprovedManuscripts({
+    writeCostSnapshot: noCostSnapshot,
     deploy: async () => {
       deployCalledOnAllFailure = true;
       return { status: "skipped", reason: "test" };
@@ -393,6 +407,7 @@ async function main(): Promise<void> {
   //     그대로 success 유지.
   const publishCalls: string[] = [];
   const r13 = await prepareApprovedManuscripts({
+    writeCostSnapshot: noCostSnapshot,
     deploy: async () => ({ status: "skipped", reason: "test" }),
     loadApprovedJobs: async () => [job("ok", "living"), job("fail", "living")],
     prepareJob: async (j) =>
