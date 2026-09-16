@@ -31,13 +31,16 @@ put`처럼 값을 명령에 직접 실려 보내는 방식만 써야 한다). 1�
 GitHub Actions 쪽 `.github/workflows/{social-issue,entertainment,community}-keyword.yml`의
 `schedule:` 블록은 전부 제거(`workflow_dispatch`만 남김) - Cloudflare가 유일한 트리거 경로다.
 
-⚠️ 검증 과정에서 사용자가 새 GitHub PAT 값을 대화창에 직접 붙여넣었다 - 세션 로그에 평문으로
-남아있을 수 있으니 **폐기 후 재발급 권장**.
+⚠️ 검증 과정에서 사용자가 새 GitHub PAT 값을 대화창에 직접 붙여넣어 세션 로그에 평문으로
+남았었다 - **같은 날 사용자가 토큰을 재발급하고 `echo -n "값" | wrangler secret put
+GH_DISPATCH_TOKEN`(파이프 방식, 대화창 노출 없음)으로 재등록 완료.** 1분 주기 임시 cron으로
+`community-keyword.yml`이 실제로 정상 dispatch되는 것까지 재검증(run 35062160142, 로그에 에러 없이
+"Ok" 단독 - 이전 두 토큰은 매번 이 자리에서 401/403이 붙었다)한 뒤 실 스케줄로 원복.
 
 **남은 것**:
-- ⬜ 위 경고대로 토큰 재발급 필요(사용자 조치).
-- ⬜ 내일 09:00/09:10/13:00 KST 실제 발화로 최종 확인(오늘은 배선 직후라 검증은 커뮤니티
-  워크플로우 1분 주기 테스트로만 함 - 사회이슈/연예OTT는 아직 실제 시각 발화 미확인).
+- ⬜ 내일 09:00/09:10/13:00 KST 실제 발화로 최종 확인(오늘 검증은 커뮤니티 워크플로우의 1분
+  주기 임시 cron으로만 함 - 사회이슈/연예OTT는 같은 코드 경로지만 아직 실제 예정 시각 발화는
+  미확인. `dispatchWorkflow` 함수 자체는 동일하게 재사용되므로 위험은 낮다).
 - ⬜ Cloudflare Worker가 이제 "텔레그램 릴레이 + 키워드 수집 스케줄러" 두 역할을 겸한다 - 이름
   (`blog-automation-telegram-relay`)이 더 이상 역할과 안 맞지만, 이름 변경은 웹훅 URL이 걸린
   다른 설정(텔레그램 setWebhook)에 영향을 줄 수 있어 이번엔 손대지 않음.
