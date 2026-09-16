@@ -20,7 +20,7 @@ import { keywordSlug } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { extractTrailingJson, runHeadlessCodex } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
-import { WEB_IMAGES_FILE, readImageSize } from "../manuscripts/exportManuscript.js";
+import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
@@ -505,7 +505,13 @@ export async function collectWebImages(
   }
 
   if (found.length > 0) {
-    await writeFile(resolve(input.dir, WEB_IMAGES_FILE), `${JSON.stringify({ images: found }, null, 2)}\n`);
+    // 이번에 찾은 것만 쓰면 지난 실행에서 채운 자리가 사라진다 - 호출부가 빈 자리만 넘길 수 있으므로
+    // 기존 사이드카와 index 기준으로 합친다(같은 자리는 이번 결과가 이긴다).
+    const previous = await readWebImages(input.dir);
+    const merged = [...previous.filter((p) => !found.some((f) => f.index === p.index)), ...found].sort(
+      (a, b) => a.index - b.index
+    );
+    await writeFile(resolve(input.dir, WEB_IMAGES_FILE), `${JSON.stringify({ images: merged }, null, 2)}\n`);
   }
 
   return { found, failures };

@@ -249,6 +249,30 @@ async function main(): Promise<void> {
     );
     console.log("✅ 핫링크 차단 대응 - 출처를 Referer로 전달, 실패 시 URL 안내");
 
+    // 5-5) 빈 자리만 채우는 재실행에서 지난 결과가 사라지면 안 된다(사이드카 병합).
+    const mergeDir = await mkdtemp(resolve(tmpdir(), "collect-merge-"));
+    try {
+      await collectWebImages(
+        { keyword: "k", dir: mergeDir, slots: [slots[0]] },
+        { verifyImage: okVerify, runCodex: codexReply([slotReply({ index: 1 })]), fetchImage: okFetch }
+      );
+      await collectWebImages(
+        { keyword: "k", dir: mergeDir, slots: [slots[1]] },
+        { verifyImage: okVerify, runCodex: codexReply([slotReply({ index: slots[1].index })]), fetchImage: okFetch }
+      );
+      const merged = JSON.parse(await readFile(resolve(mergeDir, "web-images.json"), "utf-8")) as {
+        images: { index: number }[];
+      };
+      assert(merged.images.length === 2, `두 번에 나눠 채워도 둘 다 남아야 한다 (${JSON.stringify(merged.images)})`);
+      assert(
+        merged.images[0].index === 1 && merged.images[1].index === slots[1].index,
+        "자리 번호 순으로 정렬돼야 한다"
+      );
+      console.log("✅ 재실행 시 사이드카 병합 - 지난 실행에서 채운 자리가 살아남음");
+    } finally {
+      await rm(mergeDir, { recursive: true, force: true });
+    }
+
     // 6) Codex가 못 찾았다고(skipped) 하면 빈 자리로 남기고 사유를 전한다 - 억지로 채우지 않는다.
     const skipped = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
