@@ -309,7 +309,8 @@ function main(): void {
 
   // i2) 같은 대진표라도 웹 검색이면 통과, 데이터가 아닌 장면 이미지는 AI 생성이어도 통과.
   const imageOk = checkImagePrompts(
-    "[IMAGE: 한국·일본·대만·호주 8강 대진표 — 웹 검색]\n[IMAGE PROMPT: 2026 아시안게임 야구 대진표 공식]\n\n[IMAGE: 저녁 7시 목욕부터 취침까지 4단계 루틴 — AI 생성]\n[IMAGE PROMPT: A warm flat illustration, no text, 16:9]"
+    // 장면형 AI 생성은 2026-09-17부터 실사가 기본이다(§8) - 픽스처도 그 규격을 따른다.
+    "[IMAGE: 한국·일본·대만·호주 8강 대진표 — 웹 검색]\n[IMAGE PROMPT: 2026 아시안게임 야구 대진표 공식]\n\n[IMAGE: 저녁 목욕을 마친 아이를 재우는 부모 — AI 생성]\n[IMAGE PROMPT: A photorealistic photograph of a Korean parent putting a child to bed, warm lamp light, no text, 16:9]"
   );
   assert(imageOk.length === 0, `웹 검색 대진표 + 장면형 AI 생성은 통과해야 한다 (실제: ${JSON.stringify(imageOk)})`);
   console.log("✅ image: 웹 검색 대진표·장면형 AI 생성 통과");
@@ -359,6 +360,26 @@ function main(): void {
   );
   assert(newsEventsOk.length === 0, `배포 사진 있는 자리·일반적 현장은 통과해야 한다 (${JSON.stringify(newsEventsOk)})`);
   console.log("✅ image: 제작발표회·일반적 현장은 오탐 없음");
+
+  // i7) 실사가 기본(2026-09-17 사용자 지적: 예시가 전부 flat illustration이라 원고가 일러스트 천지였다).
+  //     설명에 밝히지 않고 일러스트 프롬프트를 쓰면 경고한다.
+  const illus = checkImagePrompts(
+    "[IMAGE: 저금통에 동전이 쌓이는 모습 — AI 생성]\n[IMAGE PROMPT: A warm flat illustration of a piggy bank, soft beige palette, no text. 16:9]"
+  );
+  assert(illus.length === 1 && illus[0].message.includes("photorealistic"), `실사 기본 경고가 있어야 한다 (${JSON.stringify(illus)})`);
+
+  // 설명에 "일러스트/도식"이라고 밝힌 예외와, 실사 프롬프트는 통과.
+  const illusOk = checkImagePrompts(
+    [
+      "[IMAGE: 신청 절차 4단계를 정리한 일러스트 — AI 생성]",
+      "[IMAGE PROMPT: A clean flat illustration of four steps, no text. 16:9]",
+      "",
+      "[IMAGE: 은행 창구에서 통장을 확인하는 직장인 — AI 생성]",
+      "[IMAGE PROMPT: A photorealistic photograph of a Korean office worker at a bank counter, natural light, no text. 16:9]",
+    ].join("\n")
+  );
+  assert(illusOk.length === 0, `밝힌 일러스트·실사 프롬프트는 통과해야 한다 (${JSON.stringify(illusOk)})`);
+  console.log("✅ image: 실사 기본 - 안 밝힌 일러스트만 경고, 밝힌 도식은 통과");
 
   // ---------- 통합 ----------
 

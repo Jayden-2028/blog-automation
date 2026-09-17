@@ -31,6 +31,7 @@ import {
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
+import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -71,6 +72,19 @@ export type PrepareManuscriptOptions = {
         date: string;
         body: string;
         imagePrompts: string[];
+      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+  /**
+   * `웹 검색` 자리 수집. 기본은 collectWebImagesForJob(Claude WebSearch → Storage 업로드).
+   * false를 주면 건너뛴다(테스트/재실행). 외부 검색을 타므로 테스트에서는 반드시 꺼야 한다.
+   */
+  collectWebImages?:
+    | false
+    | ((input: {
+        jobId: string;
+        keyword: string;
+        body: string;
+        imagePrompts: string[];
+        filledIndexes: number[];
       }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
   /** 테스트 주입용. 기본은 현재 시각(Asia/Seoul). */
   now?: () => Date;
@@ -152,6 +166,8 @@ export async function prepareManuscript(
     options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
   const generateImages =
     options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
+  const collectWebImages =
+    options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
@@ -218,6 +234,26 @@ export async function prepareManuscript(
     imageFailures.push(...outcome.failures);
     if (images.length > 0) {
       await mergeJobMetadata(job.id, { imagesReadyAt: now().toISOString(), images });
+    }
+  }
+
+  // `웹 검색` 자리를 Claude(WebSearch)로 채운다(2026-09-18). 생성과 별개 게이트를 쓰는 이유: 생성은
+  // 이미 끝났는데 수집만 새로 붙은 원고가 있고, 둘의 실패 조건도 다르다(생성=유료 API, 수집=검색 결과).
+  // 여기서 실패해도 원고는 그대로 간다 - 빈 자리는 뷰어가 검색어와 함께 "채울 것"으로 띄운다.
+  if (collectWebImages && !job.metadata?.webImagesReadyAt) {
+    const outcome = await collectWebImages({
+      jobId: job.id,
+      keyword: job.keyword,
+      body: content,
+      imagePrompts,
+      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+    });
+    imageFailures.push(...outcome.failures);
+    if (outcome.images.length > 0) {
+      images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
+        (a, b) => a.index - b.index
+      );
+      await mergeJobMetadata(job.id, { webImagesReadyAt: now().toISOString(), images });
     }
   }
 

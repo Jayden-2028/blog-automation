@@ -1,6 +1,42 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-17 (Asia/Seoul)
+기준일: 2026-09-18 (Asia/Seoul)
+
+## 2026-09-18 세션 — 웹 검색 수집이 한 번도 안 돌던 것을 파이프라인에 연결 + 실사 기본 + 더블탭 물리 차단
+
+**계기**: 사용자가 오늘자 원고를 검토하고 4가지를 지적했다. 그중 1번이 근본 문제였다.
+
+**1. 웹 검색 수집이 "전혀 실행되지 않음" - 설계 실수였다.**
+`images:collect`는 **파이프라인 어디에도 연결돼 있지 않았다.** 맥 로컬 전용 CLI로만 만들었고 자동으로
+부르는 곳이 없었다. 더 나쁜 건 **구조상 영원히 자동화가 불가능했다**는 점이다 - Codex CLI는 GitHub
+Actions 러너에 없고 ChatGPT OAuth도 쓸 수 없다. 09-17에 "맥 로컬 전용"이라고 적긴 했지만 그게 곧
+"자동으로는 안 돈다"는 뜻임을 사용자에게 분명히 전하지 않았다.
+- **실행기를 Codex → Claude로 교체**(`runClaudeWebSearch.ts`). 파이프라인은 이미 `claude -p`를 돌리고
+  `CLAUDE_CODE_OAUTH_TOKEN`도 들어가 있어, `--allowed-tools WebSearch,WebFetch`만 열면 같은 일을
+  클라우드에서 한다. `WebSearchAgent` 타입으로 계약을 묶어 호출부는 어느 쪽인지 모른다.
+  Claude CLI엔 `--output-schema`가 없어 스키마를 프롬프트 끝에 붙이고 `extractTrailingJson`으로 받는다.
+- **출력 경로도 갈랐다**: 러너는 곧 사라지므로 파일을 보관함에 남기는 대신 **Supabase Storage에
+  업로드**하고 manifest의 `images`로 넘긴다(생성 이미지와 같은 자리) - 그래야 뷰어가 그린다.
+  `collectWebImages`에 `upload` sink를 주입 가능하게 만들어 맥(파일)과 클라우드(Storage)가 같은
+  판단 로직을 공유한다. 판단 기준·권한 분류·해상도/비율·비전 검증은 **전부 그대로 재사용**했다.
+- `prepareManuscript`에 연결. 생성과 **별개 게이트**(`webImagesReadyAt`)를 쓴다 - 생성은 이미 끝났는데
+  수집만 새로 붙은 원고가 있고 실패 조건도 다르다. `ManuscriptImage`에 `sourcePage`/`license`를 더해
+  출처가 발행까지 따라간다.
+- `job-publish-prepare.yml` 타임아웃 25분 → 60분. 원고 1건당 배리에이션(~3분)+생성(~1분)+수집(~3분)+
+  검증(자리당 ~1분)이고 maxJobsPerRun이 3이라 25분으로는 잘린다.
+
+**2. 일러스트 위주로 나오던 원인**: `output-format.md`의 AI 프롬프트 **예시가 전부 `flat illustration`**
+이었고 "실사 우선"이라는 규칙 자체가 없었다. 모델이 예시를 그대로 따랐다. 기본을
+`photorealistic photograph`로 못박고 (X)/(O) 예시를 교체했다. 일러스트는 **개념·절차 도식에만 예외**로
+쓰되 설명에 "일러스트/도식"이라고 밝혀야 한다 - 검수 `checkImagePrompts`가 안 밝힌 일러스트를 잡는다.
+
+**4. 텔레그램 중복 - 실제로 두 번 눌린 것**: `update_id` 223675272 / 223675273으로 **다르다**(웹훅
+재전송이 아니다). 간격은 1초 - "눌렸나?" 싶어 곧바로 다시 누른 것이다. 09-16에 넣은 토스트만으로는
+부족했다. 이제 **Worker가 dispatch 직후 버튼을 "⏳ 처리 중…" 하나로 바꿔** 두 번째 탭을 물리적으로
+막는다(`noop` 콜백은 Worker가 걸러 GitHub Actions를 안 깨운다). 러너가 60초 뒤 최종 라벨을 씌우고,
+그때는 이미 결정이 기록돼 있어 다시 눌러도 idempotency 가드가 받는다.
+
+
 
 ## 2026-09-17 세션 — 웹 검색 이미지를 AI로 생성하던 버그 + Codex 이미지 수집 + 로컬 보관함 내보내기
 

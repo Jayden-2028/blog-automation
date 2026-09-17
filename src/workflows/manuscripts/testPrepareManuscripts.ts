@@ -97,6 +97,7 @@ async function main(): Promise<void> {
   const noBase = await prepareManuscript(job("a", "living"), {
     loadArticles: async () => [],
     generateImages: false,
+    collectWebImages: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
   console.log("✅ 기준 원고 없음 -> 실패");
@@ -109,6 +110,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(parenting.status === "success", "카테고리와 무관하게 Blogspot 원고를 만들어야 한다");
   console.log("✅ 모든 카테고리 -> Blogspot 원고 1건 (채널 배정 실패 경로 없음)");
@@ -132,6 +134,7 @@ async function main(): Promise<void> {
     },
     mergeJobMetadata: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(r3.status === "success", "신규 생성 실패");
   if (r3.status === "success") {
@@ -166,6 +169,7 @@ async function main(): Promise<void> {
     },
     writeManuscriptFile: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
   assert(generateCalls === 0, "이미 있는 배리에이션은 재생성하면 안 된다");
@@ -182,6 +186,7 @@ async function main(): Promise<void> {
     createVariantArticle: async () => variantArticle(99),
     writeManuscriptFile: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(r5.status === "failed" && r5.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
   console.log("✅ 배리에이션 생성 실패 -> job 실패로 전파");
@@ -198,6 +203,7 @@ async function main(): Promise<void> {
     },
     mergeJobMetadata: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
   if (r6.status === "success") {
@@ -219,6 +225,7 @@ async function main(): Promise<void> {
       metaPatches.push(patch);
     },
     generateImages: false,
+    collectWebImages: false,
   });
   assert(r7.status === "success", "신규 생성(메타 저장 케이스) 실패");
   assert(metaPatches.length === 1, `job.metadata 갱신이 1회 호출돼야 한다 (${metaPatches.length})`);
@@ -241,6 +248,7 @@ async function main(): Promise<void> {
       },
       writeManuscriptFile: async () => {},
       generateImages: false,
+      collectWebImages: false,
     }
   );
   assert(r8.status === "success", "재사용+메타 복구 케이스 실패");
@@ -256,6 +264,7 @@ async function main(): Promise<void> {
     },
     writeManuscriptFile: async () => {},
     generateImages: false,
+    collectWebImages: false,
   });
   assert(
     r8b.status === "success" && r8b.topic.manuscript.tags.length === 0,
@@ -274,6 +283,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async (_id, patch) => {
       imagePatches.push(patch);
     },
+    collectWebImages: false,
     generateImages: async (input) => {
       imageCalls += 1;
       assert(input.imagePrompts[0] === "프롬프트 A", "이미지 생성에 imagePrompts가 전달돼야 한다");
@@ -446,6 +456,62 @@ async function main(): Promise<void> {
   assert(publishCalls.length === 1 && publishCalls[0] === "ok", `원고 준비 성공 job에만 publishBlogspot 호출 (${JSON.stringify(publishCalls)})`);
   assert(r13.find((r) => r.job.id === "ok")?.result.status === "success", "publishBlogspot 예외가 원고 준비 결과를 실패로 바꾸면 안 된다");
   console.log("✅ 원고 준비 성공 직후 publishBlogspot 호출 (실패한 job은 미호출, 발행 예외가 원고 준비 결과에 영향 없음)");
+
+  // 2026-09-18: `웹 검색` 자리를 파이프라인에서 채운다. 어제까지 이 경로는 Codex CLI 전용이라
+  // 러너에서 실행 자체가 불가능했고, 그래서 웹 검색 자리가 전부 빈 채로 발행 대기에 올라갔다.
+  {
+    const calls: number[][] = [];
+    const merged: Record<string, unknown>[] = [];
+    const webResult = await prepareManuscript(job("web", "living", { imagePrompts: ["카페 카운터 검색어"] }), {
+      loadArticles: async () => [baseArticle()],
+      generateVariant: okVariant,
+      createVariantArticle: async () => variantArticle(101),
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async (_id, patch) => {
+        merged.push(patch);
+      },
+      generateImages: async () => ({
+        images: [
+          { index: 2, description: "커피", prompt: "p", url: "https://s/2.png", provider: "openai", fileName: "02.png" },
+        ],
+        failures: [],
+      }),
+      collectWebImages: async (input) => {
+        calls.push(input.filledIndexes);
+        return {
+          images: [
+            {
+              index: 1,
+              description: "카페 카운터 사진",
+              prompt: null,
+              url: "https://s/web-1.jpg",
+              provider: "web",
+              fileName: "01-cafe.jpg",
+              error: null,
+              sourcePage: "https://example.com/a",
+              license: "공공누리 제1유형",
+            },
+          ],
+          failures: [],
+        };
+      },
+    });
+
+    assert(webResult.status === "success", `성공해야 한다 (${JSON.stringify(webResult)})`);
+    assert(calls.length === 1, "웹 검색 수집이 호출돼야 한다");
+    assert(
+      calls[0].includes(2) && !calls[0].includes(1),
+      `이미 채워진 자리만 건너뛰게 넘겨야 한다 (${JSON.stringify(calls[0])})`
+    );
+
+    const webPatch = merged.find((patch) => "webImagesReadyAt" in patch);
+    assert(webPatch, "webImagesReadyAt 게이트가 기록돼야 한다(재실행 시 중복 수집 방지)");
+    const savedImages = (webPatch?.images ?? []) as { index: number; sourcePage?: string | null }[];
+    assert(savedImages.length === 2, `생성분과 수집분이 합쳐져야 한다 (${JSON.stringify(savedImages)})`);
+    assert(savedImages[0].index === 1 && savedImages[1].index === 2, "자리 번호 순으로 정렬돼야 한다");
+    assert(savedImages[0].sourcePage === "https://example.com/a", "출처가 보존돼야 한다(발행 시 표기 필요)");
+    console.log("✅ 웹 검색 자리 수집 - 생성분과 병합 + 출처 보존 + 재수집 게이트");
+  }
 
   console.log("\n✅ 전체 통과");
 }

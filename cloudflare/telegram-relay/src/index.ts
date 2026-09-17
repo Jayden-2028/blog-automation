@@ -44,17 +44,49 @@ export interface Env {
  */
 const CALLBACK_ACK_TEXT = "⏳ 접수됐습니다. 처리 결과는 곧 메시지로 알려드립니다.";
 
-async function answerCallbackQuery(env: Env, callbackQueryId: string): Promise<void> {
+/**
+ * 눌린 직후 버튼을 이것 하나로 바꿔 **두 번째 탭 자체를 불가능하게** 만든다(2026-09-18).
+ *
+ * 왜 토스트만으로는 부족했나(실측): 승인 버튼이 1초 간격으로 두 번 눌렸다(update_id 223675272 /
+ * 223675273 - 서로 다른 콜백이라 웹훅 재전송이 아니다). 눌러도 버튼 모양이 그대로라 "안 눌렸나?"
+ * 싶어 다시 누른 것이다. 러너가 버튼을 바꾸는 건 60초 뒤라 그 사이가 통째로 무방비였다.
+ *
+ * `noop`은 아래 fetch 핸들러가 걸러내므로 눌러도 GitHub Actions를 깨우지 않는다. 러너가 나중에
+ * markReviewButtonsDecided로 최종 라벨("✅ 승인됨" 등)을 다시 씌운다 - 그때는 이미 결정이 기록돼
+ * 있어 다시 눌러도 idempotency 가드가 받는다.
+ */
+const PROCESSING_BUTTON = { text: "⏳ 처리 중…", callback_data: "noop" };
+
+async function telegramApi(env: Env, method: string, body: unknown): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) return;
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ callback_query_id: callbackQueryId, text: CALLBACK_ACK_TEXT }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    console.error("answerCallbackQuery 실패:", res.status, text.slice(0, 200));
+    console.error(`${method} 실패:`, res.status, text.slice(0, 200));
   }
+}
+
+/** 버튼을 "처리 중" 하나로 잠근다. 메시지 정보가 없으면(오래된 콜백 등) 조용히 건너뛴다. */
+async function lockButtons(env: Env, update: unknown): Promise<void> {
+  const message = (update as { callback_query?: { message?: { chat?: { id?: unknown }; message_id?: unknown } } })
+    .callback_query?.message;
+  const chatId = message?.chat?.id;
+  const messageId = message?.message_id;
+  if (typeof chatId !== "number" || typeof messageId !== "number") return;
+
+  await telegramApi(env, "editMessageReplyMarkup", {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [[PROCESSING_BUTTON]] },
+  });
+}
+
+async function answerCallbackQuery(env: Env, callbackQueryId: string, text = CALLBACK_ACK_TEXT): Promise<void> {
+  await telegramApi(env, "answerCallbackQuery", { callback_query_id: callbackQueryId, text });
 }
 
 /**
@@ -121,9 +153,18 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
-    const callbackQueryId = isCallbackQuery
-      ? (update as { callback_query?: { id?: unknown } }).callback_query?.id
+    const callbackQuery = isCallbackQuery
+      ? (update as { callback_query?: { id?: unknown; data?: unknown } }).callback_query
       : undefined;
+    const callbackQueryId = callbackQuery?.id;
+
+    // 잠금 버튼(위 PROCESSING_BUTTON)을 누른 것 - 처리 중이라는 뜻이니 GitHub Actions를 깨우지 않는다.
+    if (callbackQuery?.data === "noop") {
+      if (typeof callbackQueryId === "string" && callbackQueryId) {
+        ctx.waitUntil(answerCallbackQuery(env, callbackQueryId, "⏳ 앞서 누른 요청을 처리하고 있습니다."));
+      }
+      return new Response("OK", { status: 200 });
+    }
 
     const dispatchResponse = await fetch(
       `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/dispatches`,
@@ -147,9 +188,11 @@ export default {
       return new Response("Upstream dispatch failed", { status: 502 });
     }
 
-    // 디스패치가 실제로 성공한 뒤에만 "접수됨"을 띄운다(실패면 위에서 502 → 텔레그램 재전송).
+    // 디스패치가 실제로 성공한 뒤에만 알린다(실패면 위에서 502 → 텔레그램 재전송).
+    // 버튼 잠금이 핵심이고 토스트는 보조다 - 잠가야 두 번째 탭이 물리적으로 막힌다.
     if (typeof callbackQueryId === "string" && callbackQueryId) {
       ctx.waitUntil(answerCallbackQuery(env, callbackQueryId));
+      ctx.waitUntil(lockButtons(env, update));
     }
 
     return new Response("OK", { status: 200 });

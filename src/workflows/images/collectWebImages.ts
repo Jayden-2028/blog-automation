@@ -18,7 +18,9 @@ import { resolve } from "node:path";
 
 import { keywordSlug } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
-import { extractTrailingJson, runHeadlessCodex } from "../../services/llm/runHeadlessCodex.js";
+import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
+import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
+import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
@@ -96,7 +98,11 @@ export type VerifyImageResult = { ok: boolean; reason: string };
 
 export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 codex 실행. */
-  runCodex?: typeof runHeadlessCodex;
+  /**
+   * 웹 검색 실행기. 기본은 Claude(`claude -p` + WebSearch) - 파이프라인에서도 도는 유일한 경로다.
+   * 맥에서 Codex로 돌리고 싶으면 `runHeadlessCodex`를 넣는다(runClaudeWebSearch.ts 주석 참고).
+   */
+  runCodex?: WebSearchAgent;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -107,6 +113,16 @@ export type CollectWebImagesOptions = {
   verifyImage?: (input: VerifyImageInput) => Promise<VerifyImageResult>;
   /** false면 비전 검증을 건너뛴다(시간·호출을 아끼고 싶을 때). 기본 true. */
   verify?: boolean;
+  /**
+   * 주면 검증을 통과한 이미지를 여기에 넘겨 영구 저장한다(파이프라인은 Supabase Storage).
+   * 주지 않으면 `dir`의 파일이 결과물이다(맥 보관함).
+   */
+  upload?: (input: {
+    index: number;
+    fileName: string;
+    buffer: Buffer;
+    mimeType: string;
+  }) => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
 };
 
 /**
@@ -390,7 +406,7 @@ export async function collectWebImages(
   input: { keyword: string; dir: string; slots: WebImageSlot[] },
   options: CollectWebImagesOptions = {}
 ): Promise<CollectWebImagesResult> {
-  const runCodex = options.runCodex ?? runHeadlessCodex;
+  const runCodex = options.runCodex ?? runClaudeWebSearch;
   const fetchImage = options.fetchImage ?? defaultFetchImage;
   const verifyImage = options.verifyImage ?? defaultVerifyImage;
   const verify = options.verify ?? true;
@@ -493,6 +509,24 @@ export async function collectWebImages(
       }
     }
 
+    // 파이프라인은 러너가 곧 사라지므로 Storage에 올려야 뷰어가 본다. 업로드가 실패하면 채택하지
+    // 않는다 - manifest에 URL 없는 항목을 넣으면 뷰어가 "이미지 없음"으로 그릴 뿐이다.
+    let storageUrl: string | null = null;
+    if (options.upload) {
+      const uploaded = await options.upload({
+        index: slot.index,
+        fileName,
+        buffer: downloaded.buffer,
+        mimeType: downloaded.contentType ?? `image/${extension}`,
+      });
+      if (!uploaded.ok) {
+        await rm(filePath, { force: true });
+        failures.push(`[자리 ${slot.index}] 업로드 실패: ${uploaded.error}`);
+        continue;
+      }
+      storageUrl = uploaded.url;
+    }
+
     found.push({
       index: slot.index,
       fileName,
@@ -501,6 +535,7 @@ export async function collectWebImages(
       alt: result.alt || slot.description,
       caption: result.caption || slot.description,
       license: result.license || "출처 확인 필요",
+      storageUrl,
     });
   }
 

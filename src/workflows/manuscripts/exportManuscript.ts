@@ -34,6 +34,11 @@ export type WebImageRecord = {
   caption: string;
   /** "공식 배포" | "보도자료" | "공공저작물" | "언론 보도 화면" 등 - 저작권 판단 근거. */
   license: string;
+  /**
+   * Supabase Storage 공개 URL. 파이프라인(GitHub Actions)에서 수집하면 러너가 사라지므로 파일을
+   * Storage에 올리고 이 URL로 뷰어·manifest가 참조한다. 맥에서 보관함으로만 받으면 없다.
+   */
+  storageUrl?: string | null;
 };
 
 export const WEB_IMAGES_FILE = "web-images.json";

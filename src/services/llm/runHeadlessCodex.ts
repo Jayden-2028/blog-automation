@@ -48,6 +48,12 @@ export type RunHeadlessCodexResult =
   | { ok: false; error: string; durationMs: number };
 
 /**
+ * 웹 검색 + 구조화 JSON을 돌려주는 실행기의 공통 계약. Codex(로컬)와 Claude(클라우드)가 이 모양을
+ * 똑같이 만족해서 호출부(collectWebImages)가 어느 쪽인지 모르고 쓸 수 있다.
+ */
+export type WebSearchAgent = (options: RunHeadlessCodexOptions) => Promise<RunHeadlessCodexResult>;
+
+/**
  * stdout 끝에서 JSON을 찾는다.
  *
  * 왜 마지막 줄만 보지 않는가(2026-09-16 실측): codex exec는 세션 헤더·플러그인 로드 경고·

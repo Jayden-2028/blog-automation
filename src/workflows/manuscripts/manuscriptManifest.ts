@@ -38,6 +38,13 @@ export type ManuscriptImage = {
   fileName: string;
   /** 생성 실패 사유(있으면). 뷰어가 "이미지 없음" 자리에 보여준다. */
   error?: string | null;
+  /**
+   * 웹에서 찾아온 이미지일 때의 출처(2026-09-18). 생성 이미지에는 없다.
+   * 발행 시 출처 표기가 필요하고, 보관함의 image-metadata.md도 이 값을 쓴다.
+   */
+  sourcePage?: string | null;
+  /** 재사용 근거(예: "공공누리 제1유형", "삼성전자 공식 홈페이지"). */
+  license?: string | null;
 };
 
 export type ManuscriptEntry = {

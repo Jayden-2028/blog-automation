@@ -32,7 +32,11 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 2026-09-18: 25분 -> 60분. 이 job이 하는 일이 늘었다 - 원고 1건당 배리에이션 생성(~3분) +
+    # AI 이미지 생성(~1분) + **웹 검색 이미지 수집(~3분)** + **비전 검증(자리당 ~1분)**이고
+    # maxJobsPerRun이 3이라 25분으로는 중간에 잘린다. heavy-pipeline과 다른 concurrency group이라
+    # 오래 돌아도 조사·집필을 막지 않는다.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 

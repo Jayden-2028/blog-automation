@@ -422,6 +422,13 @@ const NEWS_EVENT_HINT =
   /보도\s*사진|(?:\d{1,2}월\s*\d{1,2}일|제\s*\d+\s*회)[^.\n\]]{0,25}(?:회의|본회의|의회|브리핑|국정감사|대정부질문)|(?:시|군|구|도)의회[^.\n\]]{0,20}(?:부결|가결|통과|의결)/;
 
 const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
+/** 설명 + 바로 뒤 인라인 프롬프트를 한 쌍으로 잡는다(프롬프트는 여러 줄일 수 있다). */
+const IMAGE_PAIR_PATTERN = /\[IMAGE:\s*([^\]]*)\]\s*\n\s*\[IMAGE PROMPT:\s*([\s\S]*?)\]/gi;
+
+/** 일러스트 계열 지시어. 실사가 기본이라(output-format.md §8) 쓰려면 설명에 밝혀야 한다. */
+const ILLUSTRATION_STYLE = /\b(illustration|illustrated|flat design|vector art|cartoon|clipart|clip art|drawing)\b/i;
+/** 설명에서 "일러스트를 쓰겠다"고 밝힌 표기. */
+const ILLUSTRATION_DECLARED = /일러스트|도식|다이어그램|인포그래픽|아이콘|카드뉴스/;
 
 /** 이미지 마커 설명이 어떤 규칙을 어겼는지. 위반이 없으면 null. */
 export type ImageMarkerViolation = "screen_capture" | "news_event";
@@ -461,6 +468,24 @@ export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
       message:
         `화면 캡처를 이미지 자리로 만든 마커 ${screens.length}개: "${screens[0].slice(0, 30)}…"` +
         " (output-format.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
+    });
+  }
+
+  // 실사가 기본인데 설명에 밝히지 않고 일러스트 프롬프트를 쓴 자리(2026-09-17 사용자 지적 -
+  // 예시가 전부 flat illustration이라 원고 대부분이 일러스트로 나왔다). 개념·절차 도식은 예외지만
+  // 그때는 설명에 "일러스트/도식"이라고 적어야 한다 - 그래야 사람이 의도한 예외임을 알 수 있다.
+  const undeclaredIllustrations = [...rawBody.matchAll(IMAGE_PAIR_PATTERN)]
+    .filter(([, description, prompt]) => /AI\s*생성/.test(description))
+    .filter(([, description, prompt]) => ILLUSTRATION_STYLE.test(prompt) && !ILLUSTRATION_DECLARED.test(description))
+    .map(([, description]) => description.trim());
+
+  if (undeclaredIllustrations.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message:
+        `실사로 밝히지 않고 일러스트로 생성하는 마커 ${undeclaredIllustrations.length}개: "${undeclaredIllustrations[0].slice(0, 30)}…"` +
+        " (output-format.md §8 - 기본은 photorealistic, 개념·절차 도식만 예외이고 그때는 설명에 '일러스트'라고 밝힌다)",
     });
   }
 

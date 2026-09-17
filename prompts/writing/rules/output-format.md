@@ -292,9 +292,22 @@ Clean white background, gentle evening lighting. 4:3 aspect ratio.]
 
 **AI 생성 프롬프트 규칙**:
 
+- **기본은 실사 사진이다(2026-09-17 사용자 결정).** 프롬프트에 `photorealistic photograph`와 카메라 느낌을
+  주는 표현(`natural lighting`, `shallow depth of field`, `documentary style` 등)을 넣는다. 예전 예시가
+  전부 `flat illustration`이었던 탓에 원고 대부분이 일러스트로 나왔다 - seo-guide가 실사를 우대하고,
+  독자에게도 실제 상황이 더 잘 전달된다.
+  **일러스트는 예외로만 쓴다**: 실물로 찍을 수 없는 개념·절차 도식(단계 흐름, 구조 비교)일 때만.
+  그 경우에도 첫 줄 설명에 "일러스트"라고 밝힌다.
+  ```
+  (X) A warm flat illustration of a piggy bank with coins, soft beige palette. 16:9.
+  (O) A photorealistic photograph of a young Korean office worker checking a savings account
+      passbook at a bank counter, natural window light, shallow depth of field,
+      documentary style, no text, no letters. 16:9.
+  ```
 - **영어로 쓴다.** 이미지 모델이 영어 지시를 훨씬 정확히 따른다.
 - **글자를 넣지 않는다.** `no text, no letters`를 반드시 포함한다. 이미지 모델은 한글을 거의 항상 깨뜨린다. 구글 디스커버도 **글자가 많은 이미지와 로고 같은 범용 이미지는 썸네일로 잘 고르지 않는다** — 품질과 유입 양쪽에서 같은 결론이다. 문구가 필요하면 생성 후 편집기에서 얹는 것을 전제로 하고, 첫 줄 설명에 "생성 후 '4단계' 문구 삽입"처럼 적는다.
 - **여섯 요소를 순서대로** 담는다: 대상 → 동작·구성 → 배경 → 색감·팔레트 → 조명 → 스타일. 마지막에 비율.
+  스타일 자리에 기본으로 `photorealistic photograph`가 온다(위 첫 항목).
 - **비율은 `16:9`를 기본**으로 한다. 구글 디스커버가 큰 썸네일로 띄우는 조건이 "너비 1200px 이상 + 16:9 가로"라, 발행 채널(Blogspot)에서 유입을 받으려면 가로 16:9여야 한다. 세로 컷이 꼭 필요하면 `3:4`, 표·카드뉴스형은 `1:1` — 다만 **세로·정사각은 디스커버 썸네일 후보에서 빠진다.** 이 표기는 실제 API 요청 크기로 변환된다(`16:9` → 1536x864, `4:3` → 1280x960). 적지 않으면 기본 16:9로 나간다.
 - **글이 열릴 첫 이미지는 반드시 `16:9` 가로로 잡는다.** 디스커버·소셜 미리보기가 대표 이미지로 집어가는 자리라, 여기가 세로거나 정사각이면 큰 썸네일을 못 받는다.
 - **한국 이야기면 한국 배경임을 명시한다.** `in Korea`, `Korean street`, `Korean police car`, `Korean cafe signage`처럼 국가·문화 맥락을 프롬프트에 직접 넣는다. 안 적으면 모델이 서구권 기본값으로 그린다 — 실측에서 한국 사건 기사에 **미국식 경찰차**와 **영어 간판의 서양 카페**(컵에 "SARAH L." 같은 영문 이름)가 생성됐다. 인물이 필요 없더라도 소품·간판·차량·거리 풍경이 한국이어야 본문과 따로 놀지 않는다.
