@@ -469,14 +469,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         if (block.type === "heading") {
           var head = (block.heading || "").trim();
           var body = (block.body || "").trim();
-          parts.push(body ? head + "\n" + body : head);
+          parts.push(body ? head + "\\n" + body : head);
           return;
         }
         var text = (block.content || "").trim();
         if (text) parts.push(text);
       });
       if (naver.tags && naver.tags.length > 0) parts.push(hashtagLine(naver.tags));
-      return parts.join("\n\n");
+      return parts.join("\\n\\n");
     }
 
     /** 이미지 한 장(또는 A/B 두 장)을 figure로. url이 없으면 사유와 프롬프트를 대신 보여준다. */
