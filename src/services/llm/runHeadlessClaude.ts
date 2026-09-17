@@ -136,7 +136,11 @@ export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Prom
       if (code !== 0) {
         finish({
           ok: false,
-          error: `claude가 종료 코드 ${code}로 끝났습니다${stderr ? ` - ${stderr.trim().slice(0, 500)}` : ""}`,
+          // 사용량 한도 같은 안내는 -p 모드에서 stderr가 아니라 stdout으로 나온다(2026-09-18 실측: 세 배치가
+          // 전부 "종료 코드 1"로만 끝나 원인을 로그에서 볼 수 없었다). stderr가 비면 stdout 끝부분을 싣는다.
+          error: `claude가 종료 코드 ${code}로 끝났습니다${
+            stderr.trim() ? ` - ${stderr.trim().slice(0, 500)}` : stdout.trim() ? ` - stdout: ${stdout.trim().slice(-300)}` : ""
+          }`,
           durationMs,
         });
         return;

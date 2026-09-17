@@ -494,7 +494,7 @@ export async function collectWebImages(
     search: true,
   });
 
-  if (!run.ok) return { found: [], failures: [`Codex 실행 실패: ${run.error}`], unfilled: allUnfilled(input.slots) };
+  if (!run.ok) return { found: [], failures: [`웹 검색 에이전트 실행 실패: ${run.error}`], unfilled: allUnfilled(input.slots) };
 
   const results = parseCodexSlots(run.data);
   if (results.length === 0)
