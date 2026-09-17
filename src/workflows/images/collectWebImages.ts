@@ -52,7 +52,9 @@ const REUSE_PERMISSIONS = [
   "cc_by", // CC BY (NC·ND 없음)
   "official_press_release", // 정부·공공기관 보도자료·배포 이미지
   "official_company", // 기업 공식 홈페이지·공식 SNS
+  "official_site_screenshot", // 기업·기관 공식 홈페이지를 찍은 화면(2026-09-17 사용자 결정)
   "broadcaster_promo", // 방송사·배급사 홍보용 공식 포스터·스틸
+  "broadcast_capture", // 방송 장면 캡처(2026-09-17 사용자 결정 - 출처 표기 필수)
   "cc_nc_or_nd", // NC/ND 붙음 - 거부
   "third_party_photo", // 개인·회사 포트폴리오, 사진작가, 뉴스사 자체 촬영 - 거부
   "marketplace_repost", // 가격비교·쇼핑몰·오픈마켓 재배포본 - 거부
@@ -67,7 +69,9 @@ const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>([
   "cc_by",
   "official_press_release",
   "official_company",
+  "official_site_screenshot",
   "broadcaster_promo",
+  "broadcast_capture",
 ]);
 
 export type WebImageSlot = {
@@ -79,10 +83,41 @@ export type WebImageSlot = {
   context: string;
 };
 
+/**
+ * 끝내 못 채운 자리 하나. 사람이 읽는 `failures` 문장과 달리 **기계가 쓰는 구조체**다 -
+ * 이걸로 AI 생성 폴백을 돌린다(2026-09-17).
+ *
+ * 왜 필요한가(실측): 수집기는 못 찾았을 때 `skipReason`에 "안동 지역 전통 탈춤단이 야외 무대에서
+ * 공연하는 일반적 장면을 AI로 만드는 편이 낫다"처럼 **대안까지 적어 준다**. 그런데 지금까지는 그
+ * 문장을 로그에 찍고 버렸고, 그 자리는 빈 채로 발행 대기에 올라갔다. 빈 자리보다 AI 이미지가
+ * 낫다는 것이 이미 정해진 방침이므로(output-format.md §8-4) 그 제안을 받아서 쓴다.
+ */
+export type UnfilledSlot = {
+  index: number;
+  /** 마커 설명(획득 방식 접미사 제거 전 원문). */
+  description: string;
+  /** 이 이미지가 요약해야 할 문단. AI 프롬프트를 지을 때 근거가 된다. */
+  context: string;
+  /** 수집기가 적은 대안 제안 또는 실패 사유. 비어 있을 수 있다. */
+  suggestion: string;
+};
+
 export type CollectWebImagesResult = {
   found: WebImageRecord[];
   failures: string[];
+  /** 웹에서 못 채운 자리. 호출부가 AI 생성으로 넘긴다. */
+  unfilled: UnfilledSlot[];
 };
+
+/** 검색을 시작조차 못 했을 때(실행 실패·응답 없음) 전 자리를 미충족으로 돌린다. */
+function allUnfilled(slots: WebImageSlot[]): UnfilledSlot[] {
+  return slots.map((slot) => ({
+    index: slot.index,
+    description: slot.description,
+    context: slot.context,
+    suggestion: "",
+  }));
+}
 
 export type VerifyImageInput = {
   /** 내려받아 저장한 파일의 절대 경로. 검증자가 직접 열어 본다. */
@@ -211,7 +246,11 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     "   - `cc_by` — CC BY (NC도 ND도 붙지 않은 것만)",
     "   - `official_press_release` — 정부·공공기관이 배포한 보도자료 사진",
     "   - `official_company` — 기업 공식 홈페이지·공식 SNS가 배포한 자료",
+    "   - `official_site_screenshot` — 기업·기관 **공식 홈페이지를 찍은 화면**(소속 아티스트 목록,",
+    "     제품 소개 페이지 등). \"그 회사가 어떤 곳인가\"를 설명하는 자리에 쓴다.",
     "   - `broadcaster_promo` — 방송사·배급사가 홍보용으로 배포한 공식 포스터·스틸컷",
+    "   - `broadcast_capture` — 방송 장면을 캡처한 이미지(예능 출연 장면 등). 어느 방송사 무슨",
+    "     프로그램인지 `license`에 반드시 적는다 - 캡션에 출처로 표기한다.",
     "   여기까지가 쓸 수 있는 것이다. 아래에 해당하면 그 자리는 **건너뛴다**(`skipped: true`):",
     "   - `cc_nc_or_nd` — CC에 NC(비영리)나 ND(변경금지)가 붙음",
     "   - `third_party_photo` — 건축사무소·사진작가 등 개인·회사가 촬영한 사진, 뉴스사 자체 보도사진",
@@ -225,7 +264,8 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     "6. `imageUrl`은 반드시 이미지 파일 자체의 직접 URL이어야 한다(.jpg/.png/.webp 등). 검색 결과",
     "   페이지나 기사 본문 URL을 넣지 않는다. `sourcePage`에 그 이미지가 실린 페이지 URL을 따로 적는다.",
     "",
-    "법령 조문·정부 포털·기관 홈페이지 **화면 캡처는 더 이상 쓰지 않는다**(2026-09-17 결정). 그런 자리를",
+    "법령 조문·정부 포털·지원금 신청 같은 **행정 절차 화면 캡처는 쓰지 않는다**(2026-09-17 결정).",
+    "(기업·기관 **공식 홈페이지 화면**은 예외로 쓸 수 있다 - `official_site_screenshot`.) 그런 자리를",
     "만나면 `skipped: true`로 두되, `skipReason`에 **대신 쓸 현장 실사 이미지를 한 줄로 제안**한다",
     "(예: \"조문 화면 대신 카페 카운터에서 응대하는 직원 사진을 권함\"). 화면을 찾아 넣으려 하지 않는다.",
     "",
@@ -412,7 +452,7 @@ export async function collectWebImages(
   const verify = options.verify ?? true;
   const failures: string[] = [];
 
-  if (input.slots.length === 0) return { found: [], failures };
+  if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
   const run = await runCodex({
     prompt: buildPrompt(input.keyword, input.slots),
@@ -420,10 +460,11 @@ export async function collectWebImages(
     search: true,
   });
 
-  if (!run.ok) return { found: [], failures: [`Codex 실행 실패: ${run.error}`] };
+  if (!run.ok) return { found: [], failures: [`Codex 실행 실패: ${run.error}`], unfilled: allUnfilled(input.slots) };
 
   const results = parseCodexSlots(run.data);
-  if (results.length === 0) return { found: [], failures: ["Codex가 자리 정보를 돌려주지 않았습니다."] };
+  if (results.length === 0)
+    return { found: [], failures: ["Codex가 자리 정보를 돌려주지 않았습니다."], unfilled: allUnfilled(input.slots) };
 
   const found: WebImageRecord[] = [];
 
@@ -539,6 +580,20 @@ export async function collectWebImages(
     });
   }
 
+  // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라
+  // (응답 누락/URL 형식/403/크기/비율/검증 탈락/업로드 실패…) 각 지점에 push를 넣으면 언젠가 한
+  // 곳을 빠뜨리고, 그 자리만 조용히 빈 채로 나간다. "채워졌다"의 반대가 "못 채웠다"이므로 found를
+  // 기준으로 빼는 것이 판정을 한 벌로 유지하는 유일한 방법이다.
+  const filledIndexes = new Set(found.map((f) => f.index));
+  const unfilled: UnfilledSlot[] = input.slots
+    .filter((slot) => !filledIndexes.has(slot.index))
+    .map((slot) => ({
+      index: slot.index,
+      description: slot.description,
+      context: slot.context,
+      suggestion: results.find((r) => r.index === slot.index)?.skipReason ?? "",
+    }));
+
   if (found.length > 0) {
     // 이번에 찾은 것만 쓰면 지난 실행에서 채운 자리가 사라진다 - 호출부가 빈 자리만 넘길 수 있으므로
     // 기존 사이드카와 index 기준으로 합친다(같은 자리는 이번 결과가 이긴다).
@@ -549,5 +604,5 @@ export async function collectWebImages(
     await writeFile(resolve(input.dir, WEB_IMAGES_FILE), `${JSON.stringify({ images: merged }, null, 2)}\n`);
   }
 
-  return { found, failures };
+  return { found, failures, unfilled };
 }

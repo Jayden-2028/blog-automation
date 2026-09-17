@@ -46,6 +46,14 @@ export type GenerateManuscriptImagesOptions = {
    * (images:fill). 생략하면 지금까지처럼 AI 생성 자리 전부가 대상이다.
    */
   onlyIndexes?: number[];
+  /**
+   * 본문에는 `웹 검색`으로 적혀 있지만 **웹에서 못 찾아 AI로 대신 채울 자리**(2026-09-17).
+   * 여기 들어온 자리는 acquisition 필터를 건너뛰고 아래 생성 루프를 그대로 탄다.
+   *
+   * 왜 별도 루프를 만들지 않는가: 생성·업로드·원장 기록·실패 기록이 이미 한 벌 있는데 폴백용으로
+   * 한 벌 더 만들면 둘이 갈라진다(이번 세션에만 같은 실수를 세 번 했다). 입력만 얹고 경로는 공유한다.
+   */
+  fallbackSlots?: { index: number; description: string; prompt: string }[];
 };
 
 export type GenerateManuscriptImagesResult = {
@@ -103,6 +111,17 @@ export async function generateManuscriptImages(
     .map((block, i) => ({ block, index: i + 1 }))
     .filter(({ block }) => block.acquisition !== "search")
     .filter(({ index }) => !onlyIndexes || onlyIndexes.has(index));
+
+  // 웹 수집이 실패해 AI로 돌려받은 자리를 같은 대상 목록에 합친다. 본문 마커의 acquisition은
+  // `search` 그대로 두므로(원고는 원고대로 정확해야 한다) 여기서만 예외적으로 생성한다.
+  for (const slot of options.fallbackSlots ?? []) {
+    if (aiSlots.some(({ index }) => index === slot.index)) continue;
+    aiSlots.push({
+      block: { type: "image", description: slot.description, prompt: slot.prompt, acquisition: "search" },
+      index: slot.index,
+    });
+  }
+  aiSlots.sort((a, b) => a.index - b.index);
 
   const targets = aiSlots.slice(0, config.maxPerArticle);
   if (aiSlots.length > targets.length) {

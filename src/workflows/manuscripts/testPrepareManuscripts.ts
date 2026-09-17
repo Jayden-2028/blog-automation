@@ -516,8 +516,10 @@ async function main(): Promise<void> {
             },
           ],
           failures: [],
+          unfilled: [],
         };
       },
+      buildFallbackPrompts: false,
     });
 
     assert(webResult.status === "success", `성공해야 한다 (${JSON.stringify(webResult)})`);

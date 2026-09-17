@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
 import { buildWebImageSlots, collectWebImages } from "./collectWebImages.js";
-import type { CollectWebImagesOptions } from "./collectWebImages.js";
+import type { CollectWebImagesOptions, UnfilledSlot } from "./collectWebImages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
 export type CollectWebImagesForJobInput = {
@@ -30,6 +30,8 @@ export type CollectWebImagesForJobInput = {
 export type CollectWebImagesForJobResult = {
   images: ManuscriptImage[];
   failures: string[];
+  /** 웹에서 못 채운 자리. prepareManuscript가 AI 생성 폴백으로 넘긴다(2026-09-17). */
+  unfilled: UnfilledSlot[];
 };
 
 export async function collectWebImagesForJob(
@@ -38,7 +40,7 @@ export async function collectWebImagesForJob(
 ): Promise<CollectWebImagesForJobResult> {
   const filled = new Set(input.filledIndexes ?? []);
   const slots = buildWebImageSlots(input.body, input.imagePrompts).filter((s) => !filled.has(s.index));
-  if (slots.length === 0) return { images: [], failures: [] };
+  if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
 
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.
   const dir = await mkdtemp(resolve(tmpdir(), "web-images-"));
@@ -78,7 +80,7 @@ export async function collectWebImagesForJob(
         license: record.license,
       }));
 
-    return { images, failures: result.failures };
+    return { images, failures: result.failures, unfilled: result.unfilled };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

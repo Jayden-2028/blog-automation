@@ -34,6 +34,9 @@ import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
+import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
+import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
+import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
@@ -81,7 +84,11 @@ export type PrepareManuscriptOptions = {
         date: string;
         body: string;
         imagePrompts: string[];
-      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+      },
+      options?: { onlyIndexes?: number[]; fallbackSlots?: FallbackImagePrompt[] }) => Promise<{
+        images: ManuscriptImage[];
+        failures: string[];
+      }>);
   /**
    * `웹 검색` 자리 수집. 기본은 collectWebImagesForJob(Claude WebSearch → Storage 업로드).
    * false를 주면 건너뛴다(테스트/재실행). 외부 검색을 타므로 테스트에서는 반드시 꺼야 한다.
@@ -94,7 +101,17 @@ export type PrepareManuscriptOptions = {
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
-      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+      }) => Promise<{ images: ManuscriptImage[]; failures: string[]; unfilled: UnfilledSlot[] }>);
+  /**
+   * 웹에서 못 찾은 자리를 AI 생성 프롬프트로 바꾼다. 기본은 buildFallbackImagePrompts.
+   * false를 주면 빈 자리를 그대로 둔다(테스트 - 헤드리스 Claude를 띄우면 안 된다).
+   */
+  buildFallbackPrompts?:
+    | false
+    | ((input: { keyword: string; unfilled: UnfilledSlot[] }) => Promise<{
+        slots: FallbackImagePrompt[];
+        failures: string[];
+      }>);
   /**
    * `표 생성` 자리 렌더. 기본은 renderTableImagesForJob(본문 표·목록 → Chromium → Storage).
    * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
@@ -202,6 +219,8 @@ export async function prepareManuscript(
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const renderTableImages =
     options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
+  const buildFallbacks =
+    options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
   const makeNaverVariant =
     options.generateNaverVariant === undefined ? generateNaverVariant : options.generateNaverVariant;
   const now = options.now ?? (() => new Date());
@@ -311,6 +330,32 @@ export async function prepareManuscript(
         (a, b) => a.index - b.index
       );
       await mergeJobMetadata(job.id, { webImagesReadyAt: now().toISOString(), images });
+    }
+
+    // 웹에서 못 찾은 자리를 AI 생성으로 메운다(2026-09-17 사용자 보고 대응). 지금까지는 여기서
+    // 끝나 자리가 그대로 비었다 - 09-17 원고 20자리 중 18자리가 그렇게 비었다. "빈 자리보다 AI
+    // 이미지가 낫다"는 방침(rules/output-format.md §8-4)을 실행에도 반영한다.
+    //
+    // 본문 마커는 `웹 검색` 그대로 둔다: 그 자리가 원래 실제 사진을 원한다는 사실은 남아 있어야
+    // 나중에 사람이 더 나은 사진으로 갈아끼울 수 있다.
+    if (generateImages && buildFallbacks && outcome.unfilled.length > 0) {
+      const fallback = await buildFallbacks({ keyword: job.keyword, unfilled: outcome.unfilled });
+      imageFailures.push(...fallback.failures);
+
+      if (fallback.slots.length > 0) {
+        const filled = await generateImages(
+          { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts },
+          { onlyIndexes: [], fallbackSlots: fallback.slots }
+        );
+        imageFailures.push(...filled.failures);
+        const usable = filled.images.filter((i) => i.url);
+        if (usable.length > 0) {
+          images = [...images.filter((e) => !usable.some((n) => n.index === e.index)), ...usable].sort(
+            (a, b) => a.index - b.index
+          );
+          await mergeJobMetadata(job.id, { webImagesReadyAt: now().toISOString(), images });
+        }
+      }
     }
   }
 
