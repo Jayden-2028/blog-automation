@@ -133,3 +133,27 @@ try {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 }
+
+// --- 기획 브리프 주입(2026-09-17) - 소제목 뼈대·unanswered·brief_coverage 지시 -------------------
+{
+  const withBrief = buildWritingPrompt({
+    job: { keyword: "국중박 분장놀이", headline: null, category: "entertainment" },
+    researchFilePath: "/tmp/r.md",
+    draftFilePath: "/tmp/d.md",
+    isMedical: false,
+    today: "2026-09-17",
+    brief: {
+    type: "event" as const,
+    hook: "모델 이혜정이 간돌검 분장으로 결선에 올랐다",
+    questions: ["무슨 행사인가", "왜 화제인가", "눈에 띄는 출품작은", "언제 어디서", "직접 가서 볼 수 있나"],
+    action: "9월 19일 열린마당 현장 관람",
+    autocomplete: ["국중박 분장놀이 결선", "국중박 분장놀이 상금"],
+    generatedAt: "2026-09-17T00:00:00.000Z",
+  },
+  });
+  for (const needle of ["Q5. 직접 가서 볼 수 있나", "writer.md §3-1", "`unanswered`", "`brief_coverage`"]) {
+    if (!withBrief.includes(needle)) throw new Error(`❌ 브리프 지시가 빠졌습니다: ${needle}`);
+  }
+  console.log("✅ 기획 브리프 주입 - 소제목 뼈대·커버리지 frontmatter 지시");
+}
+

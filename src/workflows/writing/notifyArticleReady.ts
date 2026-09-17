@@ -64,6 +64,14 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     lines.push("", imageLine);
   }
 
+  // 기획 브리프 커버리지(2026-09-17) - 독자 질문 5개 중 몇 개에 답했는지. writer의 자기 신고라
+  // 게이트가 아니라 신호다. "3/5"가 보이면 승인 전에 수정 요청을 넣을 근거가 된다.
+  if (result.briefCoverage) {
+    const { answered, total } = result.briefCoverage;
+    const missing = result.unansweredQuestions.length > 0 ? ` (미답: ${result.unansweredQuestions.join(", ")})` : "";
+    lines.push("", `🎯 독자 질문 ${answered}/${total} 답함${escapeTelegramHtml(missing)}`);
+  }
+
   // 검수 결과(SPRINT_3_DESIGN.md 6절) - 차단하지 않고 참고로만 보여준다. escapeTelegramHtml을
   // 거는 이유는 검수 메시지 안에 근거 원문 발췌("특별석은 12만 원입니다" 등)가 그대로 들어가
   // "<"/">"/"&"가 섞일 수 있기 때문이다.

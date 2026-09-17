@@ -66,6 +66,7 @@
     "test:refix-image-markers": "tsx src/workflows/images/testRefixImageMarkers.ts",
     "test:collect-web-images": "tsx src/workflows/images/testCollectWebImages.ts",
     "test:fallback-images": "tsx src/workflows/images/testFallbackImages.ts",
+    "test:keyword-brief": "tsx src/workflows/brief/testKeywordBrief.ts",
     "manuscripts:reset-web-images": "tsx src/workflows/manuscripts/resetWebImagesCli.ts",
     "test:manuscript-export": "tsx src/workflows/manuscripts/testExportManuscript.ts",
     "job:publish": "tsx src/services/publish/publishNaverDraftCli.ts",

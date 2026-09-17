@@ -11,6 +11,13 @@ export type ParsedDraftFile = {
   title: string | null;
   skillUsed: string | null;
   verdictFromResearch: string | null;
+  /**
+   * 기획 브리프의 독자 질문 중 원고가 답한 개수(2026-09-17). frontmatter `brief_coverage: 4/5`에서
+   * 읽는다. 브리프가 없던 원고나 writer가 안 적은 경우 null. 리뷰 카드에 한 줄로 보여준다.
+   */
+  briefCoverage: { answered: number; total: number } | null;
+  /** 답하지 못한 질문 번호(`unanswered: Q3, Q5`). 없으면 빈 배열. */
+  unansweredQuestions: string[];
   /** frontmatter/해시태그 줄/HTML 주석/[IMAGE PROMPT:] 줄을 걷어낸 본문(마크다운, `##`·`[IMAGE:]` 유지). */
   body: string;
   /** 본문 끝 "#태그 #태그" 줄에서 뽑은 태그(# 포함). */
@@ -38,6 +45,16 @@ function parseFrontmatter(fm: string): Record<string, string> {
     if (m) out[m[1].toLowerCase()] = m[2].trim().replace(/^["']|["']$/g, "");
   }
   return out;
+}
+
+/** `4/5` 형태만 받는다. writer가 "4개" 같은 자유 서식을 쓰면 null - 억지로 해석하지 않는다. */
+function parseCoverage(raw: string | undefined): { answered: number; total: number } | null {
+  const m = (raw ?? "").match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!m) return null;
+  const answered = Number(m[1]);
+  const total = Number(m[2]);
+  if (total <= 0 || answered > total) return null;
+  return { answered, total };
 }
 
 /** HTML 주석 블록(<!-- ... -->)을 전부 뽑아내고, 본문에서는 제거한 텍스트를 돌려준다. */
@@ -111,6 +128,11 @@ export function parseDraftFile(text: string): ParsedDraftFile {
     title,
     skillUsed: fm.skill_used || null,
     verdictFromResearch: fm.verdict_from_research || null,
+    briefCoverage: parseCoverage(fm.brief_coverage),
+    unansweredQuestions: (fm.unanswered || "")
+      .split(/[,\s]+/)
+      .map((q) => q.trim().toUpperCase())
+      .filter((q) => /^Q\d+$/.test(q)),
     body,
     hashtags,
     checkNotes: notes,

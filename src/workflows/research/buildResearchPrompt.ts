@@ -5,9 +5,17 @@
 // 박아 넣는다. 조사 방법·품질 기준·파일 템플릿은 전부 researcher.md에 있다.
 
 import type { ArticleJobRow, SourceInsert } from "../../types/database.js";
+import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
+import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 
 export type BuildResearchPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
+  /**
+   * 기획 브리프(2026-09-17). 있으면 researcher는 여기 적힌 독자 질문에 답할 자료를 1순위로 찾고,
+   * 키워드 유형에 맞는 소스 프로파일(researcher.md §4-1)을 쓴다. 브리프 생성이 실패하면 null이고
+   * 그때는 예전처럼 researcher.md 기본 절차로 돈다 - 브리프가 원고 생성을 막지 않는다.
+   */
+  brief?: KeywordBrief | null;
   /** Node가 NAVER API로 먼저 모은 기준 자료. 에이전트는 이 위에 빈칸만 보강한다(하이브리드). */
   baselineSources: SourceInsert[];
   /** 에이전트가 정확히 여기에 Write해야 한다(절대 경로). */
@@ -42,7 +50,21 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹/블로그 검색 결과):",
     ...baselineLines,
     "",
+    ...(input.brief
+      ? [
+          "기획 브리프(이 키워드를 검색한 독자가 알고 싶은 것 - researcher.md §4-1·§6-1이 이걸 소비한다):",
+          formatBriefForPrompt(input.brief),
+          "",
+        ]
+      : []),
     "파이프라인 오버라이드(researcher.md와 충돌하면 이 지시가 우선):",
+    ...(input.brief
+      ? [
+          `- 수집 순서는 researcher.md §4 기본 표 대신 §4-1의 \`${input.brief.type}\` 프로파일을 따른다.`,
+          "- §6-1대로 브리프의 질문 Q1~Q5 각각에 답할 자료를 먼저 찾고, 답을 못 찾은 질문은 §7 확인 실패에",
+          "  \"Q{n} 미해결: <무엇을 찾아봤는지>\"로 남긴다. 질문을 건너뛰거나 다른 질문으로 바꾸지 않는다.",
+        ]
+      : []),
     `- 출력 파일은 researcher.md §7의 이름 규칙·충돌 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못",
     "  채운 빈칸(정의·핵심 수치·시행 이력·예외·자주 묻는 질문·오해)을 WebSearch/WebFetch로 보강하는 데 집중한다.",

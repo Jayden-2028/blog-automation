@@ -23,6 +23,8 @@
 // 빠지면 사실 태도나 출력 형식 규칙이 조용히 누락된다.
 
 import type { ArticleJobRow } from "../../types/database.js";
+import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
+import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 
 /**
  * 카테고리 → 문체 참고 파일. writer.md §2 라우팅과 1:1 대응.
@@ -47,6 +49,11 @@ export type BuildWritingPromptInput = {
   draftFilePath: string;
   isMedical: boolean;
   today: string;
+  /**
+   * 기획 브리프(2026-09-17). 있으면 소제목 뼈대가 리서치 목차가 아니라 브리프의 독자 질문이 된다
+   * (writer.md §3-1). 없으면 예전처럼 쓴다.
+   */
+  brief?: KeywordBrief | null;
 };
 
 export function buildWritingPrompt(input: BuildWritingPromptInput): string {
@@ -76,7 +83,21 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     `- 오늘 날짜: ${today}`,
     isMedical ? "- 이 주제는 의학 정보를 다룬다. writer.md의 의학 관련 규칙을 반드시 적용한다." : null,
     "",
+    ...(input.brief
+      ? [
+          "기획 브리프(이 키워드를 검색한 독자가 알고 싶은 것 - writer.md §3-1이 이걸 소비한다):",
+          formatBriefForPrompt(input.brief),
+          "",
+        ]
+      : []),
     "파이프라인 오버라이드(위 문서와 충돌하면 이 지시가 우선):",
+    ...(input.brief
+      ? [
+          "- writer.md §3-1대로 소제목은 브리프의 Q1~Q5 순서를 뼈대로 잡는다. 리서치 파일의 섹션 순서를",
+          "  따라 쓰지 않는다. 리서치에 답이 없는 질문은 억지로 채우지 말고 frontmatter `unanswered`에",
+          "  \"Q{n}\"으로 적고, `brief_coverage`에 \"답한 개수/전체\"(예: 4/5)를 적는다.",
+        ]
+      : []),
     `- 출력은 writer.md §9의 이름·경로 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${draftFilePath}`,
     "- writer.md §9 frontmatter(keyword·title·char_count·hashtags·verdict_from_research 등)를 그대로 채운다.",
     "- writer.md §2의 Skill 호출(/parenting-blog-writer 등) 대신 moai-marketer:content-blog 스킬로",

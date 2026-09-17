@@ -90,6 +90,8 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     job: makeJob(),
     article: makeArticle(),
     sources: [makeSource("official"), makeSource("official"), makeSource("community")],
+    briefCoverage: null,
+    unansweredQuestions: [],
     isMedical: false,
     requiresMedicalReview: false,
     durationMs: 185000,
@@ -237,4 +239,15 @@ try {
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
+}
+
+// --- 기획 브리프 커버리지 줄(2026-09-17) - 있을 때만, 미답 번호와 함께 -----------------------
+{
+  const withCoverage = buildHeaderMessage(makeResult({ briefCoverage: { answered: 3, total: 5 }, unansweredQuestions: ["Q4", "Q5"] }));
+  if (!withCoverage.text.includes("🎯 독자 질문 3/5 답함 (미답: Q4, Q5)")) {
+    throw new Error(`❌ 커버리지 줄이 없습니다: ${withCoverage.text}`);
+  }
+  const without = buildHeaderMessage(makeResult());
+  if (without.text.includes("독자 질문")) throw new Error("❌ 브리프 없는 원고에 커버리지 줄이 붙었습니다");
+  console.log("✅ 브리프 커버리지 줄 - 있을 때만, 미답 번호 표시");
 }

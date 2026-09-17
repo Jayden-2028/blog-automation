@@ -496,6 +496,8 @@ image_ai_generated: 2     # 그중 AI 생성으로 지정한 개수 (절반 이�
 hashtags: 10
 sources_used: 9           # 실제로 원고에 반영한 리서치 출처 수
 verdict_from_research: ok
+brief_coverage: 4/5       # 기획 브리프가 있을 때만. 독자 질문 중 답한 개수/전체 (writer.md §3-1)
+unanswered: Q5            # 답 못한 질문 번호. 없으면 줄 자체를 생략
 ---
 
 (본문 — 네이버 블로그에 그대로 붙여넣을 수 있는 형태)

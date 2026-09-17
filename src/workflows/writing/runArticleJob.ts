@@ -43,6 +43,9 @@ import { publishArticleToTelegraph } from "../../services/telegraph/telegraphCli
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
+import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
+import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
 import { enforceGeminiGroundingUrls } from "../research/enforceGeminiGroundingUrls.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
@@ -81,6 +84,17 @@ export type RunResearchStageOptions = {
   runResearcher?: (prompt: string, outputPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 테스트 주입: research 파일 읽기를 대체한다. */
   readResearchFile?: (path: string) => Promise<string | null>;
+  /**
+   * 기획 브리프 생성(2026-09-17). 기본은 자동완성 + headless Claude. false면 건너뛴다(테스트 -
+   * 외부 HTTP·LLM을 타면 안 된다). 실패해도 조사는 계속된다.
+   */
+  buildBrief?:
+    | false
+    | ((input: {
+        job: Pick<ArticleJobRow, "keyword" | "headline" | "category" | "seed_query">;
+        baselineSources: SourceInsert[];
+        today: string;
+      }) => ReturnType<typeof buildKeywordBrief>);
 };
 
 export type RunResearchStageResult =
@@ -135,6 +149,8 @@ type DefaultResearcherInput = {
   baselineSources: SourceInsert[];
   outputPath: string;
   today: string;
+  /** 기획 브리프(2026-09-17). 실패했으면 null - researcher.md 기본 절차로 돈다. */
+  brief: KeywordBrief | null;
 };
 
 /**
@@ -207,8 +223,27 @@ async function runDefaultResearcher(
     baselineSources: input.baselineSources,
     outputPath: input.outputPath,
     today: input.today,
+    brief: input.brief,
   });
   return defaultRunResearcher(prompt);
+}
+
+/** 자동완성(네이버, 비공식) + baseline 제목을 재료로 브리프 LLM 1콜. 둘 다 실패해도 예외를 내지 않는다. */
+async function defaultBuildBrief(input: {
+  job: Pick<ArticleJobRow, "keyword" | "headline" | "category" | "seed_query">;
+  baselineSources: SourceInsert[];
+  today: string;
+}): ReturnType<typeof buildKeywordBrief> {
+  const autocomplete = await collectAutocomplete(input.job.keyword, input.job.seed_query ?? null);
+  return buildKeywordBrief({
+    keyword: input.job.keyword,
+    headline: input.job.headline ?? null,
+    category: input.job.category ?? null,
+    seedQuery: input.job.seed_query ?? null,
+    autocomplete,
+    baselineTitles: input.baselineSources.map((s) => s.title).filter((t): t is string => !!t),
+    today: input.today,
+  });
 }
 
 /** 파일이 존재하고 maxAgeMs 안에 수정됐으면 true. 재조사 생략 판정에 쓴다. */
@@ -279,6 +314,24 @@ async function runResearchStageInner(
   await mkdir(dirname(outputPath), { recursive: true });
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 
+  // 1.5) 기획 브리프(2026-09-17) - 조사 **전에** "이 키워드를 검색한 독자가 알고 싶은 것"을 정한다.
+  //      researcher는 이 질문에 답할 자료를 1순위로 찾고, writer는 이 질문 순서로 소제목을 잡는다.
+  //      사후 검증이 아니라 사전 기획인 이유: 리서치가 시도조차 안 한 항목(분장놀이 "직접 가서 볼 수
+  //      있나")은 뒤에서 아무리 검증해도 채울 재료가 없다. 실패하면 null로 두고 예전 절차로 간다 -
+  //      브리프가 원고 생성을 막아서는 안 된다. 재실행이면 metadata에 있는 것을 재사용한다(LLM 1콜 절약).
+  let brief: KeywordBrief | null = readJobBrief(job.metadata as Record<string, unknown> | null);
+  if (!brief && options.buildBrief !== false) {
+    const buildBrief = options.buildBrief ?? defaultBuildBrief;
+    const built = await buildBrief({ job, baselineSources: baseline, today });
+    if (built.status === "success") {
+      brief = built.brief;
+      await ArticleJobRepository.mergeMetadata(jobId, { brief });
+      console.log(`ℹ️ [research] 기획 브리프: type=${brief.type} / Q${brief.questions.length}개 / 자동완성 ${brief.autocomplete.length}개`);
+    } else {
+      console.warn(`⚠️ [research] 기획 브리프 생성 실패 - 기본 절차로 조사합니다: ${built.error}`);
+    }
+  }
+
   const freshFile = fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
@@ -286,10 +339,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
@@ -482,6 +535,12 @@ export type RunWritingStageResult =
        * 그대로 남아 있고 사용자가 직접 이미지를 삽입해야 한다(2026-09-01, CLAUDE.md 운영 규칙).
        */
       images: { succeeded: number; failed: number; held: boolean };
+      /**
+       * 기획 브리프의 독자 질문 중 답한 개수(2026-09-17). writer가 frontmatter에 적은 값이라 자기
+       * 신고다 - 게이트가 아니라 리뷰 카드의 신호로만 쓴다. 브리프가 없던 원고면 null.
+       */
+      briefCoverage: { answered: number; total: number } | null;
+      unansweredQuestions: string[];
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
@@ -575,6 +634,7 @@ async function runWritingStageInner(
       draftFilePath: draftPath,
       isMedical,
       today,
+      brief: readJobBrief(job.metadata as Record<string, unknown> | null),
     });
     const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
     const ran = await runWriter(prompt, draftPath);
@@ -736,6 +796,8 @@ async function runWritingStageInner(
       failed: imageGeneration.failures.length,
       held: imageGenerationHeld,
     },
+    briefCoverage: parsed.briefCoverage,
+    unansweredQuestions: parsed.unansweredQuestions,
   };
 }
 

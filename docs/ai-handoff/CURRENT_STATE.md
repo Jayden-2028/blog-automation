@@ -2,6 +2,39 @@
 
 기준일: 2026-09-18 (Asia/Seoul)
 
+## 2026-09-18 세션(후속 2) — 기획 브리프 단계 신설 + 웹 검색 실패 자리 AI 폴백
+
+**계기**(사용자): 원고가 독자가 알고 싶은 것과 멀다. 분장놀이 원고는 "예선에서 25팀이 남은 과정 /
+시상 규모 / 지난해 모습"을 다뤘는데 전부 기사 내용이고, 독자가 원한 "직접 가서 볼 수 있나 / 온라인
+시청처"는 원고에도 리서치 §7 확인 실패에도 없었다 - **찾을 생각을 안 한 것**. 원인 4개: researcher §6
+필수 항목이 정책 템플릿(정의·수치·이력·예외), §5 독자 질문이 지식iN·카페 원문으로만 정의돼 신선한
+키워드에선 항상 비어 있음(2건 다 "찾지 못함"), writer에 기획 단계가 없어 리서치 목차를 따라 씀,
+키워드가 왜 떴는지(연관검색어)가 job에 안 실림.
+
+**결정**(사용자): 사후 검증 역할이 아니라 **사전 기획 단계**. 사후 검증은 빠진 리서치를 채울 재료가
+없다. **사람이 판단하는 단계는 추가하지 않는다** - 브리프는 researcher·writer가 읽는 지시서다.
+자동완성은 비공식 엔드포인트지만 쓴다(실패해도 빈 배열, 브리프는 baseline 제목만으로 진행).
+
+**구현**: `src/workflows/brief/` - `collectAutocomplete`(seed_query·전체 키워드·2어절 창을 여러 개
+던져 합침, 긴 기사 제목형 키워드는 통째로 넣으면 비어 나옴) + `buildKeywordBrief`(LLM 1콜, 출력
+TYPE/HOOK/Q1~Q5/ACTION). `runResearchStage`가 baseline 수집 직후 브리프를 만들어 `job.metadata.brief`에
+저장하고(재실행 시 재사용), `buildResearchPrompt`·`buildWritingPrompt`가 같은 `formatBriefForPrompt`로
+박아 넣는다. researcher.md §4-1(유형별 소스 프로파일: policy/incident/celebrity/drama/event/product)·
+§6-1(브리프 질문이 1순위, 못 찾으면 `Q{n} 미해결`로 §7에 기록), writer.md §3-1(소제목 뼈대는 Q1~Q5,
+답 없는 질문은 frontmatter `unanswered`·`brief_coverage`). 리뷰 카드에 "🎯 독자 질문 N/5 답함" 한 줄 -
+writer 자기 신고라 게이트가 아니라 신호다. **Gemini researcher 경로에는 아직 브리프를 넣지 않았다**
+(RESEARCH_PROVIDER 기본이 claude).
+
+**같은 세션 앞부분**: 웹 검색 실패 자리를 AI로 메운다(`buildFallbackImagePrompts` → 기존
+`generateManuscriptImages`에 `fallbackSlots`로 얹음, 마커는 `웹 검색` 그대로). 백필 CLI
+`manuscripts:reset-web-images`(channelManuscriptsReadyAt·webImagesReadyAt만 연다). output-format.md
+§8-5(상징 이미지 금지)·§8-6(미래 일정·텍스트 포스터는 웹 검색 금지). 방송 화면 캡처·공식 홈페이지
+화면 허용(사용자 결정, `broadcast_capture`/`official_site_screenshot`).
+
+**다음 확인**: 새로 승인되는 원고에서 브리프가 실제로 어떤 질문을 뽑는지, researcher가 `Q{n} 미해결`을
+남기는지, 리뷰 카드 커버리지가 5/5로만 자기 신고되지 않는지(그러면 신호가 무의미해진다).
+
+
 ## 2026-09-18 세션(후속) — 네이버용 배리에이션 원고 추가(뷰어 전용)
 
 **요구**(사용자): 승인 시 Blogspot 원고는 그대로 두고 **네이버용 배리에이션을 한 벌 더** 만든다.
