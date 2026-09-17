@@ -324,6 +324,9 @@ function extensionFor(contentType: string): string | null {
   if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
   if (contentType.includes("png")) return "png";
   if (contentType.includes("webp")) return "webp";
+  // 네이버 뉴스 CDN 등이 avif로 준다(실측: 너말고 자리 6). 브라우저·Storage 모두 받으므로 저장한다.
+  // readImageSize가 avif를 못 읽어 크기 검증은 건너뛰지만, 비전 검증은 그대로 돈다.
+  if (contentType.includes("avif")) return "avif";
   return null;
 }
 
@@ -408,7 +411,11 @@ async function defaultVerifyImage(input: VerifyImageInput): Promise<VerifyImageR
     "",
     "하나라도 어긋나면 불합격이다:",
     "1. 이미지의 **실제 내용이 위 설명과 일치**하는가? (설명은 '포스터'인데 실제는 스틸컷이면 불합격)",
-    "2. 그 문단이 말하는 것을 보여주는가? 분위기만 맞는 무관한 사진이면 불합격.",
+    "2. **같은 주제인가?** 설명과 일치하는 실제 사진이면 **합격**이다 - 문단이 그 사진보다 더 세부적인 것",
+    "   (결말 해석, 타임테이블, 수치)을 말하더라도 그 이유로 떨어뜨리지 않는다. 사진은 문단을 대표하는",
+    "   것이지 문단 내용을 전부 담는 것이 아니다. 불합격은 **다른 주제·다른 행사·다른 인물·다른 작품**일",
+    "   때다. (실측 오판: 감독 인터뷰 사진을 \"문단은 결말 해석을 말한다\"며 버렸고, 탈춤 공연 사진을",
+    "   \"문단은 타임테이블을 말한다\"며 버렸다 - 둘 다 합격이어야 했다.)",
     "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 불합격.",
     "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 불합격.",
     "",

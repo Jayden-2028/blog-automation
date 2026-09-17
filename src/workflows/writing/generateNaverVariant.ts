@@ -144,7 +144,12 @@ export async function generateNaverVariant(
 
   // 마커 형식 자체가 안 나온 대화체 응답을 성공으로 오인하지 않는다(generateArticleVariant와 같은 가드).
   if (variant.body.length < 300) {
-    return { status: "failed", error: `본문이 너무 짧습니다(${variant.body.length}자) - 마커 형식을 못 받았을 수 있습니다.` };
+    // 같은 job(분장놀이)에서 두 번 연속 0자였다. 원인을 보려면 모델이 실제로 뭐라고 답했는지가 필요하다.
+    const head = result.output.trim().replace(/\s+/g, " ").slice(0, 240);
+    return {
+      status: "failed",
+      error: `본문이 너무 짧습니다(${variant.body.length}자) - 마커 형식을 못 받았을 수 있습니다. 응답 앞부분: "${head}"`,
+    };
   }
 
   // **가장 중요한 검증**: 이미지 마커가 원본과 완전히 같아야 한다. 다르면 이미지가 엉뚱한 문단에

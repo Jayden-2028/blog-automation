@@ -72,6 +72,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # 웹 검색 이미지 후보(searchNaverImages, 2026-09-18). 빠지면 후보 없이 web_search만 돈다 -
+          # 첫 재수집 배치에서 실제로 빠져 있어 후보가 전부 "Missing NAVER_CLIENT_ID"로 비었다(실측).
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MANUSCRIPT_IMAGE_GENERATION: ${{ vars.MANUSCRIPT_IMAGE_GENERATION }}
           IMAGE_AB_COMPARE: ${{ vars.IMAGE_AB_COMPARE }}
