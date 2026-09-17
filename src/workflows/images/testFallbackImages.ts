@@ -84,6 +84,30 @@ const UNFILLED: UnfilledSlot[] = [
   console.log("✅ 한글이 섞인 폴백 프롬프트를 버린다");
 }
 
+// --- 3-1. 실물 특정 자리는 모델이 SKIP하면 비워 둔다(2026-09-17 저녁, 사용자 반려 대응) -------------
+{
+  const result = await buildFallbackImagePrompts(
+    { keyword: "인턴", unfilled: UNFILLED },
+    {
+      generate: async () => ({
+        ok: true as const,
+        output: [
+          "INDEX: 1",
+          "SKIP: 실존 인물 이혜정의 실제 모습이 필요한 자리",
+          "",
+          "INDEX: 5",
+          "PROMPT: A photorealistic photograph of Korean mask dancers outdoors, no text, no letters. 16:9.",
+        ].join("\n"),
+        durationMs: 1,
+      }),
+    }
+  );
+  assert(result.slots.length === 1 && result.slots[0].index === 5, "SKIP한 자리가 생성 목록에 들어갔습니다");
+  assert(result.failures.some((f) => f.includes("자리 1") && f.includes("실물 특정")), "SKIP 사유가 기록되지 않았습니다");
+  assert(result.slots[0].description.includes("AI 대체 장면"), "대체 이미지 표시가 설명에 없습니다");
+  console.log("✅ 실물 특정 자리는 SKIP - 비워 두고 사유 기록, 대체 자리는 캡션에 표시");
+}
+
 // --- 4. 폴백 자리가 원래 번호 그대로 생성된다 -------------------------------------------------
 {
   const body = [

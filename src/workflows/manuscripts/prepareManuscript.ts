@@ -317,12 +317,15 @@ export async function prepareManuscript(
   // 이미 끝났는데 수집만 새로 붙은 원고가 있고, 둘의 실패 조건도 다르다(생성=유료 API, 수집=검색 결과).
   // 여기서 실패해도 원고는 그대로 간다 - 빈 자리는 뷰어가 검색어와 함께 "채울 것"으로 띄운다.
   if (collectWebImages && !job.metadata?.webImagesReadyAt) {
+    // 웹 검색 자리는 **웹에서 온 이미지(sourcePage)** 가 있을 때만 채워진 것으로 본다(2026-09-17 저녁).
+    // AI 폴백으로 메운 자리는 다시 웹을 찾는다 - 사용자가 원하는 건 실제 사진이고, 정책이 바뀌면
+    // (C안) 전에 못 찾던 것을 이제 찾을 수 있다. 웹 이미지가 오면 index 기준 병합에서 폴백을 덮는다.
     const outcome = await collectWebImages({
       jobId: job.id,
       keyword: job.keyword,
       body: content,
       imagePrompts,
-      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+      filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
     if (outcome.images.length > 0) {
@@ -338,8 +341,10 @@ export async function prepareManuscript(
     //
     // 본문 마커는 `웹 검색` 그대로 둔다: 그 자리가 원래 실제 사진을 원한다는 사실은 남아 있어야
     // 나중에 사람이 더 나은 사진으로 갈아끼울 수 있다.
-    if (generateImages && buildFallbacks && outcome.unfilled.length > 0) {
-      const fallback = await buildFallbacks({ keyword: job.keyword, unfilled: outcome.unfilled });
+    // 폴백은 **아무 이미지도 없는 자리**에만 - 지난 실행의 폴백 이미지가 있으면 유료 생성을 반복하지 않는다.
+    const stillEmpty = outcome.unfilled.filter((u) => !images.some((i) => i.index === u.index && i.url));
+    if (generateImages && buildFallbacks && stillEmpty.length > 0) {
+      const fallback = await buildFallbacks({ keyword: job.keyword, unfilled: stillEmpty });
       imageFailures.push(...fallback.failures);
 
       if (fallback.slots.length > 0) {

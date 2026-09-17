@@ -24,15 +24,15 @@ import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
+import { searchNaverImages } from "./searchNaverImages.js";
+import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
-/** 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다. */
+/** 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변). */
 const HARD_MIN_WIDTH = 600;
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
 const MIN_LANDSCAPE_RATIO = 1.3;
-/** 첫 자리는 대표 이미지(디스커버·소셜 미리보기)라 16:9(1.78)에 가까워야 한다. 여유를 둬 1.5로 자른다. */
-const FIRST_SLOT_MIN_RATIO = 1.5;
 
 /**
  * 재사용 권한 분류. Codex가 자유 문장이 아니라 **이 값 중 하나를 고르게** 한다.
@@ -48,31 +48,31 @@ const FIRST_SLOT_MIN_RATIO = 1.5;
  */
 const REUSE_PERMISSIONS = [
   "public_domain", // CC0·퍼블릭도메인
-  "public_nuri", // 공공누리 1·2유형
-  "cc_by", // CC BY (NC·ND 없음)
+  "public_nuri", // 공공누리
+  "cc_by", // CC BY
   "official_press_release", // 정부·공공기관 보도자료·배포 이미지
-  "official_company", // 기업 공식 홈페이지·공식 SNS
-  "official_site_screenshot", // 기업·기관 공식 홈페이지를 찍은 화면(2026-09-17 사용자 결정)
+  "official_company", // 기업·소속사 공식 홈페이지·공식 SNS(프로필 등)
+  "official_site_screenshot", // 기업·기관 공식 홈페이지를 찍은 화면
   "broadcaster_promo", // 방송사·배급사 홍보용 공식 포스터·스틸
-  "broadcast_capture", // 방송 장면 캡처(2026-09-17 사용자 결정 - 출처 표기 필수)
-  "cc_nc_or_nd", // NC/ND 붙음 - 거부
-  "third_party_photo", // 개인·회사 포트폴리오, 사진작가, 뉴스사 자체 촬영 - 거부
-  "marketplace_repost", // 가격비교·쇼핑몰·오픈마켓 재배포본 - 거부
-  "unclear", // 확인 불가 - 거부
+  "broadcast_capture", // 방송 장면 캡처
+  "news_photo", // 언론사 보도사진 - C안에서 허용, 캡션 출처 필수
+  "personal_sns", // 개인 SNS 게시물 - C안에서 허용, 캡션 출처 필수
+  "cc_nc", // CC NC(비영리) - 허용(C안). 캡션 출처 필수
+  "unclear", // 확인 불가 - 허용(C안). 캡션 출처 필수
+  "cc_nd", // 변경금지 - 거부(크롭·리사이즈를 하므로)
+  "paid_stock", // 게티·연합·셔터스톡 등 유료 스톡, 워터마크 - 거부
 ] as const;
 
 type ReusePermission = (typeof REUSE_PERMISSIONS)[number];
 
-const ALLOWED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>([
-  "public_domain",
-  "public_nuri",
-  "cc_by",
-  "official_press_release",
-  "official_company",
-  "official_site_screenshot",
-  "broadcaster_promo",
-  "broadcast_capture",
-]);
+/**
+ * 2026-09-17 저녁 사용자 결정(C안): **유료 스톡과 변경금지(ND)만 거부한다.** 나머지는 전부 쓰되
+ * 캡션에 출처를 반드시 표기한다. 그 전까지는 공공누리·CC BY·공식 배포물만 허용했는데, 그 기준으로
+ * 실측 9자리 중 8자리를 "찾았는데 버렸다" - 소속사 프로필·영화 스틸·보도사진이 전부 탈락했고 그게
+ * 정확히 사용자가 원하는 이미지였다. 리스크(언론사 사진의 이론상 청구 가능성)는 사용자가 인지하고
+ * 결정했다. 분류 자체는 계속 받는다 - 메타데이터·캡션 출처 표기에 쓴다.
+ */
+const REJECTED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>(["cc_nd", "paid_stock"]);
 
 export type WebImageSlot = {
   index: number;
@@ -138,6 +138,11 @@ export type CollectWebImagesOptions = {
    * 맥에서 Codex로 돌리고 싶으면 `runHeadlessCodex`를 넣는다(runClaudeWebSearch.ts 주석 참고).
    */
   runCodex?: WebSearchAgent;
+  /**
+   * 자리별 후보 이미지 검색(2026-09-17 저녁). 기본은 네이버 이미지 검색 API. 후보가 있으면 에이전트는
+   * "검색창에 친 결과 중 고르기"를 하고, 없으면 예전처럼 web_search로 직접 찾는다. false면 생략.
+   */
+  searchImages?: false | SearchImages;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -223,7 +228,11 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
+export function buildPrompt(
+  keyword: string,
+  slots: WebImageSlot[],
+  candidates: Map<number, ImageCandidate[]> = new Map()
+): string {
   const lines = [
     "너는 한국어 블로그 원고에 넣을 **실제 이미지**를 웹에서 찾는다. 이미지를 만들지 않는다.",
     "web_search 도구로 찾고, 각 자리마다 바로 쓸 수 있는 이미지 파일 URL 하나를 고른다.",
@@ -238,29 +247,25 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     "   (실패 예: 한국 카페 사건 기사에 캐나다 공항 스타벅스 매장 소개 페이지의 사진을 고른 경우.)",
     "3. **한국 이야기면 한국에서 찍힌/만들어진 자료여야 한다.** 간판·차량·제복·화폐·문서 양식이 한국이어야",
     "   본문과 따로 놀지 않는다. 해외 자료로 대신하지 않는다.",
-    "4. **라이선스를 실제로 확인한다. 출처가 있다는 것과 써도 된다는 것은 다르다.**",
-    "   이 블로그는 광고가 붙는 **상업적 이용**이고, 이미지를 크롭·리사이즈해서 쓴다.",
-    "   `reusePermission`에 아래 분류 중 하나를 **정확히** 고른다(자유롭게 쓰지 말고 값 그대로):",
-    "   - `public_domain` — CC0·퍼블릭도메인",
-    "   - `public_nuri` — 공공누리 제1·2유형",
-    "   - `cc_by` — CC BY (NC도 ND도 붙지 않은 것만)",
-    "   - `official_press_release` — 정부·공공기관이 배포한 보도자료 사진",
-    "   - `official_company` — 기업 공식 홈페이지·공식 SNS가 배포한 자료",
-    "   - `official_site_screenshot` — 기업·기관 **공식 홈페이지를 찍은 화면**(소속 아티스트 목록,",
-    "     제품 소개 페이지 등). \"그 회사가 어떤 곳인가\"를 설명하는 자리에 쓴다.",
-    "   - `broadcaster_promo` — 방송사·배급사가 홍보용으로 배포한 공식 포스터·스틸컷",
-    "   - `broadcast_capture` — 방송 장면을 캡처한 이미지(예능 출연 장면 등). 어느 방송사 무슨",
-    "     프로그램인지 `license`에 반드시 적는다 - 캡션에 출처로 표기한다.",
-    "   여기까지가 쓸 수 있는 것이다. 아래에 해당하면 그 자리는 **건너뛴다**(`skipped: true`):",
-    "   - `cc_nc_or_nd` — CC에 NC(비영리)나 ND(변경금지)가 붙음",
-    "   - `third_party_photo` — 건축사무소·사진작가 등 개인·회사가 촬영한 사진, 뉴스사 자체 보도사진",
-    "   - `marketplace_repost` — 가격비교·쇼핑몰·오픈마켓이 재배포한 상품 이미지",
-    "   - `unclear` — 재사용 근거를 확인하지 못함",
-    "   **애매하면 `unclear`를 고른다.** 쓸 수 있는 쪽으로 넘겨짚지 않는다.",
-    "   `license`에는 사람이 읽을 근거를 한 줄로 적는다(예: \"공공누리 제1유형\", \"삼성전자 공식 홈페이지\").",
-    "5. **가로 16:9에 가까운 것을 고른다.** 정사각(1:1)과 세로는 구글 디스커버 썸네일 후보에서 빠진다 -",
-    "   특히 **자리 1은 대표 이미지**라 반드시 가로여야 한다. 너비는 1200px 이상, 600px 미만은 고르지 않는다.",
-    "   글자가 화면 대부분을 덮는 홍보 배너보다 **실사 사진**을 우선한다.",
+    "4. **출처를 분류한다.** `reusePermission`에 아래 분류 중 하나를 **정확히** 고른다(자유롭게 쓰지 말고 값 그대로):",
+    "   - `public_domain` / `public_nuri` / `cc_by` / `cc_nc` — 공개 라이선스",
+    "   - `official_press_release` — 정부·공공기관 보도자료 사진",
+    "   - `official_company` — 기업·소속사 공식 홈페이지·공식 SNS(**연예인 프로필은 대개 여기**)",
+    "   - `official_site_screenshot` — 기업·기관 공식 홈페이지를 찍은 화면",
+    "   - `broadcaster_promo` — 방송사·배급사·OTT가 배포한 공식 포스터·스틸컷(**영화·드라마 자리는 대개 여기**)",
+    "   - `broadcast_capture` — 방송 장면 캡처",
+    "   - `news_photo` — 언론사 보도사진",
+    "   - `personal_sns` — 개인 SNS 게시물",
+    "   - `unclear` — 어디서 온 건지 확인 못 함",
+    "   **위 분류는 전부 쓸 수 있다**(2026-09-17 사용자 결정). 캡션에 출처가 붙으므로 `license`에",
+    "   \"사진=SM C&C\", \"출처: 뉴시스\", \"@instagram_id\"처럼 **캡션에 그대로 쓸 출처 표기**를 적는다.",
+    "   아래 둘만 **건너뛴다**(`skipped: true`):",
+    "   - `paid_stock` — 게티이미지·연합뉴스·셔터스톡 등 유료 스톡, 워터마크가 찍힌 이미지",
+    "   - `cc_nd` — 변경금지(ND)가 명시된 것(크롭·리사이즈를 하므로)",
+    "   라이선스가 불확실하다는 이유로 건너뛰지 않는다. 불확실하면 `unclear`로 두고 **쓴다**.",
+    "5. **크기는 긴 변 600px 이상이면 된다.** 가로 16:9가 있으면 좋지만 **세로 포스터·인물 프로필을",
+    "   세로라는 이유로 버리지 않는다** - 내용이 맞는 세로 사진이 조건 맞는 빈 자리보다 낫다.",
+    "   자리 1(대표 이미지)만 가능하면 가로를 고른다.",
     "6. `imageUrl`은 반드시 이미지 파일 자체의 직접 URL이어야 한다(.jpg/.png/.webp 등). 검색 결과",
     "   페이지나 기사 본문 URL을 넣지 않는다. `sourcePage`에 그 이미지가 실린 페이지 URL을 따로 적는다.",
     "",
@@ -269,9 +274,9 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     "만나면 `skipped: true`로 두되, `skipReason`에 **대신 쓸 현장 실사 이미지를 한 줄로 제안**한다",
     "(예: \"조문 화면 대신 카페 카운터에서 응대하는 직원 사진을 권함\"). 화면을 찾아 넣으려 하지 않는다.",
     "",
-    "**특정 날짜의 회의·발표·의회 현장**(예: \"9월 16일 국가정책조정회의\", \"OO시의회 조례안 부결\")도",
-    "마찬가지로 건너뛴다 - 그런 사진은 거의 항상 언론사 저작물이다. `skipReason`에 \"그 제도가 적용되는",
-    "일반적 현장을 AI 생성으로 만드는 편이 낫다\"고 적고 어떤 장면인지 한 줄로 제안한다.",
+    "**아직 열리지 않은 행사·공연**(예: 이틀 뒤 결선 오프닝)은 그 장면 사진이 존재하지 않는다. 그때는 문자",
+    "그대로 찾지 말고 **같은 주체의 다른 공연·행사 사진**(예: 안동탈놀이단의 지난 공연)으로 대체한다 -",
+    "실측에서 '결선 오프닝'을 문자 그대로 찾다 빈 자리로 끝났다.",
     "",
     "**한국 공공저작물을 먼저 뒤진다.** 정부·공공기관 자료는 아래에 공공누리로 풀려 있어 상업적 이용과",
     "변형이 허용된다 - 일반 웹 검색보다 여기를 먼저 본다:",
@@ -290,6 +295,15 @@ export function buildPrompt(keyword: string, slots: WebImageSlot[]): string {
     if (slot.query) lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
     lines.push("- 이 이미지가 요약해야 할 문단:");
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
+    const found = candidates.get(slot.index) ?? [];
+    if (found.length > 0) {
+      lines.push("- 네이버 이미지 검색 후보(**먼저 여기서 고른다**. 제목으로 출처를 짐작하고, 맞는 게 없을 때만 web_search):");
+      found.forEach((c, i) => {
+        const size = c.width && c.height ? `${c.width}×${c.height}` : "크기 미상";
+        lines.push(`  ${i + 1}. [${size}] ${c.title.slice(0, 60)} — ${c.link}`);
+      });
+      lines.push("  후보를 고르면 `imageUrl`에 그 URL을 그대로 넣고, `sourcePage`는 알면 적고 모르면 빈 문자열로 둔다.");
+    }
   }
 
   lines.push(
@@ -454,8 +468,21 @@ export async function collectWebImages(
 
   if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
+  // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
+  const searchImages = options.searchImages === undefined ? searchNaverImages : options.searchImages;
+  const candidates = new Map<number, ImageCandidate[]>();
+  if (searchImages) {
+    await Promise.all(
+      input.slots.map(async (slot) => {
+        const query = (slot.query ?? slot.description).replace(/\s*—\s*웹\s*검색\s*$/, "").trim();
+        const list = await searchImages(query);
+        if (list.length > 0) candidates.set(slot.index, list);
+      })
+    );
+  }
+
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots),
+    prompt: buildPrompt(input.keyword, input.slots, candidates),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });
@@ -478,15 +505,25 @@ export async function collectWebImages(
       failures.push(`[자리 ${slot.index}] 찾지 못함: ${result.skipReason || "사유 없음"}`);
       continue;
     }
-    if (!/^https?:\/\//i.test(result.imageUrl) || !/^https?:\/\//i.test(result.sourcePage)) {
+    if (!/^https?:\/\//i.test(result.imageUrl)) {
       failures.push(`[자리 ${slot.index}] URL 형식이 아닙니다(${result.imageUrl.slice(0, 60)}).`);
       continue;
     }
+    // 이미지 검색 후보에서 고른 경우 출처 페이지를 모를 수 있다 - 이미지 도메인을 출처로 쓴다.
+    if (!/^https?:\/\//i.test(result.sourcePage)) {
+      try {
+        result.sourcePage = new URL(result.imageUrl).origin;
+      } catch {
+        failures.push(`[자리 ${slot.index}] URL 형식이 아닙니다(${result.imageUrl.slice(0, 60)}).`);
+        continue;
+      }
+    }
 
     // 라이선스는 내려받기 **전에** 본다 - 쓸 수 없는 이미지를 디스크에 남길 이유가 없다.
-    if (!ALLOWED_PERMISSIONS.has(result.reusePermission)) {
+    // C안: 유료 스톡·ND만 막는다. 나머지는 캡션 출처 표기로 간다.
+    if (REJECTED_PERMISSIONS.has(result.reusePermission)) {
       failures.push(
-        `[자리 ${slot.index}] 재사용 권한이 없어 건너뜁니다(${result.reusePermission}: ${result.license}) - 광고가 붙는 블로그에서 쓸 수 없거나 근거가 확인되지 않은 자료입니다.`
+        `[자리 ${slot.index}] 쓸 수 없는 자료라 건너뜁니다(${result.reusePermission}: ${result.license}) - 유료 스톡이거나 변경 금지(ND)입니다.`
       );
       continue;
     }
@@ -509,20 +546,16 @@ export async function collectWebImages(
 
     const readSize = options.readSize ?? readImageSize;
     const size = readSize(downloaded.buffer);
-    if (size && size.width < HARD_MIN_WIDTH) {
-      failures.push(`[자리 ${slot.index}] 너무 작습니다(${size.width}×${size.height}, 최소 ${HARD_MIN_WIDTH}px).`);
+    // 크기 게이트(2026-09-17 저녁 완화): **긴 변 600px 미만만** 거부한다. 세로·정사각은 거부하지
+    // 않는다 - 포스터와 인물 프로필은 원래 세로다. 그 전 기준(자리 1은 비율 1.5 이상, 너비 600 이상)이
+    // 실제 포스터를 1200×837(비율 1.43)에서, 감독 프로필을 1600×2400에서 버렸다(실측). 디스커버
+    // 큰 썸네일 조건은 경고로만 남긴다 - 내용이 맞는 세로 사진이 조건 맞는 빈 자리보다 낫다.
+    const longSide = size ? Math.max(size.width, size.height) : null;
+    if (longSide !== null && longSide < HARD_MIN_WIDTH) {
+      failures.push(`[자리 ${slot.index}] 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
       continue;
     }
-
     const ratio = size ? size.width / size.height : null;
-    // 자리 1은 디스커버·소셜 미리보기가 집어가는 대표 이미지다 - 세로·정사각이면 큰 썸네일을 못 받으므로
-    // 저장하지 않고 다시 찾게 한다. 나머지 자리는 아쉬울 뿐이라 경고만 남기고 저장한다.
-    if (ratio !== null && slot.index === 1 && ratio < FIRST_SLOT_MIN_RATIO) {
-      failures.push(
-        `[자리 1] 대표 이미지가 가로가 아닙니다(${size?.width}×${size?.height}) - 16:9 가로만 큰 썸네일을 받습니다.`
-      );
-      continue;
-    }
     if (ratio !== null && ratio < MIN_LANDSCAPE_RATIO) {
       failures.push(`[자리 ${slot.index}] ⚠️ 정사각·세로입니다(${size?.width}×${size?.height}) - 디스커버 썸네일 후보에서 빠지지만 저장했습니다.`);
     }

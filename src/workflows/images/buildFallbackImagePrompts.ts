@@ -35,7 +35,15 @@ export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): 
     "",
     `## 원고 주제: ${keyword}`,
     "",
-    "## 가장 중요한 제약 - 일반화된 장면으로 바꾼다",
+    "## 먼저 판정한다 - 실물 특정 자리는 AI로 채우지 않는다",
+    "그 자리가 **특정 실존 인물·특정 작품(영화·드라마 포스터/스틸)·특정 제품·특정 장소의 실제 모습**을",
+    "보여줘야 하는 자리면 `SKIP`으로 답한다. AI가 그 사람·그 포스터를 만들면 가짜가 된다 - 실측에서",
+    "'포스터' 캡션 밑에 생성 이미지가 붙고, 여성 감독이 남자로 그려졌다(사용자 반려). 그런 자리는 비워",
+    "두는 편이 낫다(사람이 나중에 채운다).",
+    "AI로 채워도 되는 건 **일반적인 장면**뿐이다: 창구에서 신청하는 시민, 야외 무대의 탈춤 공연자,",
+    "매표소 앞 줄, 진료실 상담 등 '다른 날 찍은 비슷한 사진을 넣어도 글이 성립하는' 자리.",
+    "",
+    "## AI로 채우기로 했다면 - 일반화된 장면으로 바꾼다",
     "웹에서 못 찾은 이유는 대개 **실존 인물·실존 기업·특정 날짜의 현장**이기 때문이다. 그것을 AI로",
     "그리면 가짜가 된다. 그러니 그 대상 자체를 그리려 하지 말고, **같은 이야기를 하는 일반적인 장면**",
     "으로 바꾼다.",
@@ -79,7 +87,7 @@ export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): 
     "자리 하나에 두 줄이고, 자리 사이에 빈 줄을 하나 둔다.",
     "",
     "INDEX: <자리 번호>",
-    "PROMPT: <영어 프롬프트 한 줄>"
+    "PROMPT: <영어 프롬프트 한 줄>   ← 또는 실물 특정 자리면 PROMPT 대신 `SKIP: <왜 실물 자리인지 한 줄>`"
   );
 
   return lines.join("\n");
@@ -99,6 +107,8 @@ export function parseFallbackPrompts(raw: string): { index: number; prompt: stri
 
     const promptLines: string[] = [];
     for (let j = i + 1; j < lines.length; j += 1) {
+      // 실물 특정 자리 - 모델이 스스로 건너뛴 것. 프롬프트 없이 넘어가면 호출부가 "폴백 없음"으로 남긴다.
+      if (/^\s*SKIP:/.test(lines[j])) break;
       const promptStart = lines[j].match(/^\s*PROMPT:\s*(.*)$/);
       if (promptStart) {
         promptLines.push(promptStart[1]);
@@ -140,7 +150,12 @@ export async function buildFallbackImagePrompts(
   for (const slot of input.unfilled) {
     const match = parsed.find((p) => p.index === slot.index);
     if (!match) {
-      failures.push(`[자리 ${slot.index}] 폴백 프롬프트를 받지 못했습니다.`);
+      const skip = result.output.match(new RegExp(`INDEX:\\s*${slot.index}\\s*\\n\\s*SKIP:\\s*(.+)`));
+      failures.push(
+        skip
+          ? `[자리 ${slot.index}] 실물 특정 자리라 AI로 채우지 않고 비워 둡니다: ${skip[1].trim()}`
+          : `[자리 ${slot.index}] 폴백 프롬프트를 받지 못했습니다.`
+      );
       continue;
     }
     // 규격 위반 프롬프트를 그대로 태우면 한글이 박힌 이미지나 세로 이미지가 나온다 - 마커 교정
@@ -150,7 +165,8 @@ export async function buildFallbackImagePrompts(
       failures.push(`[자리 ${slot.index}] 폴백 프롬프트가 규격 위반이라 버립니다: ${invalid}`);
       continue;
     }
-    slots.push({ index: slot.index, description: slot.description, prompt: match.prompt });
+    // 캡션이 "포스터"인데 생성 이미지가 붙는 일이 없게, 대체 이미지임을 설명에 남긴다(뷰어 캡션에 보인다).
+    slots.push({ index: slot.index, description: `${slot.description} (웹 검색 실패 - AI 대체 장면)`, prompt: match.prompt });
   }
 
   return { slots, failures };

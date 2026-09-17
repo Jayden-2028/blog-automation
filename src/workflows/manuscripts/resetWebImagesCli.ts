@@ -51,13 +51,14 @@ async function main(): Promise<void> {
   for (const topic of targets) {
     const body = topic.manuscript.body;
     const acquisitions = [...body.matchAll(IMAGE_MARKER_RE)].map((m) => parseImageAcquisition(m[1].trim()));
-    const filled = new Set(topic.manuscript.images.filter((i) => i.url).map((i) => i.index));
+    // 웹에서 온 이미지(sourcePage)만 채워진 것으로 본다 - AI 폴백으로 메운 자리는 다시 찾는다(C안 전환 후 재수집).
+    const filled = new Set(topic.manuscript.images.filter((i) => i.url && i.sourcePage).map((i) => i.index));
     const emptySearch = acquisitions
       .map((acq, i) => ({ acq, index: i + 1 }))
       .filter(({ acq, index }) => acq === "search" && !filled.has(index));
 
     console.log(`- ${topic.keyword}`);
-    console.log(`  job ${topic.jobId} | 마커 ${acquisitions.length} | 빈 웹 검색 자리 ${emptySearch.length}개` +
+    console.log(`  job ${topic.jobId} | 마커 ${acquisitions.length} | 웹 사진 없는 자리 ${emptySearch.length}개` +
       (emptySearch.length > 0 ? ` (${emptySearch.map((s) => s.index).join(", ")})` : ""));
 
     if (emptySearch.length === 0) {

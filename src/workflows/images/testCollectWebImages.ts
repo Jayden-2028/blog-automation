@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     // 3) 정상 경로: 파일과 사이드카(web-images.json)가 쓰인다.
     const ok = await collectWebImages(
       { keyword: "남양주 카페 갑질", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch }
     );
     assert(ok.found.length === 1 && ok.failures.length === 0, `1장 찾아야 한다 (${JSON.stringify(ok.failures)})`);
     assert(ok.found[0].fileName.startsWith("01-"), `파일명이 자리 번호로 시작해야 한다 (${ok.found[0].fileName})`);
@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     const html = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       {
+        searchImages: false,
         verifyImage: okVerify,
         runCodex: codexReply([slotReply({ imageUrl: "https://example.com/page" })]),
         fetchImage: async () => ({ ok: true as const, buffer: Buffer.from("<html>"), contentType: "text/html" }),
@@ -118,52 +119,78 @@ async function main(): Promise<void> {
     // 5) 너무 작은 이미지는 거부하고, 애매한 크기는 경고하되 저장한다.
     const small = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: async () => ({ ok: true as const, buffer: PNG_300, contentType: "image/png" }) }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: async () => ({ ok: true as const, buffer: PNG_300, contentType: "image/png" }) }
     );
     assert(small.found.length === 0 && small.failures[0].includes("너무 작습니다"), `300px는 거부해야 한다 (${JSON.stringify(small.failures)})`);
     console.log("✅ 최소 해상도 미달 거부");
 
-    // 5-1) 라이선스가 맞지 않으면 내려받기 전에 거부한다(2026-09-17 실측: CC BY-NC-ND 청사 사진이
-    //      그대로 저장됐다 - NC는 광고 블로그에서 위반, ND는 크롭조차 막는다).
+    // 5-1) 출처 분류 게이트(2026-09-17 저녁, 사용자 결정 C안): 유료 스톡·ND만 거부한다. 그 전 기준
+    //      (공공누리·CC BY·공식 배포물만)은 실측 9자리 중 8자리를 "찾았는데 버렸다".
     let fetched = 0;
     const countingFetch = async () => {
       fetched += 1;
       return { ok: true as const, buffer: PNG_1200, contentType: "image/png" };
     };
-    for (const bad of ["cc_nc_or_nd", "third_party_photo", "marketplace_repost", "unclear", "made_up_value"]) {
+    for (const bad of ["cc_nd", "paid_stock"]) {
       const rejected = await collectWebImages(
         { keyword: "k", dir, slots: [slots[0]] },
-        { verifyImage: okVerify, runCodex: codexReply([slotReply({ reusePermission: bad, license: "그럴듯하게 적힌 출처 문장" })]), fetchImage: countingFetch }
+        { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ reusePermission: bad, license: "게티이미지 워터마크" })]), fetchImage: countingFetch }
       );
       assert(rejected.found.length === 0, `"${bad}"는 거부해야 한다`);
-      assert(rejected.failures[0].includes("재사용 권한"), `사유가 재사용 권한이어야 한다 (${rejected.failures[0]})`);
+      assert(rejected.failures[0].includes("쓸 수 없는 자료"), `사유가 분류 거부여야 한다 (${rejected.failures[0]})`);
     }
-    assert(fetched === 0, "권한에서 걸리면 내려받지도 말아야 한다");
+    assert(fetched === 0, "분류에서 걸리면 내려받지도 말아야 한다");
 
-    // 방송사 공식 포스터·스틸은 허용한다(사용자 결정, 2026-09-17).
-    const broadcaster = await collectWebImages(
+    for (const allowed of ["broadcaster_promo", "news_photo", "personal_sns", "unclear", "official_company"]) {
+      const ok2 = await collectWebImages(
+        { keyword: "k", dir, slots: [slots[0]] },
+        { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ reusePermission: allowed, license: "출처: 뉴시스" })]), fetchImage: okFetch }
+      );
+      assert(ok2.found.length === 1, `"${allowed}"는 통과해야 한다 (${JSON.stringify(ok2.failures)})`);
+      assert(ok2.found[0].license === "출처: 뉴시스", "캡션 출처 표기가 보존돼야 한다");
+    }
+    console.log("✅ 출처 분류 - 유료 스톡·ND만 거부, 보도사진·SNS·불명확도 출처 표기와 함께 저장(C안)");
+
+    // 5-2) 세로·정사각은 자리 1이라도 저장한다(2026-09-17 저녁 완화 - 포스터·프로필은 원래 세로다.
+    //      옛 기준이 실제 포스터 1200×837과 감독 프로필 1600×2400을 버렸다). 경고만 남긴다.
+    const portraitFirst = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply({ reusePermission: "broadcaster_promo", license: "JTBC 배포 공식 포스터" })]), fetchImage: okFetch }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 1600, height: 2400 }) }
     );
-    assert(broadcaster.found.length === 1, `방송사 공식 포스터는 통과해야 한다 (${JSON.stringify(broadcaster.failures)})`);
+    assert(portraitFirst.found.length === 1, `자리 1도 세로를 저장해야 한다 (${JSON.stringify(portraitFirst.failures)})`);
+    assert(portraitFirst.failures.some((f) => f.includes("정사각·세로")), "경고는 남겨야 한다");
 
-    console.log("✅ 재사용 권한 분류로 거부/허용(자유 문장이 아니라 enum) + 방송사 공식 포스터 허용");
-
-    // 5-2) 자리 1은 대표 이미지라 가로가 아니면 거부, 나머지 자리는 경고만 하고 저장한다.
-    const squareFirst = await collectWebImages(
+    // 긴 변 기준: 450×700(세로, 긴 변 700)은 통과, 500×400(긴 변 500)은 거부.
+    const tallSmall = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 1200, height: 1200 }) }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 450, height: 700 }) }
     );
-    assert(squareFirst.found.length === 0, "자리 1이 정사각이면 거부해야 한다");
-    assert(squareFirst.failures[0].includes("대표 이미지"), `대표 이미지 사유여야 한다 (${squareFirst.failures[0]})`);
+    assert(tallSmall.found.length === 1, "긴 변이 600 이상이면 너비가 작아도 저장한다");
+    const tiny = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 500, height: 400 }) }
+    );
+    assert(tiny.found.length === 0 && tiny.failures[0].includes("너무 작습니다"), "긴 변 600 미만은 거부한다");
+    console.log("✅ 크기 검증 - 긴 변 600px 기준, 세로·정사각은 자리 1도 저장");
 
-    const squareOther = await collectWebImages(
-      { keyword: "k", dir, slots: [slots[1]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply({ index: slots[1].index })]), fetchImage: okFetch, readSize: () => ({ width: 1200, height: 1200 }) }
+    // 5-2-1) 이미지 검색 후보(2026-09-17 저녁): 후보가 프롬프트에 실리고, 후보에서 고르면 sourcePage가
+    //        비어 있어도 이미지 도메인을 출처로 채운다.
+    let seenPrompt = "";
+    const fromCandidate = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        searchImages: async (q) => [{ title: `${q} 공식 포스터`, link: "https://img.example.net/p.png", thumbnail: "", width: 1000, height: 1400 }],
+        verifyImage: okVerify,
+        runCodex: async (input) => {
+          seenPrompt = input.prompt;
+          return { ok: true as const, data: { slots: [slotReply({ imageUrl: "https://img.example.net/p.png", sourcePage: "" })] }, durationMs: 1 };
+        },
+        fetchImage: okFetch,
+      }
     );
-    assert(squareOther.found.length === 1, "자리 1이 아니면 정사각이어도 저장한다");
-    assert(squareOther.failures.some((f) => f.includes("정사각·세로")), `경고는 남겨야 한다 (${JSON.stringify(squareOther.failures)})`);
-    console.log("✅ 비율 검증 - 자리 1은 가로 필수, 나머지는 경고 후 저장");
+    assert(seenPrompt.includes("네이버 이미지 검색 후보") && seenPrompt.includes("https://img.example.net/p.png"), "후보가 프롬프트에 실려야 한다");
+    assert(fromCandidate.found.length === 1 && fromCandidate.found[0].sourcePage === "https://img.example.net", `출처 도메인 폴백이 필요하다 (${JSON.stringify(fromCandidate.failures)})`);
+    console.log("✅ 이미지 검색 후보 - 프롬프트에 실리고, 출처 없는 후보는 도메인으로 폴백");
 
     // 5-3) 비전 검증(2026-09-17): Codex는 URL만 고르고 이미지를 보지 않아, 대만 OTT 건처럼
     //      alt는 "공식 포스터"인데 실제 파일은 스틸컷인 불일치가 나왔다. 불합격이면 파일까지 지운다.
@@ -222,6 +249,7 @@ async function main(): Promise<void> {
     await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       {
+        searchImages: false,
         verifyImage: okVerify,
         runCodex: codexReply([slotReply()]),
         fetchImage: async (i) => {
@@ -237,6 +265,7 @@ async function main(): Promise<void> {
     const blocked = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       {
+        searchImages: false,
         verifyImage: okVerify,
         runCodex: codexReply([slotReply()]),
         fetchImage: async () => ({ ok: false as const, error: "HTTP 403" }),
@@ -254,11 +283,11 @@ async function main(): Promise<void> {
     try {
       await collectWebImages(
         { keyword: "k", dir: mergeDir, slots: [slots[0]] },
-        { verifyImage: okVerify, runCodex: codexReply([slotReply({ index: 1 })]), fetchImage: okFetch }
+        { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ index: 1 })]), fetchImage: okFetch }
       );
       await collectWebImages(
         { keyword: "k", dir: mergeDir, slots: [slots[1]] },
-        { verifyImage: okVerify, runCodex: codexReply([slotReply({ index: slots[1].index })]), fetchImage: okFetch }
+        { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ index: slots[1].index })]), fetchImage: okFetch }
       );
       const merged = JSON.parse(await readFile(resolve(mergeDir, "web-images.json"), "utf-8")) as {
         images: { index: number }[];
@@ -276,7 +305,7 @@ async function main(): Promise<void> {
     // 6) Codex가 못 찾았다고(skipped) 하면 빈 자리로 남기고 사유를 전한다 - 억지로 채우지 않는다.
     const skipped = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply({ skipped: true, skipReason: "공식 배포 이미지를 못 찾음", imageUrl: "" })]), fetchImage: okFetch }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ skipped: true, skipReason: "공식 배포 이미지를 못 찾음", imageUrl: "" })]), fetchImage: okFetch }
     );
     assert(skipped.found.length === 0 && skipped.failures[0].includes("공식 배포 이미지를 못 찾음"), "skip 사유가 전달돼야 한다");
     console.log("✅ Codex가 못 찾은 자리는 빈 자리로 유지");
@@ -284,13 +313,13 @@ async function main(): Promise<void> {
     // 7) URL이 아닌 값, Codex 실행 실패는 예외 없이 사유로 돌아온다.
     const badUrl = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: codexReply([slotReply({ imageUrl: "그냥 텍스트" })]), fetchImage: okFetch }
+      { searchImages: false, verifyImage: okVerify, runCodex: codexReply([slotReply({ imageUrl: "그냥 텍스트" })]), fetchImage: okFetch }
     );
     assert(badUrl.found.length === 0 && badUrl.failures[0].includes("URL 형식"), "URL 검증이 있어야 한다");
 
     const codexDown = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { verifyImage: okVerify, runCodex: async () => ({ ok: false as const, error: "codex 없음", durationMs: 1 }), fetchImage: okFetch }
+      { searchImages: false, verifyImage: okVerify, runCodex: async () => ({ ok: false as const, error: "codex 없음", durationMs: 1 }), fetchImage: okFetch }
     );
     assert(codexDown.found.length === 0 && codexDown.failures[0].includes("codex 없음"), "실행 실패가 사유로 와야 한다");
     console.log("✅ 잘못된 URL / Codex 실행 실패 - 예외 없이 사유 반환");
@@ -300,6 +329,7 @@ async function main(): Promise<void> {
     const none = await collectWebImages(
       { keyword: "k", dir, slots: [] },
       {
+        searchImages: false,
         verifyImage: okVerify,
         runCodex: async () => {
           called += 1;

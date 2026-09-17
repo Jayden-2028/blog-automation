@@ -524,9 +524,12 @@ async function main(): Promise<void> {
 
     assert(webResult.status === "success", `성공해야 한다 (${JSON.stringify(webResult)})`);
     assert(calls.length === 1, "웹 검색 수집이 호출돼야 한다");
+    // 2026-09-17 저녁: 웹 자리는 **웹에서 온 이미지(sourcePage)** 가 있을 때만 채워진 것으로 넘긴다.
+    // 자리 2의 AI 생성 이미지는 sourcePage가 없으므로 목록에 없어야 한다(AI 폴백으로 메운 웹 자리도
+    // 다시 찾게 하기 위해서다).
     assert(
-      calls[0].includes(2) && !calls[0].includes(1),
-      `이미 채워진 자리만 건너뛰게 넘겨야 한다 (${JSON.stringify(calls[0])})`
+      calls[0].length === 0,
+      `웹에서 온 이미지가 없으면 건너뛸 자리가 없어야 한다 (${JSON.stringify(calls[0])})`
     );
 
     const webPatch = merged.find((patch) => "webImagesReadyAt" in patch);
