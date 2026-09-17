@@ -320,7 +320,9 @@ export function buildPrompt(
   return lines.join("\n");
 }
 
-function extensionFor(contentType: string): string | null {
+function extensionFor(rawContentType: string): string | null {
+  // 서버가 "image/Jpeg"처럼 대소문자를 섞어 보내기도 한다(실측: 분장놀이 자리 5가 이걸로 탈락).
+  const contentType = rawContentType.toLowerCase();
   if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
   if (contentType.includes("png")) return "png";
   if (contentType.includes("webp")) return "webp";
@@ -576,7 +578,11 @@ export async function collectWebImages(
     await writeFile(filePath, downloaded.buffer);
 
     // 검증자가 파일을 열어 봐야 하므로 저장한 뒤에 본다. 불합격이면 지운다.
-    if (verify) {
+    // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
+    // 그 형식만 검증 없이 통과시키고 경고를 남긴다 - 못 본 것을 불합격으로 치면 안 된다.
+    if (verify && extension === "avif") {
+      failures.push(`[자리 ${slot.index}] ⚠️ avif라 비전 검증을 건너뛰고 저장했습니다 - 뷰어에서 한 번 확인하세요.`);
+    } else if (verify) {
       const verdict = await verifyImage({
         filePath,
         alt: result.alt || slot.description,
