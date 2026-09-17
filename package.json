@@ -74,6 +74,7 @@
     "test:naver-publish": "tsx src/services/publish/testPublishArticleToNaver.ts",
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",
     "test:article-variant": "tsx src/workflows/writing/testGenerateArticleVariant.ts",
+    "test:naver-variant": "tsx src/workflows/writing/testGenerateNaverVariant.ts",
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
     "test:publish-blogspot": "tsx src/workflows/publish/testPublishArticleToBlogspot.ts",
     "test:publish-approved": "tsx src/workflows/publish/testPublishApprovedArticles.ts",

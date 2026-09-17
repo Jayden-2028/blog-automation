@@ -29,6 +29,8 @@ import {
   listArticlesByJobId,
 } from "../../services/supabase/repositories/articleRepository.js";
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
+import { generateNaverVariant } from "../writing/generateNaverVariant.js";
+import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
@@ -105,6 +107,17 @@ export type PrepareManuscriptOptions = {
         imagePrompts: string[];
         filledIndexes: number[];
       }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+  /**
+   * 네이버용 배리에이션. 기본은 generateNaverVariant(Blogspot 원고를 가볍게 다시 씀).
+   * false를 주면 건너뛴다(테스트 - LLM을 타면 안 된다).
+   */
+  generateNaverVariant?:
+    | false
+    | ((input: {
+        category: string | null;
+        blogspotTitle: string;
+        blogspotBody: string;
+      }) => Promise<GenerateNaverVariantResult>);
   /** 테스트 주입용. 기본은 현재 시각(Asia/Seoul). */
   now?: () => Date;
 };
@@ -189,6 +202,8 @@ export async function prepareManuscript(
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const renderTableImages =
     options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
+  const makeNaverVariant =
+    options.generateNaverVariant === undefined ? generateNaverVariant : options.generateNaverVariant;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
@@ -299,6 +314,26 @@ export async function prepareManuscript(
     }
   }
 
+  // 네이버용 배리에이션(2026-09-18). 이미지 생성·수집이 끝난 **뒤에** 만든다 - 본문의 [IMAGE: ]
+  // 마커를 그대로 물려받아야 같은 이미지를 쓸 수 있고, 마커는 이 시점의 content가 정본이다.
+  // job당 1회(naverReadyAt)이고, 실패해도 원고는 그대로 간다(뷰어가 네이버 버튼만 숨긴다).
+  let naver: { title: string; body: string; tags: string[] } | null =
+    (job.metadata?.naverVariant as { title: string; body: string; tags: string[] } | undefined) ?? null;
+
+  if (makeNaverVariant && !naver) {
+    const result = await makeNaverVariant({
+      category: job.category,
+      blogspotTitle: title,
+      blogspotBody: content,
+    });
+    if (result.status === "success") {
+      naver = { title: result.variant.title, body: result.variant.body, tags: result.variant.tags };
+      await mergeJobMetadata(job.id, { naverVariant: naver, naverReadyAt: now().toISOString() });
+    } else {
+      imageFailures.push(`네이버 배리에이션 실패: ${result.error}`);
+    }
+  }
+
   const entry: ManuscriptEntry = {
     title,
     searchDescription,
@@ -309,6 +344,7 @@ export async function prepareManuscript(
     imagePrompts,
     images,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
+    naver,
   };
 
   await writeManuscriptFile(

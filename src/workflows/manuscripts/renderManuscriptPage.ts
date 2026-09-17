@@ -46,6 +46,11 @@ type PageTopic = {
   images: ManuscriptImage[];
   /** 공백 제외 본문 글자수(참조 파일의 "본문 N자(공백 제외)"와 같은 기준). */
   charCount: number;
+  /**
+   * 네이버용 배리에이션(2026-09-18). 이미지는 위 images를 그대로 쓰므로 blocks와 마커 순서가 같다.
+   * 생성 전이거나 실패했으면 null - 그때는 네이버 복사 버튼을 숨긴다.
+   */
+  naver: { title: string; tags: string[]; blocks: ManuscriptBlock[] } | null;
 };
 
 function escapeHtml(value: string): string {
@@ -77,6 +82,11 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     blocks: parseManuscriptBlocks(m.body, m.imagePrompts),
     images: m.images,
     charCount: m.body.replace(/\s/g, "").length,
+    // 네이버 본문도 같은 파서를 태운다 - 뷰어의 복사 로직(이미지 자리를 [[이미지 N]]으로 남김)을
+    // 그대로 재사용하려면 블록 모양이 같아야 한다.
+    naver: m.naver
+      ? { title: m.naver.title, tags: m.naver.tags, blocks: parseManuscriptBlocks(m.naver.body, m.imagePrompts) }
+      : null,
   };
 }
 
@@ -446,6 +456,29 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return parts.join("\\n\\n");
     }
 
+    /**
+     * 네이버 배리에이션을 복사용 평문으로. collectPlainText를 재사용하지 **않는** 이유: 그쪽은
+     * 화면의 편집 가능한 요소(findEditable)를 우선 읽는데, 화면에 그려진 건 Blogspot 본문이라
+     * 네이버 본문을 복사해도 Blogspot 텍스트가 나온다(2026-09-18 작성 중 발견).
+     * 여기서는 DOM을 보지 않고 블록 데이터만 쓴다.
+     */
+    function naverPlainText(naver) {
+      var parts = [naver.title], n = 0;
+      naver.blocks.forEach(function (block) {
+        if (block.type === "image") { n += 1; parts.push("[[이미지 " + n + "]]"); return; }
+        if (block.type === "heading") {
+          var head = (block.heading || "").trim();
+          var body = (block.body || "").trim();
+          parts.push(body ? head + "\n" + body : head);
+          return;
+        }
+        var text = (block.content || "").trim();
+        if (text) parts.push(text);
+      });
+      if (naver.tags && naver.tags.length > 0) parts.push(hashtagLine(naver.tags));
+      return parts.join("\n\n");
+    }
+
     /** 이미지 한 장(또는 A/B 두 장)을 figure로. url이 없으면 사유와 프롬프트를 대신 보여준다. */
     function figureHtml(topic, n, block) {
       var shots = imagesFor(topic, n);
@@ -569,7 +602,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       h += '<div class="toolbar">';
       h += '<button class="btn primary" id="c-body">📋 본문 복사 (서식 유지)</button>';
-      h += '<button class="btn" id="c-plain">본문 평문 복사</button>';
+      // 2026-09-18: "본문 평문 복사"를 네이버용으로 바꿨다(사용자 요청). 평문 복사는 Blogspot
+      // 초안이 자동 저장되면서 쓸 일이 없어졌고, 네이버는 그 자리에 붙여넣을 판이 따로 필요하다.
+      if (topic.naver) {
+        h += '<button class="btn" id="c-naver">📗 네이버용 원고 복사</button>';
+      } else {
+        // 왜 없는지 알려준다 - 버튼이 그냥 사라지면 고장인지 미생성인지 구분이 안 된다.
+        h += '<span class="doc-sub" style="align-self:center">네이버 배리에이션 없음</span>';
+      }
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
       if (edits) h += '<button class="btn" id="revert">↩️ 원본으로</button><span class="edited-badge">이 브라우저에서 수정됨</span>';
@@ -638,9 +678,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       document.getElementById("c-body").addEventListener("click", function () {
         copyRich(collectRichHtml(topic), collectPlainText(topic));
       });
-      document.getElementById("c-plain").addEventListener("click", function () {
-        copyText(collectPlainText(topic));
-      });
+      var naverBtn = document.getElementById("c-naver");
+      if (naverBtn) {
+        naverBtn.addEventListener("click", function () {
+          // 제목·태그가 Blogspot과 다르므로 제목까지 함께 복사한다. 이미지 자리는 [[이미지 N]]으로
+          // 남고 번호가 Blogspot과 같아, 아래 캡션 표를 그대로 보고 이미지를 채우면 된다.
+          copyText(naverPlainText(topic.naver));
+        });
+      }
       var promptBtn = document.getElementById("c-prompt");
       if (promptBtn) promptBtn.addEventListener("click", function () { copyText(promptPack(topic)); });
 

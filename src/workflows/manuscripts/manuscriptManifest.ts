@@ -66,6 +66,13 @@ export type ManuscriptEntry = {
   images: ManuscriptImage[];
   /** PIPELINE_ROOT 기준 상대 경로(표시용). 본문 자체는 body에 인라인으로 들어 있다. */
   filePath: string;
+  /**
+   * 네이버 블로그용 배리에이션(2026-09-18 사용자 요청). 텍스트만 다르고 **이미지는 위 images를
+   * 그대로 공유한다** - 그래서 body의 [IMAGE: ] 마커 개수·순서가 위 body와 반드시 같다
+   * (generateNaverVariant가 검증하고, 다르면 배리에이션을 버린다).
+   * 생성 전이거나 실패했으면 null - 뷰어는 그때 네이버 복사 버튼을 숨긴다.
+   */
+  naver?: { title: string; body: string; tags: string[] } | null;
 };
 
 export type ManuscriptTopicEntry = {
@@ -94,6 +101,7 @@ const EMPTY_ENTRY: ManuscriptEntry = {
   imagePrompts: [],
   images: [],
   filePath: "",
+  naver: null,
 };
 
 /**
