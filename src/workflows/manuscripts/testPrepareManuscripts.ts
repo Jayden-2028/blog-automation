@@ -81,6 +81,7 @@ const okVariant = async () => ({
     title: "blogspot 제목",
     searchDescription: "blogspot 설명",
     slug: "blogspot-slug",
+    shortName: "짧은이름",
     tags: ["태그1", "태그2"],
     // 실제 파이프라인 모양: 배리에이션도 [IMAGE: 설명] 단독 줄만 남긴다(프롬프트는
     // job.metadata.imagePrompts에 별도 보관 - parseManuscriptBlocks 테스트 참고).

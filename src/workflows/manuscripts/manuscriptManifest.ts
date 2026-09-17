@@ -51,6 +51,8 @@ export type ManuscriptEntry = {
   title: string;
   searchDescription: string | null;
   slug: string | null;
+  /** 로컬 보관함 폴더로 쓸 짧은 한글 키워드(2026-09-18). 없으면 키워드로 폴백한다. */
+  shortName?: string | null;
   tags: string[];
   body: string;
   /**
@@ -86,6 +88,7 @@ const EMPTY_ENTRY: ManuscriptEntry = {
   title: "",
   searchDescription: null,
   slug: null,
+  shortName: null,
   tags: [],
   body: "",
   imagePrompts: [],

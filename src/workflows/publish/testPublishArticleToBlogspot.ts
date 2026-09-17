@@ -60,6 +60,7 @@ const baseDeps = {
       title: "배리에이션 제목",
       searchDescription: "설명",
       slug: "geunro-guide",
+      shortName: "짧은이름",
       tags: ["근로장려금"],
       body: "## 배리에이션 섹션\n\n다시 쓴 본문입니다. ".repeat(20),
     },

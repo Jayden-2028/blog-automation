@@ -229,7 +229,7 @@ export async function exportManuscript(
   options: ExportManuscriptOptions = {}
 ): Promise<ExportManuscriptResult> {
   const fetchImage = options.fetchImage ?? defaultFetchImage;
-  const dir = exportTopicDir(topic.date, topic.keyword);
+  const dir = exportTopicDir(topic.date, topic.keyword, topic.manuscript.shortName);
   await mkdir(dir, { recursive: true });
 
   const webImages = await readWebImages(dir);

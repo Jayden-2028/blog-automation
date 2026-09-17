@@ -41,7 +41,13 @@ import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 export const BLOGSPOT_PLATFORM = "blogspot";
 
 /** job.metadata.channelMeta.blogspot에 저장하는 형태 - articles 테이블에 없는 필드를 보존한다. */
-type ChannelMetaEntry = { searchDescription: string | null; slug: string | null; tags: string[] };
+type ChannelMetaEntry = {
+  searchDescription: string | null;
+  slug: string | null;
+  tags: string[];
+  /** 로컬 보관함 폴더로 쓸 짧은 한글 키워드(2026-09-18). 옛 job엔 없다 - 그때는 키워드로 폴백. */
+  shortName?: string | null;
+};
 type ChannelMetaMap = Record<string, ChannelMetaEntry>;
 
 export type PrepareManuscriptResult =
@@ -200,6 +206,7 @@ export async function prepareManuscript(
   let searchDescription: string | null = null;
   let slug: string | null = null;
   let tags: string[] = [];
+  let shortName: string | null = null;
 
   if (existing) {
     title = existing.title ?? job.keyword;
@@ -212,6 +219,7 @@ export async function prepareManuscript(
       searchDescription = saved.searchDescription;
       slug = saved.slug;
       tags = saved.tags;
+      shortName = saved.shortName ?? null;
     }
   } else {
     const result = await generateVariant({
@@ -227,9 +235,10 @@ export async function prepareManuscript(
     searchDescription = result.variant.searchDescription;
     slug = result.variant.slug;
     tags = result.variant.tags;
+    shortName = result.variant.shortName;
     await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
     await mergeJobMetadata(job.id, {
-      channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags } } satisfies ChannelMetaMap,
+      channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags, shortName } } satisfies ChannelMetaMap,
     });
   }
 
@@ -294,6 +303,7 @@ export async function prepareManuscript(
     title,
     searchDescription,
     slug,
+    shortName,
     tags,
     body: content,
     imagePrompts,

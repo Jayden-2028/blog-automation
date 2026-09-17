@@ -24,6 +24,7 @@ export const VARIANT_OUTPUT_MARKERS = {
   title: "### TITLE",
   searchDescription: "### SEARCH_DESCRIPTION",
   slug: "### SLUG",
+  shortName: "### SHORT_NAME",
   tags: "### TAGS",
   body: "### BODY",
 } as const;
@@ -33,6 +34,8 @@ export type ArticleVariant = {
   searchDescription: string | null;
   /** 영문 kebab permalink. 모델이 쓸 만한 값을 못 주면 null. */
   slug: string | null;
+  /** 로컬 보관함 폴더로 쓸 짧은 한글 키워드. 못 주면 null(키워드로 폴백). */
+  shortName: string | null;
   tags: string[];
   /** 마크다운 부분집합(## / ** / - / [](): / ![](): ). convertArticleToHtml이 HTML로 바꾼다. */
   body: string;
@@ -57,7 +60,24 @@ export type GenerateArticleVariantInput = {
 function buildPrompt(input: GenerateArticleVariantInput): string {
   const { category, baseTitle, baseBody } = input;
   const M = VARIANT_OUTPUT_MARKERS;
-  const slugRule = `- ${M.slug} 다음 줄에 영문 소문자 kebab-case 슬러그 1줄(핵심 키워드의 로마자 표기, 4~6단어, 날짜·숫자 금지).`;
+  // 2026-09-18: "로마자 표기"를 **의미 번역**으로 바꿨다. 예전 규칙 그대로 두니
+  // `neo-malgo-dareun-yeonae-sicheongnyul`(너 말고 다른 연애 시청률) 같은 소리나는 대로 적은
+  // 퍼머링크가 나왔다 - 영어권 검색에 아무 의미가 없어 SEO를 통째로 버리는 값이다.
+  const slugRule = [
+    `- ${M.slug} 다음 줄에 영문 소문자 kebab-case 퍼머링크 1줄(4~7단어).`,
+    `  **한글 발음을 로마자로 옮기지 말고 뜻을 영어로 번역한다.** 영어권 검색어로 말이 돼야 한다.`,
+    `  다만 인명·지명·브랜드 같은 고유명사는 통용 표기를 그대로 쓴다(lee-jaesi, hongdae, samsung).`,
+    `  연도·회차 숫자는 검색에 도움이 되면 넣어도 된다(2026-, -2nd-).`,
+    `  (X) neo-malgo-dareun-yeonae-sicheongnyul   (O) not-you-another-romance-ratings`,
+    `  (X) cheongnyeon-mirae-jeokgeum-sinchung    (O) youth-future-savings-2nd-application`,
+    `  (X) sosanggongin-jiwongeum-sincheong-jogeon (O) 2026-small-business-subsidy-conditions`,
+    `  (X) intern-gyeolmal-wonjak-iyu             (O) the-intern-korean-remake-ending`,
+    // 로컬 보관함 폴더 이름. 제목 전체를 쓰면 폴더가 길어 훑어보기 나쁘다(사용자 요청, 2026-09-18).
+    `- ${M.shortName} 다음 줄에 이 글을 가리키는 **짧은 한글 키워드** 1줄(2~8자, 공백 한 번까지).`,
+    `  폴더 이름으로 쓴다 - 제목을 그대로 넣지 말고 사람이 부를 법한 말로 줄인다.`,
+    `  예: "청년미래적금 2차 신청기간 확정｜가입조건" → 청년지원금 / "최민식·한소희 인턴 원작과 결말" → 인턴`,
+    `  "이동국 딸 재시 美 명문대 휴학" → 이재시 / "소상공인지원금 신청 조건" → 소상공인 지원금`,
+  ].join("\n");
 
   return [
     `당신은 ${CHANNEL_LABEL}에 올릴 SEO 최적화 블로그 글을 쓴다.`,
@@ -138,7 +158,7 @@ function sliceBetween(text: string, startMarker: string, endMarkers: string[]): 
 
 export function parseVariantOutput(raw: string, fallbackTitle: string): ArticleVariant {
   const M = VARIANT_OUTPUT_MARKERS;
-  const order: string[] = [M.title, M.searchDescription, M.slug, M.tags, M.body];
+  const order: string[] = [M.title, M.searchDescription, M.slug, M.shortName, M.tags, M.body];
   const after = (marker: string): string[] => order.slice(order.indexOf(marker) + 1);
 
   const title = sliceBetween(raw, M.title, after(M.title)).split("\n")[0]?.trim() || fallbackTitle;
@@ -163,7 +183,18 @@ export function parseVariantOutput(raw: string, fallbackTitle: string): ArticleV
 
   const body = stripTrailingMeta(sliceBetween(raw, M.body, []) || raw.trim());
 
-  return { title, searchDescription, slug, tags, body };
+  // 폴더 이름으로 쓰므로 경로에 위험한 문자와 따옴표·마크다운 장식을 걷어낸다. 못 받으면 null -
+  // exportFolderName이 키워드로 폴백한다.
+  const shortNameRaw = sliceBetween(raw, M.shortName, after(M.shortName)).split("\n")[0]?.trim() ?? "";
+  const shortName =
+    shortNameRaw
+      .replace(/^[-*·"'`]+|[-*·"'`]+$/g, "")
+      .replace(/[/\\:*?"<>|]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 20) || null;
+
+  return { title, searchDescription, slug, shortName, tags, body };
 }
 
 /**

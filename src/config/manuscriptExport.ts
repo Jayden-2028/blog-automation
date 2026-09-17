@@ -29,6 +29,8 @@ export function exportFolderName(keyword: string): string {
   return cleaned.slice(0, 50).trim() || "제목없음";
 }
 
-export function exportTopicDir(date: string, keyword: string): string {
-  return resolve(MANUSCRIPT_EXPORT_ROOT, date, exportFolderName(keyword));
+export function exportTopicDir(date: string, keyword: string, shortName?: string | null): string {
+  // shortName(배리에이션이 만든 짧은 한글 키워드)이 있으면 그것을 쓴다 - 제목 전체를 폴더명으로
+  // 쓰면 너무 길어 훑어보기 나쁘다(사용자 요청, 2026-09-18). 옛 원고엔 없어 키워드로 폴백한다.
+  return resolve(MANUSCRIPT_EXPORT_ROOT, date, exportFolderName(shortName || keyword));
 }
