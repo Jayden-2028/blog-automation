@@ -62,6 +62,7 @@
     "images:collect": "tsx src/workflows/images/collectWebImagesCli.ts",
     "images:refix": "tsx src/workflows/images/refixImageMarkersCli.ts",
     "images:fill": "tsx src/workflows/images/fillMissingImagesCli.ts",
+    "test:table-image": "tsx src/workflows/images/testRenderTableImage.ts",
     "test:refix-image-markers": "tsx src/workflows/images/testRefixImageMarkers.ts",
     "test:collect-web-images": "tsx src/workflows/images/testCollectWebImages.ts",
     "test:manuscript-export": "tsx src/workflows/manuscripts/testExportManuscript.ts",

@@ -37,7 +37,7 @@ import type { ManuscriptImage } from "./manuscriptManifest.js";
  *
  * `unknown`은 획득 방식을 안 적은 옛 원고다. 기존 동작(생성)을 유지한다.
  */
-export type ImageAcquisition = "ai" | "search" | "unknown";
+export type ImageAcquisition = "ai" | "search" | "table" | "unknown";
 
 export type ManuscriptBlock =
   | { type: "text"; content: string }
@@ -54,6 +54,10 @@ const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
  * 둘 다 있으면 `search`가 이긴다 - 잘못 생성하는 쪽이 안 만드는 쪽보다 비싸다(유료 API + 저품질 이미지).
  */
 export function parseImageAcquisition(description: string): ImageAcquisition {
+  // `표 생성`이 가장 먼저다(2026-09-18): 일정표·순위표 같은 데이터 자리는 웹 검색으로도 못 찾고
+  // (실측: 민생지원금·아시안게임 대진표 전패) 이미지 모델은 한글을 못 써서 AI로도 못 만든다.
+  // 본문에 이미 있는 표·목록을 그대로 HTML로 렌더해 PNG로 만드는 경로다.
+  if (/표\s*생성|인포그래픽\s*생성/.test(description)) return "table";
   if (/웹\s*검색/.test(description)) return "search";
   if (/AI\s*생성/i.test(description)) return "ai";
   return "unknown";

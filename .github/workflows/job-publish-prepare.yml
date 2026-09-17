@@ -47,6 +47,14 @@ jobs:
 
       - run: npm ci
 
+      # `— 표 생성` 자리를 Chromium으로 그린다(renderTableImage.ts). 러너에는 한글 폰트가 없어
+      # 설치하지 않으면 글자가 전부 네모(두부)로 찍힌다 - 표 이미지는 글자가 전부인 이미지라 치명적이다.
+      - name: 한글 폰트 + Chromium 설치 (표 이미지 렌더용)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          npx playwright install --with-deps chromium
+
       - name: Install Claude Code CLI + moai-marketer 플러그인 (배리에이션 생성용)
         run: |
           npm install -g @anthropic-ai/claude-code

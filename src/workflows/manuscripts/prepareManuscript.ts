@@ -32,6 +32,7 @@ import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
+import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -82,6 +83,18 @@ export type PrepareManuscriptOptions = {
     | ((input: {
         jobId: string;
         keyword: string;
+        body: string;
+        imagePrompts: string[];
+        filledIndexes: number[];
+      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+  /**
+   * `표 생성` 자리 렌더. 기본은 renderTableImagesForJob(본문 표·목록 → Chromium → Storage).
+   * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
+   */
+  renderTableImages?:
+    | false
+    | ((input: {
+        jobId: string;
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
@@ -168,6 +181,8 @@ export async function prepareManuscript(
     options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
   const collectWebImages =
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
+  const renderTableImages =
+    options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
@@ -234,6 +249,24 @@ export async function prepareManuscript(
     imageFailures.push(...outcome.failures);
     if (images.length > 0) {
       await mergeJobMetadata(job.id, { imagesReadyAt: now().toISOString(), images });
+    }
+  }
+
+  // `표 생성` 자리를 본문 데이터로 그린다(2026-09-18). 웹 검색보다 **먼저** 해야 한다 - 일정·순위표는
+  // 검색으로 못 찾는 게 실측으로 드러났고, 우리 데이터로 그리는 편이 정확하다.
+  if (renderTableImages && !job.metadata?.tableImagesReadyAt) {
+    const outcome = await renderTableImages({
+      jobId: job.id,
+      body: content,
+      imagePrompts,
+      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+    });
+    imageFailures.push(...outcome.failures);
+    if (outcome.images.length > 0) {
+      images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
+        (a, b) => a.index - b.index
+      );
+      await mergeJobMetadata(job.id, { tableImagesReadyAt: now().toISOString(), images });
     }
   }
 

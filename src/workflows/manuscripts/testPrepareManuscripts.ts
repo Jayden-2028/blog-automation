@@ -98,6 +98,7 @@ async function main(): Promise<void> {
     loadArticles: async () => [],
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
   console.log("✅ 기준 원고 없음 -> 실패");
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(parenting.status === "success", "카테고리와 무관하게 Blogspot 원고를 만들어야 한다");
   console.log("✅ 모든 카테고리 -> Blogspot 원고 1건 (채널 배정 실패 경로 없음)");
@@ -135,6 +137,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(r3.status === "success", "신규 생성 실패");
   if (r3.status === "success") {
@@ -170,6 +173,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
   assert(generateCalls === 0, "이미 있는 배리에이션은 재생성하면 안 된다");
@@ -187,6 +191,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(r5.status === "failed" && r5.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
   console.log("✅ 배리에이션 생성 실패 -> job 실패로 전파");
@@ -204,6 +209,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
   if (r6.status === "success") {
@@ -226,6 +232,7 @@ async function main(): Promise<void> {
     },
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(r7.status === "success", "신규 생성(메타 저장 케이스) 실패");
   assert(metaPatches.length === 1, `job.metadata 갱신이 1회 호출돼야 한다 (${metaPatches.length})`);
@@ -249,6 +256,7 @@ async function main(): Promise<void> {
       writeManuscriptFile: async () => {},
       generateImages: false,
       collectWebImages: false,
+      renderTableImages: false,
     }
   );
   assert(r8.status === "success", "재사용+메타 복구 케이스 실패");
@@ -265,6 +273,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    renderTableImages: false,
   });
   assert(
     r8b.status === "success" && r8b.topic.manuscript.tags.length === 0,
@@ -284,6 +293,7 @@ async function main(): Promise<void> {
       imagePatches.push(patch);
     },
     collectWebImages: false,
+    renderTableImages: false,
     generateImages: async (input) => {
       imageCalls += 1;
       assert(input.imagePrompts[0] === "프롬프트 A", "이미지 생성에 imagePrompts가 전달돼야 한다");
@@ -476,6 +486,7 @@ async function main(): Promise<void> {
         ],
         failures: [],
       }),
+      renderTableImages: false,
       collectWebImages: async (input) => {
         calls.push(input.filledIndexes);
         return {
