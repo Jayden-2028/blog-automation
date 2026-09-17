@@ -49,6 +49,8 @@ export type BuildKeywordBriefInput = {
   autocomplete: AutocompleteGroup[];
   /** baseline 출처 제목(뉴스·블로그). 없으면 빈 배열. */
   baselineTitles: string[];
+  /** 지식iN·카페 글 제목(2026-09-18). 제목 자체가 독자의 질문이라 자동완성 다음으로 센 근거다. */
+  kinQuestions?: string[];
   today: string;
 };
 
@@ -83,6 +85,13 @@ export function buildBriefPrompt(input: BuildKeywordBriefInput): string {
     "## 이미 나와 있는 글 제목 (뉴스·블로그)",
     ...titleLines,
     "",
+    ...(input.kinQuestions && input.kinQuestions.length > 0
+      ? [
+          "## 사람들이 지식iN·카페에 실제로 올린 질문 (제목 그대로)",
+          ...input.kinQuestions.slice(0, 15).map((q, i) => `${i + 1}. ${q}`),
+          "",
+        ]
+      : []),
     "## 기준 - 뉴스 요약이 아니라 독자의 질문에 답하는 글",
     "뉴스를 메인 정보원으로 삼으면 원고가 기사 요약이 된다(실측: '예선에서 25팀이 남은 과정', '시상",
     "규모', '지난해 모습' - 전부 기사에 있는 내용이지 독자가 검색한 이유가 아니다).",
@@ -106,7 +115,7 @@ export function buildBriefPrompt(input: BuildKeywordBriefInput): string {
     "- product(제품·서비스·할인): 가격·조건·받는 방법·비교.",
     "",
     "질문 규칙:",
-    "- 5개. **독자가 검색창에 칠 법한 말**로 쓴다. 자동완성 조합이 있으면 그것이 최우선 근거다.",
+    "- 5개. **독자가 검색창에 칠 법한 말**로 쓴다. 자동완성 조합과 지식iN·카페 질문이 있으면 그것이 최우선 근거다.",
     "- Q1은 항상 '이게 뭔가/누군가'(정의)다. 마지막 질문은 항상 '그래서 나는 뭘 할 수 있나'(행동)다 -",
     "  policy/event/product는 신청·예매·관람·구매, drama는 어디서 보나, celebrity/incident는 앞으로 뭘 지켜볼지.",
     "- 기사에 답이 있을 것 같은 질문이 아니라 **독자가 궁금한 질문**을 쓴다. 답이 없을 수도 있다 -",

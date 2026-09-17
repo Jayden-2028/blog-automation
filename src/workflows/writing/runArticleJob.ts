@@ -241,7 +241,14 @@ async function defaultBuildBrief(input: {
     category: input.job.category ?? null,
     seedQuery: input.job.seed_query ?? null,
     autocomplete,
-    baselineTitles: input.baselineSources.map((s) => s.title).filter((t): t is string => !!t),
+    baselineTitles: input.baselineSources
+      .filter((s) => s.source_name !== "naver_kin" && s.source_name !== "naver_cafe")
+      .map((s) => s.title)
+      .filter((t): t is string => !!t),
+    kinQuestions: input.baselineSources
+      .filter((s) => s.source_name === "naver_kin" || s.source_name === "naver_cafe")
+      .map((s) => s.title)
+      .filter((t): t is string => !!t),
     today: input.today,
   });
 }

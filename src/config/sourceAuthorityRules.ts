@@ -49,7 +49,7 @@ function extractHostname(url: string | null | undefined): string | null {
 export type ClassifySourceAuthorityInput = {
   url: string | null | undefined;
   /** 이 근거를 가져온 검색 소스. news 검색 결과는 URL이 official/medical에 안 걸려도 news로 분류한다. */
-  searchSource: "naver_news" | "naver_web" | "naver_blog";
+  searchSource: "naver_news" | "naver_web" | "naver_blog" | "naver_kin" | "naver_cafe" | "naver_encyc";
 };
 
 /**

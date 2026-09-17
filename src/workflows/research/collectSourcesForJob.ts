@@ -12,29 +12,43 @@
 import { NaverBlogKeywordProvider } from "../../services/search/providers/NaverBlogKeywordProvider.js";
 import { NaverNewsKeywordProvider } from "../../services/search/providers/NaverNewsKeywordProvider.js";
 import { NaverWebKeywordProvider } from "../../services/search/providers/NaverWebKeywordProvider.js";
+import { NaverSimpleSearchProvider } from "../../services/search/providers/NaverSimpleSearchProvider.js";
 import { classifySourceAuthority } from "../../config/sourceAuthorityRules.js";
 import type { KeywordProvider } from "../../services/search/providers/KeywordProvider.js";
 import type { RawKeyword } from "../../types/keywordDiscovery.js";
 import type { SourceInsert } from "../../types/database.js";
 
 export type CollectSourcesForJobOptions = {
-  /** 검색 소스별로 가져올 결과 수. 기본 5건씩(뉴스/웹/블로그) = 최대 15건. */
+  /** 검색 소스별로 가져올 결과 수. 기본 5건씩(뉴스/웹/블로그/지식iN/카페) + 백과 2건. */
   displayPerSource?: number;
   /** 테스트에서 실제 API 호출을 대체하는 주입 지점. */
+  /**
+   * 테스트 주입. **객체를 주면 여기 있는 소스만 돈다** - 없는 소스는 건너뛴다(네트워크 차단).
+   * 2026-09-18에 지식iN·카페·백과사전이 추가됐다(사용자가 API HUB에서 켬).
+   */
   providers?: {
     news?: KeywordProvider;
     web?: KeywordProvider;
     blog?: KeywordProvider;
+    kin?: KeywordProvider;
+    cafe?: KeywordProvider;
+    encyc?: KeywordProvider;
   };
 };
 
 export type CollectSourcesForJobResult = {
   sources: SourceInsert[];
   /** 실패한 검색 소스만 담는다("naver_news" -> 에러 메시지). 전부 성공하면 빈 객체. */
-  sourceErrors: Partial<Record<"naver_news" | "naver_web" | "naver_blog", string>>;
+  sourceErrors: Partial<Record<KnownSearchSource, string>>;
 };
 
-const KNOWN_SEARCH_SOURCES = ["naver_news", "naver_web", "naver_blog"] as const;
+/**
+ * 2026-09-18: 지식iN·카페·백과사전 추가. 지식iN·카페 제목은 그 자체가 **독자의 질문 원문**이라
+ * researcher.md §5와 기획 브리프의 재료가 되고(에이전트가 WebSearch로는 이 글들을 못 찾았다),
+ * 백과사전은 "이게 뭔가"(Q1)의 근거다. 등급은 지식iN·카페=community, 백과=community(출처 불명 편집)로
+ * classifySourceAuthority가 매긴다.
+ */
+const KNOWN_SEARCH_SOURCES = ["naver_news", "naver_web", "naver_blog", "naver_kin", "naver_cafe", "naver_encyc"] as const;
 type KnownSearchSource = (typeof KNOWN_SEARCH_SOURCES)[number];
 
 function isKnownSearchSource(value: string): value is KnownSearchSource {
@@ -80,15 +94,20 @@ export async function collectSourcesForJob(
 ): Promise<CollectSourcesForJobResult> {
   const displayPerSource = options.displayPerSource ?? 5;
 
-  const news = options.providers?.news ?? new NaverNewsKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource });
-  const web = options.providers?.web ?? new NaverWebKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource });
-  const blog = options.providers?.blog ?? new NaverBlogKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource });
+  const injected = options.providers;
+  const pick = (name: keyof NonNullable<typeof injected>, real: () => KeywordProvider): KeywordProvider | undefined =>
+    injected ? injected[name] : real();
 
-  const jobs: [KnownSearchSource, KeywordProvider][] = [
-    ["naver_news", news],
-    ["naver_web", web],
-    ["naver_blog", blog],
+  const candidates: [KnownSearchSource, KeywordProvider | undefined][] = [
+    ["naver_news", pick("news", () => new NaverNewsKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
+    ["naver_web", pick("web", () => new NaverWebKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
+    ["naver_blog", pick("blog", () => new NaverBlogKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
+    ["naver_kin", pick("kin", () => new NaverSimpleSearchProvider({ kind: "kin", queries: [keyword], displayPerQuery: displayPerSource }))],
+    ["naver_cafe", pick("cafe", () => new NaverSimpleSearchProvider({ kind: "cafearticle", queries: [keyword], displayPerQuery: displayPerSource }))],
+    // 백과사전은 정의 하나면 충분하다.
+    ["naver_encyc", pick("encyc", () => new NaverSimpleSearchProvider({ kind: "encyc", queries: [keyword], displayPerQuery: 2 }))],
   ];
+  const jobs = candidates.filter((entry): entry is [KnownSearchSource, KeywordProvider] => entry[1] !== undefined);
 
   const sourceErrors: CollectSourcesForJobResult["sourceErrors"] = {};
   const collected: RawKeyword[] = [];

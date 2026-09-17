@@ -104,3 +104,19 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+// --- 지식iN·카페·백과(2026-09-18) - 소스 이름 보존, community 등급, 주입 객체에 없는 소스는 건너뜀 ----
+{
+  const result = await collectSourcesForJob("job-9", "국중박 분장놀이", {
+    providers: {
+      kin: fakeProvider([makeRaw({ source: "naver_kin", keyword: "국중박 분장놀이 일반인도 볼 수 있나요?", sourceUrl: "https://kin.naver.com/qna/1" })]),
+      cafe: fakeProvider([makeRaw({ source: "naver_cafe", keyword: "분장놀이 결선 예매 어떻게 해요", sourceUrl: "https://cafe.naver.com/a/1" })]),
+    },
+  });
+  const names = result.sources.map((s) => s.source_name).sort();
+  if (names.join(",") !== "naver_cafe,naver_kin") throw new Error(`❌ 소스 이름이 보존돼야 한다 (${names})`);
+  if (!result.sources.every((s) => s.authority === "community")) throw new Error("❌ 지식iN·카페는 community여야 한다");
+  if (Object.keys(result.sourceErrors).length !== 0) throw new Error("❌ 주입 객체에 없는 소스(뉴스 등)는 실패로 기록하면 안 된다");
+  console.log("✅ 지식iN·카페 소스 - 이름 보존, community, 미주입 소스 건너뜀");
+}
+

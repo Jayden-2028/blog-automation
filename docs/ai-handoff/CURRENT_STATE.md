@@ -42,6 +42,14 @@ writer 자기 신고라 게이트가 아니라 신호다. **Gemini researcher �
 **단, 이 API는 현재 Application에서 미활성(401)**이라 사용자가 NCP 콘솔에서 켜야 후보가 나온다. 켜기
 전까지는 빈 후보로 예전처럼 web_search가 돈다.
 
+**2026-09-18 새벽 - 네이버 API 확장(사용자가 API HUB Application에 전 카테고리 활성화)**: 이미지 검색이
+켜져 `searchNaverImages` 후보가 실제로 나온다(너말고 메인 포스터, 김도영 감독 사진, 이재시 런웨이 등
+실측). **지식iN·카페·백과사전**을 자료조사 baseline에 추가했다(`NaverSimpleSearchProvider`,
+source_name `naver_kin`/`naver_cafe`/`naver_encyc`, 등급 community) - researcher가 WebSearch로는 못 찾던
+"사람들이 실제로 묻는 질문" 원문이 API로 바로 온다. buildResearchPrompt가 그 항목에 (지식iN 질문)·
+(카페 글) 표시를 붙이고 §5에 옮기라고 지시하며, 기획 브리프는 `kinQuestions`로 따로 받는다.
+`collectSourcesForJob`은 providers 객체를 주면 **그 안의 소스만** 돈다(테스트 네트워크 차단).
+
 **다음 확인**: 새로 승인되는 원고에서 브리프가 실제로 어떤 질문을 뽑는지, researcher가 `Q{n} 미해결`을
 남기는지, 리뷰 카드 커버리지가 5/5로만 자기 신고되지 않는지(그러면 신호가 무의미해진다).
 

@@ -32,7 +32,10 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
       : baselineSources.map((s, i) => {
           const auth = s.authority ?? "미분류";
           const url = s.url ?? "(URL 없음)";
-          return `${i + 1}. [${auth}] ${s.title ?? "(제목 없음)"} — ${url}`;
+          // 지식iN·카페·백과는 등급만으로는 구분이 안 된다(전부 community). §5·§6-1에서 다르게 쓰므로 표시한다.
+          const label =
+            s.source_name === "naver_kin" ? " (지식iN 질문)" : s.source_name === "naver_cafe" ? " (카페 글)" : s.source_name === "naver_encyc" ? " (백과사전)" : "";
+          return `${i + 1}. [${auth}]${label} ${s.title ?? "(제목 없음)"} — ${url}`;
         });
 
   return [
@@ -69,6 +72,8 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못",
     "  채운 빈칸(정의·핵심 수치·시행 이력·예외·자주 묻는 질문·오해)을 WebSearch/WebFetch로 보강하는 데 집중한다.",
     "- researcher.md §4의 7개 카테고리를 baseline 위에서 빠짐없이 시도한다. 각도를 바꿔 최소 3회 검색한다.",
+    "- baseline의 **(지식iN 질문)·(카페 글)** 항목은 §5 '사람들이 실제로 묻는 질문'의 원문이다. 그 제목을",
+    "  그대로 §5에 옮긴다(URL 포함) - 이 항목이 있는데 §5를 '찾지 못함'으로 두지 않는다.",
     "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
     "- §10 전체 출처 목록 표에는 baseline + 네가 새로 연 URL을 전부 등급과 함께 넣는다(감사기록).",
     "",

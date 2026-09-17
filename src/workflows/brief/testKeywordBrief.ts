@@ -43,9 +43,11 @@ function assert(condition: unknown, message: string): asserts condition {
     seedQuery: "국립중앙박물관 분장놀이",
     autocomplete: [{ query: "국중박 분장놀이", suggestions: ["국중박 분장놀이 결선", "국중박 분장놀이 상금"] }],
     baselineTitles: ["이혜정, 간돌검 분장으로 결선行"],
+    kinQuestions: ["국중박 분장놀이 일반인도 볼 수 있나요?"],
     today: "2026-09-17",
   });
   assert(prompt.includes("국중박 분장놀이 상금"), "자동완성이 프롬프트에 없습니다");
+  assert(prompt.includes("지식iN·카페에 실제로 올린 질문") && prompt.includes("일반인도 볼 수 있나요"), "지식iN 질문 섹션이 없습니다");
   assert(prompt.includes("이혜정, 간돌검"), "baseline 제목이 프롬프트에 없습니다");
   assert(prompt.includes("직접 가서 볼 수 있나"), "독자 기획 예시가 프롬프트에 없습니다");
   assert(prompt.includes("TYPE:") && prompt.includes("Q5:") && prompt.includes("ACTION:"), "출력 형식 지시가 빠졌습니다");
