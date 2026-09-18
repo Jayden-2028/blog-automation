@@ -1,5 +1,5 @@
 // generateArticleVariant 테스트. 실제 claude -p 호출 없이 generate를 주입한다.
-import { generateArticleVariant, parseVariantOutput } from "./generateArticleVariant.js";
+import { generateArticleVariant, parseVariantOutput, countImageMarkers } from "./generateArticleVariant.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -12,6 +12,8 @@ const SAMPLE_OUTPUT = `
 2026년 근로장려금 지급일과 신청 방법을 한눈에 정리했습니다.
 ### SLUG
 Geunro-Jangryeogeum 2026 Payment!! Guide
+### SHORT_NAME
+근로장려금
 ### TAGS
 근로장려금, 지급일, 2026, 신청방법, 국세청, 홈택스, 정기신청, 반기신청, 소득기준, 지급액, 모의계산
 ### BODY
@@ -113,3 +115,46 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
+// --- 마커 개수 보존(2026-09-18) - 배리에이션이 마커를 바꾸면 한 번 다시 시킨다 ------------------
+{
+  const base = "문단 하나.\n\n[IMAGE: 첫 자리 — AI 생성]\n\n문단 둘.\n\n[IMAGE: 둘째 자리 — 웹 검색]";
+  const withMarkers = (n: number) =>
+    SAMPLE_OUTPUT.replace("**근로장려금 지급일은 언제인가요?**", Array.from({ length: n }, (_, i) => `[IMAGE: 자리${i + 1} — AI 생성]`).join("\n\n") + "\n\n**근로장려금 지급일은 언제인가요?**");
+
+  // 1차에서 1개만 남기면 재시도가 돌고, 2차에서 2개로 맞추면 성공한다.
+  let calls = 0;
+  const ok = await generateArticleVariant({
+    category: "living", baseTitle: "제목", baseBody: base,
+    generate: async () => {
+      calls += 1;
+      return { ok: true as const, output: withMarkers(calls === 1 ? 1 : 2), durationMs: 1 };
+    },
+  });
+  assert(calls === 2, `마커가 다르면 한 번 다시 시켜야 한다 (호출 ${calls})`);
+  assert(ok.status === "success" && countImageMarkers(ok.variant.body) === 2, "재시도 결과가 채택돼야 한다");
+
+  // 재시도도 틀리면 그대로 진행한다 - Blogspot 원고는 필수라 여기서 멈추면 원고가 통째로 없어진다.
+  let calls2 = 0;
+  const gaveUp = await generateArticleVariant({
+    category: "living", baseTitle: "제목", baseBody: base,
+    generate: async () => {
+      calls2 += 1;
+      return { ok: true as const, output: withMarkers(1), durationMs: 1 };
+    },
+  });
+  assert(calls2 === 2 && gaveUp.status === "success", "재시도 실패해도 배리에이션은 살린다");
+
+  // 마커가 애초에 같으면 재시도하지 않는다.
+  let calls3 = 0;
+  await generateArticleVariant({
+    category: "living", baseTitle: "제목", baseBody: base,
+    generate: async () => {
+      calls3 += 1;
+      return { ok: true as const, output: withMarkers(2), durationMs: 1 };
+    },
+  });
+  assert(calls3 === 1, `개수가 맞으면 한 번만 호출해야 한다 (${calls3})`);
+  console.log("✅ 마커 개수 보존 - 다르면 1회 재시도, 실패해도 원고는 살림");
+}
+

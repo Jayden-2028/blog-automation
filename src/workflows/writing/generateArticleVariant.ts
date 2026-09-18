@@ -133,6 +133,11 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `  Blogger는 검색 설명을 API로 못 받아서(2026-09-16 확인) 사람이 넣기 전까지 meta description이`,
     `  비고, 그때 검색엔진은 본문 앞부분으로 스니펫을 만든다. 첫 문단이 곧 설명이 되도록 쓴다.`,
     slugRule,
+    // SHORT_NAME은 §규칙 절에만 있고 출력 템플릿에서 빠져 있었다(2026-09-18 발견). 모델이 규칙
+    // 순서를 보고 TAGS 앞에 넣어줘서 지금까지 통했지만, 뒤에 넣으면 태그에 섞이고 아예 빠뜨리면
+    // missingMarkers 검사에 걸려 배리에이션이 통째로 실패한다. 순서를 템플릿에 못박는다.
+    `${M.shortName}`,
+    `(짧은 한글 키워드 1줄 - 위 규칙 참고)`,
     `${M.tags}`,
     `(쉼표로 구분한 태그 정확히 10개 이상)`,
     `${M.body}`,
@@ -213,6 +218,22 @@ function stripTrailingMeta(body: string): string {
   return out.trim();
 }
 
+/** 본문의 `[IMAGE: ]` 마커 개수. 기준 원고와 배리에이션이 같아야 프롬프트 짝이 맞는다. */
+export function countImageMarkers(body: string): number {
+  return body.split("\n").filter((line) => /^\[IMAGE:\s*[\s\S]*?\]$/.test(line.trim())).length;
+}
+
+/** 마커 개수가 틀렸을 때 그 사실을 알려주고 다시 시키는 프롬프트. 한 번만 쓴다. */
+function buildMarkerFixPrompt(input: GenerateArticleVariantInput, expected: number, got: number): string {
+  return [
+    `방금 쓴 배리에이션의 \`[IMAGE: ]\` 마커가 ${got}개인데, 기준 원고는 ${expected}개다.`,
+    "이미지 제작 프롬프트가 마커 등장 순서로 짝지어지므로 **개수가 정확히 같아야 한다.**",
+    `마커를 정확히 ${expected}개로 맞춰 처음부터 다시 쓴다. 같은 출력 마커 형식을 그대로 지킨다.`,
+    "",
+    buildPrompt(input),
+  ].join("\n");
+}
+
 export async function generateArticleVariant(
   input: GenerateArticleVariantInput
 ): Promise<GenerateArticleVariantResult> {
@@ -250,6 +271,30 @@ export async function generateArticleVariant(
   const variant = parseVariantOutput(result.output, input.baseTitle);
   if (!variant.body || variant.body.length < 300) {
     return { status: "failed", error: `배리에이션 본문이 너무 짧습니다 (${variant.body.length}자)` };
+  }
+
+  // **마커 개수 보존 검증**(2026-09-18). 이미지 프롬프트(job.metadata.imagePrompts)는 기준 원고에서
+  // 뽑은 것이라, 배리에이션이 마커를 하나라도 더하거나 빼면 짝이 어긋난다. 그러면
+  // parseManuscriptBlocks가 안전을 위해 **모든 프롬프트를 null로 떨어뜨리고**, 그 원고의 AI 생성
+  // 자리가 전부 "프롬프트 없음"으로 비어 버린다.
+  //
+  // 실측(2026-09-18): 오늘 13건 중 2건이 이 경우였다 - 카톡 스타벅스(기준 5 → 배리에이션 6),
+  // 블랙핑크 로제(기준 6 → 배리에이션 5). 각각 AI 자리 3개·2개가 통째로 비었다.
+  //
+  // 한 번만 다시 시킨다. 실패해도 배리에이션 자체는 살린다 - Blogspot 원고는 필수라 여기서
+  // 중단하면 원고가 통째로 없어지는데, 그건 이미지 몇 장 비는 것보다 훨씬 큰 손해다.
+  const baseMarkers = countImageMarkers(input.baseBody);
+  if (baseMarkers > 0 && countImageMarkers(variant.body) !== baseMarkers) {
+    const retry = await generate(buildMarkerFixPrompt(input, baseMarkers, countImageMarkers(variant.body)));
+    if (retry.ok) {
+      const retried = parseVariantOutput(retry.output, input.baseTitle);
+      if (retried.body.length >= 300 && countImageMarkers(retried.body) === baseMarkers) {
+        return { status: "success", variant: retried, durationMs: Date.now() - startedAt };
+      }
+    }
+    console.warn(
+      `⚠️ [variant] 이미지 마커 개수가 기준 원고와 다릅니다(기준 ${baseMarkers} / 배리에이션 ${countImageMarkers(variant.body)}) - 재시도도 실패했습니다. 이 원고는 AI 생성 이미지가 비게 됩니다.`
+    );
   }
 
   return { status: "success", variant, durationMs: Date.now() - startedAt };

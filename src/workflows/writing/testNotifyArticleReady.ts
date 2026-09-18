@@ -92,6 +92,7 @@ function makeResult(overrides: Partial<RunArticleJobSuccess> = {}): RunArticleJo
     sources: [makeSource("official"), makeSource("official"), makeSource("community")],
     briefCoverage: null,
     unansweredQuestions: [],
+    promptPairing: null,
     isMedical: false,
     requiresMedicalReview: false,
     durationMs: 185000,
@@ -251,3 +252,15 @@ try {
   if (without.text.includes("독자 질문")) throw new Error("❌ 브리프 없는 원고에 커버리지 줄이 붙었습니다");
   console.log("✅ 브리프 커버리지 줄 - 있을 때만, 미답 번호 표시");
 }
+
+// --- 마커/프롬프트 짝 불일치 경고(2026-09-18) - 승인 전에 보여야 한다 --------------------------
+{
+  const mismatched = buildHeaderMessage(makeResult({ promptPairing: { markers: 5, prompts: 2 } }));
+  if (!mismatched.text.includes("이미지 마커 5개 / 프롬프트 2개")) {
+    throw new Error(`❌ 짝 불일치 경고가 없습니다: ${mismatched.text}`);
+  }
+  const fine = buildHeaderMessage(makeResult());
+  if (fine.text.includes("짝이 안 맞아")) throw new Error("❌ 정상 원고에 경고가 붙었습니다");
+  console.log("✅ 마커/프롬프트 짝 불일치 - 불일치일 때만 경고");
+}
+

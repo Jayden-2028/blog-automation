@@ -26,12 +26,17 @@ export type ManuscriptImageConfig = {
    * 호출 수가 2배라 비교 기간에만 켜 둔다.
    */
   abCompare: boolean;
-  /** 원고 1건이 만들 수 있는 이미지 상한(프롬프트가 아무리 많아도 여기서 자른다). */
+  /**
+   * 원고 1건이 만들 수 있는 이미지 상한(프롬프트가 아무리 많아도 여기서 자른다).
+   * 6 → 8(2026-09-18). writer.md §8은 "최소 5쌍"만 정하고 상한이 없어 마커 7개짜리 원고가 나오는데,
+   * 상한 6에 걸려 **마지막 한 자리가 조용히 비었다**(실측: 정부지원금 원고, 마커 7 중 6장만 생성).
+   * 비용 상한이라는 취지는 유지하되 실제 마커 수(5~7)를 덮도록 한 칸 올린다.
+   */
   maxPerArticle: number;
 };
 
 export const MANUSCRIPT_IMAGE_CONFIG: ManuscriptImageConfig = {
   enabled: parseBooleanEnv(process.env.MANUSCRIPT_IMAGE_GENERATION, false),
   abCompare: parseBooleanEnv(process.env.IMAGE_AB_COMPARE, true),
-  maxPerArticle: parseIntEnv(process.env.IMAGE_MAX_PER_ARTICLE, 6),
+  maxPerArticle: parseIntEnv(process.env.IMAGE_MAX_PER_ARTICLE, 8),
 };

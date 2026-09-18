@@ -72,6 +72,16 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
     lines.push("", `🎯 독자 질문 ${answered}/${total} 답함${escapeTelegramHtml(missing)}`);
   }
 
+  // 이미지 마커/프롬프트 짝 불일치(2026-09-18). 이 상태로 승인하면 AI 생성 이미지가 **전부** 빈다.
+  // 원고 자체는 멀쩡하므로 차단하지 않고, "수정 필요"로 돌릴지 사용자가 정하게 한다.
+  if (result.promptPairing) {
+    const { markers, prompts } = result.promptPairing;
+    lines.push(
+      "",
+      `⚠️ 이미지 마커 ${markers}개 / 프롬프트 ${prompts}개 — 짝이 안 맞아 AI 생성 이미지가 전부 비게 됩니다`
+    );
+  }
+
   // 검수 결과(SPRINT_3_DESIGN.md 6절) - 차단하지 않고 참고로만 보여준다. escapeTelegramHtml을
   // 거는 이유는 검수 메시지 안에 근거 원문 발췌("특별석은 12만 원입니다" 등)가 그대로 들어가
   // "<"/">"/"&"가 섞일 수 있기 때문이다.

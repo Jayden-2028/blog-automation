@@ -44,6 +44,7 @@ import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
+import { countImageMarkers } from "./generateArticleVariant.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
@@ -548,6 +549,11 @@ export type RunWritingStageResult =
        */
       briefCoverage: { answered: number; total: number } | null;
       unansweredQuestions: string[];
+      /**
+       * 이미지 마커 수와 프롬프트 수가 다를 때만 채운다(2026-09-18). 다르면 그 원고의 AI 생성
+       * 자리가 **전부** 빈다 - 승인 전에 알 수 있도록 리뷰 카드에 띄운다.
+       */
+      promptPairing: { markers: number; prompts: number } | null;
     }
   | { status: "skipped"; reason: string }
   | { status: "failed"; error: string };
@@ -664,6 +670,22 @@ async function runWritingStageInner(
   }
   const parsed = parseDraftFile(draftText);
   const title = parsed.title ?? job.keyword;
+
+  // 마커 ↔ 프롬프트 짝 검사(2026-09-18). 개수가 다르면 parseManuscriptBlocks가 안전을 위해
+  // **모든 프롬프트를 null로 떨어뜨려** 그 원고의 AI 생성 자리가 전부 빈다. 지금까지는 그 사실이
+  // 이미지 단계에 가서야 "프롬프트 없음"으로 드러났는데, 그때는 이미 승인이 끝난 뒤였다.
+  // 실측(2026-09-18): 13건 중 2건이 writer가 [IMAGE PROMPT:] 줄을 빠뜨린 경우였다
+  // (이청아 마커 5·프롬프트 2, 청년미래적금 마커 6·프롬프트 1).
+  const markerCount = countImageMarkers(parsed.body);
+  const promptPairing =
+    markerCount === parsed.imagePrompts.length
+      ? null
+      : { markers: markerCount, prompts: parsed.imagePrompts.length };
+  if (promptPairing) {
+    console.warn(
+      `⚠️ [writing] 이미지 마커 ${promptPairing.markers}개 / 프롬프트 ${promptPairing.prompts}개 - 짝이 맞지 않아 AI 생성 자리가 전부 빕니다.`
+    );
+  }
 
   // 이미지: 2026-09-01부터 API 자동생성 기본 보류(CLAUDE.md 운영 규칙). 보류면 writer가 남긴
   // `[IMAGE: 설명]` 마커를 본문에 그대로 두고(passthrough) 사용자가 직접 삽입한다.
@@ -805,6 +827,7 @@ async function runWritingStageInner(
     },
     briefCoverage: parsed.briefCoverage,
     unansweredQuestions: parsed.unansweredQuestions,
+    promptPairing,
   };
 }
 
