@@ -9,7 +9,7 @@
 name: community-keyword
 
 # 2026-09-16: schedule: 제거, Cloudflare Worker Cron Trigger가 대신 깨운다(social-issue-keyword.yml
-# 상단 메모와 같은 이유 - 이 워크플로우는 04:07 UTC 근처 정시도 아닌데 매일 5시간 넘게 지연됐다).
+# 상단 메모와 같은 이유 - 정시가 아닌 시각인데도 매일 5시간 넘게 지연됐다). KST 18:00(2026-09-18).
 on:
   workflow_dispatch: {}
 

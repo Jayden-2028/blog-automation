@@ -90,7 +90,10 @@ async function answerCallbackQuery(env: Env, callbackQueryId: string, text = CAL
 }
 
 /**
- * cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 09:00/11:00/13:00에 맞춘 것이다.
+ * cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 08:00/12:00/18:00에 맞춘 것이다
+ * (2026-09-18 사용자 결정 - 하루에 고르게 펴서 시간대별로 다른 성격의 키워드를 본다).
+ * 순서 의존: 연예 잡은 social-issue가 채운 trend_candidates를 읽지만, "오늘 날짜"가 아니라
+ * latestAvailableTrendDate를 쓰므로 UTC 날짜가 갈려도(08:00 KST = 전날 23:00 UTC) 문제없다.
  *
  * 2026-09-16 간격 확대(사용자 요청): 원래 09:00/09:10/13:00로 10분만 띄웠는데, 그 좁은 간격이
  * heavy-pipeline 전체 부하를 짧은 시간에 몰아 사용자가 같은 목록에서 Go를 연달아 누르는 상황과
@@ -99,9 +102,9 @@ async function answerCallbackQuery(env: Env, callbackQueryId: string, text = CAL
  * 그건 dispatchWorkflow.ts의 DB 큐(2026-09-16, 아래 참고)가 담당한다.
  */
 const SCHEDULED_WORKFLOWS: Record<string, string> = {
-  "0 0 * * *": "social-issue-keyword.yml", // 09:00 KST
-  "0 2 * * *": "entertainment-keyword.yml", // 11:00 KST - social-issue가 채운 trend_candidates를 읽음(당일자라 간격은 무관)
-  "0 4 * * *": "community-keyword.yml", // 13:00 KST
+  "0 23 * * *": "social-issue-keyword.yml", // 08:00 KST (UTC로는 전날 23:00)
+  "0 3 * * *": "entertainment-keyword.yml", // 12:00 KST - social-issue가 채운 trend_candidates를 읽는다
+  "0 9 * * *": "community-keyword.yml", // 18:00 KST
 };
 
 async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {

@@ -1,6 +1,6 @@
 # 클라우드 이전 Phase 2 - 연예·OTT 키워드 수집(블로그스팟용). social-issue-keyword.yml이 같은 날
 # 먼저 실행되어 trend_candidates를 채워둔 뒤에 실행해야 한다(entertainmentKeywordJob.ts 상단 주석
-# 참고 - 재수집 없이 오늘자 candidates를 읽기만 함). 로컬 launchd(09:00/09:10 순서)와 동일한 이유.
+# 참고 - 재수집 없이 candidates를 읽기만 함). KST 12:00에 Worker cron이 깨운다(2026-09-18).
 #
 # 지금은 workflow_dispatch(수동)만 - social-issue-keyword.yml과 같은 이유로 schedule은 아직 안 넣음.
 #
@@ -11,8 +11,8 @@
 name: entertainment-keyword
 
 # 2026-09-16: schedule: 제거, Cloudflare Worker Cron Trigger가 대신 깨운다(social-issue-keyword.yml
-# 상단 메모와 같은 이유). social-issue-keyword.yml(00:00 UTC)의 10분 뒤(00:10 UTC)에 돌도록
-# Worker 쪽에 등록돼 있다 - 오늘자 trend_candidates를 읽어야 하는 순서 의존은 그대로 유지된다.
+# 상단 메모와 같은 이유). social-issue-keyword.yml(KST 08:00)보다 4시간 뒤인 KST 12:00에 돌도록
+# Worker 쪽에 등록돼 있다 - social-issue가 채운 trend_candidates를 읽는 순서 의존이 유지된다.
 on:
   workflow_dispatch: {}
 

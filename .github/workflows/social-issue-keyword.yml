@@ -1,4 +1,4 @@
-# 클라우드 이전 Phase 2 - 사회이슈 키워드 수집(티스토리용, 로컬 09:00 job과 동일 로직).
+# 클라우드 이전 Phase 2 - 사회·경제 이슈 키워드 수집. KST 08:00에 Worker cron이 깨운다(2026-09-18).
 # docs/ai-handoff/CLOUD_MIGRATION.md 참고. 로컬 launchd(com.wooahpapa.blog-automation.
 # social-issue-keyword.plist)와 같은 npm 스크립트를 그대로 실행한다 - 로직 이원화 없음.
 #

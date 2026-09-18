@@ -14,7 +14,12 @@ GITHUB_REPO = "blog-automation"
 # 쓴다 - 없어도 릴레이 자체는 동작하고 토스트만 생략된다(src/index.ts 참고).
 
 # 2026-09-16: 키워드 수집 3종을 여기서 깨운다(src/index.ts의 scheduled() 핸들러 + 상단 주석 참고 -
-# GitHub Actions 네이티브 schedule: 트리거가 매일 4~5시간씩 지연되던 문제의 대체). 값은 KST
-# 09:00/11:00/13:00을 UTC로 바꾼 것 - src/index.ts의 SCHEDULED_WORKFLOWS와 반드시 같이 바꿀 것.
+# GitHub Actions 네이티브 schedule: 트리거가 매일 4~5시간씩 지연되던 문제의 대체).
+# 2026-09-18 사용자 결정으로 하루에 고르게 폈다: 사회·경제 08:00 / 연예·OTT 12:00 / 커뮤니티 18:00(KST).
+# 아래 값은 그것을 UTC로 바꾼 것이다(KST = UTC+9). **08:00 KST는 UTC로 전날 23:00**이라 날짜가 하루
+# 밀려 보이는데 정상이다 - 연예 잡이 읽는 trend_candidates는 "오늘 날짜"가 아니라
+# latestAvailableTrendDate(가장 최근 데이터가 있는 날짜)를 쓰므로 UTC 날짜 경계와 무관하다
+# (buildDailyQueryPool.ts 주석 참고).
+# src/index.ts의 SCHEDULED_WORKFLOWS와 반드시 같이 바꿀 것.
 [triggers]
-crons = ["0 0 * * *", "0 2 * * *", "0 4 * * *"]
+crons = ["0 23 * * *", "0 3 * * *", "0 9 * * *"]
