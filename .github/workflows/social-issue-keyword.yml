@@ -58,5 +58,8 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 경쟁도(블로그 포화도)를 점수에 반영할지. Phase B 게이트(config/keywordCompetition.ts).
+          # repo variable로 빼둬서 코드 변경 없이 되돌릴 수 있다 - 6-factor scoring이 바뀌는 값이다.
+          BLOG_COMPETITION_APPLY_TO_SCORE: ${{ vars.BLOG_COMPETITION_APPLY_TO_SCORE }}
           CREATOR_ADVISOR_ENABLED: "false"
         run: npm run job:social-issue-keyword

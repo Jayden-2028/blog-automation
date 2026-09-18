@@ -1,7 +1,7 @@
 // formatNotificationMessage 테스트. DB 없이 payload를 직접 구성해 메시지 조립만 검증한다.
 // 2026-09-04: 원문(headline)·항목별 배점표(scoreBreakdown)를 메시지에서 뺐다 - 항목은 이제
 // 제목(rank+keyword)과 seedQuery/category 한 줄만 보여준다.
-import { formatNotificationMessage } from "./formatNotificationMessage.js";
+import { formatNotificationMessage, thinSourceWarning } from "./formatNotificationMessage.js";
 import type { KeywordNotificationPayload, NotificationKeywordItem } from "../../types/keywordNotification.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -18,10 +18,11 @@ function item(overrides: Partial<NotificationKeywordItem> = {}): NotificationKey
     totalScore: 63,
     scoreBreakdown: {
       trendMomentum: 30,
-      newsVelocity: 0,
+      // 자료 부족 경고(thinSourceWarning)가 끼어들지 않도록 공용 fixture는 정상 키워드로 둔다.
+      newsVelocity: 12,
       contentDemand: 10,
       freshness: 15,
-      crossSourceSignal: 0,
+      crossSourceSignal: 7,
       clickPotential: 8,
       total: 63,
     },
@@ -94,3 +95,18 @@ function main(): void {
 }
 
 main();
+
+// --- 자료 부족 위험 표시(2026-09-18) - 뉴스 0 + 교차출처 0일 때만 -------------------------------
+{
+  const bd = (news: number, cross: number) => ({
+    trendMomentum: 5, newsVelocity: news, contentDemand: 9, freshness: 13,
+    crossSourceSignal: cross, clickPotential: 4, total: 31,
+  });
+  // 실측값 그대로: 넷플릭스 인형은 news 0 / cross 0이었다.
+  if (thinSourceWarning(bd(0, 0)) === null) throw new Error("❌ 단일 출처 키워드에 경고가 없다");
+  if (thinSourceWarning(bd(7, 0)) !== null) throw new Error("❌ 뉴스가 있으면 경고하면 안 된다");
+  if (thinSourceWarning(bd(0, 10)) !== null) throw new Error("❌ 교차 출처가 있으면 경고하면 안 된다");
+  if (thinSourceWarning(null) !== null) throw new Error("❌ 내역이 없으면 경고하지 않는다");
+  console.log("✅ 자료 부족 위험 - 뉴스 0 + 교차출처 0에서만 표시");
+}
+
