@@ -107,9 +107,15 @@ export async function generateManuscriptImages(
   // index는 **원래 마커 순서**(1-based)를 유지한다 - 뷰어(renderManuscriptPage)가 이 번호로 본문 블록과
   // 이미지를 짝지으므로, 건너뛴 자리만큼 번호를 당기면 이미지가 엉뚱한 문단에 붙는다.
   const onlyIndexes = options.onlyIndexes ? new Set(options.onlyIndexes) : null;
+  // **화이트리스트로 고른다**(2026-09-18). 전에는 `!== "search"`라 `표 생성` 자리까지 AI 생성
+  // 대상이었다. prepareManuscript가 AI 생성을 먼저 돌리고 표 렌더를 나중에 돌리므로(이미 채워진
+  // 자리는 건너뛴다) **AI가 표 자리를 선점하면 표는 영영 안 그려진다.**
+  // 실측(2026-09-18): 정부지원금 [3][4][6]과 노크노크 [6]이 전부 그렇게 AI 사진으로 채워졌다 -
+  // 캡션은 "표 생성"인데 그림은 폰 보는 남자였다(사용자 반려).
+  // `unknown`은 획득 방식 접미사가 없던 옛 원고라 종전대로 AI로 둔다.
   const aiSlots = imageBlocks
     .map((block, i) => ({ block, index: i + 1 }))
-    .filter(({ block }) => block.acquisition !== "search")
+    .filter(({ block }) => block.acquisition === "ai" || block.acquisition === "unknown")
     .filter(({ index }) => !onlyIndexes || onlyIndexes.has(index));
 
   // 웹 수집이 실패해 AI로 돌려받은 자리를 같은 대상 목록에 합친다. 본문 마커의 acquisition은

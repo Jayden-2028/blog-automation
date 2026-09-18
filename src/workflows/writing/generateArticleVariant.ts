@@ -14,6 +14,7 @@
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { parseImageAcquisition } from "../manuscripts/parseManuscriptBlocks.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
 // 배리에이션도 writer.md(500줄+)를 읽고 content-blog·korean-humanize를 순서대로 돌린다 -
@@ -223,12 +224,33 @@ export function countImageMarkers(body: string): number {
   return body.split("\n").filter((line) => /^\[IMAGE:\s*[\s\S]*?\]$/.test(line.trim())).length;
 }
 
-/** 마커 개수가 틀렸을 때 그 사실을 알려주고 다시 시키는 프롬프트. 한 번만 쓴다. */
-function buildMarkerFixPrompt(input: GenerateArticleVariantInput, expected: number, got: number): string {
+/**
+ * 마커의 **획득 방식 순열**("atatata" 꼴). 개수만 봐서는 부족하다는 것이 실측으로 드러났다
+ * (2026-09-18): 정부지원금은 기준 `atatata` → 배리에이션 `aattata`로 **개수는 7로 같은데 순서가
+ * 달랐고**, 노크노크는 기준 `saasss` → 배리에이션 `ssasst`로 없던 `표 생성`까지 생겼다.
+ * 프롬프트는 등장 순서로 짝지으므로 순서가 밀리면 AI 자리에 "표로 렌더"가, 표 자리에 사진
+ * 프롬프트가 들어간다 - 사용자가 본 "내용과 상관없는 표"가 전부 이것이었다.
+ */
+export function imageAcquisitionSequence(body: string): string {
+  return body
+    .split("\n")
+    .map((line) => line.trim().match(/^\[IMAGE:\s*([\s\S]*?)\]$/))
+    .filter((matched): matched is RegExpMatchArray => matched !== null)
+    .map((matched) => parseImageAcquisition(matched[1].trim())[0])
+    .join("");
+}
+
+/** 마커 순열이 틀렸을 때 그 사실을 알려주고 다시 시키는 프롬프트. 한 번만 쓴다. */
+function buildMarkerFixPrompt(input: GenerateArticleVariantInput, expected: string, got: string): string {
+  const spell = (seq: string) =>
+    [...seq].map((c) => (c === "a" ? "AI 생성" : c === "t" ? "표 생성" : c === "s" ? "웹 검색" : "미지정")).join(" → ");
   return [
-    `방금 쓴 배리에이션의 \`[IMAGE: ]\` 마커가 ${got}개인데, 기준 원고는 ${expected}개다.`,
-    "이미지 제작 프롬프트가 마커 등장 순서로 짝지어지므로 **개수가 정확히 같아야 한다.**",
-    `마커를 정확히 ${expected}개로 맞춰 처음부터 다시 쓴다. 같은 출력 마커 형식을 그대로 지킨다.`,
+    "방금 쓴 배리에이션의 `[IMAGE: ]` 마커가 기준 원고와 다르다.",
+    `  기준 원고(${expected.length}개): ${spell(expected)}`,
+    `  네가 쓴 것(${got.length}개): ${spell(got)}`,
+    "이미지 제작 프롬프트가 마커 **등장 순서**로 짝지어지므로, 개수만이 아니라 **순서와 획득 방식**이",
+    "정확히 같아야 한다. 하나라도 밀리면 AI 자리에 표 프롬프트가, 표 자리에 사진 프롬프트가 들어간다.",
+    "기준 원고의 마커를 순서·획득 방식 그대로 옮겨 처음부터 다시 쓴다. 출력 마커 형식도 그대로 지킨다.",
     "",
     buildPrompt(input),
   ].join("\n");
@@ -283,17 +305,17 @@ export async function generateArticleVariant(
   //
   // 한 번만 다시 시킨다. 실패해도 배리에이션 자체는 살린다 - Blogspot 원고는 필수라 여기서
   // 중단하면 원고가 통째로 없어지는데, 그건 이미지 몇 장 비는 것보다 훨씬 큰 손해다.
-  const baseMarkers = countImageMarkers(input.baseBody);
-  if (baseMarkers > 0 && countImageMarkers(variant.body) !== baseMarkers) {
-    const retry = await generate(buildMarkerFixPrompt(input, baseMarkers, countImageMarkers(variant.body)));
+  const baseSeq = imageAcquisitionSequence(input.baseBody);
+  if (baseSeq.length > 0 && imageAcquisitionSequence(variant.body) !== baseSeq) {
+    const retry = await generate(buildMarkerFixPrompt(input, baseSeq, imageAcquisitionSequence(variant.body)));
     if (retry.ok) {
       const retried = parseVariantOutput(retry.output, input.baseTitle);
-      if (retried.body.length >= 300 && countImageMarkers(retried.body) === baseMarkers) {
+      if (retried.body.length >= 300 && imageAcquisitionSequence(retried.body) === baseSeq) {
         return { status: "success", variant: retried, durationMs: Date.now() - startedAt };
       }
     }
     console.warn(
-      `⚠️ [variant] 이미지 마커 개수가 기준 원고와 다릅니다(기준 ${baseMarkers} / 배리에이션 ${countImageMarkers(variant.body)}) - 재시도도 실패했습니다. 이 원고는 AI 생성 이미지가 비게 됩니다.`
+      `⚠️ [variant] 이미지 마커가 기준 원고와 다릅니다(기준 ${baseSeq} / 배리에이션 ${imageAcquisitionSequence(variant.body)}) - 재시도도 실패했습니다. 프롬프트 짝이 밀려 이미지가 엉뚱하게 붙을 수 있습니다.`
     );
   }
 

@@ -422,3 +422,34 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+// --- 비전 검증 판정 기준(2026-09-18) - alt가 아니라 마커 설명으로 본다 --------------------------
+{
+  const dir2 = await mkdtemp(resolve(tmpdir(), "collect-verify-"));
+  try {
+    let seen: { markerDescription: string; alt: string } | null = null;
+    await collectWebImages(
+      { keyword: "k", dir: dir2, slots: [{ index: 1, description: "배우 이청아의 최근 공식 프로필 사진", query: null, context: "문단" }] },
+      {
+        searchImages: false,
+        cropTall: false,
+        runCodex: codexReply([slotReply({ alt: "선글라스를 쓰고 거리에서 찍힌 모습" })]),
+        fetchImage: okFetch,
+        verifyImage: async (input) => {
+          seen = { markerDescription: input.markerDescription, alt: input.alt };
+          return { ok: true, reason: "" };
+        },
+      }
+    );
+    if (!seen) throw new Error("❌ 검증이 호출되지 않았다");
+    const got = seen as { markerDescription: string; alt: string };
+    if (got.markerDescription !== "배우 이청아의 최근 공식 프로필 사진") {
+      throw new Error(`❌ 판정 기준은 마커 설명이어야 한다 (${got.markerDescription})`);
+    }
+    if (got.alt !== "선글라스를 쓰고 거리에서 찍힌 모습") throw new Error("❌ 수집기 추측(alt)도 참고로 전달돼야 한다");
+    console.log("✅ 비전 검증 - 마커 설명이 판정 기준, 수집기 alt는 참고");
+  } finally {
+    await rm(dir2, { recursive: true, force: true });
+  }
+}
+

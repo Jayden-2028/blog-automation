@@ -1,5 +1,5 @@
 // generateArticleVariant 테스트. 실제 claude -p 호출 없이 generate를 주입한다.
-import { generateArticleVariant, parseVariantOutput, countImageMarkers } from "./generateArticleVariant.js";
+import { generateArticleVariant, parseVariantOutput, imageAcquisitionSequence } from "./generateArticleVariant.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -116,23 +116,28 @@ main().catch((e) => {
   process.exit(1);
 });
 
-// --- 마커 개수 보존(2026-09-18) - 배리에이션이 마커를 바꾸면 한 번 다시 시킨다 ------------------
+// --- 마커 순열 보존(2026-09-18) - 개수뿐 아니라 획득 방식 순서까지 같아야 한다 ----------------
 {
-  const base = "문단 하나.\n\n[IMAGE: 첫 자리 — AI 생성]\n\n문단 둘.\n\n[IMAGE: 둘째 자리 — 웹 검색]";
-  const withMarkers = (n: number) =>
-    SAMPLE_OUTPUT.replace("**근로장려금 지급일은 언제인가요?**", Array.from({ length: n }, (_, i) => `[IMAGE: 자리${i + 1} — AI 생성]`).join("\n\n") + "\n\n**근로장려금 지급일은 언제인가요?**");
+  // 기준: AI → 표 (순열 "at")
+  const base = "문단 하나.\n\n[IMAGE: 첫 자리 — AI 생성]\n\n문단 둘.\n\n[IMAGE: 둘째 자리 — 표 생성]";
+  const withSeq = (markers: string) =>
+    SAMPLE_OUTPUT.replace("**근로장려금 지급일은 언제인가요?**", markers + "\n\n**근로장려금 지급일은 언제인가요?**");
+  const AT = "[IMAGE: 가 — AI 생성]\n\n[IMAGE: 나 — 표 생성]";
+  const TA = "[IMAGE: 가 — 표 생성]\n\n[IMAGE: 나 — AI 생성]"; // 개수는 같고 순서만 뒤집힘
 
-  // 1차에서 1개만 남기면 재시도가 돌고, 2차에서 2개로 맞추면 성공한다.
+  assert(imageAcquisitionSequence(base) === "at", `순열 추출 실패 (${imageAcquisitionSequence(base)})`);
+
+  // 개수가 같아도 순서가 다르면 다시 시킨다 - 예전 개수 검증은 이걸 통과시켰다.
   let calls = 0;
   const ok = await generateArticleVariant({
     category: "living", baseTitle: "제목", baseBody: base,
     generate: async () => {
       calls += 1;
-      return { ok: true as const, output: withMarkers(calls === 1 ? 1 : 2), durationMs: 1 };
+      return { ok: true as const, output: withSeq(calls === 1 ? TA : AT), durationMs: 1 };
     },
   });
-  assert(calls === 2, `마커가 다르면 한 번 다시 시켜야 한다 (호출 ${calls})`);
-  assert(ok.status === "success" && countImageMarkers(ok.variant.body) === 2, "재시도 결과가 채택돼야 한다");
+  assert(calls === 2, `순서가 뒤집히면 다시 시켜야 한다 (호출 ${calls})`);
+  assert(ok.status === "success" && imageAcquisitionSequence(ok.variant.body) === "at", "재시도 결과가 채택돼야 한다");
 
   // 재시도도 틀리면 그대로 진행한다 - Blogspot 원고는 필수라 여기서 멈추면 원고가 통째로 없어진다.
   let calls2 = 0;
@@ -140,21 +145,20 @@ main().catch((e) => {
     category: "living", baseTitle: "제목", baseBody: base,
     generate: async () => {
       calls2 += 1;
-      return { ok: true as const, output: withMarkers(1), durationMs: 1 };
+      return { ok: true as const, output: withSeq(TA), durationMs: 1 };
     },
   });
   assert(calls2 === 2 && gaveUp.status === "success", "재시도 실패해도 배리에이션은 살린다");
 
-  // 마커가 애초에 같으면 재시도하지 않는다.
+  // 순열이 같으면 재시도하지 않는다.
   let calls3 = 0;
   await generateArticleVariant({
     category: "living", baseTitle: "제목", baseBody: base,
     generate: async () => {
       calls3 += 1;
-      return { ok: true as const, output: withMarkers(2), durationMs: 1 };
+      return { ok: true as const, output: withSeq(AT), durationMs: 1 };
     },
   });
-  assert(calls3 === 1, `개수가 맞으면 한 번만 호출해야 한다 (${calls3})`);
-  console.log("✅ 마커 개수 보존 - 다르면 1회 재시도, 실패해도 원고는 살림");
+  assert(calls3 === 1, `순열이 맞으면 한 번만 호출해야 한다 (${calls3})`);
+  console.log("✅ 마커 순열 보존 - 개수 같아도 순서 다르면 1회 재시도, 실패해도 원고는 살림");
 }
-
