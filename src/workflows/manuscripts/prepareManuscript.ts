@@ -38,6 +38,7 @@ import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.j
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
+import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -117,6 +118,18 @@ export type PrepareManuscriptOptions = {
    * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
    */
   renderTableImages?:
+    | false
+    | ((input: {
+        jobId: string;
+        body: string;
+        imagePrompts: string[];
+        filledIndexes: number[];
+      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+  /**
+   * `페이지 캡처` 자리. 기본은 capturePagesForJob(리서처가 정한 URL을 Chromium으로 연다).
+   * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
+   */
+  capturePages?:
     | false
     | ((input: {
         jobId: string;
@@ -219,6 +232,7 @@ export async function prepareManuscript(
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const renderTableImages =
     options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
+  const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
   const makeNaverVariant =
@@ -310,6 +324,25 @@ export async function prepareManuscript(
         (a, b) => a.index - b.index
       );
       await mergeJobMetadata(job.id, { tableImagesReadyAt: now().toISOString(), images });
+    }
+  }
+
+  // `페이지 캡처` 자리(2026-09-18). 리서처가 열어본 URL을 그대로 연다 - 웹 검색으로는 못 찾고
+  // AI로도 못 만드는데 주소만 알면 되는 자리다(스타벅스 프로모션 페이지, OTT 시청 화면 등).
+  // 표 렌더와 웹 수집 **사이**에 둔다: 표보다 구체적이고, 웹 검색보다 확실하다.
+  if (capturePages && !job.metadata?.pageCapturesReadyAt) {
+    const outcome = await capturePages({
+      jobId: job.id,
+      body: content,
+      imagePrompts,
+      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+    });
+    imageFailures.push(...outcome.failures);
+    if (outcome.images.length > 0) {
+      images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
+        (a, b) => a.index - b.index
+      );
+      await mergeJobMetadata(job.id, { pageCapturesReadyAt: now().toISOString(), images });
     }
   }
 

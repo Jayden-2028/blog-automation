@@ -100,6 +100,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
@@ -115,6 +116,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(parenting.status === "success", "카테고리와 무관하게 Blogspot 원고를 만들어야 한다");
@@ -141,6 +143,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(r3.status === "success", "신규 생성 실패");
@@ -178,6 +181,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
@@ -197,6 +201,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(r5.status === "failed" && r5.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
@@ -216,6 +221,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
@@ -240,6 +246,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(r7.status === "success", "신규 생성(메타 저장 케이스) 실패");
@@ -265,6 +272,7 @@ async function main(): Promise<void> {
       generateImages: false,
       collectWebImages: false,
       renderTableImages: false,
+      capturePages: false,
       generateNaverVariant: false,
     }
   );
@@ -283,6 +291,7 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
   });
   assert(
@@ -304,6 +313,7 @@ async function main(): Promise<void> {
     },
     collectWebImages: false,
     renderTableImages: false,
+    capturePages: false,
     generateNaverVariant: false,
     generateImages: async (input) => {
       imageCalls += 1;
@@ -498,6 +508,7 @@ async function main(): Promise<void> {
         failures: [],
       }),
       renderTableImages: false,
+      capturePages: false,
       generateNaverVariant: false,
       collectWebImages: async (input) => {
         calls.push(input.filledIndexes);

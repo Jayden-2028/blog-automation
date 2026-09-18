@@ -23,6 +23,22 @@ import type { ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest
  * 산출물이 아니라 보관함에서 사람이 쓰는 자료다. 여기 두면 내보내기를 다시 돌려도(원고가 갱신돼도)
  * 이미 찾아 둔 이미지와 그 출처가 그대로 살아남고, image-metadata.md도 매번 완전한 상태로 다시 쓰인다.
  */
+/** 획득 방식 라벨. 2026-09-18에 `페이지 캡처`가 추가돼 넷이다. */
+function acquisitionLabel(acquisition: ImageAcquisition): string {
+  if (acquisition === "search") return "웹 검색 이미지";
+  if (acquisition === "capture") return "페이지 캡처";
+  if (acquisition === "table") return "표·인포그래픽";
+  if (acquisition === "ai") return "AI 생성 이미지";
+  return "미지정";
+}
+
+/** 둘째 줄이 무엇인지 - 방식마다 다르다(검색어 / URL / 생성 프롬프트). */
+function promptLabel(acquisition: ImageAcquisition): string {
+  if (acquisition === "search") return "검색어";
+  if (acquisition === "capture") return "캡처할 URL";
+  return "생성 프롬프트";
+}
+
 export type WebImageRecord = {
   index: number;
   fileName: string;
@@ -168,9 +184,9 @@ function metadataMarkdown(
       // 아직 파일이 없는 자리. 웹 검색 자리는 원래 여기 오는 게 정상이고(생성 대상이 아니다),
       // AI 생성 자리가 여기 오면 생성이 실패한 것이다 - 어느 쪽이든 사람이 채워야 할 자리다.
       lines.push(`## ${String(slot.index).padStart(2, "0")} — 채울 자리`, "");
-      lines.push(`- 유형: ${slot.acquisition === "search" ? "웹 검색 이미지(직접 채움)" : "미생성"}`);
+      lines.push(`- 유형: ${acquisitionLabel(slot.acquisition)}`);
       lines.push(`- 설명: ${slot.description}`);
-      if (slot.prompt) lines.push(`- ${slot.acquisition === "search" ? "검색어" : "생성 프롬프트"}: ${slot.prompt}`);
+      if (slot.prompt) lines.push(`- ${promptLabel(slot.acquisition)}: ${slot.prompt}`);
       lines.push("");
       continue;
     }
@@ -189,7 +205,7 @@ function metadataMarkdown(
         lines.push(`- 출처: ${web.sourcePage}`);
         lines.push(`- 원본: ${web.imageUrl}`);
       } else {
-        lines.push(`- 유형: ${slot.acquisition === "search" ? "웹 검색 이미지" : "AI 생성 이미지"}`);
+        lines.push(`- 유형: ${acquisitionLabel(slot.acquisition)}`);
         lines.push(`- ALT: ${slot.description}`);
         lines.push(`- 캡션: ${slot.description}`);
       }

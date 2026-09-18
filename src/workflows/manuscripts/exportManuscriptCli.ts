@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     console.log(`   이미지 ${result.downloaded}장 받음, ${result.skipped}장 건너뜀 · 채울 자리 ${unfilled.length}개`);
     for (const failure of result.failures) console.log(`   ⚠️ ${failure}`);
     for (const slot of unfilled) {
-      console.log(`   · [${slot.index}] ${slot.acquisition === "search" ? "웹 검색" : "미생성"} — ${slot.description}`);
+      console.log(`   · [${slot.index}] ${slot.acquisition === "search" ? "웹 검색" : slot.acquisition === "capture" ? "페이지 캡처" : slot.acquisition === "table" ? "표 생성" : "미생성"} — ${slot.description}`);
     }
     console.log("");
   }

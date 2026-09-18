@@ -37,7 +37,12 @@ import type { ManuscriptImage } from "./manuscriptManifest.js";
  *
  * `unknown`은 획득 방식을 안 적은 옛 원고다. 기존 동작(생성)을 유지한다.
  */
-export type ImageAcquisition = "ai" | "search" | "table" | "unknown";
+/**
+ * 이미지를 어떻게 구하는가. 2026-09-18에 `capture`가 추가돼 넷이 됐다(사용자 결정).
+ * 우선순위는 `웹 검색` > `페이지 캡처` > `표 생성` > `AI 생성`이고, AI는 앞의 셋이 전부 불가능할
+ * 때만 쓰는 **폴백**이다(rules/output-format.md §8-4).
+ */
+export type ImageAcquisition = "ai" | "search" | "table" | "capture" | "unknown";
 
 export type ManuscriptBlock =
   | { type: "text"; content: string }
@@ -57,6 +62,10 @@ export function parseImageAcquisition(description: string): ImageAcquisition {
   // `표 생성`이 가장 먼저다(2026-09-18): 일정표·순위표 같은 데이터 자리는 웹 검색으로도 못 찾고
   // (실측: 민생지원금·아시안게임 대진표 전패) 이미지 모델은 한글을 못 써서 AI로도 못 만든다.
   // 본문에 이미 있는 표·목록을 그대로 HTML로 렌더해 PNG로 만드는 경로다.
+  // `페이지 캡처`가 가장 먼저다(2026-09-18): 특정 URL을 열어 찍는 자리라 다른 방식과 섞일 수 없다.
+  // 문구를 정확히 이것만 본다 - "화면 캡처" 같은 일반어까지 잡으면 §8-2가 금지한 행정 화면이
+  // 실수로 이 경로를 타게 된다.
+  if (/페이지\s*캡처/.test(description)) return "capture";
   if (/표\s*생성|인포그래픽\s*생성/.test(description)) return "table";
   if (/웹\s*검색/.test(description)) return "search";
   if (/AI\s*생성/i.test(description)) return "ai";

@@ -460,7 +460,7 @@ async function defaultFetchImage(input: {
  * 모델이 독립적으로 보는 편이 낫고, CLAUDE.md의 역할 분담(Claude가 최종 검증)과도 맞는다.
  */
 /** 후보를 한 번에 열어 보고 하나를 고른다. 아무것도 안 맞으면 picked: null. */
-async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
+export async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
   const prompt = [
     "블로그 원고의 이미지 자리 하나에 넣을 후보 사진을 내려받았다. Read 도구로 **후보를 전부 열어 보고**",
     "그 자리에 가장 맞는 것 하나를 고른다. 맞는 것이 하나도 없으면 고르지 않는다.",
