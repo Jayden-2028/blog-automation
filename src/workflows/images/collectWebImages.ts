@@ -25,6 +25,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
 import { searchNaverImages } from "./searchNaverImages.js";
+import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
@@ -143,6 +144,11 @@ export type CollectWebImagesOptions = {
    * "검색창에 친 결과 중 고르기"를 하고, 없으면 예전처럼 web_search로 직접 찾는다. false면 생략.
    */
   searchImages?: false | SearchImages;
+  /**
+   * 1:2보다 긴 세로 이미지를 주요 부분만 잘라낸다(2026-09-18). 기본은 Chromium canvas + Claude 초점 판단.
+   * false면 자르지 않는다(테스트 - 브라우저를 띄우면 안 된다).
+   */
+  cropTall?: false | typeof cropTallImageWithFocus;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -546,15 +552,15 @@ export async function collectWebImages(
       continue;
     }
 
-    const extension = extensionFor(downloaded.contentType ?? "");
-    if (!extension) {
+    const rawExtension = extensionFor(downloaded.contentType ?? "");
+    if (!rawExtension) {
       // 이미지가 아닌 것(검색 결과 페이지 HTML 등)을 집어온 경우다 - 파일로 남기면 안 된다.
       failures.push(`[자리 ${slot.index}] 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
       continue;
     }
 
     const readSize = options.readSize ?? readImageSize;
-    const size = readSize(downloaded.buffer);
+    let size = readSize(downloaded.buffer);
     // 크기 게이트(2026-09-17 저녁 완화): **긴 변 600px 미만만** 거부한다. 세로·정사각은 거부하지
     // 않는다 - 포스터와 인물 프로필은 원래 세로다. 그 전 기준(자리 1은 비율 1.5 이상, 너비 600 이상)이
     // 실제 포스터를 1200×837(비율 1.43)에서, 감독 프로필을 1600×2400에서 버렸다(실측). 디스커버
@@ -573,6 +579,39 @@ export async function collectWebImages(
     }
 
     const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
+    let extension = rawExtension;
+
+    // 1:2보다 긴 세로 이미지는 **왜곡 없이 주요 부분만 잘라낸다**(2026-09-18 사용자 지시).
+    // 실측: 국립중앙박물관 웹플라이어가 1080×13861(1:12.8)로 저장됐다 - 포스터가 아니라 웹페이지를
+    // 통째로 이어붙인 길이라 본문에 넣으면 스크롤만 내려간다. 비율을 늘려 맞추면 글자가 뭉개지므로
+    // 자른다. 초점 판단에 파일이 필요해 원본을 먼저 쓴 뒤, 잘린 결과로 덮어쓴다.
+    const cropTall = options.cropTall === undefined ? cropTallImageWithFocus : options.cropTall;
+    if (cropTall && size && ratio !== null && ratio < CROP_TRIGGER_RATIO) {
+      const originalPath = resolve(input.dir, `${stem}.${extension}`);
+      await writeFile(originalPath, downloaded.buffer);
+      const cropped = await cropTall({
+        buffer: downloaded.buffer,
+        mimeType: downloaded.contentType ?? `image/${extension}`,
+        width: size.width,
+        height: size.height,
+        filePath: originalPath,
+        alt: result.alt || slot.description,
+        context: slot.context,
+      });
+      if (cropped.ok) {
+        failures.push(
+          `[자리 ${slot.index}] ⚠️ 너무 길어(${size.width}×${size.height}) 주요 부분만 잘랐습니다 → ${cropped.width}×${cropped.height}.`
+        );
+        downloaded.buffer = cropped.buffer;
+        downloaded.contentType = cropped.mimeType;
+        extension = extensionFor(cropped.mimeType) ?? extension;
+        size = { width: cropped.width, height: cropped.height };
+        if (`${stem}.${extension}` !== `${stem}.${rawExtension}`) await rm(originalPath, { force: true });
+      } else {
+        failures.push(`[자리 ${slot.index}] ⚠️ 너무 길지만(${size.width}×${size.height}) 자르지 못해 원본을 씁니다: ${cropped.error}`);
+      }
+    }
+
     const fileName = `${stem}.${extension}`;
     const filePath = resolve(input.dir, fileName);
     await writeFile(filePath, downloaded.buffer);

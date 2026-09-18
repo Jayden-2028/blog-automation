@@ -16,8 +16,9 @@
 //   - manuscript_manifest_topics.channels[0].images (뷰어가 읽는다)
 //   - article_jobs.metadata.images                  (prepareManuscript가 재사용한다)
 //
-// 사용: npm run manuscripts:clear-ai-substitutes -- <jobId 접두사...> [--apply]
+// 사용: npm run manuscripts:clear-ai-substitutes -- <jobId 접두사...> [--slots=3,5] [--apply]
 // 기본은 미리보기다. --apply 없이는 아무것도 쓰지 않는다.
+// --slots를 주면 AI/웹을 가리지 않고 **그 자리 번호의 이미지를 지운다**(다시 수집시키고 싶을 때).
 
 import "dotenv/config";
 
@@ -43,6 +44,14 @@ function findAiSubstitutes(body: string, images: ManuscriptImage[]): number[] {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const apply = args.includes("--apply");
+  const slotsArg = args.find((a) => a.startsWith("--slots="));
+  const forcedSlots = slotsArg
+    ? slotsArg
+        .slice("--slots=".length)
+        .split(",")
+        .map((v) => Number(v.trim()))
+        .filter((v) => Number.isInteger(v) && v > 0)
+    : null;
   const prefixes = args.filter((a) => !a.startsWith("--"));
 
   if (prefixes.length === 0) {
@@ -66,11 +75,13 @@ async function main(): Promise<void> {
   let changed = 0;
   for (const topic of targets) {
     const images = topic.manuscript.images ?? [];
-    const doomed = findAiSubstitutes(topic.manuscript.body, images);
+    const doomed = forcedSlots
+      ? images.filter((i) => forcedSlots.includes(i.index)).map((i) => i.index)
+      : findAiSubstitutes(topic.manuscript.body, images);
 
     console.log(`- ${topic.keyword}`);
     if (doomed.length === 0) {
-      console.log(`  job ${topic.jobId} | 지울 AI 대체 이미지 없음`);
+      console.log(`  job ${topic.jobId} | 지울 이미지 없음`);
       continue;
     }
     for (const index of doomed) {

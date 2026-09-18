@@ -192,6 +192,61 @@ async function main(): Promise<void> {
     assert(fromCandidate.found.length === 1 && fromCandidate.found[0].sourcePage === "https://img.example.net", `출처 도메인 폴백이 필요하다 (${JSON.stringify(fromCandidate.failures)})`);
     console.log("✅ 이미지 검색 후보 - 프롬프트에 실리고, 출처 없는 후보는 도메인으로 폴백");
 
+    // 5-2-2) 너무 긴 세로 이미지(2026-09-18): 거부하지 않고 주요 부분만 잘라 저장한다. 비율을 늘려
+    //        맞추면 글자가 뭉개지므로 왜곡 없이 잘라내는 것이 사용자 지시다(실측 1080×13861).
+    const croppedWith: { width: number; height: number; alt: string }[] = [];
+    const tall = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        searchImages: false,
+        verifyImage: okVerify,
+        runCodex: codexReply([slotReply()]),
+        fetchImage: okFetch,
+        readSize: () => ({ width: 1080, height: 13861 }),
+        cropTall: async (input) => {
+          croppedWith.push({ width: input.width, height: input.height, alt: input.alt });
+          return { ok: true as const, buffer: PNG_1200, mimeType: "image/png", width: 1080, height: 1440, focus: 0 };
+        },
+      }
+    );
+    assert(tall.found.length === 1, `자른 뒤 저장돼야 한다 (${JSON.stringify(tall.failures)})`);
+    assert(croppedWith.length === 1 && croppedWith[0].height === 13861, "원본 크기가 크로퍼에 전달돼야 한다");
+    assert(tall.failures.some((f) => f.includes("주요 부분만 잘랐습니다") && f.includes("1080×1440")), `자른 사실이 기록돼야 한다 (${JSON.stringify(tall.failures)})`);
+
+    // 자르기가 실패해도 원본으로 계속 간다 - 빈 자리보다 긴 이미지가 낫다.
+    const cropFailed = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        searchImages: false,
+        verifyImage: okVerify,
+        runCodex: codexReply([slotReply()]),
+        fetchImage: okFetch,
+        readSize: () => ({ width: 1080, height: 13861 }),
+        cropTall: async () => ({ ok: false as const, error: "canvas 실패" }),
+      }
+    );
+    assert(cropFailed.found.length === 1, "자르기 실패해도 원본을 저장한다");
+    assert(cropFailed.failures.some((f) => f.includes("자르지 못해 원본")), "실패 사유가 남아야 한다");
+
+    // 포스터·프로필(1:1.5)은 자르지 않는다.
+    let cropCalled = false;
+    await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      {
+        searchImages: false,
+        verifyImage: okVerify,
+        runCodex: codexReply([slotReply()]),
+        fetchImage: okFetch,
+        readSize: () => ({ width: 1600, height: 2400 }),
+        cropTall: async () => {
+          cropCalled = true;
+          return { ok: false as const, error: "불러선 안 된다" };
+        },
+      }
+    );
+    assert(!cropCalled, "1:1.5 포스터는 자르지 않아야 한다");
+    console.log("✅ 긴 세로 이미지 - 왜곡 없이 크롭, 실패 시 원본 유지, 포스터는 그대로");
+
     // 5-3) 비전 검증(2026-09-17): Codex는 URL만 고르고 이미지를 보지 않아, 대만 OTT 건처럼
     //      alt는 "공식 포스터"인데 실제 파일은 스틸컷인 불일치가 나왔다. 불합격이면 파일까지 지운다.
     const rejected = await collectWebImages(
