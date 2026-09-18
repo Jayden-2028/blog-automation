@@ -20,8 +20,12 @@
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { buildCompetitionQuery } from "./buildCompetitionQuery.js";
 
-/** 헤드라인 30건 요약은 짧은 작업이다. 제목 생성(90초)보다 항목이 많아 조금 넉넉하게 잡는다. */
-const TOPIC_EXTRACTION_TIMEOUT_MS = 120_000;
+/**
+ * 헤드라인 요약은 짧은 작업이다. 제목 생성(90초)보다 항목이 많아 넉넉하게 잡는다.
+ * 2026-09-18에 프로브 창이 30 → 60건으로 넓어져(keywordCompetition.ts) 한 번에 처리할 항목이
+ * 두 배가 됐으므로 여유를 더 둔다. 실패하면 규칙 기반 폴백이 있어 파이프라인은 멈추지 않는다.
+ */
+const TOPIC_EXTRACTION_TIMEOUT_MS = 180_000;
 
 /** 주제구가 이보다 길면 모델이 문장을 그대로 돌려준 것으로 보고 버린다(어절 기준). */
 const MAX_TOPIC_WORDS = 5;

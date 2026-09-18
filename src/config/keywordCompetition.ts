@@ -44,8 +44,19 @@ export const BLOG_COMPETITION_CONFIG = {
    */
   applyToScore: parseBooleanEnv(process.env.BLOG_COMPETITION_APPLY_TO_SCORE, false),
 
-  /** 프로브를 돌릴 최대 키워드 수. daily workflow는 최종 Top 10이라 실제로는 10건이다. */
-  probeMaxKeywords: parseIntEnv(process.env.BLOG_COMPETITION_PROBE_MAX, 30),
+  /**
+   * 프로브를 돌릴 최대 키워드 수(원래 점수 기준 상위 N건).
+   *
+   * 30 → 60으로 올린다(2026-09-18, applyToScore를 켜면서). **프로브 창을 고르는 기준이 바로
+   * 포화도를 모르는 옛 점수**라, 기회도 점수가 끌어올릴 키워드를 체계적으로 창 밖에 남긴다.
+   * 실측(오늘 preview): 희소 키워드는 감점이 아니라 **가점**을 받는다.
+   *   [노영국 사망 3주기] 80건(희소)    30점 → 35점
+   *   [손예진 현빈 모자이크] 279건(희소) 42점 → 45점
+   *   [넷플릭스 인형] 84,966건(포화)    31점 → 22점
+   * 가점 폭이 +5라, 30위 근처에 몰려 있는(실측 대부분 30~31점) 희소 키워드가 창 밖이면 영영
+   * 올라오지 못한다. 창을 넓히는 비용은 네이버 블로그 검색 30회 추가(약 5초)뿐이다.
+   */
+  probeMaxKeywords: parseIntEnv(process.env.BLOG_COMPETITION_PROBE_MAX, 60),
 
   /** 프로브 호출 사이 지연(ms). rate limit 보호. 기존 provider들과 같은 값. */
   requestDelayMs: parseIntEnv(process.env.BLOG_COMPETITION_DELAY_MS, 150),
