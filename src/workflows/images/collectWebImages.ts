@@ -30,6 +30,8 @@ import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
+/** 한 자리에 내려받아 비교할 후보 수 상한(2026-09-18 B안). 프롬프트가 길어지고 내려받기도 늘어난다. */
+const MAX_CANDIDATES = 4;
 /** 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변). */
 const HARD_MIN_WIDTH = 600;
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
@@ -139,6 +141,26 @@ export type VerifyImageInput = {
 
 export type VerifyImageResult = { ok: boolean; reason: string };
 
+/** 비전 판정에 넘기는 후보 하나. `number`로 답을 받는다. */
+export type ImageChoiceCandidate = {
+  number: number;
+  filePath: string;
+  /** 수집기가 URL만 보고 쓴 추측. 참고용이고 판정 기준이 아니다. */
+  alt: string;
+  sourcePage: string;
+};
+
+export type ChooseImageInput = {
+  candidates: ImageChoiceCandidate[];
+  /** 판정 기준: 원고 마커가 요구한 것. */
+  markerDescription: string;
+  context: string;
+  keyword: string;
+};
+
+/** `picked`가 null이면 "쓸 만한 것이 없다"는 뜻이다. */
+export type ChooseImageResult = { picked: number | null; reason: string };
+
 export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 codex 실행. */
   /**
@@ -162,8 +184,14 @@ export type CollectWebImagesOptions = {
     referer: string;
   }) => Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }>;
   readSize?: (buffer: Buffer) => { width: number; height: number } | null;
-  /** 내려받은 이미지를 실제로 열어 보고 판정한다. 기본은 Claude(claude -p + Read). */
-  verifyImage?: (input: VerifyImageInput) => Promise<VerifyImageResult>;
+  /**
+   * 내려받은 후보들을 **한 번에 열어 보고 하나를 고른다**(2026-09-18 B안). 기본은 Claude.
+   *
+   * 왜 한 번에 고르는가: 전에는 후보를 하나만 내려받아 합·불만 판정했고, 떨어지면 그 자리는 끝이었다.
+   * 후보를 순차로 여러 번 검증하면 호출이 자리당 최대 4회가 되지만, 한 호출에 같이 열어 고르면
+   * **호출은 1회 그대로**이고 비교 판단이라 정확도도 오른다(사용자 결정).
+   */
+  chooseImage?: (input: ChooseImageInput) => Promise<ChooseImageResult>;
   /** false면 비전 검증을 건너뛴다(시간·호출을 아끼고 싶을 때). 기본 true. */
   verify?: boolean;
   /**
@@ -220,6 +248,19 @@ const OUTPUT_SCHEMA = {
           rationale: { type: "string" },
           skipped: { type: "boolean" },
           skipReason: { type: "string" },
+          alternates: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                imageUrl: { type: "string" },
+                sourcePage: { type: "string" },
+                license: { type: "string" },
+              },
+              required: ["imageUrl", "sourcePage", "license"],
+              additionalProperties: false,
+            },
+          },
         },
         required: [
           "index",
@@ -232,6 +273,7 @@ const OUTPUT_SCHEMA = {
           "rationale",
           "skipped",
           "skipReason",
+          "alternates",
         ],
         additionalProperties: false,
       },
@@ -327,7 +369,10 @@ export function buildPrompt(
     "- `rationale`: 이 이미지가 그 문단의 무엇을 보여주는지 한 문장.",
     "- 기준에 맞는 이미지를 못 찾았으면 `skipped: true`와 `skipReason`을 채우고 `imageUrl`은 빈 문자열로 둔다.",
     "  억지로 비슷한 것을 고르지 않는다 - 빈 자리가 잘못된 이미지보다 낫다.",
-    "- 그 외 자리는 `skipped: false`, `skipReason`은 빈 문자열."
+    "- 그 외 자리는 `skipped: false`, `skipReason`은 빈 문자열.",
+    "- **`alternates`에 대체 후보를 0~3개 더 담는다**(2026-09-18). 1순위와 같은 기준을 통과한 것만,",
+    "  좋은 순서대로. 실제 파일을 열어 보는 건 다음 단계가 하므로, 네가 URL만 보고 1순위를 잘못 골라도",
+    "  대체 후보가 있으면 거기서 건질 수 있다. 하나뿐이면 빈 배열로 둔다."
   );
 
   return lines.join("\n");
@@ -414,45 +459,57 @@ async function defaultFetchImage(input: {
  * 왜 Codex가 아니라 Claude가 보는가: 고른 쪽이 자기 선택을 검수하면 같은 착각을 반복한다. 다른
  * 모델이 독립적으로 보는 편이 낫고, CLAUDE.md의 역할 분담(Claude가 최종 검증)과도 맞는다.
  */
-async function defaultVerifyImage(input: VerifyImageInput): Promise<VerifyImageResult> {
+/** 후보를 한 번에 열어 보고 하나를 고른다. 아무것도 안 맞으면 picked: null. */
+async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
   const prompt = [
-    "아래 이미지 파일을 Read 도구로 열어 실제 내용을 보고, 블로그 원고의 그 자리에 쓸 수 있는지 판정한다.",
+    "블로그 원고의 이미지 자리 하나에 넣을 후보 사진을 내려받았다. Read 도구로 **후보를 전부 열어 보고**",
+    "그 자리에 가장 맞는 것 하나를 고른다. 맞는 것이 하나도 없으면 고르지 않는다.",
     "",
-    `파일: ${input.filePath}`,
     `원고 주제: ${input.keyword}`,
     `이 자리에 필요한 것(원고 마커): ${input.markerDescription}`,
-    `수집기가 적은 설명(추측 - 틀릴 수 있다): ${input.alt}`,
     "이 이미지가 요약해야 할 문단:",
     `"""${input.context.slice(0, 600)}"""`,
     "",
-    "하나라도 어긋나면 불합격이다:",
-    "1. **그 자리가 요구한 것**(위 '이 자리에 필요한 것')을 보여주는가? 이것이 유일한 판정 기준이다.",
-    "   수집기가 적은 설명은 파일을 열어보지 않고 쓴 추측이라 **틀릴 수 있다** - 추측과 다르다는",
-    "   이유로 떨어뜨리지 않는다. (실측 오판: 마커는 '공식 프로필 사진'만 요구했는데 수집기가",
-    "   '선글라스 쓰고 거리에서'라고 잘못 적었고, 실내 사진이라는 이유로 진짜 인물 사진을 버렸다.)",
-    "2. **같은 주제인가?** 문단이 그 사진보다 더 세부적인 것(결말 해석, 타임테이블, 수치)을 말하더라도",
-    "   그 이유로 떨어뜨리지 않는다. 불합격은 **다른 주제·다른 행사·다른 인물·다른 작품**일 때다.",
-    "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 불합격.",
-    "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 불합격.",
+    "## 후보",
+    ...input.candidates.map(
+      (c) => `${c.number}. ${c.filePath}\n   수집기 설명(추측 - 틀릴 수 있다): ${c.alt}\n   출처: ${c.sourcePage}`
+    ),
     "",
-    '마지막 줄에 JSON 한 줄만 답한다: {"ok": true, "reason": "한 문장"}',
+    "## 고르는 기준",
+    "1. **그 자리가 요구한 것**(위 '이 자리에 필요한 것')을 보여주는가? 이것이 유일한 판정 기준이다.",
+    "   수집기 설명은 파일을 열어보지 않고 쓴 추측이라 **틀릴 수 있다** - 추측과 다르다는 이유로",
+    "   떨어뜨리지 않는다. (실측 오판: 마커는 '공식 프로필 사진'만 요구했는데 수집기가 '선글라스 쓰고",
+    "   거리에서'라고 잘못 적었고, 실내 사진이라는 이유로 진짜 인물 사진을 버렸다.)",
+    "2. **같은 주제면 합격이다.** 문단이 사진보다 더 세부적인 것(결말 해석, 타임테이블, 수치)을",
+    "   말하더라도 그 이유로 떨어뜨리지 않는다. 제외는 **다른 주제·다른 행사·다른 인물·다른 작품**일 때다.",
+    "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 제외.",
+    "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 제외.",
+    "5. 둘 이상이 맞으면 **문단을 더 구체적으로 보여주는 쪽**을, 그래도 비슷하면 큰 쪽을 고른다.",
+    "",
+    '마지막 줄에 JSON 한 줄만 답한다: {"picked": 2, "reason": "한 문장"}',
+    '맞는 것이 하나도 없으면 {"picked": null, "reason": "왜 전부 안 되는지 한 문장"}.',
   ].join("\n");
 
   const result = await runHeadlessClaude({
     prompt,
     allowedTools: ["Read"],
     permissionMode: "acceptEdits",
-    timeoutMs: 120_000,
+    timeoutMs: 180_000,
   });
 
-  // 검증자가 못 돌면 이미지를 버리지 않는다 - 판정 불가와 불합격은 다르다. 사람이 보도록 남긴다.
-  if (!result.ok) return { ok: true, reason: `검증 건너뜀(${result.error})` };
+  // 검증 자체가 실패하면 1순위를 그대로 쓴다 - 판정을 못 했다고 빈 자리로 두는 건 과하다.
+  if (!result.ok) return { picked: input.candidates[0]?.number ?? null, reason: `검증 건너뜀(${result.error})` };
 
-  const parsed = extractTrailingJson(result.output) as { ok?: unknown; reason?: unknown } | null;
-  if (!parsed || typeof parsed.ok !== "boolean") {
-    return { ok: true, reason: "검증 결과를 읽지 못해 그대로 둡니다" };
+  const parsed = extractTrailingJson(result.output) as { picked?: unknown; reason?: unknown } | null;
+  const reason = typeof parsed?.reason === "string" ? parsed.reason : "";
+  if (!parsed || !("picked" in parsed)) {
+    return { picked: input.candidates[0]?.number ?? null, reason: "검증 결과를 읽지 못해 1순위를 씁니다" };
   }
-  return { ok: parsed.ok, reason: typeof parsed.reason === "string" ? parsed.reason : "" };
+  if (parsed.picked === null) return { picked: null, reason };
+  const picked = typeof parsed.picked === "number" ? parsed.picked : Number.NaN;
+  return Number.isInteger(picked) && input.candidates.some((c) => c.number === picked)
+    ? { picked, reason }
+    : { picked: input.candidates[0]?.number ?? null, reason: "고른 번호가 후보에 없어 1순위를 씁니다" };
 }
 
 type CodexSlotResult = {
@@ -466,6 +523,8 @@ type CodexSlotResult = {
   rationale: string;
   skipped: boolean;
   skipReason: string;
+  /** 대체 후보(2026-09-18). 비전 검증이 1순위와 함께 열어 보고 그중 하나를 고른다. */
+  alternates: { imageUrl: string; sourcePage: string; license: string }[];
 };
 
 function parseCodexSlots(data: unknown): CodexSlotResult[] {
@@ -485,7 +544,7 @@ export async function collectWebImages(
 ): Promise<CollectWebImagesResult> {
   const runCodex = options.runCodex ?? runClaudeWebSearch;
   const fetchImage = options.fetchImage ?? defaultFetchImage;
-  const verifyImage = options.verifyImage ?? defaultVerifyImage;
+  const chooseImage = options.chooseImage ?? defaultChooseImage;
   const verify = options.verify ?? true;
   const failures: string[] = [];
 
@@ -521,29 +580,17 @@ export async function collectWebImages(
   for (const slot of input.slots) {
     const result = results.find((r) => r.index === slot.index);
     if (!result) {
-      failures.push(`[자리 ${slot.index}] Codex 응답에 없습니다.`);
+      failures.push(`[자리 ${slot.index}] 웹 검색 에이전트 응답에 없습니다.`);
       continue;
     }
     if (result.skipped || !result.imageUrl) {
       failures.push(`[자리 ${slot.index}] 찾지 못함: ${result.skipReason || "사유 없음"}`);
       continue;
     }
-    if (!/^https?:\/\//i.test(result.imageUrl)) {
-      failures.push(`[자리 ${slot.index}] URL 형식이 아닙니다(${result.imageUrl.slice(0, 60)}).`);
-      continue;
-    }
-    // 이미지 검색 후보에서 고른 경우 출처 페이지를 모를 수 있다 - 이미지 도메인을 출처로 쓴다.
-    if (!/^https?:\/\//i.test(result.sourcePage)) {
-      try {
-        result.sourcePage = new URL(result.imageUrl).origin;
-      } catch {
-        failures.push(`[자리 ${slot.index}] URL 형식이 아닙니다(${result.imageUrl.slice(0, 60)}).`);
-        continue;
-      }
-    }
 
-    // 라이선스는 내려받기 **전에** 본다 - 쓸 수 없는 이미지를 디스크에 남길 이유가 없다.
-    // C안: 유료 스톡·ND만 막는다. 나머지는 캡션 출처 표기로 간다.
+    // 출처 분류는 내려받기 **전에** 본다 - 쓸 수 없는 자료를 디스크에 남길 이유가 없다.
+    // C안: 유료 스톡·ND만 막는다(2026-09-17 사용자 결정). 대체 후보도 같은 기준을 통과한 것만
+    // 담으라고 프롬프트에 지시했으므로 자리 단위로 한 번 본다.
     if (REJECTED_PERMISSIONS.has(result.reusePermission)) {
       failures.push(
         `[자리 ${slot.index}] 쓸 수 없는 자료라 건너뜁니다(${result.reusePermission}: ${result.license}) - 유료 스톡이거나 변경 금지(ND)입니다.`
@@ -551,33 +598,124 @@ export async function collectWebImages(
       continue;
     }
 
-    const downloaded = await fetchImage({ url: result.imageUrl, referer: result.sourcePage });
-    if (!downloaded.ok || !downloaded.buffer) {
-      // URL을 같이 남긴다 - 자동으로 못 받은 이미지는 사람이 브라우저로 직접 저장할 수 있다.
-      failures.push(
-        `[자리 ${slot.index}] 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${result.imageUrl}\n      출처: ${result.sourcePage}`
-      );
-      continue;
-    }
-
-    const rawExtension = extensionFor(downloaded.contentType ?? "");
-    if (!rawExtension) {
-      // 이미지가 아닌 것(검색 결과 페이지 HTML 등)을 집어온 경우다 - 파일로 남기면 안 된다.
-      failures.push(`[자리 ${slot.index}] 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
-      continue;
-    }
+    // 1순위 + 대체 후보를 함께 내려받아 **한 번에 비교해 고른다**(2026-09-18 B안).
+    // 전에는 1순위 하나만 받아 합·불을 판정했고, 떨어지면 그 자리는 끝이었다.
+    const rawCandidates = [
+      { imageUrl: result.imageUrl, sourcePage: result.sourcePage, license: result.license },
+      ...(result.alternates ?? []),
+    ];
 
     const readSize = options.readSize ?? readImageSize;
-    let size = readSize(downloaded.buffer);
-    // 크기 게이트(2026-09-17 저녁 완화): **긴 변 600px 미만만** 거부한다. 세로·정사각은 거부하지
-    // 않는다 - 포스터와 인물 프로필은 원래 세로다. 그 전 기준(자리 1은 비율 1.5 이상, 너비 600 이상)이
-    // 실제 포스터를 1200×837(비율 1.43)에서, 감독 프로필을 1600×2400에서 버렸다(실측). 디스커버
-    // 큰 썸네일 조건은 경고로만 남긴다 - 내용이 맞는 세로 사진이 조건 맞는 빈 자리보다 낫다.
-    const longSide = size ? Math.max(size.width, size.height) : null;
-    if (longSide !== null && longSide < HARD_MIN_WIDTH) {
-      failures.push(`[자리 ${slot.index}] 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
+    const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
+
+    type Downloaded = {
+      number: number;
+      filePath: string;
+      buffer: Buffer;
+      contentType: string;
+      extension: string;
+      size: { width: number; height: number } | null;
+      imageUrl: string;
+      sourcePage: string;
+      license: string;
+    };
+    const candidates: Downloaded[] = [];
+
+    for (const cand of rawCandidates) {
+      if (candidates.length >= MAX_CANDIDATES) break;
+      if (!/^https?:\/\//i.test(cand.imageUrl)) {
+        failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
+        continue;
+      }
+
+      // 출처 페이지를 모르면(이미지 검색 후보에서 고른 경우) 이미지 도메인을 출처로 쓴다.
+      let sourcePage = cand.sourcePage;
+      if (!/^https?:\/\//i.test(sourcePage)) {
+        try {
+          sourcePage = new URL(cand.imageUrl).origin;
+        } catch {
+          failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
+          continue;
+        }
+      }
+
+      const downloaded = await fetchImage({ url: cand.imageUrl, referer: sourcePage });
+      if (!downloaded.ok || !downloaded.buffer) {
+        // URL을 같이 남긴다 - 자동으로 못 받은 이미지는 사람이 브라우저로 직접 저장할 수 있다.
+        failures.push(
+          `[자리 ${slot.index}] 후보 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
+        );
+        continue;
+      }
+      const extension = extensionFor(downloaded.contentType ?? "");
+      if (!extension) {
+        failures.push(`[자리 ${slot.index}] 후보가 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
+        continue;
+      }
+      const size = readSize(downloaded.buffer);
+      const longSide = size ? Math.max(size.width, size.height) : null;
+      if (longSide !== null && longSide < HARD_MIN_WIDTH) {
+        failures.push(`[자리 ${slot.index}] 후보가 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
+        continue;
+      }
+
+      const number = candidates.length + 1;
+      const filePath = resolve(input.dir, `${stem}-cand${number}.${extension}`);
+      await writeFile(filePath, downloaded.buffer);
+      candidates.push({
+        number,
+        filePath,
+        buffer: downloaded.buffer,
+        contentType: downloaded.contentType ?? `image/${extension}`,
+        extension,
+        size,
+        imageUrl: cand.imageUrl,
+        sourcePage,
+        license: cand.license || result.license,
+      });
+    }
+
+    if (candidates.length === 0) {
+      failures.push(`[자리 ${slot.index}] 쓸 수 있는 후보를 하나도 내려받지 못했습니다.`);
       continue;
     }
+
+    // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
+    // 그 형식은 판정 대상에서 빼고, 열 수 있는 후보가 하나도 없으면 1순위를 그대로 쓴다.
+    const openable = candidates.filter((c) => c.extension !== "avif");
+    let chosen = candidates[0];
+
+    if (verify && openable.length === 0) {
+      failures.push(`[자리 ${slot.index}] ⚠️ avif라 비전 검증을 건너뛰고 저장했습니다 - 뷰어에서 한 번 확인하세요.`);
+    } else if (verify) {
+      const verdict = await chooseImage({
+        candidates: openable.map((c) => ({
+          number: c.number,
+          filePath: c.filePath,
+          alt: result.alt || slot.description,
+          sourcePage: c.sourcePage,
+        })),
+        markerDescription: slot.description,
+        context: slot.context,
+        keyword: input.keyword,
+      });
+      if (verdict.picked === null) {
+        for (const c of candidates) await rm(c.filePath, { force: true });
+        failures.push(
+          `[자리 ${slot.index}] 후보 ${openable.length}장 중 쓸 만한 것이 없어 비웠습니다: ${verdict.reason}`
+        );
+        continue;
+      }
+      chosen = openable.find((c) => c.number === verdict.picked) ?? openable[0];
+      if (candidates.length > 1) {
+        failures.push(`[자리 ${slot.index}] ℹ️ 후보 ${candidates.length}장 중 ${chosen.number}번 채택: ${verdict.reason}`);
+      }
+    }
+
+    for (const c of candidates) if (c !== chosen) await rm(c.filePath, { force: true });
+
+    let { buffer, contentType, extension, size } = chosen;
+    const rawExtension = extension;
     const ratio = size ? size.width / size.height : null;
     if (ratio !== null && ratio < MIN_LANDSCAPE_RATIO) {
       failures.push(`[자리 ${slot.index}] ⚠️ 정사각·세로입니다(${size?.width}×${size?.height}) - 디스커버 썸네일 후보에서 빠지지만 저장했습니다.`);
@@ -586,23 +724,18 @@ export async function collectWebImages(
       failures.push(`[자리 ${slot.index}] ⚠️ 너비 ${size.width}px - 디스커버 큰 썸네일 기준(${PREFERRED_MIN_WIDTH}px) 미달이지만 저장했습니다.`);
     }
 
-    const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
-    let extension = rawExtension;
-
     // 1:2보다 긴 세로 이미지는 **왜곡 없이 주요 부분만 잘라낸다**(2026-09-18 사용자 지시).
-    // 실측: 국립중앙박물관 웹플라이어가 1080×13861(1:12.8)로 저장됐다 - 포스터가 아니라 웹페이지를
-    // 통째로 이어붙인 길이라 본문에 넣으면 스크롤만 내려간다. 비율을 늘려 맞추면 글자가 뭉개지므로
-    // 자른다. 초점 판단에 파일이 필요해 원본을 먼저 쓴 뒤, 잘린 결과로 덮어쓴다.
+    // 실측: 국립중앙박물관 웹플라이어가 1080×13861(1:12.8)로 저장됐다 - 본문에 넣으면 스크롤만
+    // 내려간다. 비율을 늘려 맞추면 글자가 뭉개지므로 자른다. 고른 뒤에 자른다 - 탈락할 후보를
+    // 미리 자르는 건 낭비다.
     const cropTall = options.cropTall === undefined ? cropTallImageWithFocus : options.cropTall;
     if (cropTall && size && ratio !== null && ratio < CROP_TRIGGER_RATIO) {
-      const originalPath = resolve(input.dir, `${stem}.${extension}`);
-      await writeFile(originalPath, downloaded.buffer);
       const cropped = await cropTall({
-        buffer: downloaded.buffer,
-        mimeType: downloaded.contentType ?? `image/${extension}`,
+        buffer,
+        mimeType: contentType,
         width: size.width,
         height: size.height,
-        filePath: originalPath,
+        filePath: chosen.filePath,
         alt: result.alt || slot.description,
         context: slot.context,
       });
@@ -610,50 +743,26 @@ export async function collectWebImages(
         failures.push(
           `[자리 ${slot.index}] ⚠️ 너무 길어(${size.width}×${size.height}) 주요 부분만 잘랐습니다 → ${cropped.width}×${cropped.height}.`
         );
-        downloaded.buffer = cropped.buffer;
-        downloaded.contentType = cropped.mimeType;
+        buffer = cropped.buffer;
+        contentType = cropped.mimeType;
         extension = extensionFor(cropped.mimeType) ?? extension;
         size = { width: cropped.width, height: cropped.height };
-        if (`${stem}.${extension}` !== `${stem}.${rawExtension}`) await rm(originalPath, { force: true });
       } else {
         failures.push(`[자리 ${slot.index}] ⚠️ 너무 길지만(${size.width}×${size.height}) 자르지 못해 원본을 씁니다: ${cropped.error}`);
       }
     }
 
+    // 후보 파일명(`-cand1`)을 최종 이름으로 바꾼다. 내보내기 폴더가 이 이름을 그대로 쓴다.
     const fileName = `${stem}.${extension}`;
     const filePath = resolve(input.dir, fileName);
-    await writeFile(filePath, downloaded.buffer);
-
-    // 검증자가 파일을 열어 봐야 하므로 저장한 뒤에 본다. 불합격이면 지운다.
-    // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
-    // 그 형식만 검증 없이 통과시키고 경고를 남긴다 - 못 본 것을 불합격으로 치면 안 된다.
-    if (verify && extension === "avif") {
-      failures.push(`[자리 ${slot.index}] ⚠️ avif라 비전 검증을 건너뛰고 저장했습니다 - 뷰어에서 한 번 확인하세요.`);
-    } else if (verify) {
-      const verdict = await verifyImage({
-        filePath,
-        markerDescription: slot.description,
-        alt: result.alt || slot.description,
-        context: slot.context,
-        keyword: input.keyword,
-      });
-      if (!verdict.ok) {
-        await rm(filePath, { force: true });
-        failures.push(`[자리 ${slot.index}] 이미지가 설명과 맞지 않아 버렸습니다: ${verdict.reason}`);
-        continue;
-      }
-    }
+    await writeFile(filePath, buffer);
+    if (filePath !== chosen.filePath) await rm(chosen.filePath, { force: true });
 
     // 파이프라인은 러너가 곧 사라지므로 Storage에 올려야 뷰어가 본다. 업로드가 실패하면 채택하지
     // 않는다 - manifest에 URL 없는 항목을 넣으면 뷰어가 "이미지 없음"으로 그릴 뿐이다.
     let storageUrl: string | null = null;
     if (options.upload) {
-      const uploaded = await options.upload({
-        index: slot.index,
-        fileName,
-        buffer: downloaded.buffer,
-        mimeType: downloaded.contentType ?? `image/${extension}`,
-      });
+      const uploaded = await options.upload({ index: slot.index, fileName, buffer, mimeType: contentType });
       if (!uploaded.ok) {
         await rm(filePath, { force: true });
         failures.push(`[자리 ${slot.index}] 업로드 실패: ${uploaded.error}`);
@@ -665,13 +774,14 @@ export async function collectWebImages(
     found.push({
       index: slot.index,
       fileName,
-      imageUrl: result.imageUrl,
-      sourcePage: result.sourcePage,
+      imageUrl: chosen.imageUrl,
+      sourcePage: chosen.sourcePage,
       alt: result.alt || slot.description,
       caption: result.caption || slot.description,
-      license: result.license || "출처 확인 필요",
+      license: chosen.license || "출처 확인 필요",
       storageUrl,
     });
+    void rawExtension;
   }
 
   // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라
