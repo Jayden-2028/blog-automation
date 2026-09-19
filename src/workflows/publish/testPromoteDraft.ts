@@ -37,6 +37,8 @@ function options(over: Record<string, unknown> = {}) {
 {
   let inserted = 0;
   let promotedId = "";
+  let patchedHtml = "";
+  let patchedBeforePublish = false;
   const statusUpdates: unknown[] = [];
   const result = await publishArticleToBlogspot(
     "job-1",
@@ -48,8 +50,14 @@ function options(over: Record<string, unknown> = {}) {
         inserted += 1;
         return { ok: true as const, postId: "999", url: "https://new", isDraft: false };
       },
+      updatePost: async (postId: string, input: { contentHtml: string }) => {
+        assert(postId === "222", "초안 postId를 덮어써야 한다");
+        patchedHtml = input.contentHtml;
+        return { ok: true as const, postId };
+      },
       publishPost: async (postId: string) => {
         promotedId = postId;
+        patchedBeforePublish = patchedHtml !== "";
         return { ok: true as const, postId, url: "https://blog.example.com/2026/09/p.html", status: "LIVE", publishedAt: "", scheduled: false };
       },
       markPublished: async (input: unknown) => {
@@ -64,7 +72,32 @@ function options(over: Record<string, unknown> = {}) {
   assert(result.ok && result.url.includes("blog.example.com"), `공개 URL을 돌려줘야 한다 (${result.ok ? result.url : ""})`);
   assert(result.ok && !result.alreadyDone, "전환에 성공했으므로 alreadyDone이 아니다");
   assert(statusUpdates.length === 1, "publications/articles 상태를 한 번 갱신해야 한다");
-  console.log("✅ 초안이 남아 있으면 새 글 대신 공개 전환");
+  // 초안 본문에 남아 있던 `[IMAGE: ... ]` 마커 텍스트가 공개되면 독자에게 그대로 보인다.
+  assert(patchedBeforePublish, "공개 전에 본문을 먼저 덮어써야 한다");
+  assert(!patchedHtml.includes("[IMAGE:"), `공개 본문에 마커 텍스트가 남으면 안 된다 (${patchedHtml})`);
+  console.log("✅ 초안이 남아 있으면 새 글 대신 공개 전환 + 본문을 공개용으로 덮어씀");
+}
+
+// --- 본문 덮어쓰기가 실패하면 공개하지 않는다 -----------------------------------------------
+{
+  let promoted = 0;
+  const result = await publishArticleToBlogspot(
+    "job-1",
+    options({
+      loadExistingPublications: async () => [
+        { id: 7, status: "pending", published_url: "https://www.blogger.com/blog/post/edit/111/222" },
+      ],
+      insertPost: async () => ({ ok: true as const, postId: "999", url: "https://new", isDraft: false }),
+      updatePost: async () => ({ ok: false as const, stage: "update" as const, error: "429" }),
+      publishPost: async () => {
+        promoted += 1;
+        return {} as never;
+      },
+    }) as never
+  );
+  assert(promoted === 0, "본문을 못 고쳤으면 공개하면 안 된다");
+  assert(!result.ok && result.reason === "blogger_failed", "실패를 그대로 알려야 한다");
+  console.log("✅ 본문 덮어쓰기 실패 시 공개를 막는다");
 }
 
 // --- 이미 공개된 글이면 그대로 알린다 ------------------------------------------------------------

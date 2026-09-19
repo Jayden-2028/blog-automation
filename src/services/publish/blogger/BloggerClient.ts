@@ -10,7 +10,7 @@ import type { BloggerReaderComments } from "../../../config/publishTargets.js";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const API_BASE = "https://www.googleapis.com/blogger/v3";
 
-export type BloggerPublishStage = "config" | "token" | "insert" | "publish";
+export type BloggerPublishStage = "config" | "token" | "insert" | "publish" | "update";
 
 export type BloggerInsertInput = {
   title: string;
@@ -38,6 +38,17 @@ export type BloggerInsertInput = {
 
 export type BloggerInsertResult =
   | { ok: true; postId: string; url: string; isDraft: boolean }
+  | { ok: false; stage: BloggerPublishStage; error: string };
+
+export type BloggerUpdateInput = {
+  title: string;
+  /** 완성된 본문 HTML(convertArticleToHtml 결과). 기존 본문을 통째로 덮어쓴다. */
+  contentHtml: string;
+  labels?: string[];
+};
+
+export type BloggerUpdateResult =
+  | { ok: true; postId: string }
   | { ok: false; stage: BloggerPublishStage; error: string };
 
 export type BloggerPublishResult =
@@ -144,6 +155,44 @@ export class BloggerClient {
       ? `https://www.blogger.com/blog/post/edit/${this.blogId}/${json.id}`
       : json.url ?? "";
     return { ok: true, postId: json.id, url: resultUrl, isDraft };
+  }
+
+  /**
+   * 이미 올라간 글의 제목·본문·라벨을 덮어쓴다(posts.patch).
+   *
+   * 초안을 공개로 전환하기 직전에 쓴다. 초안 본문은 "초안 모드"로 만들어져 채워지지 않은
+   * `[IMAGE: ... — 웹 검색]` 마커가 글자 그대로 남아 있는데, 그 상태로 공개하면 독자에게 그
+   * 텍스트가 보인다(publishArticleToBlogspot 참고). `publish=false`라 이 호출 자체가 글을
+   * 공개하지는 않는다 - 공개는 publishPost가 따로 한다.
+   */
+  async updatePost(postId: string, input: BloggerUpdateInput): Promise<BloggerUpdateResult> {
+    const configError = this.missingConfig();
+    if (configError) return { ok: false, stage: "config", error: configError };
+
+    const token = await this.getAccessToken();
+    if (!token.ok) return { ok: false, stage: "token", error: token.error };
+
+    const url = new URL(`${API_BASE}/blogs/${this.blogId}/posts/${postId}`);
+    url.searchParams.set("publish", "false");
+    url.searchParams.set("fetchImages", "false");
+
+    const body: Record<string, unknown> = {
+      kind: "blogger#post",
+      title: input.title,
+      content: input.contentHtml,
+    };
+    if (input.labels && input.labels.length > 0) body.labels = input.labels;
+
+    const res = await this.fetchImpl(url.toString(), {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (!res.ok || !json.id) {
+      return { ok: false, stage: "update", error: `posts.patch 실패 (${res.status}): ${json.error?.message ?? ""}`.trim() };
+    }
+    return { ok: true, postId: json.id };
   }
 
   /**

@@ -41,7 +41,12 @@ import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
 import { manuscriptBodyWithoutImages, substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
-import type { BloggerInsertInput, BloggerInsertResult } from "../../services/publish/blogger/BloggerClient.js";
+import type {
+  BloggerInsertInput,
+  BloggerInsertResult,
+  BloggerUpdateInput,
+  BloggerUpdateResult,
+} from "../../services/publish/blogger/BloggerClient.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 export const BLOGSPOT_PLATFORM = "blogspot";
@@ -63,6 +68,8 @@ export type PublishArticleToBlogspotResult =
 export type PublishArticleToBlogspotOptions = {
   /** 테스트 주입: 초안 -> 공개 전환(posts.publish). 기본은 BloggerClient.publishPost. */
   publishPost?: (postId: string) => Promise<BloggerPublishResult>;
+  /** 테스트 주입: 초안 본문을 공개용으로 덮어쓰기(posts.patch). 기본은 BloggerClient.updatePost. */
+  updatePost?: (postId: string, input: BloggerUpdateInput) => Promise<BloggerUpdateResult>;
   /**
    * 초안이냐 공개냐를 호출부가 정한다(2026-09-19). 생략하면 BLOGGER_CONFIG.publishAsDraft(기본 true).
    *
@@ -135,6 +142,8 @@ export async function publishArticleToBlogspot(
   const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const insertPost = options.insertPost ?? ((input) => new BloggerClient().insertPost(input));
   const publishPost = options.publishPost ?? ((postId: string) => new BloggerClient().publishPost(postId));
+  const updatePost =
+    options.updatePost ?? ((postId: string, input: BloggerUpdateInput) => new BloggerClient().updatePost(postId, input));
   const markPublished =
     options.markPublished ??
     (async ({ publicationId, url, articleId }) => {
@@ -154,6 +163,23 @@ export async function publishArticleToBlogspot(
     return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 기준 원고가 없습니다: ${jobId}` };
   }
 
+  const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
+
+  /**
+   * 발행할 본문 HTML을 만든다. prepareManuscript.ts가 job.metadata.images에 저장해 둔 이미지를
+   * 본문의 [IMAGE: 설명] 마커 자리에 확정된 것만(정확히 1장) 끼워 넣는다.
+   *
+   * 채워지지 않고 남은 마커(주로 `— 웹 검색` 자리)는 **초안이냐 공개냐**로 갈린다.
+   *  - 초안: 그대로 둔다. 편집 화면에서 "여기에 자료를 넣어라"는 TODO 표시로 쓰인다.
+   *  - 공개: **반드시 지운다.** 안 지우면 `[IMAGE: ... — 웹 검색]`이라는 글자가 독자에게 그대로
+   *    보인다(convertArticleToHtml의 placeholder 경로가 <p>로 렌더한다).
+   */
+  const buildContentHtml = (article: ArticleRow, draft: boolean): string => {
+    const confirmedImages = readJobManuscriptImages(job);
+    const bodyWithImages = substituteConfirmedImages(article.content ?? "", confirmedImages);
+    return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages));
+  };
+
   // 이미 만들어 둔 배리에이션이 있으면 재사용(LLM 재지출 방지).
   let variantArticle = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
   let variantCreated = false;
@@ -170,6 +196,17 @@ export async function publishArticleToBlogspot(
       const wantsPublic = (options.asDraft ?? BLOGGER_CONFIG.publishAsDraft) === false;
       const postId = extractPostId(done.published_url);
       if (wantsPublic && done.status === "pending" && postId) {
+        // 초안 본문은 **초안 모드로** 만들어졌다 - 채워지지 않은 마커가 `[IMAGE: ... — 웹 검색]`
+        // 글자 그대로 남아 있고, 초안 저장 이후 이미지가 더 채워졌을 수도 있다. 그대로 공개하면
+        // 그 텍스트가 독자에게 보이므로 공개용 본문으로 먼저 덮어쓴다(2026-09-19).
+        const refreshed = await updatePost(postId, {
+          title: variantArticle.title ?? job.keyword,
+          contentHtml: buildContentHtml(variantArticle, false),
+          labels: label ? [label] : undefined,
+        });
+        if (!refreshed.ok) {
+          return { ok: false, reason: "blogger_failed", detail: `[${refreshed.stage}] ${refreshed.error}`, stage: refreshed.stage };
+        }
         const promoted = await publishPost(postId);
         if (!promoted.ok) {
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
@@ -231,22 +268,8 @@ export async function publishArticleToBlogspot(
     variantCreated = true;
   }
 
-  // prepareManuscript.ts가 job.metadata.images에 저장해 둔 자동 생성 이미지를, 본문의
-  // [IMAGE: 설명] 마커 자리에 확정된 것만(정확히 1장) 실제 이미지로 바꿔 넣은 뒤 HTML로 변환한다.
-  const confirmedImages = readJobManuscriptImages(job);
-  const bodyWithImages = substituteConfirmedImages(variantArticle.content ?? "", confirmedImages);
-
-  // 채워지지 않고 남은 마커(주로 `— 웹 검색` 자리)를 어떻게 할지는 **초안이냐 공개냐**로 갈린다.
-  //  - 초안(BLOGGER_PUBLISH_AS_DRAFT=true): 그대로 둔다. 편집 화면에서 "여기에 자료를 넣어라"는
-  //    TODO 표시로 쓰인다(현행 운영 흐름 - 사람이 퍼머링크·검색 설명과 함께 채운 뒤 공개).
-  //  - 공개(=false): **반드시 지운다.** 안 지우면 `[IMAGE: ... — 웹 검색]`이라는 글자가 독자에게
-  //    그대로 보인다(convertArticleToHtml의 placeholder 경로가 <p>로 렌더한다). 공개 자동화로
-  //    내리는 순간 터지는 사고라 모드 분기를 둔다(2026-09-16).
   const isDraft = options.asDraft ?? BLOGGER_CONFIG.publishAsDraft;
-  const publishBody = isDraft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages);
-
-  const contentHtml = convertArticleToHtml(publishBody);
-  const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
+  const contentHtml = buildContentHtml(variantArticle, isDraft);
 
   const inserted = await insertPost({
     title: variantArticle.title ?? job.keyword,
