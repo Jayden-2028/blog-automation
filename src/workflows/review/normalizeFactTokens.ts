@@ -105,17 +105,60 @@ function parseKoreanAmount(digits: string, unit: string | undefined): number | n
   return found ? base * found.multiplier : base;
 }
 
+/**
+ * **단위 뒤에 나머지가 붙는 한국식 복합 수**를 읽는다: `1만 949` -> 10949, `1억 2천만` -> 120000000.
+ *
+ * 왜 필요한가(2026-09-19 실측): 예전 정규식은 `숫자 + 단위? + 원` 하나만 봐서 `1만 949원`에서
+ * **`949원`만 잘라냈다.** 그래서 리서치에 `10,949원`으로 멀쩡히 있는 값이 "근거에서 확인되지 않은
+ * 수치"로 표시됐다 - 공무원 수당 원고의 검수 error 5건이 전부 이 오탐이었다. 정책·지원금 원고는
+ * 금액을 거의 다 이렇게 쓰므로, **가장 검수가 필요한 카테고리에서 검수가 못 쓰게 되는** 문제였다.
+ *
+ * 알고리즘은 한국어 수 읽기 그대로다. 억·만을 만나면 그때까지 쌓인 section을 total로 넘기고,
+ * 천은 section 안에서만 곱한다(`2천만` = 2*1000*10000).
+ */
+function parseCompositeAmount(expression: string): number | null {
+  let total = 0;
+  let section = 0;
+  let sawDigit = false;
+
+  for (const match of expression.matchAll(/(\d[\d,]*(?:\.\d+)?)|([억만천])/g)) {
+    const [, digits, unit] = match;
+    if (digits !== undefined) {
+      const value = Number(digits.replace(/,/g, ""));
+      if (!Number.isFinite(value)) return null;
+      // 단위 없이 이어지는 숫자는 앞 단위의 나머지다(`1만 949`의 949).
+      section += value;
+      sawDigit = true;
+      continue;
+    }
+    const multiplier = KOREAN_UNITS.find((u) => u.suffix === unit)?.multiplier;
+    if (multiplier === undefined) return null;
+    // 숫자 없이 단위만 이어지면(`천만`) 1로 보고 곱한다.
+    const base = section === 0 ? 1 : section;
+    if (unit === "천") {
+      section = base * multiplier;
+    } else {
+      total += base * multiplier;
+      section = 0;
+    }
+    sawDigit = true;
+  }
+
+  if (!sawDigit) return null;
+  return total + section;
+}
+
 /** 금액을 뽑는다. "60,000원", "6만 원", "300만원대" 모두 같은 숫자로 정규화한다. */
 function extractMoney(text: string): FactToken[] {
   const tokens: FactToken[] = [];
 
-  // 숫자 + (선택) 한국어 단위 + "원". "대"/"가량" 같은 근사 접미사는 뒤에 붙어도 무시한다.
-  // 숫자로 시작하도록 강제한다: `[\d,]+`로 쓰면 쉼표만 있어도 매칭돼 ", 원" 같은 조각이
-  // money:0으로 잡힌다(2026-08-28 실측에서 실제로 발생).
-  const pattern = /(\d[\d,]*(?:\.\d+)?)\s*([억만천])?\s*원/g;
+  // 숫자·단위가 이어지는 덩어리 전체 + "원". `1만 949원`, `62만 7,090원`, `1억 2천만 원`을 한 덩어리로
+  // 잡는다(2026-09-19). 숫자로 시작하도록 강제한다: `[\d,]+`로 쓰면 쉼표만 있어도 매칭돼 ", 원"
+  // 같은 조각이 money:0으로 잡힌다(2026-08-28 실측에서 실제로 발생).
+  const pattern = /(\d[\d,]*(?:\.\d+)?(?:\s*[억만천])*(?:\s*\d[\d,]*(?:\.\d+)?(?:\s*[억만천])*)*)\s*원/g;
   for (const match of text.matchAll(pattern)) {
-    const [raw, digits, unit] = match;
-    const amount = parseKoreanAmount(digits, unit);
+    const [raw, expression] = match;
+    const amount = parseCompositeAmount(expression);
     if (amount === null) continue;
     tokens.push({ raw: raw.trim(), normalized: `money:${amount}`, kind: "money" });
   }
@@ -127,11 +170,15 @@ function extractMoney(text: string): FactToken[] {
 function extractNumbers(text: string): FactToken[] {
   const tokens: FactToken[] = [];
   const units = MEANINGFUL_NUMBER_UNITS.join("|");
-  const pattern = new RegExp(String.raw`(\d[\d,]*(?:\.\d+)?)\s*([억만천])?\s*(${units})`, "g");
+  // 금액과 같은 이유로 복합 표기를 한 덩어리로 잡는다(`1만 2,000명`).
+  const pattern = new RegExp(
+    String.raw`(\d[\d,]*(?:\.\d+)?(?:\s*[억만천])*(?:\s*\d[\d,]*(?:\.\d+)?(?:\s*[억만천])*)*)\s*(${units})`,
+    "g"
+  );
 
   for (const match of text.matchAll(pattern)) {
-    const [raw, digits, koreanUnit, unit] = match;
-    const value = parseKoreanAmount(digits, koreanUnit);
+    const [raw, expression, unit] = match;
+    const value = parseCompositeAmount(expression);
     if (value === null || value < MIN_SIGNIFICANT_NUMBER) continue;
     tokens.push({ raw: raw.trim(), normalized: `num:${value}:${unit}`, kind: "number" });
   }

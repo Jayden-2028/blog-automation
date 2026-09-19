@@ -137,3 +137,29 @@ try {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 }
+
+// --- 한국식 복합 금액(2026-09-19) - 단위 뒤에 나머지가 붙는 표기 -------------------------------
+{
+  // 실측: 공무원 수당 원고가 `1만 949원`으로 썼는데 검수기가 `949원`만 잘라내
+  // 리서치에 멀쩡히 있는 `10,949원`을 "근거에서 확인되지 않은 수치"로 표시했다(error 5건 전부).
+  const corpus = buildFactCorpus(["9급 10,949원, 7급 12,368원 / 월 상한 627,090원 / 1억 2천만 원 규모"]);
+  const body = "9급은 시간당 1만 949원, 월 57시간이면 62만 7,090원입니다. 사업 규모는 1억 2천만 원입니다.";
+  const unverified = extractFactTokens(body).filter((t) => !corpus.has(t.normalized) && t.kind === "money");
+  if (unverified.length > 0) {
+    throw new Error(`❌ 복합 금액이 근거와 대조돼야 한다 (미확인: ${unverified.map((t) => t.raw).join(", ")})`);
+  }
+
+  const amount = (text: string) => extractFactTokens(text).find((t) => t.kind === "money")?.normalized;
+  const expect = (text: string, want: string) => {
+    if (amount(text) !== want) throw new Error(`❌ ${text} → ${amount(text)} (기대 ${want})`);
+  };
+  expect("1만 949원", "money:10949");
+  expect("107만 5,550원", "money:1075550");
+  expect("1억 2천만 원", "money:120000000");
+  // 기존 표기도 그대로 읽어야 한다(회귀).
+  expect("6만 원", "money:60000");
+  expect("60,000원", "money:60000");
+  expect("300만원대", "money:3000000");
+  console.log("✅ 한국식 복합 금액 - 단위 뒤 나머지·연속 단위, 기존 표기 회귀 없음");
+}
+
