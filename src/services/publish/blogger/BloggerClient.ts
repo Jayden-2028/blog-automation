@@ -158,6 +158,31 @@ export class BloggerClient {
   }
 
   /**
+   * 공개 URL로 postId를 찾는다(posts.getByPath).
+   *
+   * publications 테이블에는 postId 컬럼이 없고(마이그레이션은 승인 게이트) 공개 URL만 남는다.
+   * 이미 공개된 글을 수정본으로 덮어쓰려면 id가 필요해서 주소로 되찾는다. 초안은 공개 경로가
+   * 없어 이 방법으로 못 찾는다 - 초안은 편집 URL에 id가 들어 있으므로 그쪽에서 뽑는다.
+   */
+  async getPostIdByPath(path: string): Promise<string | null> {
+    const configError = this.missingConfig();
+    if (configError) return null;
+
+    const token = await this.getAccessToken();
+    if (!token.ok) return null;
+
+    const url = new URL(`${API_BASE}/blogs/${this.blogId}/posts/bypath`);
+    url.searchParams.set("path", path);
+
+    const res = await this.fetchImpl(url.toString(), {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token.token}` },
+    });
+    const json = (await res.json().catch(() => ({}))) as { id?: string };
+    return res.ok && json.id ? json.id : null;
+  }
+
+  /**
    * 이미 올라간 글의 제목·본문·라벨을 덮어쓴다(posts.patch).
    *
    * 초안을 공개로 전환하기 직전에 쓴다. 초안 본문은 "초안 모드"로 만들어져 채워지지 않은

@@ -238,8 +238,8 @@ export type TelegramBotOptions = {
   triggerRevision?: (jobId: string, feedback: string) => void;
   /**
    * 답장(reply_to_message.message_id)으로 "수정 필요" 요청 메시지를 역매칭해 그 job을 찾는다.
-   * 기본 구현은 status="review"인 job을 훑어 metadata.editRequestMessageId가 일치하는 것을 찾는다
-   * (동시에 검수 대기 중인 job이 많지 않다는 전제 - 많아지면 Supabase jsonb 쿼리로 바꿀 것).
+   * 기본 구현은 ArticleJobRepository.findByEditRequestMessageId - status가 review이거나
+   * **approved**인 job을 jsonb 필터로 직접 찾는다(승인 후 최종본을 보고 고치는 경우가 있다).
    */
   findJobByEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
 
@@ -334,10 +334,7 @@ export class TelegramBot {
       options.triggerRevision ?? ((jobId, feedback) => spawnDetachedTask("job:revise", [jobId, feedback]));
     this.findJobByEditRequestMessageId =
       options.findJobByEditRequestMessageId ??
-      (async (messageId) => {
-        const reviewJobs = await ArticleJobRepository.listByStatus("review", 50);
-        return reviewJobs.find((j) => (j.metadata as Record<string, unknown>)?.editRequestMessageId === messageId) ?? null;
-      });
+      ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId));
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -812,7 +809,11 @@ export class TelegramBot {
     return {
       outcome: { status: "published", url: published.url },
       message: [
-        published.isDraft ? "📝 <b>초안으로 올렸습니다</b>" : "🚀 <b>블로그에 발행했습니다</b>",
+        published.updatedExisting
+          ? "♻️ <b>수정본으로 글을 갱신했습니다</b>"
+          : published.isDraft
+            ? "📝 <b>초안으로 올렸습니다</b>"
+            : "🚀 <b>블로그에 발행했습니다</b>",
         "",
         `<b>${escapeTelegramHtml(job.keyword)}</b>`,
         escapeTelegramHtml(published.url),

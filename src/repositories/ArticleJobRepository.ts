@@ -130,6 +130,29 @@ export class ArticleJobRepository {
   }
 
   /**
+   * "수정 필요" 안내 메시지의 message_id로 job을 찾는다(답장 매칭).
+   *
+   * 왜 status를 review로 한정하지 않는가(2026-09-19 실측 사고): 예전 구현은
+   * `listByStatus("review", 50)`을 훑었는데, **이미 승인된 원고**를 최종본에서 보고 수정 요청하면
+   * job.status가 approved라 매칭이 통째로 실패해 답장이 조용히 무시됐다(사용자 리포트 - "정풍운동
+   * 수정 요청에 응답이 없다"). 승인 후에도 고칠 수 있어야 하므로 두 status를 모두 본다.
+   *
+   * 필터를 DB로 내려 조회 창(50건) 밖으로 밀려나는 문제도 같이 없앤다 - message_id는 유일하다.
+   */
+  static async findByEditRequestMessageId(messageId: number): Promise<ArticleJobRow | null> {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("*")
+      .in("status", ["review", "approved"])
+      .filter("metadata->>editRequestMessageId", "eq", String(messageId))
+      .order("selected_at", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+    return data?.[0] ?? null;
+  }
+
+  /**
    * status와 무관하게 최근 선택된 job을 최신순으로 반환한다.
    *
    * listByStatus는 "다음 단계 워커가 집어갈 job"을 찾는 용도라 status가 고정이다. 이 메서드는

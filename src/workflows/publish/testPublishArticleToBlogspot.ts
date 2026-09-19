@@ -50,7 +50,7 @@ const baseDeps = {
   loadArticles: async () => [article()],
   createVariantArticle: async (i: { jobId: string; title: string; content: string }) =>
     article({ id: 2, platform: "blogspot", title: i.title, content: i.content }),
-  loadExistingPublications: async () => [] as PublicationRow[],
+  loadJobPublications: async () => [] as PublicationRow[],
   savePublication: async (i: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) =>
     ({ id: 99, article_id: i.articleId, platform: "blogspot", status: i.status, published_url: i.publishedUrl, published_at: null, created_at: "x" }) as PublicationRow,
   countToday: async () => 0,
@@ -106,10 +106,12 @@ async function main(): Promise<void> {
   const already = await publishArticleToBlogspot("job-1", {
     ...baseDeps,
     loadArticles: async () => [article(), article({ id: 2, platform: "blogspot" })],
-    loadExistingPublications: async (articleId: number) =>
-      articleId === 2
+    loadJobPublications: async (articleIds: number[]) =>
+      articleIds.includes(2)
         ? [{ id: 7, article_id: 2, platform: "blogspot", status: "published", published_url: "https://b/x", published_at: null, created_at: "x" } as PublicationRow]
         : [],
+    // 주소로도 postId를 못 찾는 옛 기록 - 덮어쓰기 없이 "이미 발행됨"으로 끝나야 한다.
+    findPostIdByPath: async () => null,
     insertPost: async () => {
       insertCalls++;
       return baseDeps.insertPost();

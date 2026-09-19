@@ -34,7 +34,7 @@ import {
 import {
   countTodayPublicationsByPlatform,
   createPublication,
-  listPublicationsByArticleId,
+  listPublicationsByArticleIds,
   updatePublicationStatus,
 } from "../../services/supabase/repositories/publicationRepository.js";
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
@@ -58,7 +58,16 @@ type ChannelMetaMap = Record<string, ChannelMetaEntry>;
 const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "publishing", "published"];
 
 export type PublishArticleToBlogspotResult =
-  | { ok: true; publicationId: number; url: string; isDraft: boolean; variantCreated: boolean; alreadyDone: boolean }
+  | {
+      ok: true;
+      publicationId: number;
+      url: string;
+      isDraft: boolean;
+      variantCreated: boolean;
+      alreadyDone: boolean;
+      /** 새 글을 올린 게 아니라 **이미 있던 글의 본문을 지금 원고로 덮어썼다**(수정 반영). */
+      updatedExisting?: boolean;
+    }
   | { ok: false; reason: "disabled"; detail: string }
   | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found"; detail: string }
   | { ok: false; reason: "daily_limit"; detail: string }
@@ -70,6 +79,10 @@ export type PublishArticleToBlogspotOptions = {
   publishPost?: (postId: string) => Promise<BloggerPublishResult>;
   /** 테스트 주입: 초안 본문을 공개용으로 덮어쓰기(posts.patch). 기본은 BloggerClient.updatePost. */
   updatePost?: (postId: string, input: BloggerUpdateInput) => Promise<BloggerUpdateResult>;
+  /** 테스트 주입: 공개 URL 경로로 postId 되찾기. 기본은 BloggerClient.getPostIdByPath. */
+  findPostIdByPath?: (path: string) => Promise<string | null>;
+  /** 테스트 주입: job에 속한 article 전부의 publication 조회. 기본은 Supabase. */
+  loadJobPublications?: (articleIds: number[]) => Promise<PublicationRow[]>;
   /**
    * 초안이냐 공개냐를 호출부가 정한다(2026-09-19). 생략하면 BLOGGER_CONFIG.publishAsDraft(기본 true).
    *
@@ -86,7 +99,6 @@ export type PublishArticleToBlogspotOptions = {
     content: string;
     aiModel: string | null;
   }) => Promise<ArticleRow>;
-  loadExistingPublications?: (articleId: number) => Promise<PublicationRow[]>;
   savePublication?: (input: {
     articleId: number;
     status: PublicationRow["status"];
@@ -118,6 +130,16 @@ export function extractPostId(url: string | null | undefined): string | null {
   return matched ? matched[1] : null;
 }
 
+/** 공개 URL에서 blog 경로만 뽑는다(posts.getByPath용): .../2026/09/x.html -> /2026/09/x.html */
+function urlPath(url: string | null | undefined): string {
+  if (!url) return "";
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "";
+  }
+}
+
 export async function publishArticleToBlogspot(
   jobId: string,
   options: PublishArticleToBlogspotOptions = {}
@@ -133,7 +155,6 @@ export async function publishArticleToBlogspot(
     options.createVariantArticle ??
     (({ jobId: jid, title, content, aiModel }) =>
       createArticle({ job_id: jid, title, content, status: "approved", ai_model: aiModel, platform: BLOGSPOT_PLATFORM }));
-  const loadExistingPublications = options.loadExistingPublications ?? listPublicationsByArticleId;
   const savePublication =
     options.savePublication ??
     (({ articleId, status, publishedUrl }) =>
@@ -144,6 +165,8 @@ export async function publishArticleToBlogspot(
   const publishPost = options.publishPost ?? ((postId: string) => new BloggerClient().publishPost(postId));
   const updatePost =
     options.updatePost ?? ((postId: string, input: BloggerUpdateInput) => new BloggerClient().updatePost(postId, input));
+  const findPostIdByPath = options.findPostIdByPath ?? ((path: string) => new BloggerClient().getPostIdByPath(path));
+  const loadJobPublications = options.loadJobPublications ?? listPublicationsByArticleIds;
   const markPublished =
     options.markPublished ??
     (async ({ publicationId, url, articleId }) => {
@@ -184,53 +207,62 @@ export async function publishArticleToBlogspot(
   let variantArticle = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
   let variantCreated = false;
 
-  // 배리에이션이 이미 발행됐는지 멱등성 확인.
-  if (variantArticle) {
-    const existing = await loadExistingPublications(variantArticle.id);
-    const done = existing.find((pub) => IN_PROGRESS_OR_DONE.includes(pub.status));
-    if (done) {
-      // 공개 요청인데 이미 **초안으로** 올라가 있으면 새 글을 또 만들지 않고 그 초안을 공개로
-      // 전환한다(posts.publish). 2026-09-19 이전에는 준비 단계가 초안을 먼저 올렸기 때문에
-      // 그 잔재가 남아 있는데, 새 글을 만들면 같은 원고가 블로그에 두 번 올라간다.
-      // `pending`은 초안, `published`는 이미 공개된 것이다.
-      const wantsPublic = (options.asDraft ?? BLOGGER_CONFIG.publishAsDraft) === false;
-      const postId = extractPostId(done.published_url);
-      if (wantsPublic && done.status === "pending" && postId) {
-        // 초안 본문은 **초안 모드로** 만들어졌다 - 채워지지 않은 마커가 `[IMAGE: ... — 웹 검색]`
-        // 글자 그대로 남아 있고, 초안 저장 이후 이미지가 더 채워졌을 수도 있다. 그대로 공개하면
-        // 그 텍스트가 독자에게 보이므로 공개용 본문으로 먼저 덮어쓴다(2026-09-19).
-        const refreshed = await updatePost(postId, {
-          title: variantArticle.title ?? job.keyword,
-          contentHtml: buildContentHtml(variantArticle, false),
-          labels: label ? [label] : undefined,
-        });
-        if (!refreshed.ok) {
-          return { ok: false, reason: "blogger_failed", detail: `[${refreshed.stage}] ${refreshed.error}`, stage: refreshed.stage };
-        }
+  // 이 job의 원고가 블로그에 이미 올라가 있는지 확인한다. **article 한 건이 아니라 job 전체**를
+  // 본다(2026-09-19): 수정 반영이 들어오면 배리에이션 article row가 새로 생기는데, 그 row만 보면
+  // publication이 없어 "아직 안 올렸다"로 보이고 같은 글이 블로그에 두 번 올라간다.
+  const publications = await loadJobPublications(articles.map((article) => article.id));
+  const done = publications.find((pub) => IN_PROGRESS_OR_DONE.includes(pub.status));
+  if (done) {
+    const wantsPublic = (options.asDraft ?? BLOGGER_CONFIG.publishAsDraft) === false;
+    // 초안은 편집 URL에 postId가 들어 있다. 공개된 글은 주소만 남아 있어 경로로 되찾는다.
+    const postId = extractPostId(done.published_url) ?? (await findPostIdByPath(urlPath(done.published_url)).catch(() => null));
+
+    // 덮어쓸 상황인가:
+    //  - 공개 요청인데 아직 초안이다  -> 공개용 본문으로 덮어쓴 뒤 공개 전환(posts.publish).
+    //    초안 본문은 "초안 모드"로 만들어져 채워지지 않은 마커가 글자 그대로 남아 있다.
+    //  - 이미 공개된 글이다          -> 지금 원고(수정 반영본일 수 있다)로 본문을 갱신한다.
+    const shouldRefresh = Boolean(postId) && Boolean(variantArticle) && (done.status === "published" || (wantsPublic && done.status === "pending"));
+
+    if (postId && variantArticle && shouldRefresh) {
+      const refreshed = await updatePost(postId, {
+        title: variantArticle.title ?? job.keyword,
+        contentHtml: buildContentHtml(variantArticle, false),
+        labels: label ? [label] : undefined,
+      });
+      if (!refreshed.ok) {
+        return { ok: false, reason: "blogger_failed", detail: `[${refreshed.stage}] ${refreshed.error}`, stage: refreshed.stage };
+      }
+
+      if (done.status === "pending") {
         const promoted = await publishPost(postId);
         if (!promoted.ok) {
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
         }
         await markPublished({ publicationId: done.id, url: promoted.url, articleId: variantArticle.id });
-        return {
-          ok: true,
-          publicationId: done.id,
-          url: promoted.url,
-          isDraft: false,
-          variantCreated: false,
-          alreadyDone: false,
-        };
+        return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, variantCreated: false, alreadyDone: false };
       }
 
+      // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다.
+      await markPublished({ publicationId: done.id, url: done.published_url ?? "", articleId: variantArticle.id });
       return {
         ok: true,
         publicationId: done.id,
         url: done.published_url ?? "",
-        isDraft: done.status === "pending",
+        isDraft: false,
         variantCreated: false,
-        alreadyDone: true,
+        alreadyDone: false,
+        updatedExisting: true,
       };
     }
+
+    return {
+      ok: true,
+      publicationId: done.id,
+      url: done.published_url ?? "",
+      isDraft: done.status === "pending",
+      variantCreated: false,
+      alreadyDone: true,
+    };
   }
 
   // 일일 상한(하드 가드). 배리에이션 생성 전에 확인해 LLM 비용도 아낀다.

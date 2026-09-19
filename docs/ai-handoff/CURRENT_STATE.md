@@ -1,6 +1,33 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-18 (Asia/Seoul)
+기준일: 2026-09-19 (Asia/Seoul)
+
+## 2026-09-19 세션 — 자동 발행 켬 + 승인 이후 수정 반영
+
+**발행**: 준비 단계의 자동 초안 저장을 없애고, 텔레그램 "🚀 블로그 발행" 버튼이 **그 순간 공개
+업로드**를 한다(96aeb3a). 남아 있던 초안은 새 글을 만들지 않고 `posts.publish`로 공개 전환하며,
+공개 직전에 `posts.patch`로 본문을 공개용(미채움 마커 제거)으로 덮어쓴다(a7e2ae9). 오늘 2건 발행
+성공 - 공무원 수당, 윤가이. 퍼머링크는 예상대로 나쁘다(`/2026/09/57.html`, `blog-post_167.html`) -
+a안(Blogger 기본값 수용) 유지.
+
+**실측 교훈**: 이미 보낸 텔레그램 메시지의 버튼은 누를 때마다 **그 시점 main**으로 처리된다.
+11:16 클릭이 7분 뒤 커밋 직전 코드로 돌아 아무 일도 안 일어났다. 고친 뒤에는 알림을 다시 보내야
+한다 - `npm run manuscripts:resend-notification -- --job=<uuid>`(6d0c795).
+
+**승인 이후 수정**(사용자 요청, 2026-09-19): 최종본을 보고 고칠 수 있어야 한다. 세 군데를 고쳤다.
+1. 답장 매칭이 `status="review"`만 훑어서, **승인된 job(approved)의 수정 답장이 조용히 무시**됐다
+   (정풍운동 사례). `ArticleJobRepository.findByEditRequestMessageId`로 내리고 review+approved를 본다.
+2. `job:revise`는 이미 준비된 job이면 초안 검수로 되돌리지 않고, 게이트
+   (`channelManuscriptsReadyAt`/`images`/`imagesReadyAt`/`webImagesReadyAt`/`naverReadyAt`)를 열고
+   `job-publish-prepare.yml`을 직접 발화해 **최종본을 다시 만들어 재전송**한다.
+3. `prepareManuscript`는 기준 원고가 배리에이션보다 새것이면 배리에이션을 다시 만든다(안 그러면
+   수정이 최종본에 영영 반영되지 않는다). 그 결과 배리에이션 row가 새로 생기므로, 발행 멱등성
+   검사를 **job 전체의 publication**으로 넓혔다 - article 한 건만 보면 같은 글이 블로그에 두 번
+   올라간다. 이미 공개된 글은 `posts.getByPath`로 postId를 되찾아 본문만 덮어쓴다(주소 유지).
+
+**남은 판단**: 이미지 한 장만 바꾸고 싶어도 지금은 기준 원고 재작성(LLM) + 배리에이션 재생성(LLM) +
+이미지 전량 재생성이 돈다. 이미지 슬롯만 다시 만드는 경로가 필요한지는 사용자 판단.
+
 
 ## 2026-09-18 세션(후속 2) — 기획 브리프 단계 신설 + 웹 검색 실패 자리 AI 폴백
 

@@ -24,6 +24,8 @@ on:
       - "src/workflows/manuscripts/manuscriptManifest.ts"
       - "src/workflows/manuscripts/buildManuscriptPageCli.ts"
       - "src/workflows/manuscripts/deployManuscriptsPage.ts"
+      # 네이버 육아 뷰어. 이 파일이 바뀌면 같은 Pages 프로젝트에 다시 얹어야 한다.
+      - "public/naver-parenting.html"
       - ".github/workflows/manuscripts-refresh.yml"
   workflow_dispatch: {}
 

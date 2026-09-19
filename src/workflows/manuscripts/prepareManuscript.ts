@@ -246,7 +246,15 @@ export async function prepareManuscript(
   const date = kstDateString(now());
   const imagePrompts = readImagePrompts(job);
 
-  const existing = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
+  const latestVariant = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
+  // 수정 반영(job:revise)은 새 기준 원고 row를 **배리에이션보다 나중에** 만든다. 그 경우 기존
+  // 배리에이션은 수정 전 원고에서 나온 것이라 재사용하면 사용자의 수정이 최종본에 영영 반영되지
+  // 않는다 - 기준 원고가 더 새것이면 다시 만든다(2026-09-19). 평상시에는 기준 원고가 먼저이므로
+  // 이 조건이 걸리지 않고 예전처럼 재사용된다(LLM 비용 0).
+  const existing = latestVariant && latestVariant.id > baseArticle.id ? latestVariant : null;
+  if (latestVariant && !existing) {
+    console.log(`· [manuscripts] 기준 원고가 수정됐습니다(article ${baseArticle.id} > 배리에이션 ${latestVariant.id}) - 배리에이션을 다시 만듭니다.`);
+  }
   const channelMeta = (job.metadata?.channelMeta as ChannelMetaMap | undefined) ?? {};
 
   let title: string;

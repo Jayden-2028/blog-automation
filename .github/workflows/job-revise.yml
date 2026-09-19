@@ -65,6 +65,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 이미 승인·준비된 원고를 고친 경우, 재작성 뒤 job-publish-prepare.yml을 직접 발화해
+          # 최종본을 다시 만든다(2026-09-19). 그 workflow_dispatch 호출에 토큰이 필요하다.
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run job:revise -- "${{ inputs.job_id }}" "${{ inputs.feedback }}"
 
       # job-research.yml과 같은 이유(2026-09-16) - always()로 돌아 큐 행을 마감하고 다음 대기

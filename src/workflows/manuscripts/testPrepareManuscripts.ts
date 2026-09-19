@@ -363,6 +363,30 @@ async function main(): Promise<void> {
   }
   console.log("✅ 이미 생성된 이미지는 재생성하지 않고 metadata에서 복구");
 
+  // 10-1) 수정 반영(job:revise)으로 기준 원고가 배리에이션보다 **나중에** 생기면, 그 배리에이션은
+  // 수정 전 원고에서 나온 것이다 - 재사용하면 사용자의 수정이 최종본에 영영 반영되지 않는다.
+  let regenerated = 0;
+  const revisedBase = { ...baseArticle("수정 반영된 기준 원고입니다."), id: 30 } as ArticleRow;
+  const r10b = await prepareManuscript(job("a", "living"), {
+    loadArticles: async () => [variantArticle(2), revisedBase],
+    generateVariant: async (input) => {
+      regenerated += 1;
+      assert(input.baseBody.includes("수정 반영된"), "수정된 기준 원고로 다시 만들어야 한다");
+      return okVariant();
+    },
+    createVariantArticle: async () => variantArticle(31),
+    writeManuscriptFile: async () => {},
+    mergeJobMetadata: async () => {},
+    collectWebImages: false,
+    renderTableImages: false,
+    capturePages: false,
+    generateNaverVariant: false,
+    generateImages: async () => noImages(),
+  });
+  assert(r10b.status === "success", "수정 반영 케이스 실패");
+  assert(regenerated === 1, "기준 원고가 더 새것이면 배리에이션을 다시 만들어야 한다");
+  console.log("✅ 기준 원고가 수정되면 배리에이션을 다시 만든다");
+
   // 11) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다 + 페이지 갱신 시 배포 호출
   const marks: Array<{ id: string; patch: Record<string, unknown> }> = [];
   let manifestSaved: ManuscriptManifest | null = null;

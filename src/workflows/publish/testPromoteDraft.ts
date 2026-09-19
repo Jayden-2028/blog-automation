@@ -43,7 +43,7 @@ function options(over: Record<string, unknown> = {}) {
   const result = await publishArticleToBlogspot(
     "job-1",
     options({
-      loadExistingPublications: async () => [
+      loadJobPublications: async () => [
         { id: 7, status: "pending", published_url: "https://www.blogger.com/blog/post/edit/111/222" },
       ],
       insertPost: async () => {
@@ -84,7 +84,7 @@ function options(over: Record<string, unknown> = {}) {
   const result = await publishArticleToBlogspot(
     "job-1",
     options({
-      loadExistingPublications: async () => [
+      loadJobPublications: async () => [
         { id: 7, status: "pending", published_url: "https://www.blogger.com/blog/post/edit/111/222" },
       ],
       insertPost: async () => ({ ok: true as const, postId: "999", url: "https://new", isDraft: false }),
@@ -100,16 +100,17 @@ function options(over: Record<string, unknown> = {}) {
   console.log("✅ 본문 덮어쓰기 실패 시 공개를 막는다");
 }
 
-// --- 이미 공개된 글이면 그대로 알린다 ------------------------------------------------------------
+// --- 이미 공개된 글이고 postId도 못 찾으면 그대로 알린다 -----------------------------------------
 {
   let promoted = 0;
   const result = await publishArticleToBlogspot(
     "job-1",
     options({
-      loadExistingPublications: async () => [
+      loadJobPublications: async () => [
         { id: 7, status: "published", published_url: "https://blog.example.com/2026/09/p.html" },
       ],
       insertPost: async () => ({ ok: true as const, postId: "999", url: "https://new", isDraft: false }),
+      findPostIdByPath: async () => null,
       publishPost: async () => {
         promoted += 1;
         return {} as never;
@@ -118,7 +119,54 @@ function options(over: Record<string, unknown> = {}) {
   );
   assert(promoted === 0, "이미 공개된 글을 다시 전환하면 안 된다");
   assert(result.ok && result.alreadyDone, "alreadyDone이어야 한다");
-  console.log("✅ 이미 공개된 글은 그대로 알린다");
+  console.log("✅ 이미 공개된 글 + postId 미확인 -> 그대로 알린다");
+}
+
+// --- 수정 반영: 이미 공개된 글은 새로 올리지 않고 본문만 덮어쓴다 ---------------------------------
+// 수정이 들어오면 배리에이션 article row가 새로 생긴다. 그 row의 publication만 보면 "아직 안
+// 올렸다"로 보여 같은 글이 블로그에 두 번 올라간다 - job 전체의 publication을 봐야 한다.
+{
+  let inserted = 0;
+  let promoted = 0;
+  let patchedTo = "";
+  let askedPath = "";
+  const result = await publishArticleToBlogspot(
+    "job-1",
+    options({
+      // 수정 반영으로 배리에이션이 새로 생긴 상태(id 3). 옛 배리에이션(id 2)에 publication이 있다.
+      loadArticles: async () => [base, variant, { id: 3, platform: "blogspot", title: "수정 제목", content: "수정 본문" }],
+      loadJobPublications: async (articleIds: number[]) => {
+        assert(articleIds.includes(2), "job 전체 article의 publication을 봐야 한다");
+        return [{ id: 7, status: "published", published_url: "https://blog.example.com/2026/09/p.html" }] as never;
+      },
+      findPostIdByPath: async (path: string) => {
+        askedPath = path;
+        return "555";
+      },
+      updatePost: async (postId: string, input: { title: string; contentHtml: string }) => {
+        assert(postId === "555", "주소로 찾은 postId를 덮어써야 한다");
+        patchedTo = input.contentHtml;
+        return { ok: true as const, postId };
+      },
+      insertPost: async () => {
+        inserted += 1;
+        return { ok: true as const, postId: "999", url: "https://new", isDraft: false };
+      },
+      publishPost: async () => {
+        promoted += 1;
+        return {} as never;
+      },
+      markPublished: async () => {},
+    }) as never
+  );
+
+  assert(inserted === 0, "이미 공개된 글이 있으면 새 글을 올리면 안 된다(중복 게시)");
+  assert(promoted === 0, "이미 공개된 글을 다시 publish할 필요는 없다");
+  assert(askedPath === "/2026/09/p.html", `공개 URL의 경로로 postId를 찾아야 한다 (${askedPath})`);
+  assert(patchedTo.includes("수정 본문"), `수정된 최신 배리에이션으로 덮어써야 한다 (${patchedTo})`);
+  assert(result.ok && result.updatedExisting, "본문 갱신이었음을 알려야 한다");
+  assert(result.ok && result.url.includes("blog.example.com"), "주소는 그대로여야 한다");
+  console.log("✅ 수정 반영 -> 기존 공개 글의 본문만 덮어씀(중복 게시 없음)");
 }
 
 console.log("\n🎉 초안 공개 전환 테스트 통과");
