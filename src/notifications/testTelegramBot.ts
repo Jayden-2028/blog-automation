@@ -1026,10 +1026,10 @@ main().catch((error) => {
 
   // 2) 이미 초안으로 올라가 있으면 - API로 공개 전환이 안 되므로 그 사실을 알린다.
   const dup = await publishBot(async () =>
-    ({ ok: true, publicationId: 1, url: "https://blogger.com/edit", isDraft: true, variantCreated: false, alreadyDone: true }) as never
+    ({ ok: true, publicationId: 1, url: "https://blog.example.com/p.html", isDraft: false, variantCreated: false, alreadyDone: true }) as never
   ).handlePublishDecisionCallback(query(`publish:${JOB}`));
   assert(dup.outcome.status === "already_done", "중복은 already_done이어야 한다");
-  assert(dup.message.includes("직접 공개"), "사람이 공개해야 한다는 안내가 있어야 한다");
+  assert(dup.message.includes("이미 발행된 글"), "이미 발행됐다는 안내가 있어야 한다");
 
   // 3) 실패하면 수동 발행을 안내한다.
   const failed = await publishBot(async () => ({ ok: false, reason: "daily_limit", detail: "오늘 상한 도달" }) as never)

@@ -369,7 +369,6 @@ async function main(): Promise<void> {
   let pageHtml: string | null = null;
   let deployCalled = false;
   const r11 = await prepareApprovedManuscripts({
-    publishBlogspot: async () => ({ ok: false, reason: "disabled", detail: "test" }),
     writeCostSnapshot: noCostSnapshot,
     deploy: async () => {
       deployCalled = true;
@@ -443,8 +442,7 @@ async function main(): Promise<void> {
   assert(!deployCalledOnAllFailure, "성공한 job이 없으면 페이지도 배포도 갱신하면 안 된다");
   console.log("✅ maxJobsPerRun 제한 + 전부 실패 시 배포 미호출");
 
-  // 13) 원고 준비 성공 직후 publishBlogspot(jobId)를 호출해야 한다(2026-09-15 재배선) - 실패한
-  //     job에는 호출하면 안 된다. publishBlogspot 자체가 실패해도(예외 포함) 원고 준비 결과는
+  // 13) 준비 단계는 Blogger에 아무것도 올리지 않는다(2026-09-19 사용자 결정). 원고 준비 결과는
   //     그대로 success 유지.
   const publishCalls: string[] = [];
   const r13 = await prepareApprovedManuscripts({
@@ -479,14 +477,13 @@ async function main(): Promise<void> {
     loadManifest: async () => ({ topics: [] }),
     saveManifest: async () => {},
     writePage: async () => {},
-    publishBlogspot: async (jobId) => {
-      publishCalls.push(jobId);
-      throw new Error("Blogger 호출 실패(테스트)");
-    },
   });
-  assert(publishCalls.length === 1 && publishCalls[0] === "ok", `원고 준비 성공 job에만 publishBlogspot 호출 (${JSON.stringify(publishCalls)})`);
-  assert(r13.find((r) => r.job.id === "ok")?.result.status === "success", "publishBlogspot 예외가 원고 준비 결과를 실패로 바꾸면 안 된다");
-  console.log("✅ 원고 준비 성공 직후 publishBlogspot 호출 (실패한 job은 미호출, 발행 예외가 원고 준비 결과에 영향 없음)");
+  // 2026-09-19: 준비 단계는 **Blogger에 아무것도 올리지 않는다**(사용자 결정). 전에는 여기서
+  // 초안으로 올렸는데, 그러면 발행 버튼이 "이미 올라가 있음"에 막혀 매번 사람이 Blogger에서
+  // 수동 공개해야 했다. 실제 업로드는 알림의 발행 버튼을 누른 순간에만 일어난다.
+  assert(publishCalls.length === 0, "준비 단계에서 Blogger를 호출하면 안 된다");
+  assert(r13.find((r) => r.job.id === "ok")?.result.status === "success", "준비 결과는 그대로 success여야 한다");
+  console.log("✅ 준비 단계는 Blogger에 올리지 않는다(발행은 버튼을 누른 순간에만)");
 
   // 2026-09-18: `웹 검색` 자리를 파이프라인에서 채운다. 어제까지 이 경로는 Codex CLI 전용이라
   // 러너에서 실행 자체가 불가능했고, 그래서 웹 검색 자리가 전부 빈 채로 발행 대기에 올라갔다.

@@ -795,16 +795,15 @@ export class TelegramBot {
       };
     }
 
-    // 이미 초안으로 올라가 있던 경우다. Blogger API로는 초안을 공개로 못 바꾸므로(BloggerClient
-    // 주석) 사람이 Blogger에서 공개해야 한다 - 링크를 주고 그 사실을 알린다.
+    // 이미 공개된 글을 또 누른 경우다. 초안이 남아 있으면 publishArticleToBlogspot이
+    // posts.publish로 공개 전환하므로 여기까지 오지 않는다(2026-09-19).
     if (published.alreadyDone) {
       return {
         outcome: { status: "already_done", url: published.url },
         message: [
-          "ℹ️ <b>이미 Blogger에 올라가 있습니다</b>",
+          "ℹ️ <b>이미 발행된 글입니다</b>",
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-          published.isDraft ? "초안 상태라 Blogger에서 직접 공개해야 합니다(API로는 전환할 수 없습니다)." : "이미 공개된 글입니다.",
           escapeTelegramHtml(published.url),
         ].join("\n"),
       };

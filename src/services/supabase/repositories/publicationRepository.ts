@@ -21,11 +21,16 @@ export async function createPublication(
 
 export async function updatePublicationStatus(
   id: number,
-  status: PublicationStatus
+  status: PublicationStatus,
+  /**
+   * 초안을 공개로 전환하면 URL이 편집 주소에서 공개 주소로 바뀐다(2026-09-19). 생략하면 기존 값을
+   * 그대로 둔다 - status만 바꾸는 호출이 URL을 지워버리면 안 된다.
+   */
+  publishedUrl?: string
 ): Promise<PublicationRow> {
   const { data, error } = await supabase
     .from("publications")
-    .update({ status } satisfies PublicationUpdate)
+    .update({ status, ...(publishedUrl ? { published_url: publishedUrl } : {}) } satisfies PublicationUpdate)
     .eq("id", id)
     .select()
     .single();

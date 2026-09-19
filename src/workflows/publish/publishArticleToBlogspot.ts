@@ -24,6 +24,7 @@
 import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
+import type { BloggerPublishResult } from "../../services/publish/blogger/BloggerClient.js";
 import { convertArticleToHtml } from "../../services/publish/convertArticleToHtml.js";
 import {
   createArticle,
@@ -34,6 +35,7 @@ import {
   countTodayPublicationsByPlatform,
   createPublication,
   listPublicationsByArticleId,
+  updatePublicationStatus,
 } from "../../services/supabase/repositories/publicationRepository.js";
 import { generateArticleVariant } from "../writing/generateArticleVariant.js";
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
@@ -59,6 +61,8 @@ export type PublishArticleToBlogspotResult =
   | { ok: false; reason: "blogger_failed"; detail: string; stage: string };
 
 export type PublishArticleToBlogspotOptions = {
+  /** 테스트 주입: 초안 -> 공개 전환(posts.publish). 기본은 BloggerClient.publishPost. */
+  publishPost?: (postId: string) => Promise<BloggerPublishResult>;
   /**
    * 초안이냐 공개냐를 호출부가 정한다(2026-09-19). 생략하면 BLOGGER_CONFIG.publishAsDraft(기본 true).
    *
@@ -82,6 +86,11 @@ export type PublishArticleToBlogspotOptions = {
     publishedUrl: string | null;
   }) => Promise<PublicationRow>;
   countToday?: (platform: string) => Promise<number>;
+  /**
+   * 발행 성공을 DB에 반영한다(publications.status/URL + articles.status). 테스트 주입 지점 -
+   * 없으면 이 함수가 Supabase를 직접 친다.
+   */
+  markPublished?: (input: { publicationId: number; url: string; articleId: number }) => Promise<void>;
   generateVariant?: (input: {
     category: string | null;
     baseTitle: string;
@@ -91,6 +100,16 @@ export type PublishArticleToBlogspotOptions = {
   /** enabled override (테스트). 생략하면 BLOGGER_CONFIG.enabled. */
   enabled?: boolean;
 };
+
+/**
+ * 초안 편집 URL에서 postId를 뽑는다: `https://www.blogger.com/blog/post/edit/{blogId}/{postId}`.
+ * publications 테이블에 postId 컬럼이 없어(마이그레이션은 승인 게이트) URL에서 읽는다.
+ */
+export function extractPostId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const matched = url.match(/\/post\/edit\/\d+\/(\d+)/);
+  return matched ? matched[1] : null;
+}
 
 export async function publishArticleToBlogspot(
   jobId: string,
@@ -115,6 +134,13 @@ export async function publishArticleToBlogspot(
   const countToday = options.countToday ?? countTodayPublicationsByPlatform;
   const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const insertPost = options.insertPost ?? ((input) => new BloggerClient().insertPost(input));
+  const publishPost = options.publishPost ?? ((postId: string) => new BloggerClient().publishPost(postId));
+  const markPublished =
+    options.markPublished ??
+    (async ({ publicationId, url, articleId }) => {
+      await updatePublicationStatus(publicationId, "published", url).catch(() => {});
+      await updateArticleStatus(articleId, "published").catch(() => {});
+    });
 
   const job = await loadJob(jobId);
   if (!job) return { ok: false, reason: "job_not_found", detail: `job을 찾을 수 없습니다: ${jobId}` };
@@ -135,16 +161,35 @@ export async function publishArticleToBlogspot(
   // 배리에이션이 이미 발행됐는지 멱등성 확인.
   if (variantArticle) {
     const existing = await loadExistingPublications(variantArticle.id);
-    // 공개 요청인데 이미 **초안으로** 올라간 글이 있으면, 새 글을 또 만들지 않는다. Blogger에서
-    // 그 초안을 공개로 전환해야 하는데 API로는 되지 않으므로(BloggerClient 주석) 사람이 UI에서
-    // 공개해야 한다 - 그 사실을 사유로 알린다.
     const done = existing.find((pub) => IN_PROGRESS_OR_DONE.includes(pub.status));
     if (done) {
+      // 공개 요청인데 이미 **초안으로** 올라가 있으면 새 글을 또 만들지 않고 그 초안을 공개로
+      // 전환한다(posts.publish). 2026-09-19 이전에는 준비 단계가 초안을 먼저 올렸기 때문에
+      // 그 잔재가 남아 있는데, 새 글을 만들면 같은 원고가 블로그에 두 번 올라간다.
+      // `pending`은 초안, `published`는 이미 공개된 것이다.
+      const wantsPublic = (options.asDraft ?? BLOGGER_CONFIG.publishAsDraft) === false;
+      const postId = extractPostId(done.published_url);
+      if (wantsPublic && done.status === "pending" && postId) {
+        const promoted = await publishPost(postId);
+        if (!promoted.ok) {
+          return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
+        }
+        await markPublished({ publicationId: done.id, url: promoted.url, articleId: variantArticle.id });
+        return {
+          ok: true,
+          publicationId: done.id,
+          url: promoted.url,
+          isDraft: false,
+          variantCreated: false,
+          alreadyDone: false,
+        };
+      }
+
       return {
         ok: true,
         publicationId: done.id,
         url: done.published_url ?? "",
-        isDraft: BLOGGER_CONFIG.publishAsDraft,
+        isDraft: done.status === "pending",
         variantCreated: false,
         alreadyDone: true,
       };

@@ -24,8 +24,6 @@ import type { DeployManuscriptsPageResult } from "./deployManuscriptsPage.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
 import type { WriteCostSnapshotResult } from "../reports/writeCostSnapshot.js";
-import { publishArticleToBlogspot } from "../publish/publishArticleToBlogspot.js";
-import type { PublishArticleToBlogspotResult } from "../publish/publishArticleToBlogspot.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -47,8 +45,6 @@ export type PrepareApprovedManuscriptsOptions = {
   writeCostSnapshot?: () => Promise<WriteCostSnapshotResult>;
   /** job당 처리 상한(배리에이션 LLM 호출이 오래 걸리므로). 기본 3. */
   maxJobsPerRun?: number;
-  /** 원고 준비 성공 직후 호출. 기본은 publishArticleToBlogspot(jobId) - BLOGGER_ENABLED=false면 no-op. */
-  publishBlogspot?: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
 };
 
 async function defaultWritePage(html: string): Promise<void> {
@@ -73,7 +69,6 @@ export async function prepareApprovedManuscripts(
   const deploy = options.deploy ?? (() => deployManuscriptsPage());
   const writeCostSnapshotFn = options.writeCostSnapshot ?? (() => writeCostSnapshot());
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
-  const publishBlogspot = options.publishBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId));
 
   const approved = await loadApprovedJobs();
   const pending = approved.filter((job) => !job.metadata?.channelManuscriptsReadyAt).slice(0, maxJobsPerRun);
@@ -94,18 +89,11 @@ export async function prepareApprovedManuscripts(
         console.warn(`⚠️ [manuscripts] ${job.keyword}: ${failure}`);
       }
 
-      // BLOGGER_ENABLED=false면 즉시 disabled로 돌아온다(무해) - best-effort라 실패해도 원고
-      // 준비 자체는 이미 success로 끝났다.
-      try {
-        const published = await publishBlogspot(job.id);
-        if (!published.ok && published.reason !== "disabled") {
-          console.warn(`⚠️ [manuscripts] ${job.keyword}: Blogspot 자동 발행 미완료 - ${published.detail}`);
-        } else if (published.ok) {
-          console.log(`✅ [manuscripts] ${job.keyword}: Blogspot 발행 완료 (${published.url})`);
-        }
-      } catch (error) {
-        console.warn(`⚠️ [manuscripts] ${job.keyword}: Blogspot 자동 발행 중 오류 - ${error instanceof Error ? error.message : error}`);
-      }
+      // **여기서 Blogger에 올리지 않는다**(2026-09-19 사용자 결정). 전에는 준비 직후 초안으로
+      // 올렸는데, 그러면 발행 버튼이 "이미 올라가 있음"에 막혀 매번 사람이 Blogger에서 수동으로
+      // 공개해야 했다 - 자동 발행의 의미가 사라진다. 원고는 **원고 뷰어에서만** 보고, 실제 업로드는
+      // 알림의 "🚀 블로그 발행" 버튼을 누른 그 순간에 한 번만 일어난다
+      // (TelegramBot.handlePublishDecisionCallback).
     }
   }
 
