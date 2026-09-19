@@ -95,6 +95,7 @@
     "test:pipeline-queue": "tsx src/services/github/testPipelineQueue.ts",
     "test:deploy-manuscripts-page": "tsx src/workflows/manuscripts/testDeployManuscriptsPage.ts",
     "test:notify-manuscripts-ready": "tsx src/workflows/manuscripts/testNotifyManuscriptsReady.ts",
+    "manuscripts:resend-notification": "tsx src/workflows/manuscripts/resendManuscriptNotificationCli.ts",
     "manuscripts:build": "tsx src/workflows/manuscripts/buildManuscriptPageCli.ts",
     "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "debug:live-blogspot": "tsx src/workflows/publish/debug/liveBlogspotTest.ts",
