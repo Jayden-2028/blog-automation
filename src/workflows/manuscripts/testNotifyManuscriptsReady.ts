@@ -83,3 +83,22 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+// --- 발행 버튼(2026-09-19) - 페이지 열기 옆에, UUID일 때만 ---------------------------------------
+{
+  const JOB = "054bfe0b-1234-4abc-8def-0123456789ab";
+  const withUuid = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
+  const row = withUuid.replyMarkup?.inline_keyboard?.[0] ?? [];
+  if (row.length !== 2) throw new Error(`❌ 페이지 열기 + 발행 두 버튼이어야 한다 (${JSON.stringify(row)})`);
+  if (!row[0].url?.includes(`#${JOB}`)) throw new Error("❌ 첫 버튼은 원고 페이지 딥링크여야 한다");
+  if (row[1].callback_data !== `publish:${JOB}`) throw new Error(`❌ 둘째 버튼은 발행 콜백이어야 한다 (${row[1].callback_data})`);
+  if (!row[1].text.includes("발행")) throw new Error("❌ 발행 버튼 문구가 있어야 한다");
+
+  // jobId가 UUID가 아니면 버튼만 빠지고 알림 자체는 살아야 한다(예외로 알림을 죽이지 않는다).
+  const legacy = buildManuscriptReadyMessage(successResult(job("a")), "https://pages.example.dev");
+  const legacyRow = legacy.replyMarkup?.inline_keyboard?.[0] ?? [];
+  if (legacyRow.length !== 1) throw new Error("❌ UUID가 아니면 발행 버튼만 빠져야 한다");
+  if (!legacy.text.includes("원고 준비 완료")) throw new Error("❌ 알림 본문은 그대로여야 한다");
+  console.log("✅ 발행 버튼 - 페이지 열기 옆에, UUID 아니면 버튼만 생략");
+}
+

@@ -12,6 +12,7 @@ import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/Telegr
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
+import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
 /** pagesUrl은 테스트 주입용. 생략하면 cloudflarePagesUrl()(환경변수 기반)을 쓴다. */
@@ -40,9 +41,24 @@ export function buildManuscriptReadyMessage(
   const lines = ["📄 <b>원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, summary];
   let buttons: TelegramInlineKeyboardButton[][] | undefined;
 
+  // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤**
+  // 누르는 공개 발행이다. 사람이 곧 품질 게이트다 - 누르지 않은 원고는 지금처럼 뷰어에서 복사해
+  // 수동 발행한다. 페이지 열기와 같은 줄에 둔다(먼저 보고 나서 누르는 순서라 시선이 왼→오른쪽).
+  // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다 - 여기서 예외를
+  // 던지면 "원고 준비 완료" 알림 자체가 통째로 사라진다.
+  let publishButton: TelegramInlineKeyboardButton | null = null;
+  try {
+    publishButton = { text: "🚀 블로그 발행", callback_data: buildPublishDecisionCallbackData(outcome.topic.jobId) };
+  } catch {
+    publishButton = null;
+  }
+
   if (pagesUrl) {
-    buttons = [[{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }]];
+    const row: TelegramInlineKeyboardButton[] = [{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }];
+    if (publishButton) row.push(publishButton);
+    buttons = [row];
   } else {
+    if (publishButton) buttons = [[publishButton]];
     lines.push("", `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`, "위 파일을 브라우저로 열어 원고를 확인·복사해 붙여넣어 주세요.");
   }
 

@@ -20,6 +20,9 @@ import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
+import { parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
+import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
+import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
@@ -148,6 +151,18 @@ export type HandleResearchDecisionOutcome =
 
 export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
+export type HandlePublishDecisionOutcome =
+  | { status: "ignored"; reason: "not_a_publish_decision" | "wrong_chat" }
+  | { status: "job_not_found" }
+  | { status: "published"; url: string }
+  | { status: "already_done"; url: string }
+  | { status: "failed"; reason: string };
+
+export type HandlePublishDecisionResult = {
+  outcome: HandlePublishDecisionOutcome;
+  message: string;
+};
+
 export type HandleResearchDecisionResult = {
   outcome: HandleResearchDecisionOutcome;
   message: string;
@@ -183,6 +198,8 @@ export type TelegramBotOptions = {
   updateJobStatus?: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   /** 의학 교차확인 처리에 쓴다. jobId로 job을 직접 조회한다(키워드 선택과 달리 run/rank가 없다). */
   loadJobById?: (jobId: string) => Promise<ArticleJobRow | null>;
+  /** 테스트 주입: 실제 Blogger 호출을 대체한다. 기본은 publishArticleToBlogspot(공개 발행). */
+  publishToBlogspot?: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   /** 승인(confirm) 시 원고 상태도 함께 바꾸는 데 쓴다(SPRINT_3_DESIGN.md 8절). job의 최신 원고 1건을 찾는다. */
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
@@ -251,6 +268,7 @@ export class TelegramBot {
   private readonly saveTitles: (jobId: string, titles: string[]) => Promise<void>;
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
+  private readonly publishToBlogspot: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
@@ -282,6 +300,9 @@ export class TelegramBot {
     this.updateJobStatus =
       options.updateJobStatus ?? ((jobId, status) => ArticleJobRepository.updateStatus(jobId, status));
     this.loadJobById = options.loadJobById ?? ((jobId) => ArticleJobRepository.findById(jobId));
+    // 버튼으로 누르는 발행은 **공개**다 - 사람이 최종 원고를 보고 결정한 것이므로.
+    this.publishToBlogspot =
+      options.publishToBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId, { asDraft: false }));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
     this.findLatestArticleByJobId =
@@ -733,6 +754,74 @@ export class TelegramBot {
   }
 
   /**
+   * "publish:<jobId>" callback을 처리한다 - **원고 준비 완료 알림의 발행 버튼**(2026-09-19).
+   *
+   * 사람이 원고 페이지에서 이미지까지 본 뒤 누르는 것이므로 **공개 발행**(asDraft: false)이다.
+   * 전역 BLOGGER_PUBLISH_AS_DRAFT는 건드리지 않는다 - 그걸 뒤집으면 자동 폴링 경로까지 공개가 돼
+   * 사람이 안 본 원고가 나간다.
+   *
+   * 여기서 바로 발행한다(별도 워크플로우로 넘기지 않는다): 배리에이션 원고가 이미 있으므로 LLM
+   * 호출이 없고, 이미지 치환 + HTML 변환 + Blogger API 한 번이라 수 초면 끝난다.
+   */
+  async handlePublishDecisionCallback(query: TelegramCallbackQuery): Promise<HandlePublishDecisionResult> {
+    const parsed = parsePublishDecisionCallbackData(query.data);
+    if (!parsed) {
+      return { outcome: { status: "ignored", reason: "not_a_publish_decision" }, message: "" };
+    }
+
+    const fromChatId = query.message?.chat?.id;
+    if (fromChatId !== undefined && String(fromChatId) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+
+    const job = await this.loadJobById(parsed.jobId);
+    if (!job) {
+      return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
+    }
+
+    const published = await this.publishToBlogspot(parsed.jobId);
+
+    if (!published.ok) {
+      return {
+        outcome: { status: "failed", reason: published.reason },
+        message: [
+          "⚠️ <b>발행하지 못했습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          escapeTelegramHtml(published.detail),
+          "",
+          "원고 페이지에서 복사해 직접 발행해 주세요.",
+        ].join("\n"),
+      };
+    }
+
+    // 이미 초안으로 올라가 있던 경우다. Blogger API로는 초안을 공개로 못 바꾸므로(BloggerClient
+    // 주석) 사람이 Blogger에서 공개해야 한다 - 링크를 주고 그 사실을 알린다.
+    if (published.alreadyDone) {
+      return {
+        outcome: { status: "already_done", url: published.url },
+        message: [
+          "ℹ️ <b>이미 Blogger에 올라가 있습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          published.isDraft ? "초안 상태라 Blogger에서 직접 공개해야 합니다(API로는 전환할 수 없습니다)." : "이미 공개된 글입니다.",
+          escapeTelegramHtml(published.url),
+        ].join("\n"),
+      };
+    }
+
+    return {
+      outcome: { status: "published", url: published.url },
+      message: [
+        published.isDraft ? "📝 <b>초안으로 올렸습니다</b>" : "🚀 <b>블로그에 발행했습니다</b>",
+        "",
+        `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+        escapeTelegramHtml(published.url),
+      ].join("\n"),
+    };
+  }
+
+  /**
    * "research:<action>:<jobId>" callback을 처리한다. handleCallbackQuery/handleArticleReviewCallback과
    * 완전히 다른 대상·액션 집합이라 별도 메서드로 둔다 - pollOnce가 둘 다 실패했을 때만 이걸 시도한다.
    */
@@ -895,6 +984,7 @@ export class TelegramBot {
     result?: HandleCallbackResult;
     reviewResult?: HandleArticleReviewResult;
     researchDecisionResult?: HandleResearchDecisionResult;
+    publishDecisionResult?: HandlePublishDecisionResult;
     researchTrigger?: ResearchTriggerResult;
     editFeedbackResult?: HandleEditFeedbackResult;
   }> {
@@ -922,6 +1012,15 @@ export class TelegramBot {
       if (researchResult.outcome.status !== "ignored") {
         await this.respondToResearchDecision(update.callback_query, researchResult);
         return { handled: true, researchDecisionResult: researchResult };
+      }
+
+      // 발행 버튼(publish:<jobId>)은 네 파서 중 마지막이다. 넷 다 서로 배타적이라
+      // (test*CallbackData.ts로 확인) 순서가 결과를 바꾸지 않는다.
+      const publishResult = await this.handlePublishDecisionCallback(update.callback_query);
+      if (publishResult.outcome.status !== "ignored") {
+        await this.answerCallbackQuery(update.callback_query.id, "발행 처리 중...").catch(() => {});
+        if (publishResult.message) await this.sendMessage(publishResult.message).catch(() => {});
+        return { handled: true, publishDecisionResult: publishResult };
       }
     }
 

@@ -998,3 +998,52 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);
 });
+
+// --- 발행 버튼(2026-09-19) - 공개 발행, 실패·중복은 사유를 알린다 -------------------------------
+{
+  const JOB = "054bfe0b-1234-4abc-8def-0123456789ab";
+  const query = (data: string) => ({ id: "q1", data, message: { chat: { id: Number(CHAT_ID) }, message_id: 1 } }) as never;
+  // makeBot은 키워드 선택 경로 전용이라 여기서는 필요한 주입만 직접 준다.
+  const publishBot = (publish: (jobId: string) => Promise<never>) =>
+    new TelegramBot({
+      botToken: "test-token",
+      chatId: CHAT_ID,
+      loadJobById: async () => ({ id: JOB, keyword: "공무원 수당" }) as never,
+      publishToBlogspot: publish as never,
+      sendMessage: async () => {},
+      answerCallbackQuery: async () => {},
+    } as never);
+
+  // 1) 정상 발행: 공개 URL을 회신한다.
+  let publishedJobId = "";
+  const ok = await publishBot(async (jobId) => {
+    publishedJobId = jobId;
+    return { ok: true, publicationId: 1, url: "https://blog.example.com/p.html", isDraft: false, variantCreated: false, alreadyDone: false } as never;
+  }).handlePublishDecisionCallback(query(`publish:${JOB}`));
+  assert(publishedJobId === JOB, "누른 job을 발행해야 한다");
+  assert(ok.outcome.status === "published", `발행 성공이어야 한다 (${JSON.stringify(ok.outcome)})`);
+  assert(ok.message.includes("블로그에 발행했습니다") && ok.message.includes("blog.example.com"), "URL을 회신해야 한다");
+
+  // 2) 이미 초안으로 올라가 있으면 - API로 공개 전환이 안 되므로 그 사실을 알린다.
+  const dup = await publishBot(async () =>
+    ({ ok: true, publicationId: 1, url: "https://blogger.com/edit", isDraft: true, variantCreated: false, alreadyDone: true }) as never
+  ).handlePublishDecisionCallback(query(`publish:${JOB}`));
+  assert(dup.outcome.status === "already_done", "중복은 already_done이어야 한다");
+  assert(dup.message.includes("직접 공개"), "사람이 공개해야 한다는 안내가 있어야 한다");
+
+  // 3) 실패하면 수동 발행을 안내한다.
+  const failed = await publishBot(async () => ({ ok: false, reason: "daily_limit", detail: "오늘 상한 도달" }) as never)
+    .handlePublishDecisionCallback(query(`publish:${JOB}`));
+  assert(failed.outcome.status === "failed", "실패는 failed여야 한다");
+  assert(failed.message.includes("오늘 상한 도달") && failed.message.includes("직접 발행"), "사유와 대안을 알려야 한다");
+
+  // 4) 우리 버튼이 아니면 무시하고, 발행을 시도하지도 않는다.
+  let called = 0;
+  const other = await publishBot(async () => {
+    called += 1;
+    return {} as never;
+  }).handlePublishDecisionCallback(query(`review:confirm:${JOB}`));
+  assert(other.outcome.status === "ignored" && called === 0, "다른 콜백은 무시하고 발행하지 않는다");
+
+  console.log("✅ 발행 버튼 - 공개 발행 / 중복 안내 / 실패 시 수동 발행 안내 / 남의 콜백 무시");
+}

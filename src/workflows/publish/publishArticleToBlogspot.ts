@@ -59,6 +59,14 @@ export type PublishArticleToBlogspotResult =
   | { ok: false; reason: "blogger_failed"; detail: string; stage: string };
 
 export type PublishArticleToBlogspotOptions = {
+  /**
+   * 초안이냐 공개냐를 호출부가 정한다(2026-09-19). 생략하면 BLOGGER_CONFIG.publishAsDraft(기본 true).
+   *
+   * 왜 필요한가: 원고 준비 완료 알림의 **발행 버튼**은 사용자가 이미지까지 반영된 최종 원고를 보고
+   * 누르는 것이라 그 호출만 공개(false)여야 한다. 전역 기본값을 뒤집으면 자동 폴링 경로까지 공개로
+   * 바뀌어 사람이 안 본 원고가 나간다.
+   */
+  asDraft?: boolean;
   loadJob?: (jobId: string) => Promise<ArticleJobRow | null>;
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
   createVariantArticle?: (input: {
@@ -127,6 +135,9 @@ export async function publishArticleToBlogspot(
   // 배리에이션이 이미 발행됐는지 멱등성 확인.
   if (variantArticle) {
     const existing = await loadExistingPublications(variantArticle.id);
+    // 공개 요청인데 이미 **초안으로** 올라간 글이 있으면, 새 글을 또 만들지 않는다. Blogger에서
+    // 그 초안을 공개로 전환해야 하는데 API로는 되지 않으므로(BloggerClient 주석) 사람이 UI에서
+    // 공개해야 한다 - 그 사실을 사유로 알린다.
     const done = existing.find((pub) => IN_PROGRESS_OR_DONE.includes(pub.status));
     if (done) {
       return {
@@ -186,7 +197,7 @@ export async function publishArticleToBlogspot(
   //  - 공개(=false): **반드시 지운다.** 안 지우면 `[IMAGE: ... — 웹 검색]`이라는 글자가 독자에게
   //    그대로 보인다(convertArticleToHtml의 placeholder 경로가 <p>로 렌더한다). 공개 자동화로
   //    내리는 순간 터지는 사고라 모드 분기를 둔다(2026-09-16).
-  const isDraft = BLOGGER_CONFIG.publishAsDraft;
+  const isDraft = options.asDraft ?? BLOGGER_CONFIG.publishAsDraft;
   const publishBody = isDraft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages);
 
   const contentHtml = convertArticleToHtml(publishBody);

@@ -56,4 +56,13 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_UPDATE_JSON: ${{ toJson(github.event.client_payload) }}
+          # 원고 준비 완료 알림의 "🚀 블로그 발행" 버튼이 여기서 바로 Blogger를 호출한다(2026-09-19).
+          # 배리에이션 원고가 이미 있어 LLM 호출이 없고 수 초면 끝나므로 별도 워크플로우로 넘기지 않는다.
+          BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          # 버튼 경로는 호출 인자로 공개(asDraft:false)를 명시하므로 이 값에 영향받지 않는다.
+          BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
         run: npm run job:telegram-update
