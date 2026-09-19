@@ -4,6 +4,8 @@
 // articles 행으로 만든다. 본문의 `**소제목**`(볼드, 2026-09-06부터)과 `[IMAGE: 설명]` 마커는
 // 그대로 보존한다(다운스트림 변환기가 이 볼드 규격을 쓰고, 이미지 마커는 사용자가 직접 채운다).
 
+import { stripTrailingMeta } from "./stripTrailingMeta.js";
+
 export type DraftCheckNote = { label: string; body: string };
 
 export type ParsedDraftFile = {
@@ -122,6 +124,9 @@ export function parseDraftFile(text: string): ParsedDraftFile {
   body = body.replace(/^#\s+.+\r?\n+/, "").trim();
   // [IMAGE PROMPT:] 제거로 생긴 빈 줄 3개 이상을 2개로 정리.
   body = body.replace(/\n{3,}/g, "\n\n");
+  // 모델이 본문 끝에 덧붙인 작업 노트("분량은 ...자로", "점검 결과" 등)를 잘라낸다 - 여기서
+  // 안 자르면 배리에이션에도 그대로 실려 발행된다(2026-09-19 실측).
+  body = stripTrailingMeta(body);
 
   return {
     keyword: fm.keyword || null,

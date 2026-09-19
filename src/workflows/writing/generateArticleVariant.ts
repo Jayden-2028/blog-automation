@@ -14,6 +14,7 @@
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
+import { stripTrailingMeta } from "./stripTrailingMeta.js";
 import { parseImageAcquisition } from "../manuscripts/parseManuscriptBlocks.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
@@ -201,22 +202,6 @@ export function parseVariantOutput(raw: string, fallbackTitle: string): ArticleV
       .slice(0, 20) || null;
 
   return { title, searchDescription, slug, shortName, tags, body };
-}
-
-/**
- * 본문 뒤에 모델이 덧붙이는 메타 텍스트를 잘라낸다. 관측(2026-09-01): "**점검 결과**", "**점검**",
- * "## 점검", "---\n**점검..." 같은 준수 설명이 참고 자료 다음에 붙어 그대로 발행될 뻔했다.
- */
-function stripTrailingMeta(body: string): string {
-  const patterns = [
-    /\n+-{3,}\s*\n+\**\s*점검[^\n]*[\s\S]*$/,
-    /\n+#{1,3}\s*점검[\s\S]*$/,
-    /\n+\**\s*점검\s*결과\**[\s\S]*$/,
-    /\n+\**\s*(확인|검토)\s*(결과|사항)\**\s*[:：][\s\S]*$/,
-  ];
-  let out = body;
-  for (const p of patterns) out = out.replace(p, "");
-  return out.trim();
 }
 
 /** 본문의 `[IMAGE: ]` 마커 개수. 기준 원고와 배리에이션이 같아야 프롬프트 짝이 맞는다. */

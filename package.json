@@ -102,6 +102,7 @@
     "blogspot:schedule": "tsx src/workflows/publish/scheduleBlogspotPostCli.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
+    "test:strip-meta": "tsx src/workflows/writing/testStripTrailingMeta.ts",
     "test:revise-article": "tsx src/workflows/writing/testReviseArticleWithFeedback.ts",
     "test:notify-revised-article": "tsx src/workflows/writing/testNotifyRevisedArticleReady.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
