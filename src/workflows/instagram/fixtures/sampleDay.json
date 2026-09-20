@@ -1,0 +1,24 @@
+{
+  "note": "데모용 가짜 데이터. 캡션은 실제 이슈 페이지 문체를 흉내낸 것이고, 주제는 검색 포화도 조회가 의미 있도록 실재하는 소재로 골랐다.",
+  "accounts": [
+    { "username": "ddak.mag", "followers": 420000, "baselinePosts": [1200, 1800, 2100, 1500, 1900] },
+    { "username": "_ytnstar", "followers": 980000, "baselinePosts": [3200, 4100, 3800, 2900, 3500] },
+    { "username": "eyesmag", "followers": 1250000, "baselinePosts": [5200, 6100, 4800, 5500, 5000] },
+    { "username": "_trend_kr", "followers": 86000, "baselinePosts": [320, 410, 380, 290, 350] },
+    { "username": "idolissue", "followers": 210000, "baselinePosts": [900, 1100, 1000, 850, 950] }
+  ],
+  "posts": [
+    { "username": "_ytnstar", "hoursAgo": 6, "likes": 31000, "comments": 2400, "caption": "국립중앙박물관 분장놀이 결선 진출 25팀이 공개됐습니다. 간돌검 분장으로 화제가 된 참가자도 본선에 올랐다고 하네요." },
+    { "username": "ddak.mag", "hoursAgo": 9, "likes": 18500, "comments": 1600, "caption": "박물관에서 유물로 변신한 사람들... 국중박 분장놀이 본선 라인업 떴다" },
+    { "username": "_trend_kr", "hoursAgo": 14, "likes": 4100, "comments": 620, "caption": "올해 국중박 코스프레 대회 결선 명단 공개. 작년보다 규모가 커졌다" },
+    { "username": "eyesmag", "hoursAgo": 20, "likes": 5300, "comments": 210, "caption": "가을 전시 추천 리스트 모음" },
+    { "username": "idolissue", "hoursAgo": 4, "likes": 8800, "comments": 1900, "caption": "지창욱 성형 논란에 소속사가 입장을 냈습니다. 모태 미남으로 알려졌던 만큼 팬들 반응이 갈리는 중" },
+    { "username": "ddak.mag", "hoursAgo": 11, "likes": 2200, "comments": 180, "caption": "오늘의 날씨 일교차 크니 겉옷 챙기세요" },
+    { "username": "eyesmag", "hoursAgo": 30, "likes": 14200, "comments": 730, "caption": "디즈니플러스 퍼니셔 원 라스트 킬 공개일 확정. 시즌 마무리 어떻게 될까" },
+    { "username": "_ytnstar", "hoursAgo": 38, "likes": 3400, "comments": 210, "caption": "[이벤트] 팔로우하고 굿즈 받아가세요" },
+    { "username": "_trend_kr", "hoursAgo": 22, "likes": 1900, "comments": 340, "caption": "지창욱 코 성형 전후 비교 사진이 돌고 있다" },
+    { "username": "idolissue", "hoursAgo": 33, "likes": 1050, "comments": 90, "caption": "아이돌 공항패션 모음 .zip" },
+    { "username": "eyesmag", "hoursAgo": 16, "likes": 22000, "comments": 1400, "caption": "서울 지하철 요금 인상안이 다시 논의된다. 내년 상반기 적용 가능성" },
+    { "username": "ddak.mag", "hoursAgo": 41, "likes": 1400, "comments": 60, "caption": "감성 가득한 가을 사진 모음" }
+  ]
+}
