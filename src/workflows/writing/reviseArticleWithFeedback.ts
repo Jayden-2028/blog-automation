@@ -8,7 +8,7 @@
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
-import { stripTrailingMeta } from "./stripTrailingMeta.js";
+import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
 // 배리에이션과 같은 부하(writer.md 500줄+ 재독 + skill 2개) - 같은 타임아웃을 쓴다.
@@ -98,7 +98,7 @@ function sliceBetween(text: string, startMarker: string, endMarkers: string[]): 
 export function parseRevisionOutput(raw: string, fallbackTitle: string): RevisedArticle {
   const M = REVISION_OUTPUT_MARKERS;
   const title = sliceBetween(raw, M.title, [M.body]).split("\n")[0]?.trim() || fallbackTitle;
-  const body = stripTrailingMeta(sliceBetween(raw, M.body, []) || raw.trim());
+  const body = sanitizeArticleBody(sliceBetween(raw, M.body, []) || raw.trim());
   return { title, body };
 }
 

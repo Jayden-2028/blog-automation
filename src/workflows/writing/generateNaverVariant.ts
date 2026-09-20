@@ -12,7 +12,7 @@
 //
 // 텔레그램 흐름은 그대로다 - 이 결과물은 원고 뷰어에서만 보고 복사한다(사용자 결정).
 
-import { stripTrailingMeta } from "./stripTrailingMeta.js";
+import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
@@ -119,7 +119,7 @@ export function parseNaverVariantOutput(raw: string, fallbackTitle: string): Nav
     ?.split(",")
     .map((tag) => tag.trim().replace(/^#/, ""))
     .filter(Boolean) ?? [];
-  const body = stripTrailingMeta(sliceBetween(raw, M.body, []));
+  const body = sanitizeArticleBody(sliceBetween(raw, M.body, []));
   return { title, tags, body };
 }
 

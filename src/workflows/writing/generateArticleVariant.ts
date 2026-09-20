@@ -14,7 +14,7 @@
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
-import { stripTrailingMeta } from "./stripTrailingMeta.js";
+import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
 import { parseImageAcquisition } from "../manuscripts/parseManuscriptBlocks.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
@@ -188,7 +188,7 @@ export function parseVariantOutput(raw: string, fallbackTitle: string): ArticleV
     .map((t) => t.replace(/^#/, "").trim())
     .filter(Boolean);
 
-  const body = stripTrailingMeta(sliceBetween(raw, M.body, []) || raw.trim());
+  const body = sanitizeArticleBody(sliceBetween(raw, M.body, []) || raw.trim());
 
   // 폴더 이름으로 쓰므로 경로에 위험한 문자와 따옴표·마크다운 장식을 걷어낸다. 못 받으면 null -
   // exportFolderName이 키워드로 폴백한다.
