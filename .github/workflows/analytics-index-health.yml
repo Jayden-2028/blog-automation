@@ -1,0 +1,46 @@
+# 색인 건강 점검 주 1회(2026-09-21, 2단계).
+#
+# 왜 만들었나: "블로그가 색인이 안 된다"를 사용자가 GSC를 직접 열어보고 발견했다(2026-09-21).
+# 그때 홈페이지는 구글에 알려지지도 않았고, 크롤링된 글은 전부 리디렉션 오류였다. 이 점검이
+# 주 1회 돌면 사람이 찾아 들어가지 않아도 먼저 안다.
+#
+# 조용한 주에는 알림이 짧다(집계 한 줄). 고장이 있을 때만 목록이 붙는다 -
+# classifyIndexHealth.ts가 "발견됨/대기"를 고장으로 치지 않기 때문에 거짓 경보가 나지 않는다.
+#
+# 발화는 Cloudflare Worker 크론(월요일 10:00 KST). 상태를 저장하지 않아 언제 돌려도 안전하다.
+
+name: analytics-index-health
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: analytics-index-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run analytics:index-health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+          GSC_SITE_URL: ${{ vars.GSC_SITE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run analytics:index-health -- --notify

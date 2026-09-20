@@ -29,6 +29,20 @@ export type SearchAnalyticsRow = {
   position: number;
 };
 
+/** URL Inspection 결과 중 우리가 쓰는 것만. 전체 응답은 훨씬 크다. */
+export type UrlInspectionResult = {
+  url: string;
+  /** PASS / PARTIAL / FAIL / NEUTRAL / VERDICT_UNSPECIFIED */
+  verdict: string;
+  /** "Submitted and indexed", "Redirect error" 같은 사람이 읽는 상태 문자열. 분류의 기준이다. */
+  coverageState: string;
+  robotsTxtState: string;
+  pageFetchState: string;
+  lastCrawlTime: string | null;
+  /** 구글이 고른 표준 URL. 우리가 넣은 것과 다르면 중복 취급되고 있다는 뜻이다. */
+  googleCanonical: string | null;
+};
+
 export type SearchConsoleResult<T> = { ok: true; data: T } | { ok: false; error: string; stage: string };
 
 export type SearchConsoleOptions = {
@@ -205,5 +219,50 @@ export class SearchConsoleClient {
     }
 
     return { ok: true, data: all };
+  }
+
+  /**
+   * URL 하나의 색인 상태를 묻는다(URL Inspection API).
+   *
+   * Search Analytics와 다른 엔드포인트·다른 버전(v1)을 쓴다. 할당량도 따로 잡히는데
+   * 사이트당 하루 2,000건이라 우리 규모(수십 건)에서는 여유가 많다.
+   *
+   * 이 API가 있어서 "색인이 안 되고 있다"를 사람이 GSC를 열어보고 발견할 필요가 없어진다
+   * (2026-09-21 - 실제로 그렇게 발견했다).
+   */
+  async inspectUrl(url: string): Promise<SearchConsoleResult<UrlInspectionResult>> {
+    const configError = this.missingConfig();
+    if (configError) return { ok: false, stage: "config", error: configError };
+
+    const token = await this.getAccessToken();
+    if (!token.ok) return token;
+
+    const res = await this.fetchImpl("https://searchconsole.googleapis.com/v1/urlInspection/index:inspect", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token.data}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ inspectionUrl: url, siteUrl: this.siteUrl }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      inspectionResult?: { indexStatusResult?: Record<string, unknown> };
+      error?: { message?: string };
+    };
+
+    if (!res.ok) {
+      return { ok: false, stage: "inspect", error: `urlInspection 실패(${res.status}): ${json.error?.message ?? ""}`.trim() };
+    }
+
+    const status = json.inspectionResult?.indexStatusResult ?? {};
+    return {
+      ok: true,
+      data: {
+        url,
+        verdict: String(status.verdict ?? "VERDICT_UNSPECIFIED"),
+        coverageState: String(status.coverageState ?? ""),
+        robotsTxtState: String(status.robotsTxtState ?? ""),
+        pageFetchState: String(status.pageFetchState ?? ""),
+        lastCrawlTime: status.lastCrawlTime ? String(status.lastCrawlTime) : null,
+        googleCanonical: status.googleCanonical ? String(status.googleCanonical) : null,
+      },
+    };
   }
 }

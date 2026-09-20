@@ -106,6 +106,7 @@ const SCHEDULED_WORKFLOWS: Record<string, string> = {
   "0 3 * * *": "entertainment-keyword.yml", // 12:00 KST - social-issue가 채운 trend_candidates를 읽는다
   "0 9 * * *": "community-keyword.yml", // 18:00 KST
   "30 0 * * *": "analytics-search.yml", // 09:30 KST - Search Console 일일 성과(데이터는 3일 전 것)
+  "0 1 * * 1": "analytics-index-health.yml", // 월요일 10:00 KST - 색인 건강 점검(주 1회)
 };
 
 async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {

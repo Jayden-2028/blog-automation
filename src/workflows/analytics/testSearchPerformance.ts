@@ -1,6 +1,7 @@
 // 성과 수집의 순수 로직 테스트. 외부 호출 없음. 실행: npm run test:search-performance
 import { buildAssertion, mapAnalyticsRows } from "../../services/searchConsole/SearchConsoleClient.js";
 import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./normalizeSearchRows.js";
+import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -103,6 +104,57 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(claim.scope.endsWith("webmasters.readonly"), "읽기 전용 스코프여야 한다");
   assert(claim.exp - claim.iat === 3600, "만료는 1시간");
   console.log("✅ JWT 서명 - 굳은 줄바꿈 복원, 읽기 전용 스코프");
+}
+
+// --- 8. 색인 상태 분류 - 고장만 고장으로 본다 ---------------------------------------------------
+{
+  // 실제 우리 블로그에서 나온 상태값들(2026-09-21 실측).
+  assert(classifyCoverage("Redirect error") === "broken", "리디렉션 오류는 고장");
+  assert(classifyCoverage("Not found (404)") === "broken", "404는 고장");
+  assert(classifyCoverage("Server error (5xx)") === "broken", "5xx는 고장");
+  assert(classifyCoverage("Blocked by robots.txt") === "broken", "robots 차단은 고장");
+  assert(classifyCoverage("Excluded by 'noindex' tag") === "broken", "noindex는 고장");
+
+  assert(classifyCoverage("Submitted and indexed") === "indexed", "색인 완료");
+  assert(classifyCoverage("Indexed, not submitted in sitemap") === "indexed", "사이트맵 밖이어도 색인은 색인");
+
+  // **여기가 핵심이다** - 신생 블로그의 정상 상태를 고장으로 치면 매주 거짓 경보가 된다.
+  assert(classifyCoverage("Discovered - currently not indexed") === "pending", "발견됨은 고장이 아니다");
+  assert(classifyCoverage("Crawled - currently not indexed") === "pending", "크롤링됨은 고장이 아니다");
+  assert(classifyCoverage("URL is unknown to Google") === "pending", "모르는 URL은 고장이 아니다");
+
+  // 모르는 상태를 고장으로 치지 않는다(구글이 문구를 바꿔도 거짓 경보가 안 나야 한다).
+  assert(classifyCoverage("어떤 새로운 상태") === "pending", "모르는 상태는 대기로 떨어진다");
+  assert(classifyCoverage("") === "pending", "빈 문자열도 대기");
+  console.log("✅ 색인 상태 분류 - 대기와 고장을 가른다(거짓 경보 방지)");
+}
+
+// --- 9. 알림 문구 - 평소엔 짧게, 고장이면 목록을 붙인다 -----------------------------------------
+{
+  const inspect = (url: string, coverageState: string) => ({
+    url, coverageState, verdict: "NEUTRAL", robotsTxtState: "", pageFetchState: "", lastCrawlTime: null, googleCanonical: null,
+  });
+
+  const healthy = buildReport([
+    inspect("https://b.com/a.html", "Submitted and indexed"),
+    inspect("https://b.com/b.html", "Discovered - currently not indexed"),
+  ]);
+  const healthyMsg = buildHealthMessage(healthy, 2);
+  assert(!healthyMsg.includes("고장 발견"), "고장이 없으면 경보 제목이 아니어야 한다");
+  assert(healthyMsg.includes("색인됨 1"), "집계가 들어가야 한다");
+  assert(!healthyMsg.includes("손봐야 할 글"), "고장이 없으면 목록을 붙이지 않는다");
+
+  const brokenMsg = buildHealthMessage(
+    buildReport([inspect("https://b.com/2026/09/57.html", "Redirect error")]),
+    1
+  );
+  assert(brokenMsg.includes("고장 발견"), "고장이 있으면 제목이 바뀌어야 한다");
+  assert(brokenMsg.includes("/2026/09/57.html") && brokenMsg.includes("Redirect error"), "어느 글이 왜인지 나와야 한다");
+
+  // 전부 대기인 신생 블로그 - 걱정할 일이 아님을 같이 알린다(오늘 우리 상태가 이것이다).
+  const freshMsg = buildHealthMessage(buildReport([inspect("https://b.com/a.html", "URL is unknown to Google")]), 1);
+  assert(freshMsg.includes("2~4주"), "전부 대기면 기다리면 된다는 안내가 있어야 한다");
+  console.log("✅ 알림 문구 - 정상이면 짧게, 고장이면 목록 첨부");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");
