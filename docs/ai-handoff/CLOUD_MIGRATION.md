@@ -89,7 +89,7 @@
 
 **설정(사용자 작업)**: GitHub fine-grained PAT(저장소 단일 범위, Contents: Read and write) 발급 →
 Cloudflare Workers용 API 토큰 신규 발급("Cloudflare Workers 편집" 템플릿, 기존 Pages 토큰은
-Workers 권한이 없어서 재사용 불가 확인됨) → workers.dev 서브도메인 최초 등록(`bjkim2028.workers.dev`)
+Workers 권한이 없어서 재사용 불가 확인됨) → workers.dev 서브도메인 최초 등록(`<계정>.workers.dev`)
 → Worker 배포(`wrangler deploy`) → Worker secret 2개 등록(`TELEGRAM_WEBHOOK_SECRET`은 Claude가
 생성, `GH_DISPATCH_TOKEN`은 PAT를 사용자가 직접 `wrangler secret put`).
 

@@ -502,7 +502,7 @@ URL을 남겨** 사람이 브라우저로 직접 저장할 수 있게 했다.
 
 **남은 것**:
 - ✅ **migration 적용 완료**(2026-09-16, 사용자 승인). Supabase MCP `apply_migration`으로 원격
-  프로젝트(`blog_automation` / ref `exbhtdearvxjorwqlqno`)에 올렸고, 테이블·인덱스·주석·권한까지
+  프로젝트(`blog_automation` / ref `<supabase-ref>`)에 올렸고, 테이블·인덱스·주석·권한까지
   실제 스키마로 확인했다. 원격 migration history의 version이 `20260916153725`로 기록돼 로컬
   파일명도 거기에 맞췄다 - 어긋난 채 두면 나중에 `supabase db push`가 이미 적용된 migration을
   다시 실행하려 든다. 되돌리기: `drop table public.api_usage`.
@@ -1349,7 +1349,7 @@ URL/secret은 기존과 동일, 재실행해도 안전 - Telegram 외부 설정 
 대신 실행하지 않음):
 ```
 curl -s "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
-  -d "url=https://blog-automation-telegram-relay.bjkim2028.workers.dev" \
+  -d "url=https://blog-automation-telegram-relay.<계정>.workers.dev" \
   -d "secret_token=<기존 TELEGRAM_WEBHOOK_SECRET>" \
   -d 'allowed_updates=["callback_query","message"]'
 ```
@@ -1459,7 +1459,7 @@ overwrite를 없애고 행 단위 upsert로 바꾼 것).
 **작업**: 09-06 세션에서 미완료로 남아 있던 절차 5단계(Cloudflare Zero Trust Access)를 대시보드에서
 직접 진행 — Zero Trust 무료 플랜 활성화(사용자 승인, 카드 등록됨/한도초과 시에만 과금) →
 Access 애플리케이션 생성(대상 `blog-automation-manuscripts.pages.dev`) → 정책 `owner-email`
-(이메일 = `bjkim2028@gmail.com`만 허용). 실제 접속 테스트로 로그인 게이트가 뜨는 것까지 확인함
+(이메일 = `운영자 계정`만 허용). 실제 접속 테스트로 로그인 게이트가 뜨는 것까지 확인함
 (이전엔 링크만 있으면 누구나 원고 원문 - 실존 인물 인용 포함 - 을 볼 수 있었음).
 
 **역할 범위 재확인(사용자 질문에 대한 답)**: Cloudflare Pages/Access의 목적은 **"맥이 꺼져 있어도
@@ -1643,7 +1643,7 @@ Cloudflare 설정 시 로컬 경로 문구 대신 "원고 페이지 열기" 링�
 4. ✅ `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_PAGES_PROJECT_NAME` 전부 설정
    확인(두 워크트리 `.env` 공유 심링크).
 5. ✅ **2026-09-14 완료**: Zero Trust 무료 플랜 활성화 + Access 애플리케이션(`owner-email`
-   정책, 이메일=`bjkim2028@gmail.com`) 생성. 로그인 게이트 실제 작동 확인.
+   정책, 이메일=`운영자 계정`) 생성. 로그인 게이트 실제 작동 확인.
 
 **다음 확인**: 완료. `publish-poll` 로그에 배포 성공 다건 확인됨(`✅ [manuscripts] 페이지 배포
 완료: https://blog-automation-manuscripts.pages.dev`). 위 "2026-09-14 세션" 항목의 역할 범위

@@ -170,7 +170,7 @@ alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
 | 항목 | 결정 |
 |---|---|
 | 티스토리 | 주소 `https://wooahpapa.tistory.com/`, **반자동**(임시저장까지, 발행은 사람) |
-| Blogspot | 계정 `bjkim2028@gmail.com`, **blog ID `6088186200818704009`**, 완전 자동(공개 발행) |
+| Blogspot | 계정 `운영자 계정`, **blog ID `6088186200818704009`**, 완전 자동(공개 발행) |
 | 배리에이션 저장 | **A1** — `articles`에 `platform` 컬럼 추가(nullable, null=네이버 기준). migration 1줄, 사용자 승인 필요 |
 | 일일 상한 | **채널당 하루 5건** (하드 가드) |
 | GCP OAuth | Claude가 화면 캡처 받아가며 **단계별 동행** |
@@ -228,11 +228,11 @@ alt와 함께 이미지 SEO에 기여(§3-1). 별도 작은 작업.
 
 진행할 때 각 단계 화면을 캡처해 주면 Claude가 다음 단계를 안내한다.
 
-1. `console.cloud.google.com` 접속 (구글 로그인: `bjkim2028@gmail.com`)
+1. `console.cloud.google.com` 접속 (구글 로그인: `운영자 계정`)
 2. 상단 프로젝트 선택 → "새 프로젝트" → 이름 `blog-automation` → 만들기
 3. 검색창에 "Blogger API" → **Blogger API v3** → "사용" 버튼
 4. 좌측 "API 및 서비스" → "OAuth 동의 화면" → User Type "외부" → 앱 이름/이메일만 채우고 저장
-   (테스트 사용자에 `bjkim2028@gmail.com` 추가)
+   (테스트 사용자에 `운영자 계정` 추가)
 5. "사용자 인증 정보" → "사용자 인증 정보 만들기" → "OAuth 클라이언트 ID" → 애플리케이션 유형
    **데스크톱 앱** → 만들기
 6. 나온 **클라이언트 ID**와 **클라이언트 보안 비밀번호(secret)** 를 Claude에게 전달

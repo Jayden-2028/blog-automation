@@ -776,7 +776,7 @@ async function main(): Promise<void> {
   {
     const supabaseNetworkError = Object.assign(new Error("TypeError: fetch failed"), {
       details:
-        "TypeError: fetch failed\n\nCaused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+        "TypeError: fetch failed\n\nCaused by: Error: getaddrinfo ENOTFOUND test-project-ref.supabase.co (ENOTFOUND)",
     });
     assert(isTransientNetworkError(supabaseNetworkError), "Supabase 스타일 DNS 실패는 인프라 장애로 판정해야 한다");
     assert(isTransientNetworkError(new Error("connect ECONNREFUSED 127.0.0.1:5432")), "ECONNREFUSED는 인프라 장애다");
@@ -827,7 +827,7 @@ async function main(): Promise<void> {
     {
       const updates = [makeUpdate(101, 1), makeUpdate(102, 2), makeUpdate(103, 3)];
       const networkError = Object.assign(new Error("TypeError: fetch failed"), {
-        details: "Caused by: Error: getaddrinfo ENOTFOUND exbhtdearvxjorwqlqno.supabase.co (ENOTFOUND)",
+        details: "Caused by: Error: getaddrinfo ENOTFOUND test-project-ref.supabase.co (ENOTFOUND)",
       });
       const { bot, advancedTo } = makePollOnceBot({ updates, storedOffset: 100, failRank: 2, failError: networkError });
       const result = await bot.pollOnce();
