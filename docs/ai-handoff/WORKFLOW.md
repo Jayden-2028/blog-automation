@@ -12,10 +12,12 @@
 > | `~/Documents/blog-automation` | `~/blog-automation/repo` | 메인 저장소(개발 브랜치) |
 > | `~/blog-automation-prod` | `~/blog-automation/prod` | worktree · **항상 `main` 고정** |
 > | `~/blog-automation-kw` | `~/blog-automation/kw` | worktree · 키워드 수집 브랜치 |
-> | — | `~/blog-automation/manuscripts` | `~/Documents/blog-manuscripts` 심볼릭 링크 |
+> | `~/Documents/blog-manuscripts` | `~/blog-automation/blog-manuscripts` | 원고·이미지 보관함(사람이 여는 자리) |
 >
-> 원고 폴더는 **옮기지 않았다** - 그 아래 `naver-parenting`은 이 파이프라인과 무관한 별개 수동
-> 프로젝트라 내부 경로를 흔들면 안 된다. 링크만 걸었다.
+> 원고 폴더는 처음엔 링크만 걸어 두었다가 **2026-09-20에 실제로 옮겼다**(사용자). 발행용 보관함은
+> `blog-manuscripts/whyissuenow/<날짜>/<주제>/`이고, 코드는 `MANUSCRIPT_EXPORT_ROOT`(기본값은
+> 워크트리 부모 기준 상대경로)로 이 자리를 가리킨다 - 어느 워크트리에서 실행해도 같은 곳이다.
+> 그 아래 `naver-parenting` 등은 이 파이프라인과 무관한 별개 수동 프로젝트라 내부 경로를 흔들지 않는다.
 >
 > ⚠️ **이동 때 걸린 것**: `prod`의 `.env`·`.local`·`logs`와 `kw`의 `.env`는 `repo`를 가리키는
 > 심볼릭 링크인데, 절대경로라 이동 직후 전부 끊겼다(= 로컬 실행 시 비밀값이 통째로 사라짐).

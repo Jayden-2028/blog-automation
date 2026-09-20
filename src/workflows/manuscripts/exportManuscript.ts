@@ -1,4 +1,4 @@
-// 승인된 원고 1건을 맥 로컬 보관함(~/Documents/blog-manuscripts/whyissuenow)으로 내보낸다.
+// 승인된 원고 1건을 맥 로컬 보관함(config/manuscriptExport.ts의 MANUSCRIPT_EXPORT_ROOT)으로 내보낸다.
 //
 // 내보내는 것: 원고 본문 .md + 생성된 AI 이미지 파일 + image-metadata.md.
 // 웹 검색 자리는 파일이 아직 없으므로 "채울 자리"로 메타데이터에 남긴다 - collectWebImages가
