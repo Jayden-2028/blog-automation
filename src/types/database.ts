@@ -531,6 +531,43 @@ export type AnalyticsInsert = {
 
 export type AnalyticsUpdate = Partial<AnalyticsInsert>;
 
+// ---------- search_performance_daily ----------
+// Search Console 일일 성과. 한 행 = (날짜, 글 주소, 검색어).
+// 스키마: supabase/migrations/20260921060000_search_performance_daily.sql.
+
+export type SearchPerformanceRow = {
+  id: string;
+  date: string;
+  /** 쿼리스트링을 뗀 정규화 주소(모바일 `?m=1`은 코드에서 합쳐 저장한다). */
+  page_url: string;
+  query: string;
+  clicks: number;
+  impressions: number;
+  /** GSC 원본 비율(0~1). 퍼센트가 아니다. */
+  ctr: number;
+  /** 노출 가중 평균 순위. 낮을수록 좋다. */
+  position: number;
+  /** article_jobs.id. 수동 발행 글은 매칭되지 않아 null. */
+  job_id: string | null;
+  fetched_at: string;
+};
+
+// id/fetched_at은 DB default가 있어 생략 가능하다.
+export type SearchPerformanceInsertRow = {
+  id?: string;
+  date: string;
+  page_url: string;
+  query: string;
+  clicks?: number;
+  impressions?: number;
+  ctr?: number;
+  position?: number;
+  job_id?: string | null;
+  fetched_at?: string;
+};
+
+export type SearchPerformanceUpdate = Partial<SearchPerformanceInsertRow>;
+
 // ---------- api_usage ----------
 // 유료 API 호출 1건 = row 1건. 대시보드(manuscripts/cost.json)가 이 테이블만 보고 비용을 집계한다.
 // 스키마: supabase/migrations/20260916153725_api_usage.sql.
@@ -675,6 +712,12 @@ export type Database = {
         Row: ApiUsageRow;
         Insert: ApiUsageInsert;
         Update: ApiUsageUpdate;
+        Relationships: [];
+      };
+      search_performance_daily: {
+        Row: SearchPerformanceRow;
+        Insert: SearchPerformanceInsertRow;
+        Update: SearchPerformanceUpdate;
         Relationships: [];
       };
     };

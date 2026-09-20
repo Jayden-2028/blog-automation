@@ -102,6 +102,8 @@
     "blogspot:schedule": "tsx src/workflows/publish/scheduleBlogspotPostCli.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
+    "analytics:search": "tsx src/workflows/analytics/collectSearchPerformanceCli.ts",
+    "test:search-performance": "tsx src/workflows/analytics/testSearchPerformance.ts",
     "test:sanitize-body": "tsx src/workflows/writing/testSanitizeArticleBody.ts",
     "test:revise-article": "tsx src/workflows/writing/testReviseArticleWithFeedback.ts",
     "test:notify-revised-article": "tsx src/workflows/writing/testNotifyRevisedArticleReady.ts",
