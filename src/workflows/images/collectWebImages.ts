@@ -17,6 +17,7 @@ import { rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { keywordSlug } from "../../config/pipelinePaths.js";
+import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
@@ -32,6 +33,8 @@ import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 const PREFERRED_MIN_WIDTH = 1200;
 /** 한 자리에 내려받아 비교할 후보 수 상한(2026-09-18 B안). 프롬프트가 길어지고 내려받기도 늘어난다. */
 const MAX_CANDIDATES = 4;
+/** 동시에 처리할 자리 수(2026-09-21). 판정·내려받기가 전부 외부 호출이라 상한을 둔다. */
+const SLOT_CONCURRENCY = 3;
 /** 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변). */
 const HARD_MIN_WIDTH = 600;
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
@@ -582,15 +585,19 @@ export async function collectWebImages(
 
   const found: WebImageRecord[] = [];
 
-  for (const slot of input.slots) {
+  // 자리마다 후보를 내려받아 **실제로 열어 보고** 고른다. 이 판정이 자리당 최대 3분이라
+  // 순차로 돌면 자리 4개짜리 원고에서만 10분 넘게 쓴다(2026-09-21 실측 - 원고 1건 40~50분의
+  // 큰 축이었다). 자리끼리는 완전히 독립이고 파일명도 자리 번호로 갈려 충돌하지 않는다.
+  // 무제한 병렬이 아니라 상한을 두는 이유는 mapWithConcurrency 주석 참고(429·일시 차단 회피).
+  const processSlot = async (slot: WebImageSlot): Promise<WebImageRecord | null> => {
     const result = results.find((r) => r.index === slot.index);
     if (!result) {
       failures.push(`[자리 ${slot.index}] 웹 검색 에이전트 응답에 없습니다.`);
-      continue;
+      return null;
     }
     if (result.skipped || !result.imageUrl) {
       failures.push(`[자리 ${slot.index}] 찾지 못함: ${result.skipReason || "사유 없음"}`);
-      continue;
+      return null;
     }
 
     // 출처 분류는 내려받기 **전에** 본다 - 쓸 수 없는 자료를 디스크에 남길 이유가 없다.
@@ -600,7 +607,7 @@ export async function collectWebImages(
       failures.push(
         `[자리 ${slot.index}] 쓸 수 없는 자료라 건너뜁니다(${result.reusePermission}: ${result.license}) - 유료 스톡이거나 변경 금지(ND)입니다.`
       );
-      continue;
+      return null;
     }
 
     // 1순위 + 대체 후보를 함께 내려받아 **한 번에 비교해 고른다**(2026-09-18 B안).
@@ -630,7 +637,7 @@ export async function collectWebImages(
       if (candidates.length >= MAX_CANDIDATES) break;
       if (!/^https?:\/\//i.test(cand.imageUrl)) {
         failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
-        continue;
+        return null;
       }
 
       // 출처 페이지를 모르면(이미지 검색 후보에서 고른 경우) 이미지 도메인을 출처로 쓴다.
@@ -640,7 +647,7 @@ export async function collectWebImages(
           sourcePage = new URL(cand.imageUrl).origin;
         } catch {
           failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
-          continue;
+          return null;
         }
       }
 
@@ -650,18 +657,18 @@ export async function collectWebImages(
         failures.push(
           `[자리 ${slot.index}] 후보 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
         );
-        continue;
+        return null;
       }
       const extension = extensionFor(downloaded.contentType ?? "");
       if (!extension) {
         failures.push(`[자리 ${slot.index}] 후보가 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
-        continue;
+        return null;
       }
       const size = readSize(downloaded.buffer);
       const longSide = size ? Math.max(size.width, size.height) : null;
       if (longSide !== null && longSide < HARD_MIN_WIDTH) {
         failures.push(`[자리 ${slot.index}] 후보가 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
-        continue;
+        return null;
       }
 
       const number = candidates.length + 1;
@@ -682,7 +689,7 @@ export async function collectWebImages(
 
     if (candidates.length === 0) {
       failures.push(`[자리 ${slot.index}] 쓸 수 있는 후보를 하나도 내려받지 못했습니다.`);
-      continue;
+      return null;
     }
 
     // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
@@ -709,7 +716,7 @@ export async function collectWebImages(
         failures.push(
           `[자리 ${slot.index}] 후보 ${openable.length}장 중 쓸 만한 것이 없어 비웠습니다: ${verdict.reason}`
         );
-        continue;
+        return null;
       }
       chosen = openable.find((c) => c.number === verdict.picked) ?? openable[0];
       if (candidates.length > 1) {
@@ -771,12 +778,13 @@ export async function collectWebImages(
       if (!uploaded.ok) {
         await rm(filePath, { force: true });
         failures.push(`[자리 ${slot.index}] 업로드 실패: ${uploaded.error}`);
-        continue;
+        return null;
       }
       storageUrl = uploaded.url;
     }
 
-    found.push({
+    void rawExtension;
+    return {
       index: slot.index,
       fileName,
       imageUrl: chosen.imageUrl,
@@ -785,9 +793,11 @@ export async function collectWebImages(
       caption: result.caption || slot.description,
       license: chosen.license || "출처 확인 필요",
       storageUrl,
-    });
-    void rawExtension;
-  }
+    };
+  };
+
+  const outcomes = await mapWithConcurrency(input.slots, SLOT_CONCURRENCY, processSlot);
+  for (const outcome of outcomes) if (outcome) found.push(outcome);
 
   // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라
   // (응답 누락/URL 형식/403/크기/비율/검증 탈락/업로드 실패…) 각 지점에 push를 넣으면 언젠가 한

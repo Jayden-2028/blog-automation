@@ -235,8 +235,18 @@ export async function prepareManuscript(
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
+  // 네이버 배리에이션은 **기본으로 끈다**(2026-09-21 사용자 결정). 채널이 Blogspot 하나인데
+  // (CLAUDE.md) 원고마다 LLM 호출이 한 번 더 돌아 2~5분을 먹고 있었다. 뷰어의 네이버 복사
+  // 버튼용이라 없으면 그 버튼만 숨는다(renderManuscriptPage가 naver: null을 이미 처리한다).
+  // 코드는 지우지 않는다 - 네이버를 다시 쓰게 되면 NAVER_VARIANT_ENABLED=true로 되살린다.
+  // 이미 만들어 둔 원고의 naverVariant는 metadata에 남아 있어 그대로 보인다.
+  const naverEnabled = process.env.NAVER_VARIANT_ENABLED === "true";
   const makeNaverVariant =
-    options.generateNaverVariant === undefined ? generateNaverVariant : options.generateNaverVariant;
+    options.generateNaverVariant === undefined
+      ? naverEnabled
+        ? generateNaverVariant
+        : false
+      : options.generateNaverVariant;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
