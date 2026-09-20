@@ -132,7 +132,8 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
 // --- 9. 알림 문구 - 평소엔 짧게, 고장이면 목록을 붙인다 -----------------------------------------
 {
   const inspect = (url: string, coverageState: string) => ({
-    url, coverageState, verdict: "NEUTRAL", robotsTxtState: "", pageFetchState: "", lastCrawlTime: null, googleCanonical: null,
+    url, coverageState, verdict: "NEUTRAL", robotsTxtState: "", pageFetchState: "",
+    lastCrawlTime: null as string | null, googleCanonical: null,
   });
 
   const healthy = buildReport([
@@ -144,12 +145,17 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(healthyMsg.includes("색인됨 1"), "집계가 들어가야 한다");
   assert(!healthyMsg.includes("손봐야 할 글"), "고장이 없으면 목록을 붙이지 않는다");
 
-  const brokenMsg = buildHealthMessage(
-    buildReport([inspect("https://b.com/2026/09/57.html", "Redirect error")]),
-    1
-  );
+  const broken = inspect("https://b.com/2026/09/57.html", "Redirect error");
+  broken.lastCrawlTime = "2026-09-20T18:07:42Z"; // KST 2026-09-21 03:07
+  const brokenMsg = buildHealthMessage(buildReport([broken]), 1);
   assert(brokenMsg.includes("고장 발견"), "고장이 있으면 제목이 바뀌어야 한다");
   assert(brokenMsg.includes("/2026/09/57.html") && brokenMsg.includes("Redirect error"), "어느 글이 왜인지 나와야 한다");
+
+  // **마지막 크롤링 시각이 반드시 있어야 한다**(2026-09-21 실측): API가 보는 건 과거 기록이라,
+  // 시각이 없으면 이미 해결된 문제로 사람을 불러내게 된다. 실제로 홈페이지가 API로는 고장인데
+  // GSC 실시간 테스트는 통과했다.
+  assert(brokenMsg.includes("2026-09-21 03:07"), `마지막 크롤링 시각(KST)이 나와야 한다 (${brokenMsg})`);
+  assert(brokenMsg.includes("실제 URL 테스트"), "현재 상태를 확인하라는 안내가 있어야 한다");
 
   // 전부 대기인 신생 블로그 - 걱정할 일이 아님을 같이 알린다(오늘 우리 상태가 이것이다).
   const freshMsg = buildHealthMessage(buildReport([inspect("https://b.com/a.html", "URL is unknown to Google")]), 1);

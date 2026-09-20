@@ -6,6 +6,12 @@
 // 반대로 "Redirect error"·"Not found"는 우리가 손대야 하는 진짜 고장이다.
 //
 // 그래서 세 갈래로만 가른다: 정상 / 대기 / 고장. 알림은 **고장이 있을 때만 시끄럽게** 한다.
+//
+// ⚠️ **이 API가 보는 것은 "마지막 크롤링 기록"이지 현재 상태가 아니다**(2026-09-21 실측).
+// 홈페이지가 API로는 `Redirect error`인데 GSC의 "실제 URL 테스트"(구글이 그 자리에서 다시
+// 크롤링)는 정상 통과했다. 즉 고장 표시가 **이미 지나간 일**일 수 있다. URL Inspection API에는
+// 실시간 테스트가 없으므로(GSC 화면 전용), 알림에 **마지막 크롤링 시각을 함께 실어** 사람이
+// "오래된 기록인지" 판단할 수 있게 한다. 이걸 빼면 다 나은 문제로 사람을 불러내게 된다.
 
 import type { UrlInspectionResult } from "../../services/searchConsole/SearchConsoleClient.js";
 
@@ -59,6 +65,13 @@ function shortPath(url: string): string {
   }
 }
 
+/** 마지막 크롤링 시각을 KST 날짜로. 며칠 전 기록인지가 판단의 핵심이라 날짜까지만 보인다. */
+function formatCrawlTime(isoTime: string): string {
+  const parsed = new Date(isoTime);
+  if (Number.isNaN(parsed.getTime())) return isoTime;
+  return new Date(parsed.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+}
+
 /** 텔레그램 HTML 파싱을 깨뜨리지 않게 최소 이스케이프. */
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -83,9 +96,14 @@ export function buildHealthMessage(report: HealthReport, total: number): string 
     // 너무 많으면 메시지가 잘린다 - 앞의 몇 건만 보이고 나머지는 수만 알린다.
     for (const item of report.broken.slice(0, 8)) {
       lines.push(`· ${escapeHtml(shortPath(item.url))}`);
-      lines.push(`  ${escapeHtml(item.coverageState)}`);
+      lines.push(`  ${escapeHtml(item.coverageState)}${item.lastCrawlTime ? ` · 마지막 크롤링 ${escapeHtml(formatCrawlTime(item.lastCrawlTime))}` : ""}`);
     }
     if (report.broken.length > 8) lines.push(`· 외 ${report.broken.length - 8}건`);
+    lines.push("");
+    lines.push(
+      "이 값은 <b>마지막 크롤링 기록</b>이라 이미 해결됐을 수 있습니다. " +
+        "GSC에서 해당 URL을 열어 <b>실제 URL 테스트</b>로 현재 상태를 확인한 뒤, 정상이면 색인 생성을 요청하세요."
+    );
   }
 
   if (report.failures.length > 0) {
