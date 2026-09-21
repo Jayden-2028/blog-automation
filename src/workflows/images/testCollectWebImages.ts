@@ -162,17 +162,23 @@ async function main(): Promise<void> {
     assert(portraitFirst.found.length === 1, `자리 1도 세로를 저장해야 한다 (${JSON.stringify(portraitFirst.failures)})`);
     assert(portraitFirst.failures.some((f) => f.includes("정사각·세로")), "경고는 남겨야 한다");
 
-    // 긴 변 기준: 450×700(세로, 긴 변 700)은 통과, 500×400(긴 변 500)은 거부.
+    // 긴 변 기준(2026-09-21: 600 → 400 완화). 540×582는 예전엔 떨어졌지만 이제 통과한다 -
+    // 실측에서 지창욱 인스타 셀카 자리가 이 크기 때문에 빈 채로 남았다(빈 자리보다 낫다는 결정).
     const tallSmall = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 450, height: 700 }) }
     );
-    assert(tallSmall.found.length === 1, "긴 변이 600 이상이면 너비가 작아도 저장한다");
+    assert(tallSmall.found.length === 1, "긴 변이 기준 이상이면 너비가 작아도 저장한다");
+    const previouslyRejected = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 540, height: 582 }) }
+    );
+    assert(previouslyRejected.found.length === 1, "540×582는 이제 통과해야 한다(완화 전에는 거부됐다)");
     const tiny = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 500, height: 400 }) }
+      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 300, height: 250 }) }
     );
-    assert(tiny.found.length === 0 && tiny.failures[0].includes("너무 작습니다"), "긴 변 600 미만은 거부한다");
+    assert(tiny.found.length === 0 && tiny.failures[0].includes("너무 작습니다"), "긴 변 400 미만은 여전히 거부한다");
     console.log("✅ 크기 검증 - 긴 변 600px 기준, 세로·정사각은 자리 1도 저장");
 
     // 5-2-1) 이미지 검색 후보(2026-09-17 저녁): 후보가 프롬프트에 실리고, 후보에서 고르면 sourcePage가

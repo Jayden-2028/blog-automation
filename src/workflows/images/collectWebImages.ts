@@ -25,6 +25,7 @@ import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
+import { broadenQuery } from "./broadenQuery.js";
 import { searchNaverImages } from "./searchNaverImages.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
@@ -35,8 +36,15 @@ const PREFERRED_MIN_WIDTH = 1200;
 const MAX_CANDIDATES = 4;
 /** 동시에 처리할 자리 수(2026-09-21). 판정·내려받기가 전부 외부 호출이라 상한을 둔다. */
 const SLOT_CONCURRENCY = 3;
-/** 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변). */
-const HARD_MIN_WIDTH = 600;
+/**
+ * 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변).
+ *
+ * 2026-09-21 600 → 400으로 완화(사용자 결정). 600 기준에서 지창욱 인스타 셀카 자리가 540×582
+ * 후보를 떨어뜨리고 빈 채로 남았다. **작은 사진 한두 장이 빈 자리보다 낫다** - 나머지 이미지
+ * 품질이 받쳐주면 한 장이 작아도 글이 성립한다. 디스커버 썸네일 기준(1200px)은 경고로만 남기고
+ * 저장은 하므로, 이 값은 "본문에 넣었을 때 알아볼 수 있는 최소치"로만 쓴다.
+ */
+const HARD_MIN_WIDTH = 400;
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
 const MIN_LANDSCAPE_RATIO = 1.3;
 
@@ -350,7 +358,14 @@ export function buildPrompt(
     lines.push("");
     lines.push(`### 자리 ${slot.index}`);
     lines.push(`- 필요한 이미지: ${slot.description}`);
-    if (slot.query) lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
+    if (slot.query) {
+      lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
+      const broader = broadenQuery(slot.query);
+      if (broader) {
+        lines.push(`  (이 검색어로 안 나오면 **고유명사만 남겨** 다시 찾는다: "${broader}". 연도·"사진"·`);
+        lines.push(`  "장면" 같은 수식을 뺀 쪽이 실제로 더 많이 나온다 - 2022년이 아니어도 맥락이 맞으면 쓴다.)`);
+      }
+    }
     lines.push("- 이 이미지가 요약해야 할 문단:");
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
     const found = candidates.get(slot.index) ?? [];
@@ -485,6 +500,15 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   거리에서'라고 잘못 적었고, 실내 사진이라는 이유로 진짜 인물 사진을 버렸다.)",
     "2. **같은 주제면 합격이다.** 문단이 사진보다 더 세부적인 것(결말 해석, 타임테이블, 수치)을",
     "   말하더라도 그 이유로 떨어뜨리지 않는다. 제외는 **다른 주제·다른 행사·다른 인물·다른 작품**일 때다.",
+    "2-1. **다만 '없으니까 대신 이거'는 안 된다**(2026-09-21 사용자 반려). 마커가 특정 맥락을",
+    "   지목했는데(예: '포틀랜드 트레일블레이저스 관련') 후보에 그 맥락이 하나도 없으면, 같은",
+    "   인물이 나온 **다른 행사** 사진으로 채우지 말고 `picked: null`로 비운다. 실측 반려: 마커는",
+    "   포틀랜드인데 아시안게임 시상식 사진을 넣고 캡션까지 사진에 맞춰 바꿔, 본문은 포틀랜드를",
+    "   말하는데 그림은 시상식이 됐다. **빈 자리가 어긋난 사진보다 낫다.**",
+    "2-2. **얼굴로 인물을 특정하려 하지 마라.** 너는 한국 선수·배우의 얼굴을 신뢰성 있게 구분하지",
+    "   못한다(실측: '이현중이 덩크하는 장면'이라 적고 고른 사진이 다른 선수였다). 그 인물인지는",
+    "   **출처 페이지로 판단한다** - 그 인물을 다루는 기사·공식 페이지에 실린 사진이면 맞다고 보고,",
+    "   출처가 그 인물과 무관하거나 알 수 없으면 '맞다'고 단정하지 말고 근거에 그렇게 적는다.",
     "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 제외.",
     "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 제외.",
     "5. **단독 인물 자리인데 여러 명이 나온 단체·그룹 사진이면 제외한다** - '~의 모습', '~만' 같은",
@@ -566,7 +590,17 @@ export async function collectWebImages(
       input.slots.map(async (slot) => {
         const query = (slot.query ?? slot.description).replace(/\s*—\s*웹\s*검색\s*$/, "").trim();
         const list = await searchImages(query);
-        if (list.length > 0) candidates.set(slot.index, list);
+        // 원고가 준 검색어는 "2022년 인스타그램 셀카 사진"처럼 시점·형식까지 박아 넣는 경우가
+        // 많아 후보가 0건으로 끝난다(2026-09-21 실측). 그러면 고유명사만 남겨 한 번 더 찾는다 -
+        // §8-1-1로 작성 규칙은 고쳤지만 그 전에 쓰인 원고는 검색어가 이미 굳어 있다.
+        if (list.length > 0) {
+          candidates.set(slot.index, list);
+          return;
+        }
+        const broader = broadenQuery(query);
+        if (!broader) return;
+        const retry = await searchImages(broader);
+        if (retry.length > 0) candidates.set(slot.index, retry);
       })
     );
   }
@@ -789,8 +823,11 @@ export async function collectWebImages(
       fileName,
       imageUrl: chosen.imageUrl,
       sourcePage: chosen.sourcePage,
-      alt: result.alt || slot.description,
-      caption: result.caption || slot.description,
+      // 캡션은 **마커가 요구한 것**을 기준으로 둔다(2026-09-21). 수집기가 쓴 설명을 그대로 쓰면
+      // 사진에 맞춰 캡션이 바뀌어, 본문은 A를 말하는데 그림 설명은 B가 되는 드리프트가 생긴다
+      // (실측: 마커는 '포틀랜드'인데 캡션이 '금메달 기념촬영'으로 바뀌었다).
+      alt: slot.description,
+      caption: slot.description,
       license: chosen.license || "출처 확인 필요",
       storageUrl,
     };
