@@ -8,7 +8,7 @@
 // 한 색인으로만 채워져, 다른 색인을 붙인 의미가 사라진다(에이전트는 앞쪽부터 본다).
 
 import { searchNaverImages } from "./searchNaverImages.js";
-import { searchGoogleImages } from "./searchGoogleImages.js";
+import { searchSerperImages } from "./searchSerperImages.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
 /** 같은 이미지가 두 색인에 다 있으면 한 번만 남긴다. */
@@ -39,7 +39,7 @@ export function interleave(a: ImageCandidate[], b: ImageCandidate[]): ImageCandi
 export const searchImagesMerged: SearchImages = async (query) => {
   const [naver, google] = await Promise.all([
     searchNaverImages(query).catch(() => [] as ImageCandidate[]),
-    searchGoogleImages(query).catch(() => [] as ImageCandidate[]),
+    searchSerperImages(query).catch(() => [] as ImageCandidate[]),
   ]);
   return interleave(naver, google);
 };

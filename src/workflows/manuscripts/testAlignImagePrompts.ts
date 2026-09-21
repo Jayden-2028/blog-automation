@@ -106,4 +106,48 @@ const PROMPTS = [
   console.log("✅ 짝 없는 자리는 비운다 - 엉뚱한 검색어를 붙이지 않는다");
 }
 
+// --- 7. 조사가 달라도 같은 대상으로 본다(2026-09-21 안은진 원고 실측) ---------------------------
+// 순서는 그대로인데 배리에이션이 표현만 바꿔 쓴 경우다. 정확 일치로 세던 때는 조사 하나 때문에
+// 6자리 중 4자리가 "대응 없음"으로 떨어져 검색어 없이 수집했고, 그만큼 자리가 비었다.
+{
+  const base = [
+    "[IMAGE: 1회에서 안은진이 착용한 에르에르 라글란 스웨트셔츠 — 웹 검색]",
+    "[IMAGE: 2회에서 안은진이 착용한 폴뉴아 니트 — 웹 검색]",
+  ].join("\n\n");
+  const variant = [
+    "[IMAGE: 에르에르 라글란 스웨트셔츠를 입은 1회 안은진 — 웹 검색]",
+    "[IMAGE: 폴뉴아 아이보리 니트를 입은 2회 안은진 — 웹 검색]",
+  ].join("\n\n");
+  const result = alignImagePrompts(base, variant, ["에르에르 라글란", "폴뉴아 니트"]);
+  assert(result !== null, "결과가 있어야 한다");
+  assert(result.unmatched.length === 0, `조사 차이로 떨어지면 안 된다 (${result.unmatched})`);
+  assert(result.prompts[0] === "에르에르 라글란" && result.prompts[1] === "폴뉴아 니트", "제 검색어가 붙어야 한다");
+  console.log("✅ 조사만 다른 설명도 같은 대상으로 본다");
+}
+
+// --- 8. 고유명사가 조사와 같은 글자로 끝나도 망가지지 않는다 -------------------------------------
+// "이미도"(극중 인물)의 끝 글자는 조사 "도"와 같다. 조사를 떼는 방식이었다면 "이미"가 돼
+// 엉뚱하게 매칭된다.
+{
+  const base = "[IMAGE: 이미도 역을 연기하는 안은진 — 웹 검색]\n\n[IMAGE: 회차별 시청률 변화 — 표 생성]";
+  const variant = "[IMAGE: 영화감독 이미도로 분한 안은진의 극중 스틸 — 웹 검색]\n\n[IMAGE: 회차별 시청률 변화 — 표 생성]";
+  const result = alignImagePrompts(base, variant, ["안은진 이미도", ""]);
+  assert(result !== null, "결과가 있어야 한다");
+  assert(result.prompts[0] === "안은진 이미도", `인물 자리가 어긋났다 (${result.prompts[0]})`);
+  console.log("✅ 조사와 같은 글자로 끝나는 고유명사도 안전하다");
+}
+
+// --- 9. 순서가 그대로면 짝을 못 지어도 번호순으로 되돌린다 ---------------------------------------
+// 비우면 검색어 없이 수집하게 돼 그 자리가 통째로 빈다. 재배열이 없다고 확인된 원고라면
+// 번호순이 맞을 가능성이 높다. **재배열된 원고에서는 쓰지 않는다**(6번 테스트가 그것을 지킨다).
+{
+  const base = "[IMAGE: 첫 번째 설명 — 웹 검색]\n\n[IMAGE: 두 번째 설명 — 웹 검색]";
+  const variant = "[IMAGE: 첫 번째 설명 — 웹 검색]\n\n[IMAGE: 완전히 딴판인 무언가 — 웹 검색]";
+  const result = alignImagePrompts(base, variant, ["검색어 1", "검색어 2"]);
+  assert(result !== null, "결과가 있어야 한다");
+  assert(result.reordered === false, "재배열은 없다");
+  assert(result.prompts[1] === "검색어 2", `번호순으로 되돌려야 한다 (${result.prompts[1]})`);
+  console.log("✅ 순서가 그대로면 짝을 못 지어도 번호순으로 되돌린다");
+}
+
 console.log("\n🎉 검색어 재정렬 테스트 통과");

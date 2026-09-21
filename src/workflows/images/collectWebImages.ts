@@ -429,6 +429,16 @@ const BROWSER_HEADERS: Record<string, string> = {
   "Sec-Fetch-Site": "same-origin",
 };
 
+/** 헤더에 실어도 되는 형태로. ASCII 밖의 글자를 퍼센트 인코딩한다. */
+export function safeHeaderUrl(value: string): string {
+  try {
+    return new URL(value).href;
+  } catch {
+    // URL로 안 파싱되는 값이라도 헤더를 터뜨리지는 않게 한다.
+    return encodeURI(value);
+  }
+}
+
 async function fetchOnce(
   url: string,
   referer: string | null
@@ -436,7 +446,10 @@ async function fetchOnce(
   try {
     const headers = { ...BROWSER_HEADERS };
     if (referer) {
-      headers.Referer = referer;
+      // 헤더 값은 Latin-1만 담을 수 있다. 한글이 든 주소를 그대로 넣으면 요청을 보내기도 전에
+      // "Cannot convert argument to a ByteString"으로 터진다(2026-09-21 실측 - 한글 경로를 쓰는
+      // 기사 페이지에서 자리가 통째로 비었다). URL로 정규화해 퍼센트 인코딩한다.
+      headers.Referer = safeHeaderUrl(referer);
       // 같은 사이트에서 온 것처럼 보이게 한다 - 핫링크 차단은 대개 이 조합을 본다.
       try {
         headers.Origin = new URL(referer).origin;
