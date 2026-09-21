@@ -38,6 +38,31 @@ export function serperSearchConfigured(): boolean {
   return Boolean(process.env.SERPER_API_KEY);
 }
 
+/**
+ * 구글 색인이 멈춘 사실. 실패해도 수집은 네이버 후보만으로 **조용히** 계속 도는데, 그게 위험하다 -
+ * 무료 크레딧이 소진돼도 아무도 모른 채 이미지 품질만 슬그머니 떨어진다(2026-09-21 사용자 요청).
+ *
+ * 소진 시 어떤 상태 코드가 오는지는 문서화돼 있지 않아 맞히려 들지 않는다. **실패 사유를 그대로**
+ * 실어 보내면 크레딧 소진이든 키 오류든 한도 초과든 사람이 보고 판단할 수 있다.
+ *
+ * 한 번 실행에 자리마다 실패해도 알림은 한 번이면 된다 - 처음 것만 남긴다.
+ */
+export type SerperOutage = { status: number; message: string; query: string };
+
+let outage: SerperOutage | null = null;
+
+/** 기록된 장애를 가져가면서 비운다(알림을 보낸 쪽이 호출한다). */
+export function takeSerperOutage(): SerperOutage | null {
+  const taken = outage;
+  outage = null;
+  return taken;
+}
+
+/** 테스트용 - 실행 간 상태가 새지 않게 한다. */
+export function resetSerperOutage(): void {
+  outage = null;
+}
+
 export async function searchSerperImages(
   query: string,
   options: { fetchImpl?: typeof fetch } = {}
@@ -61,7 +86,10 @@ export async function searchSerperImages(
   }
 
   if (!res.ok) {
-    // 429(한도 초과)·403(키 문제)도 여기로 온다. 조용히 비우고 네이버에 맡긴다.
+    // 크레딧 소진·키 오류·한도 초과가 전부 여기로 온다. 수집은 네이버 후보만으로 계속 가되,
+    // 조용히 넘어가지는 않는다 - 장애를 기록해 두면 publish-poll이 끝날 때 한 번 알린다.
+    const message = (await res.text().catch(() => "")).trim().slice(0, 200);
+    outage ??= { status: res.status, message, query: trimmed };
     console.warn(`⚠️ 구글 이미지 검색 실패(${res.status}) - 네이버 후보만 사용합니다: "${trimmed}"`);
     return [];
   }

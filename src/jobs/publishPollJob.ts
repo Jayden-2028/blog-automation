@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
 import { prepareApprovedManuscripts } from "../workflows/manuscripts/prepareApprovedManuscripts.js";
 import { notifyManuscriptsReady } from "../workflows/manuscripts/notifyManuscriptsReady.js";
+import { notifySerperOutage } from "../workflows/images/notifySerperOutage.js";
 
 const MAX_JITTER_MS = 90_000;
 
@@ -42,6 +43,12 @@ async function main(): Promise<void> {
   }
 
   await notifyManuscriptsReady(results);
+
+  // 구글 이미지 검색이 멈췄으면 여기서 한 번 알린다. 수집은 네이버만으로 조용히 계속 돌기 때문에,
+  // 알리지 않으면 무료 크레딧이 소진돼도 아무도 모른 채 이미지 품질만 떨어진다.
+  if (await notifySerperOutage()) {
+    console.warn("⚠️ [publish-poll] 구글 이미지 검색 장애 - 텔레그램으로 알렸습니다.");
+  }
 
   if (hadFailure) {
     // Telegram 알림은 notifyManuscriptsReady가 job별로 이미 보냈다 - 여기는 launchd 로그용.
