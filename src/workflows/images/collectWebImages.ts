@@ -701,12 +701,14 @@ export async function collectWebImages(
       license: string;
     };
     const candidates: Downloaded[] = [];
+    // 후보 한 장이 실패한 사유. 자리가 끝내 비었을 때만 보고한다 - 한 장 실패는 정상 과정이다.
+    const rejected: string[] = [];
 
     for (const cand of rawCandidates) {
       if (candidates.length >= MAX_CANDIDATES) break;
       if (!/^https?:\/\//i.test(cand.imageUrl)) {
-        failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
-        return null;
+        rejected.push(`URL 형식이 아님(${cand.imageUrl.slice(0, 60)})`);
+        continue;
       }
 
       // 출처 페이지를 모르면(이미지 검색 후보에서 고른 경우) 이미지 도메인을 출처로 쓴다.
@@ -715,29 +717,29 @@ export async function collectWebImages(
         try {
           sourcePage = new URL(cand.imageUrl).origin;
         } catch {
-          failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
-          return null;
+          rejected.push(`URL 형식이 아님(${cand.imageUrl.slice(0, 60)})`);
+          continue;
         }
       }
 
       const downloaded = await fetchImage({ url: cand.imageUrl, referer: sourcePage });
       if (!downloaded.ok || !downloaded.buffer) {
         // URL을 같이 남긴다 - 자동으로 못 받은 이미지는 사람이 브라우저로 직접 저장할 수 있다.
-        failures.push(
-          `[자리 ${slot.index}] 후보 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
+        rejected.push(
+          `내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
         );
-        return null;
+        continue;
       }
       const extension = extensionFor(downloaded.contentType ?? "");
       if (!extension) {
-        failures.push(`[자리 ${slot.index}] 후보가 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
-        return null;
+        rejected.push(`이미지가 아님(content-type: ${downloaded.contentType || "없음"})`);
+        continue;
       }
       const size = readSize(downloaded.buffer);
       const longSide = size ? Math.max(size.width, size.height) : null;
       if (longSide !== null && longSide < HARD_MIN_WIDTH) {
-        failures.push(`[자리 ${slot.index}] 후보가 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
-        return null;
+        rejected.push(`너무 작음(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px)`);
+        continue;
       }
 
       const number = candidates.length + 1;
@@ -757,7 +759,12 @@ export async function collectWebImages(
     }
 
     if (candidates.length === 0) {
-      failures.push(`[자리 ${slot.index}] 쓸 수 있는 후보를 하나도 내려받지 못했습니다.`);
+      // 여기까지 왔다는 건 후보를 **전부** 써보고도 안 됐다는 뜻이다. 사유를 다 남긴다 -
+      // 뒤에 사람이 브라우저로 직접 저장할 때 어디서 막혔는지가 단서가 된다.
+      const detail = rejected.length ? `\n      - ${rejected.join("\n      - ")}` : "";
+      failures.push(
+        `[자리 ${slot.index}] 후보 ${rawCandidates.length}장을 모두 써봤지만 쓸 수 있는 것이 없습니다.${detail}`
+      );
       return null;
     }
 
