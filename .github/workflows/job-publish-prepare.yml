@@ -96,4 +96,6 @@ jobs:
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
+          # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.
+          BLOGGER_DAILY_LIMIT: ${{ vars.BLOGGER_DAILY_LIMIT }}
         run: npm run job:publish-poll

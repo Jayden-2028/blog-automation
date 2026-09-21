@@ -74,12 +74,25 @@ export async function listPublicationsByArticleIds(
 }
 
 /**
- * 오늘(로컬 자정 기준) 해당 platform으로 실제 발행/임시저장된 publication 수. 일일 상한 하드 가드용.
- * status='failed'는 세지 않는다(실패는 재시도되므로 상한을 잠식하면 안 된다).
+ * 한국시간 자정 기준 "오늘"의 시작 시각.
+ *
+ * 왜 로컬 자정이 아닌가(2026-09-21): 실제로 도는 곳은 GitHub Actions 러너이고 거기는 UTC다.
+ * 로컬 자정을 쓰면 카운터가 **한국시간 오전 9시**에 초기화돼, 밤에 상한에 걸린 원고가 다음 날
+ * 아침 9시까지 막힌다. 사용자가 보는 "오늘"과 어긋난다.
+ *
+ * KST는 서머타임이 없어 항상 UTC+9다 - 오프셋을 그대로 붙이면 된다.
+ */
+export function startOfKstDay(now: Date = new Date()): Date {
+  const kstDate = now.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+  return new Date(`${kstDate}T00:00:00+09:00`);
+}
+
+/**
+ * 오늘(한국시간 자정 기준) 해당 platform으로 실제 발행/임시저장된 publication 수. 일일 상한
+ * 하드 가드용. status='failed'는 세지 않는다(실패는 재시도되므로 상한을 잠식하면 안 된다).
  */
 export async function countTodayPublicationsByPlatform(platform: string): Promise<number> {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  const startOfDay = startOfKstDay();
 
   const { count, error } = await supabase
     .from("publications")

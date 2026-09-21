@@ -30,7 +30,8 @@ export function buildManuscriptReadyMessage(
         `<b>${escapeTelegramHtml(job.keyword)}</b>`,
         escapeTelegramHtml(outcome.reason),
         "",
-        "다음 폴링에서 재시도합니다.",
+        // 폴링은 폐지됐다(2026-09-14). 승인 콜백으로만 돌기 때문에 자동 재시도가 없다.
+        "자동 재시도는 없습니다 - 승인 버튼을 다시 눌러주세요.",
       ].join("\n"),
     };
   }

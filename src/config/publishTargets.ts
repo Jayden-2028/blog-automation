@@ -58,7 +58,10 @@ export const BLOGGER_CONFIG: BloggerConfig = {
   refreshToken: process.env.BLOGGER_REFRESH_TOKEN || undefined,
   blogId: process.env.BLOGGER_BLOG_ID || undefined,
   scope: "https://www.googleapis.com/auth/blogger",
-  dailyLimit: parseIntEnv(process.env.BLOGGER_DAILY_LIMIT, 5),
+  // 5 -> 20(2026-09-21 사용자 결정). 5는 하루 3건 생산을 전제로 잡은 값이라, 밀린 원고가
+  // 겹치면 바로 걸렸다(실측: 더쿠 원고가 6번째라 막혔고, 재시도하는 스케줄이 없어 그대로 묻혔다).
+  // Blogger 자체 한도는 하루 50건이라 20은 한참 아래다.
+  dailyLimit: parseIntEnv(process.env.BLOGGER_DAILY_LIMIT, 20),
   // 기본 true. 당분간 draft 고정(2026-09-01, CLAUDE.md 원고 파이프라인 운영 규칙): 이미지
   // 자동생성이 보류 상태라 원고에 이미지가 비어 있고, 사용자가 편집화면에서 이미지를 삽입한 뒤
   // 직접 발행한다. 시스템 안정화 전까지 BLOGGER_PUBLISH_AS_DRAFT=false로 바꾸지 않는다.
