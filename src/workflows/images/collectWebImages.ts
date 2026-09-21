@@ -26,7 +26,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
 import { broadenQuery } from "./broadenQuery.js";
-import { searchNaverImages } from "./searchNaverImages.js";
+import { searchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
@@ -370,12 +370,15 @@ export function buildPrompt(
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
     const found = candidates.get(slot.index) ?? [];
     if (found.length > 0) {
-      lines.push("- 네이버 이미지 검색 후보(**먼저 여기서 고른다**. 제목으로 출처를 짐작하고, 맞는 게 없을 때만 web_search):");
+      lines.push("- 이미지 검색 후보(네이버 + 구글, **먼저 여기서 고른다**. 맞는 게 없을 때만 web_search):");
       found.forEach((c, i) => {
         const size = c.width && c.height ? `${c.width}×${c.height}` : "크기 미상";
         lines.push(`  ${i + 1}. [${size}] ${c.title.slice(0, 60)} — ${c.link}`);
+        // 출처 페이지는 구글 후보에만 있다. 인물이 맞는지 **얼굴이 아니라 이 주소로** 판단한다.
+        if (c.sourcePage) lines.push(`      출처: ${c.sourcePage}`);
       });
-      lines.push("  후보를 고르면 `imageUrl`에 그 URL을 그대로 넣고, `sourcePage`는 알면 적고 모르면 빈 문자열로 둔다.");
+      lines.push("  후보를 고르면 `imageUrl`에 그 URL을 그대로 넣고, `sourcePage`는 위에 적힌 것이 있으면 그대로,");
+      lines.push("  없으면 네가 확인한 페이지 주소를 적는다(모르면 빈 문자열).");
     }
   }
 
@@ -583,7 +586,7 @@ export async function collectWebImages(
   if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
-  const searchImages = options.searchImages === undefined ? searchNaverImages : options.searchImages;
+  const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
   const candidates = new Map<number, ImageCandidate[]>();
   if (searchImages) {
     await Promise.all(

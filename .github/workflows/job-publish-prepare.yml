@@ -76,6 +76,9 @@ jobs:
           # 첫 재수집 배치에서 실제로 빠져 있어 후보가 전부 "Missing NAVER_CLIENT_ID"로 비었다(실측).
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          # 이미지 검색을 네이버와 함께 쓴다(2026-09-21). 없으면 네이버 후보만으로 계속 돈다.
+          GOOGLE_SEARCH_API_KEY: ${{ secrets.GOOGLE_SEARCH_API_KEY }}
+          GOOGLE_SEARCH_ENGINE_ID: ${{ vars.GOOGLE_SEARCH_ENGINE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MANUSCRIPT_IMAGE_GENERATION: ${{ vars.MANUSCRIPT_IMAGE_GENERATION }}
           IMAGE_AB_COMPARE: ${{ vars.IMAGE_AB_COMPARE }}

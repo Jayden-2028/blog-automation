@@ -196,7 +196,7 @@ async function main(): Promise<void> {
         fetchImage: okFetch,
       }
     );
-    assert(seenPrompt.includes("네이버 이미지 검색 후보") && seenPrompt.includes("https://img.example.net/p.png"), "후보가 프롬프트에 실려야 한다");
+    assert(seenPrompt.includes("이미지 검색 후보(네이버 + 구글") && seenPrompt.includes("https://img.example.net/p.png"), "후보가 프롬프트에 실려야 한다");
     assert(fromCandidate.found.length === 1 && fromCandidate.found[0].sourcePage === "https://img.example.net", `출처 도메인 폴백이 필요하다 (${JSON.stringify(fromCandidate.failures)})`);
     console.log("✅ 이미지 검색 후보 - 프롬프트에 실리고, 출처 없는 후보는 도메인으로 폴백");
 
