@@ -508,6 +508,12 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   인물이 나온 **다른 행사** 사진으로 채우지 말고 `picked: null`로 비운다. 실측 반려: 마커는",
     "   포틀랜드인데 아시안게임 시상식 사진을 넣고 캡션까지 사진에 맞춰 바꿔, 본문은 포틀랜드를",
     "   말하는데 그림은 시상식이 됐다. **빈 자리가 어긋난 사진보다 낫다.**",
+    "2-1-예외. **제품은 착용샷이 없으면 제품 컷으로 받는다**(2026-09-21 사용자 결정). 마커가",
+    "   \"A가 B 브랜드 옷을 입은 사진\"을 요구하는데 그런 착용샷이 없고 **B 제품 자체를 보여주는",
+    "   사진**이 있으면 그것을 고른다. 이건 위 2-1이 막는 '다른 것으로 때우기'가 아니다 - 마커가",
+    "   지목한 **그 물건이 맞기** 때문이다(다른 행사 사진으로 바꾸는 것과 다르다). 독자가 보려는",
+    "   것도 '그 옷이 어떻게 생겼나'다. 단, **다른 브랜드 제품이면 제외한다**(실측: 에르에르를",
+    "   찾는데 halfclub·모즈핏 제품이 후보로 왔다).",
     "2-2. **얼굴로 인물을 특정하려 하지 마라.** 너는 한국 선수·배우의 얼굴을 신뢰성 있게 구분하지",
     "   못한다(실측: '이현중이 덩크하는 장면'이라 적고 고른 사진이 다른 선수였다). 그 인물인지는",
     "   **출처 페이지로 판단한다** - 그 인물을 다루는 기사·공식 페이지에 실린 사진이면 맞다고 보고,",
@@ -587,7 +593,8 @@ export async function collectWebImages(
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
   const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
-  const candidates = new Map<number, ImageCandidate[]>();
+  // 검색창에서 미리 받아둔 후보(자리별). 에이전트가 고른 URL이 전부 막히면 여기서 건진다.
+  const prefetched = new Map<number, ImageCandidate[]>();
   if (searchImages) {
     await Promise.all(
       input.slots.map(async (slot) => {
@@ -597,19 +604,19 @@ export async function collectWebImages(
         // 많아 후보가 0건으로 끝난다(2026-09-21 실측). 그러면 고유명사만 남겨 한 번 더 찾는다 -
         // §8-1-1로 작성 규칙은 고쳤지만 그 전에 쓰인 원고는 검색어가 이미 굳어 있다.
         if (list.length > 0) {
-          candidates.set(slot.index, list);
+          prefetched.set(slot.index, list);
           return;
         }
         const broader = broadenQuery(query);
         if (!broader) return;
         const retry = await searchImages(broader);
-        if (retry.length > 0) candidates.set(slot.index, retry);
+        if (retry.length > 0) prefetched.set(slot.index, retry);
       })
     );
   }
 
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots, candidates),
+    prompt: buildPrompt(input.keyword, input.slots, prefetched),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });
@@ -649,10 +656,22 @@ export async function collectWebImages(
 
     // 1순위 + 대체 후보를 함께 내려받아 **한 번에 비교해 고른다**(2026-09-18 B안).
     // 전에는 1순위 하나만 받아 합·불을 판정했고, 떨어지면 그 자리는 끝이었다.
-    const rawCandidates = [
+    // 에이전트가 고른 것 + 대체 후보. 그 뒤에 **미리 받아둔 검색 후보**를 이어 붙인다
+    // (2026-09-21 실측): 안은진 원고 자리 6은 에이전트가 후보를 1개만 줬고 그게 핫링크 차단
+    // (403)이라 자리가 통째로 비었다. 네이버가 준 직접 이미지 URL 12장이 손에 있었는데 쓰지
+    // 않았다. 검색 후보는 색인에서 온 직접 URL이라 대체로 잘 받아진다.
+    const agentPicks = [
       { imageUrl: result.imageUrl, sourcePage: result.sourcePage, license: result.license },
       ...(result.alternates ?? []),
     ];
+    const searchFallback = (prefetched.get(slot.index) ?? []).map((candidate) => ({
+      imageUrl: candidate.link,
+      sourcePage: candidate.sourcePage ?? "",
+      // 검색 후보는 출처를 우리가 단정할 수 없다 - 분류는 비워 두고 비전 검증에 맡긴다.
+      license: "",
+    }));
+    const seenUrls = new Set(agentPicks.map((c) => c.imageUrl));
+    const rawCandidates = [...agentPicks, ...searchFallback.filter((c) => !seenUrls.has(c.imageUrl))];
 
     const readSize = options.readSize ?? readImageSize;
     const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
