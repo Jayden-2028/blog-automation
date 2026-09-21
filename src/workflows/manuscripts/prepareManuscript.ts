@@ -39,6 +39,7 @@ import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js
 import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
+import { alignImagePrompts } from "./alignImagePrompts.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -308,17 +309,33 @@ export async function prepareManuscript(
     });
   }
 
+  const imageFailures: string[] = [];
+
+  // 배리에이션이 문단을 재배열하면 마커 순서도 바뀌는데, imagePrompts는 **기준 원고 순서**로
+  // 저장돼 있다. 번호로만 짝지으면 통째로 밀려 "검색은 A, 판정은 B"가 된다 - 2026-09-21 지창욱
+  // 원고에서 6자리 중 5자리가 이렇게 어긋나 웹 검색이 전부 실패했다. 재배열을 막는 대신(그건
+  // 배리에이션의 일이다) 설명을 보고 검색어가 제 마커를 따라가게 맞춘다.
+  const aligned = alignImagePrompts(baseArticle.content ?? "", content, imagePrompts);
+  const slotPrompts = aligned ? aligned.prompts : imagePrompts;
+  if (aligned?.reordered) {
+    console.log(`· [manuscripts] ${job.keyword}: 배리에이션이 마커를 재배열해 검색어를 다시 맞췄습니다.`);
+  }
+  if (aligned && aligned.unmatched.length > 0) {
+    imageFailures.push(
+      `기준 원고에 대응이 없는 마커 ${aligned.unmatched.join(", ")}번 - 검색어를 비웠습니다(엉뚱한 검색어를 붙이지 않기 위해).`
+    );
+  }
+
   // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
   let images: ManuscriptImage[] = readJobManuscriptImages(job);
-  const imageFailures: string[] = [];
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
       jobId: job.id,
       keyword: job.keyword,
       date,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
     });
     images = outcome.images;
     imageFailures.push(...outcome.failures);
@@ -333,7 +350,7 @@ export async function prepareManuscript(
     const outcome = await renderTableImages({
       jobId: job.id,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -352,7 +369,7 @@ export async function prepareManuscript(
     const outcome = await capturePages({
       jobId: job.id,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -375,7 +392,7 @@ export async function prepareManuscript(
       jobId: job.id,
       keyword: job.keyword,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -400,7 +417,7 @@ export async function prepareManuscript(
 
       if (fallback.slots.length > 0) {
         const filled = await generateImages(
-          { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts },
+          { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts: slotPrompts },
           { onlyIndexes: [], fallbackSlots: fallback.slots }
         );
         imageFailures.push(...filled.failures);
@@ -442,7 +459,9 @@ export async function prepareManuscript(
     shortName,
     tags,
     body: content,
-    imagePrompts,
+    // 뷰어와 .md 파일도 정렬된 검색어를 쓴다 - 여기가 기준 원고 순서면 화면에서 캡션과 프롬프트가
+    // 어긋나 보인다(2026-09-21 사용자 리포트: 캡션 "톰포드 화보"에 프롬프트 "제작발표회").
+    imagePrompts: slotPrompts,
     images,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,

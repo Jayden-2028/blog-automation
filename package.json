@@ -104,6 +104,7 @@
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
     "analytics:index-health": "tsx src/workflows/analytics/checkIndexHealthCli.ts",
     "analytics:search": "tsx src/workflows/analytics/collectSearchPerformanceCli.ts",
+    "test:align-prompts": "tsx src/workflows/manuscripts/testAlignImagePrompts.ts",
     "test:concurrency": "tsx src/services/testMapWithConcurrency.ts",
     "test:search-performance": "tsx src/workflows/analytics/testSearchPerformance.ts",
     "test:sanitize-body": "tsx src/workflows/writing/testSanitizeArticleBody.ts",

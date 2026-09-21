@@ -14,6 +14,9 @@ import { renderTableImage } from "./renderTableImage.js";
 import { captureRankingImage, matchRankingSource } from "./captureRankingImage.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
+/** 표 한 장에 담을 최대 줄 수. 이보다 길면 본문 복붙이라 그리지 않는다(2026-09-21). */
+const MAX_TABLE_ROWS = 5;
+
 export type RenderTableImagesForJobInput = {
   jobId: string;
   body: string;
@@ -90,6 +93,17 @@ export async function renderTableImagesForJob(
       const data = extractTableData(preceding, label);
       if (!data) {
         failures.push(`[자리 ${imageIndex}] 표로 그릴 데이터를 본문에서 찾지 못했습니다(앞 문단에 표나 목록이 있어야 합니다).`);
+        continue;
+      }
+      // 문단을 통째로 옮긴 글자 벽은 만들지 않는다(2026-09-21 사용자 결정 - 꽃게 손질 7단계가
+      // 본문과 한 글자도 다르지 않은 이미지로 나왔다). 독자는 같은 내용을 두 번 읽고, 디스커버는
+      // 글자 이미지를 썸네일로 잘 안 고른다. 줄 수가 많다는 건 **압축하지 않았다**는 뜻이다 -
+      // 그 자리는 실물 사진으로 돌리거나 빼는 편이 낫다(output-format.md §8-4 질문 3-1).
+      if (data.rows.length > MAX_TABLE_ROWS) {
+        failures.push(
+          `[자리 ${imageIndex}] 본문 목록이 ${data.rows.length}줄이라 표로 그리지 않았습니다(최대 ${MAX_TABLE_ROWS}줄) - ` +
+            `본문을 그대로 옮긴 글자 이미지가 됩니다. 핵심만 추리거나 실물 사진으로 바꾸세요.`
+        );
         continue;
       }
       rendered = await render(data);
