@@ -15,7 +15,7 @@
 import "dotenv/config";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
-import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import { readInstagramCandidates, selectPromotableImages } from "./selectPromotableImages.js";
 
 async function main(): Promise<void> {
   const jobId = process.argv[2];
@@ -30,8 +30,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const candidates = job.metadata?.instagramImages as ManuscriptImage[] | undefined;
-  if (!Array.isArray(candidates) || candidates.length === 0) {
+  const candidates = readInstagramCandidates(job.metadata as Record<string, unknown> | null);
+  if (!candidates || candidates.length === 0) {
     console.error(`metadata.instagramImages가 없습니다 - 이 job은 인스타 캡처 후보가 없습니다: ${jobId}`);
     process.exit(1);
   }
@@ -45,18 +45,26 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // slideIndex(1..N, 캐러셀 순서)를 그대로 두되, markerCount를 넘는 인덱스는 버린다.
-  const usable = candidates.filter((c) => c.index <= markerCount);
-  const dropped = candidates.length - usable.length;
+  // 판단은 runArticleJob.ts의 자동 승격과 같은 함수를 쓴다 - 예전에는 규칙이 복붙돼 있어
+  // 한쪽만 고쳐지면 서로 어긋났다(2026-09-22).
+  const { promote, dropped, filledSlots } = selectPromotableImages(candidates, markerCount);
   if (dropped > 0) {
     console.warn(`⚠️ [ig-promote-images] 마커(${markerCount}개)보다 뒤 순번인 후보 ${dropped}개는 버립니다.`);
   }
-  if (usable.length < candidates.length - dropped) {
-    console.warn(`⚠️ [ig-promote-images] 마커 ${markerCount}개 중 ${usable.length}개 자리만 후보가 있습니다 - 나머지는 뷰어에서 비어 보입니다.`);
+  if (!promote) {
+    console.error(
+      `❌ [ig-promote-images] 후보 ${candidates.length}개가 전부 마커(${markerCount}개) 범위 밖입니다 - 승격하지 않습니다. 자리는 비워 두고 뷰어에서 판단하세요.`
+    );
+    process.exit(1);
+  }
+  if (filledSlots < markerCount) {
+    console.warn(
+      `⚠️ [ig-promote-images] 마커 ${markerCount}개 중 ${filledSlots}개 자리만 후보가 있습니다 - 나머지는 뷰어에서 비어 보입니다.`
+    );
   }
 
-  await ArticleJobRepository.mergeMetadata(jobId, { images: usable, imagesReadyAt: new Date().toISOString() });
-  console.log(`✅ [ig-promote-images] job ${jobId}: 후보 ${usable.length}장을 metadata.images로 옮겼습니다.`);
+  await ArticleJobRepository.mergeMetadata(jobId, { images: promote, imagesReadyAt: new Date().toISOString() });
+  console.log(`✅ [ig-promote-images] job ${jobId}: 후보 ${promote.length}장을 metadata.images로 옮겼습니다(자리 ${filledSlots}개).`);
 }
 
 main().catch((error) => {

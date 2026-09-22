@@ -7,13 +7,17 @@
 //
 // 파일 형식: 한 줄 = InstagramQueueEntry 하나(JSON). 재작성 시 전체를 다시 쓴다(건수가 적어 비용 무시).
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import type { InstagramQueueEntry } from "./types.js";
 
-export const INSTAGRAM_QUEUE_PATH = resolve("data/instagram-queue.jsonl");
+// 다른 파이프라인 산출물과 같은 뿌리를 쓴다(2026-09-22). 예전에는 맨 `resolve("data/...")`라
+// process.cwd()에 묶여, PIPELINE_ROOT를 설정한 프로세스에서 부르면 큐 파일이 두 개로 갈라졌다.
+// launchd는 cd $REPO를 하니 지금까지는 우연히 맞았을 뿐이다.
+export const INSTAGRAM_QUEUE_PATH = resolve(PIPELINE_ROOT, "data/instagram-queue.jsonl");
 
 async function ensureDir(path: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
@@ -35,9 +39,15 @@ export function readQueue(path: string = INSTAGRAM_QUEUE_PATH): InstagramQueueEn
   return entries;
 }
 
+// 임시 파일에 다 쓰고 rename으로 갈아끼운다(2026-09-22). 전체 재작성이라 쓰는 도중에 죽으면
+// 큐가 잘린 채로 남는데, rename은 같은 파일시스템에서 원자적이라 독자는 옛 파일 아니면 새 파일만
+// 본다. 단, 읽고-고쳐-쓰기 사이의 유실(폴러와 캡처 세션이 동시에 갱신)까지 막지는 못한다 -
+// 창이 좁고 실제로 겹친 적이 없어 락은 붙이지 않았다.
 function writeQueue(entries: InstagramQueueEntry[], path: string): void {
   const text = entries.map((e) => JSON.stringify(e)).join("\n");
-  writeFileSync(path, text.length > 0 ? `${text}\n` : "", "utf8");
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, text.length > 0 ? `${text}\n` : "", "utf8");
+  renameSync(tmp, path);
 }
 
 export async function appendQueueEntry(

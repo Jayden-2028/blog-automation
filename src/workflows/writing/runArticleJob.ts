@@ -59,7 +59,10 @@ import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
 import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, SourceRow } from "../../types/database.js";
-import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import {
+  readInstagramCandidates,
+  selectPromotableImages,
+} from "../instagram-capture/selectPromotableImages.js";
 
 /**
  * 헤드리스 writer는 writer.md(500줄+) + seo-guide.md(500줄+) + research 파일(20~30KB)을 읽고,
@@ -718,23 +721,26 @@ async function runWritingStageInner(
   // 이 시점(write 완료 = 마커 수 확정)과 승인 사이에 별도 CLI(ig:promote-images)를 기다리면 그
   // 틈에 승인이 먼저 끝나 metadata.images가 비어 있는 채로 승인 이후 파이프라인이 돌고, 거기서
   // 웹 이미지 자동 검색이 대신 채워 인스타 캡처 사진이 최종 원고에서 통째로 빠진다(2026-09-21
-  // 실측: "김지원 밀라노 근황" job에서 실제로 발생). 그래서 write 완료 시점에 곧바로
-  // instagramImages -> images로 옮긴다 - promoteInstagramImagesCli.ts와 같은 규칙(마커 수를
-  // 넘는 후보는 버림)이며, 그 CLI는 이미 승격된 job에 대해서는 아무 일도 하지 않으므로 안전하다.
-  const instagramCandidates =
-    job.metadata?.source === "instagram_manual"
-      ? (job.metadata?.instagramImages as ManuscriptImage[] | undefined)
-      : undefined;
-  const instagramPromotedImages =
-    Array.isArray(instagramCandidates) && instagramCandidates.length > 0
-      ? instagramCandidates.filter((c) => c.index <= parsed.imagePrompts.length)
-      : null;
-  if (instagramCandidates && instagramPromotedImages) {
-    const dropped = instagramCandidates.length - instagramPromotedImages.length;
-    if (dropped > 0) {
-      console.warn(`⚠️ [writing] 인스타 캡처 후보 중 마커(${parsed.imagePrompts.length}개)를 넘는 ${dropped}개는 버립니다.`);
+  // 실측: "김지원 밀라노 근황" job에서 실제로 발생). 그래서 write 완료 시점에 곧바로 옮긴다.
+  // 판단 규칙은 selectPromotableImages가 유일한 기준이다 - ig:promote-images CLI도 같은 함수를
+  // 쓰므로 둘이 어긋날 수 없다.
+  const instagramCandidates = readInstagramCandidates(job.metadata as Record<string, unknown> | null);
+  const instagramPromotion = selectPromotableImages(instagramCandidates, parsed.imagePrompts.length);
+  if (instagramCandidates) {
+    if (instagramPromotion.dropped > 0) {
+      console.warn(
+        `⚠️ [writing] 인스타 캡처 후보 중 마커(${parsed.imagePrompts.length}개)를 넘는 ${instagramPromotion.dropped}개는 버립니다.`
+      );
     }
-    console.log(`ℹ️ [writing] 인스타 캡처 후보 ${instagramPromotedImages.length}개를 metadata.images로 승격했습니다.`);
+    if (instagramPromotion.promote) {
+      console.log(
+        `ℹ️ [writing] 인스타 캡처 후보 ${instagramPromotion.promote.length}개를 metadata.images로 승격했습니다(자리 ${instagramPromotion.filledSlots}개).`
+      );
+    } else {
+      console.warn(
+        `⚠️ [writing] 인스타 캡처 후보 ${instagramCandidates.length}개가 마커(${parsed.imagePrompts.length}개) 범위 밖이라 승격하지 않습니다 - 자리는 비워 두고 사람이 뷰어에서 판단합니다.`
+      );
+    }
   }
 
   // 이미지: 2026-09-01부터 API 자동생성 기본 보류(CLAUDE.md 운영 규칙). 보류면 writer가 남긴
@@ -850,8 +856,8 @@ async function runWritingStageInner(
     imageCounts: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
     imageFailures: imageGeneration.failures,
     imageGenerationHeld,
-    ...(instagramPromotedImages
-      ? { images: instagramPromotedImages, imagesReadyAt: new Date().toISOString() }
+    ...(instagramPromotion.promote
+      ? { images: instagramPromotion.promote, imagesReadyAt: new Date().toISOString() }
       : {}),
     sourceCounts: {
       total: sources.length,

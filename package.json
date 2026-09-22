@@ -147,6 +147,7 @@
     "test:callback-data": "tsx src/notifications/testTelegramCallbackData.ts",
     "test:telegram-bot": "tsx src/notifications/testTelegramBot.ts",
     "test:instagram-capture-bot": "tsx src/notifications/testInstagramCaptureBot.ts",
+    "test:ig-promote": "tsx src/workflows/instagram-capture/testSelectPromotableImages.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",
     "test:heavy-pipeline-lock": "tsx src/jobs/lib/testHeavyPipelineLock.ts",
