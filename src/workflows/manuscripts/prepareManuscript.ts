@@ -40,6 +40,10 @@ import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
+import {
+  readInstagramCandidates,
+  selectPromotableImages,
+} from "../instagram-capture/selectPromotableImages.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 
@@ -302,6 +306,28 @@ export async function prepareManuscript(
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
   let images: ManuscriptImage[] = readJobManuscriptImages(job);
   const imageFailures: string[] = [];
+
+  // 인스타 캡처 job인데 자리가 비어 있으면 후보에서 다시 승격한다(2026-09-22).
+  //
+  // job:revise는 최종본을 다시 만들려고 `images`/`imagesReadyAt`/`webImagesReadyAt`을 통째로
+  // 비운다(본문이 바뀌면 마커 순번이 밀리기 때문 - runReviseArticleCli.ts). 그런데 자동 승격은
+  // job:write 안에만 있어서(runArticleJob.ts) revise 경로에는 그걸 되살리는 곳이 없었다. 그러면
+  // 아래 웹 이미지 수집이 빈 자리를 전부 엉뚱한 사진으로 채운다 - "김지원 밀라노 근황"에서 겪은
+  // 바로 그 증상이 수정할 때마다 되풀이된다.
+  //
+  // 원본 후보는 metadata.instagramImages에 그대로 남아 있으므로 여기서 현재 마커 수에 맞춰 다시
+  // 자른다. 판단은 selectPromotableImages 하나로 통일돼 있다(자동 승격·수동 CLI와 같은 규칙).
+  if (images.length === 0) {
+    const candidates = readInstagramCandidates(job.metadata as Record<string, unknown> | null);
+    const { promote, filledSlots } = selectPromotableImages(candidates, imagePrompts.length);
+    if (promote) {
+      images = promote;
+      await mergeJobMetadata(job.id, { images, imagesReadyAt: now().toISOString() });
+      console.log(
+        `· [manuscripts] ${job.keyword}: 인스타 캡처 후보 ${promote.length}장을 다시 승격했습니다(자리 ${filledSlots}개).`
+      );
+    }
+  }
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
       jobId: job.id,
