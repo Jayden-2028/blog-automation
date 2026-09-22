@@ -58,19 +58,32 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
   (`prompts/writing/writer.md` §8).
-- 발행: 반자동 업로드(Playwright/API)는 **여전히 중단**이다(2026-09-05). 대신 텔레그램에서 원고를
-  승인(✅)하면 `publishPollJob`(`prepareApprovedManuscripts()`)이 Blogspot 배리에이션 원고 1건을
-  만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 생성한 뒤
+- 원고 준비: 텔레그램에서 원고를 승인(✅)하면 `prepareApprovedManuscripts()`가 Blogspot 배리에이션
+  원고 1건을 만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 채운 뒤
   `manuscripts/index.html`(날짜→주제 2단 트리, 복사/수정 버튼, 이미지 인라인)을 갱신한다.
   작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고 배리에이션의 재료로만 쓰인다.
-  사용자가 그 페이지에서 복사해 Blogger에 붙여넣는다. 트리거는 2026-09-14부터 폴링이 아니라
-  **승인 콜백 직후 이벤트 기반**이다(`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분
-  폴링(`publish-poll` launchd)은 영구 비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가
-  같은 스크립트를 재사용해 실행한다.
-- **자동 업로드는 아직 켜지 않는다.** Blogger API v3 + 만료 없는 refresh token은 이미 준비돼
-  있지만(`publishArticleToBlogspot.ts`), 켜는 기준은 "원고·이미지 품질이 보장됐다"는 **사용자
-  판단**이다. 코드가 준비돼도 사용자 승인 전에는 `BLOGGER_ENABLED`/`BLOGGER_AUTO_PUBLISH`를
-  건드리지 않는다. `BLOGGER_PUBLISH_AS_DRAFT`는 true 유지(1단계는 비공개 초안까지).
+  트리거는 2026-09-14부터 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
+  (`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분 폴링(`publish-poll` launchd)은 영구
+  비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가 같은 스크립트를 재사용해 실행한다.
+- **발행은 사람이 버튼을 누를 때만 일어나고, 누르면 공개다**(2026-09-19 이후 실제 동작).
+  원고 준비 완료 알림의 **🚀 블로그 발행** 버튼이 `handlePublishDecisionCallback`을 타고
+  `publishArticleToBlogspot(jobId, { asDraft: false })`를 **그 자리에서** 부른다 - 배리에이션 원고가
+  이미 있어 LLM 호출이 없고 수 초면 끝나므로 별도 워크플로우로 넘기지 않는다. 남아 있던 초안은 새
+  글을 만들지 않고 `posts.publish`로 공개 전환하며, 공개 직전에 `posts.patch`로 본문을 공개용
+  (미채움 마커 제거)으로 덮어쓴다. 사람이 원고 페이지에서 이미지까지 본 뒤 누르는 것이라 공개가
+  맞다. 뷰어에서 복사해 직접 붙여넣는 길도 그대로 열려 있다(발행 실패 시 안내가 그쪽으로 보낸다).
+- **자동 발행(사람 없이 나가는 경로)은 여전히 없다.** `publishApprovedArticles.ts`(폴링 fan-out)는
+  2026-09-05부터 호출되지 않는다 - 코드와 테스트만 남아 있고 `publishPollJob`이 부르지 않는다.
+  되살리는 기준은 "원고·이미지 품질이 보장됐다"는 **사용자 판단**이다.
+- 발행 관련 환경변수(승인 없이 건드리지 않는다):
+  - `BLOGGER_ENABLED` - 마스터 게이트. false면 버튼도 `disabled`로 실패한다(기본 false).
+  - `BLOGGER_PUBLISH_AS_DRAFT` - true 유지(기본 true). **단 🚀 버튼은 이 값을 무시하고 공개로
+    나간다** - 이 전역값이 지배하는 것은 지금 죽어 있는 자동 폴링 경로뿐이다. 뒤집으면 사람이
+    안 본 원고까지 공개되므로 버튼 쪽에서만 `asDraft: false`를 넘긴다.
+  - `BLOGGER_DAILY_LIMIT` - 하루 상한, 코드 기본값 20(2026-09-21에 5에서 올림, Blogger 자체 한도는
+    50). 워크플로우 vars로 조절하므로 코드 수정이 필요 없다.
+  - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
+    `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 
 ## 승인 없이는 금지
 
