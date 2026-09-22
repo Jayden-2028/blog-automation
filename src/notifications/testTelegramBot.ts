@@ -1053,6 +1053,14 @@ main().catch((error) => {
   //    다시 누를 수 없었다 - 자동 재시도도 없으니 원고가 그대로 묻힌다.
   {
     const lockedKeyboard = [[{ text: "⏳ 처리 중…", callback_data: "noop" }]];
+    const fullKeyboard = [
+      [{ text: "📄 원고 페이지 열기", callback_data: undefined }],
+      [
+        { text: "🖼 이미지 수정", callback_data: `publish:images:${JOB}` },
+        { text: "🔵 블로그 발행", callback_data: `publish:blogspot:${JOB}` },
+        { text: "🟢 네이버 발행", callback_data: `publish:naver:${JOB}` },
+      ],
+    ];
     const updateFor = (data: string) =>
       ({
         update_id: 1,
@@ -1147,6 +1155,64 @@ main().catch((error) => {
       assert(publishCalls === 1 && out.outcome.status === "published", `blogspot 발행이 돌아야 한다 (${data})`);
     }
     console.log("✅ 네이버는 예약만 / 이미지는 미연결 / blogspot은 옛 형식도 동작");
+  }
+
+  // 7) **누른 버튼 하나만** 바뀐다(2026-09-22 실측 버그).
+  //    발행 콜백을 가진 버튼을 전부 갈아끼워서, 이미지 수정을 눌렀는데 블로그·네이버까지
+  //    "✅ 발행됨"으로 잠겼다. 발행되지도 않았는데 발행됐다고 표시되고 다시 누를 수도 없었다.
+  {
+    const updateWith = (data: string) =>
+      ({
+        update_id: 1,
+        callback_query: {
+          id: "q1",
+          data,
+          message: { chat: { id: Number(CHAT_ID) }, message_id: 7, reply_markup: { inline_keyboard: fullKeyboard } },
+        },
+      }) as never;
+
+    const run = async (data: string, deps: Record<string, unknown> = {}) => {
+      const edits: Record<string, unknown>[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "키워드" }) as never,
+        publishToBlogspot: (async () =>
+          ({ ok: true, publicationId: 1, url: "https://b/x.html", isDraft: false, variantCreated: false, alreadyDone: false }) as never) as never,
+        requestNaverPublish: async () => ({ queued: true }),
+        sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {
+          if (method === "editMessageReplyMarkup") edits.push(body);
+          return null;
+        },
+        ...deps,
+      } as never);
+      await bot.processUpdate(updateWith(data));
+      const rows = (edits[0]?.reply_markup as { inline_keyboard: { text: string; callback_data?: string }[][] } | undefined)?.inline_keyboard ?? [];
+      return rows;
+    };
+
+    // 이미지 수정(미연결)을 눌러도 발행 버튼 둘은 살아 있어야 한다.
+    const afterImages = await run(`publish:images:${JOB}`);
+    const actions = afterImages[1] ?? [];
+    assert(afterImages[0]?.[0]?.text.includes("원고 페이지"), "링크 버튼은 그대로여야 한다");
+    assert(actions.length === 3, `액션 버튼 3개가 유지돼야 한다 (${JSON.stringify(actions)})`);
+    assert(actions[1].callback_data === `publish:blogspot:${JOB}`, "블로그 버튼이 살아 있어야 한다");
+    assert(actions[2].callback_data === `publish:naver:${JOB}`, "네이버 버튼이 살아 있어야 한다");
+    assert(!JSON.stringify(actions).includes("발행됨"), "아무것도 발행되지 않았는데 발행됨이라고 하면 안 된다");
+
+    // 블로그 발행은 그 버튼만 잠기고 네이버는 살아 있어야 한다(둘 다 올릴 수 있다).
+    const afterBlogspot = await run(`publish:blogspot:${JOB}`);
+    const row = afterBlogspot[1] ?? [];
+    assert(row[1].text === "✅ 발행됨" && row[1].callback_data === "noop", `블로그만 잠겨야 한다 (${JSON.stringify(row[1])})`);
+    assert(row[2].callback_data === `publish:naver:${JOB}`, "네이버는 그대로 눌 수 있어야 한다");
+    assert(row[0].callback_data === `publish:images:${JOB}`, "이미지 수정도 그대로여야 한다");
+
+    // 네이버는 "예약됨"이다 - 아직 안 올라갔는데 "발행됨"이라고 하면 확인하러 갔다 헛걸음한다.
+    const afterNaver = await run(`publish:naver:${JOB}`);
+    const naverRow = afterNaver[1] ?? [];
+    assert(naverRow[2].text === "🟢 예약됨", `네이버는 예약됨이어야 한다 (${naverRow[2].text})`);
+    assert(naverRow[1].callback_data === `publish:blogspot:${JOB}`, "블로그는 그대로여야 한다");
+    console.log("✅ 누른 버튼 하나만 바뀐다 / 네이버는 예약됨 표시");
   }
   }
 }

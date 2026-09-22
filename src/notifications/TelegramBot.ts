@@ -1032,23 +1032,62 @@ export class TelegramBot {
     const parsed = parsePublishDecisionCallbackData(query.data);
     if (messageId === undefined || !parsed) return;
 
-    const retryable = outcome.status === "failed" || outcome.status === "job_not_found";
-    const button: TelegramInlineKeyboardButton = retryable
-      ? { text: `${PUBLISH_RETRY_LABEL[parsed.action]} (재시도)`, callback_data: buildPublishDecisionCallbackData(parsed.jobId, parsed.action) }
-      : { text: outcome.status === "already_done" ? "✅ 이미 발행됨" : "✅ 발행됨", callback_data: "noop" };
+    // **누른 버튼 하나만** 바꾼다. 2026-09-22 실측: 발행 콜백을 가진 버튼을 전부 갈아끼워서,
+    // 이미지 수정을 눌렀는데 블로그·네이버 버튼까지 "✅ 발행됨"으로 잠겼다. 발행되지도 않았는데
+    // 발행됐다고 표시되고 다시 누를 수도 없는, 두 겹으로 잘못된 상태였다.
+    const settled = (action: PublishDecisionAction): OutgoingButton | null => {
+      if (action !== parsed.action) return null; // 다른 버튼은 건드리지 않는다
 
-    // 원래 키보드에서 발행 버튼만 갈아끼운다 - "원고 페이지 열기" 같은 링크 버튼은 살려야 한다.
-    // Worker가 이미 버튼을 "처리 중…" 하나로 덮었다면 원본이 없으니 발행 버튼만 다시 세운다.
+      switch (outcome.status) {
+        case "published":
+          return { text: "✅ 발행됨", callback_data: "noop" };
+        case "already_done":
+          return { text: "✅ 이미 발행됨", callback_data: "noop" };
+        case "queued":
+          // 네이버는 여기서 끝나지 않는다 - 맥의 폴러가 실제로 올린다. 잠그되 "발행됨"이라고
+          // 말하지 않는다. 아직 안 올라갔는데 올라갔다고 하면 사용자가 확인하러 갔다 헛걸음한다.
+          return { text: "🟢 예약됨", callback_data: "noop" };
+        case "not_wired":
+          // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
+          return null;
+        default:
+          // 실패·job 없음 - 사람이 다시 눌러야 하므로 되살린다.
+          return {
+            text: `${PUBLISH_RETRY_LABEL[action]} (재시도)`,
+            callback_data: buildPublishDecisionCallbackData(parsed.jobId, action),
+          };
+      }
+    };
+
     const original = query.message?.reply_markup?.inline_keyboard;
     const hadPublishButton = original?.some((row) =>
       row.some((b) => parsePublishDecisionCallbackData(b.callback_data) !== null)
     );
-    const keyboard =
-      original && hadPublishButton
-        ? original.map((row) =>
-            row.map((b) => (parsePublishDecisionCallbackData(b.callback_data) ? button : b))
-          )
-        : [[button]];
+
+    type OutgoingButton = { text: string; callback_data?: string; url?: string };
+    let keyboard: OutgoingButton[][];
+    if (original && hadPublishButton) {
+      // "원고 페이지 열기" 같은 링크 버튼과 누르지 않은 발행 버튼은 그대로 둔다.
+      keyboard = original.map((row): OutgoingButton[] =>
+        row.map((b): OutgoingButton => {
+          const own = parsePublishDecisionCallbackData(b.callback_data);
+          if (!own) return b;
+          return settled(own.action) ?? b;
+        })
+      );
+    } else {
+      // Worker가 버튼을 "처리 중…" 하나로 덮어 원본이 없다 - 세 버튼을 다시 세운다.
+      // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
+      keyboard = [
+        (["images", "blogspot", "naver"] as PublishDecisionAction[]).map(
+          (action) =>
+            settled(action) ?? {
+              text: PUBLISH_RETRY_LABEL[action],
+              callback_data: buildPublishDecisionCallbackData(parsed.jobId, action),
+            }
+        ),
+      ];
+    }
 
     await this.post("editMessageReplyMarkup", {
       chat_id: this.chatId,
