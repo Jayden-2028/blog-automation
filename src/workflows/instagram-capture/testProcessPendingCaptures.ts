@@ -72,6 +72,9 @@ const tests: Array<[string, () => Promise<void>]> = [
       const r = await processPendingCaptures(h.deps);
       assert.equal(r.created, 1);
       assert.deepEqual(h.research, ["job-1"], "조사가 발화돼야 한다");
+      // 2026-09-23 사용자 결정: 성공은 텔레그램으로 안 알린다. messages가 비어야 폴러가
+      // 알림을 아예 안 보낸다(접수 답장 + 초안 도착으로 이미 두 번 알게 된다).
+      assert.deepEqual(r.messages, [], "성공은 알리지 않는다 - 세 번째 알림은 소음이다");
     },
   ],
   [
@@ -82,6 +85,8 @@ const tests: Array<[string, () => Promise<void>]> = [
       assert.equal(r.failed, 1);
       assert.equal(r.givenUp, 0);
       assert.deepEqual(h.marks[0][1], { attempts: 1, lastError: "로그인 만료" });
+      assert.equal(r.messages.length, 1, "실패는 계속 알려야 한다 - 무인 운영에서 조용하면 모른다");
+      assert.ok(r.messages[0].startsWith("⚠️"), r.messages[0]);
       assert.ok(!("status" in h.marks[0][1]), "status를 바꾸면 안 된다 - 다음 폴링에서 재시도해야 한다");
     },
   ],
@@ -133,6 +138,7 @@ const tests: Array<[string, () => Promise<void>]> = [
       } as Parameters<typeof processPendingCaptures>[0]);
 
       assert.equal(r.created, 1);
+      assert.deepEqual(r.messages, [], "성공은 알리지 않는다");
       assert.equal(seenByCreateJob, "이미지 내용", "job을 만들 때 이미지가 아직 있어야 한다");
       assert.equal(existsSync(dir), false, "job을 만든 뒤에는 임시 디렉터리를 지워야 한다");
     },

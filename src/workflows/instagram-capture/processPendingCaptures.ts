@@ -117,9 +117,12 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
         );
       });
 
-      result.messages.push(
-        `✅ ${entry.instagramUrl}\n   job ${created.jobId} (이미지 ${session.slidesUsed}장${session.slidesDropped > 0 ? `, 자리 ${session.slidesDropped}개 비움` : ""}) - 조사 시작`
-      );
+      // 성공은 텔레그램으로 알리지 않는다(2026-09-23 사용자 결정). 사용자는 이미 두 번 알게
+      // 된다 - URL을 보낼 때 봇이 "접수했습니다"로 답하고, 집필이 끝나면 원고 초안이 온다.
+      // 그 사이에 "캡처 처리됨"이 한 번 더 오면 세 번째 알림이라 소음이다. 진행 상황은
+      // stdout의 "캡처 N건 시도" 줄과 로그에 남는다.
+      //
+      // messages는 **사람이 손을 대야 하는 것**만 담는다 - 재시도·포기·조사 발화 실패.
     } finally {
       await rm(session.tempDir, { recursive: true, force: true }).catch(() => {});
     }

@@ -43,13 +43,16 @@ async function main(): Promise<void> {
       (captured.givenUp > 0 ? ` / 포기 ${captured.givenUp}` : "")
   );
 
-  // 무인으로 도는 job이라 stdout을 아무도 안 본다. 결과는 텔레그램으로 알린다 - 성공도 알려야
-  // "보냈는데 아무 일도 없다"를 사용자가 겪지 않는다.
+  // 무인으로 도는 job이라 stdout을 아무도 안 본다. **사람이 손을 대야 하는 것만** 텔레그램으로
+  // 알린다 - 재시도·포기·조사 발화 실패(2026-09-23 사용자 결정).
+  //
+  // 성공은 안 보낸다. URL을 보낼 때 봇이 "접수했습니다"로 답하고 집필이 끝나면 초안이 오므로,
+  // 그 사이의 "캡처 처리됨"은 세 번째 알림이라 소음이다.
   if (captured.messages.length > 0) {
     await TelegramNotifier.fromEnv()
       .sendMessages([
         {
-          text: `📥 <b>인스타 캡처 처리</b>\n\n${captured.messages.map((m) => escapeTelegramHtml(m)).join("\n\n")}`,
+          text: `⚠️ <b>인스타 캡처 - 확인 필요</b>\n\n${captured.messages.map((m) => escapeTelegramHtml(m)).join("\n\n")}`,
         },
       ])
       .catch(() => {});
