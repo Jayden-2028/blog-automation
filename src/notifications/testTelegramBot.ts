@@ -1084,7 +1084,7 @@ main().catch((error) => {
     assert(afterFailure.length === 1, `버튼을 되돌려야 한다 (edit ${afterFailure.length}회)`);
     const revived = JSON.stringify(afterFailure[0].reply_markup);
     assert(revived.includes("재시도"), `실패 후에는 다시 누를 수 있어야 한다 (${revived})`);
-    assert(revived.includes(`publish:${JOB}`), "되살린 버튼이 같은 job을 가리켜야 한다");
+    assert(revived.includes(`publish:blogspot:${JOB}`), "되살린 버튼이 같은 job·같은 동작을 가리켜야 한다");
     assert(!revived.includes("처리 중"), "\"처리 중\"에 멈춰 있으면 안 된다");
 
     // 성공하면 눌린 표시로 잠근다 - 또 누르면 중복 발행 시도가 된다.
@@ -1095,5 +1095,30 @@ main().catch((error) => {
     assert(settled.includes("✅ 발행됨") && settled.includes("noop"), `성공 뒤에는 잠가야 한다 (${settled})`);
 
     console.log("✅ 발행 버튼 - 실패하면 되살리고, 성공하면 잠근다");
+
+  // 6) 연결 안 된 동작은 **절대 발행하지 않는다**(2026-09-22 네이버 재개 작업 중).
+  //    분기가 없으면 어떤 버튼을 눌러도 Blogspot이 발행된다 - 가장 위험한 실수라 테스트로 막는다.
+  {
+    for (const action of ["naver", "images"]) {
+      let publishCalls = 0;
+      const out = await publishBot(async () => {
+        publishCalls += 1;
+        return {} as never;
+      }).handlePublishDecisionCallback(query(`publish:${action}:${JOB}`));
+      assert(publishCalls === 0, `${action} 버튼이 Blogspot을 발행하면 안 된다`);
+      assert(out.outcome.status === "not_wired", `${action}은 not_wired여야 한다 (${JSON.stringify(out.outcome)})`);
+      assert(out.message.includes("발행되지 않습니다"), "아무 일도 없다는 점을 알려야 한다");
+    }
+    // blogspot은 옛 형식·새 형식 모두 실제로 발행돼야 한다.
+    for (const data of [`publish:${JOB}`, `publish:blogspot:${JOB}`]) {
+      let publishCalls = 0;
+      const out = await publishBot(async () => {
+        publishCalls += 1;
+        return { ok: true, publicationId: 1, url: "https://b/x.html", isDraft: false, variantCreated: false, alreadyDone: false } as never;
+      }).handlePublishDecisionCallback(query(data));
+      assert(publishCalls === 1 && out.outcome.status === "published", `blogspot 발행이 돌아야 한다 (${data})`);
+    }
+    console.log("✅ 연결 안 된 동작은 발행하지 않는다 / blogspot은 옛 형식도 동작");
+  }
   }
 }

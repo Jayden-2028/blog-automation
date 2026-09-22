@@ -22,6 +22,7 @@ import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
+import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -152,12 +153,21 @@ export type HandleResearchDecisionOutcome =
 
 export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
+/** 실패 후 되살릴 버튼 문구. 누른 그 동작으로 되돌려야 한다(네이버를 눌렀는데 블로그 버튼이 오면 안 된다). */
+const PUBLISH_RETRY_LABEL: Record<PublishDecisionAction, string> = {
+  blogspot: "🔵 블로그 발행",
+  naver: "🟢 네이버 발행",
+  images: "🖼 이미지 수정",
+};
+
 export type HandlePublishDecisionOutcome =
   | { status: "ignored"; reason: "not_a_publish_decision" | "wrong_chat" }
   | { status: "job_not_found" }
   | { status: "published"; url: string }
   | { status: "already_done"; url: string }
-  | { status: "failed"; reason: string };
+  | { status: "failed"; reason: string }
+  /** 버튼은 붙었으나 처리 경로가 아직 연결되지 않았다(2026-09-22 네이버 재개 작업 중). */
+  | { status: "not_wired"; action: PublishDecisionAction };
 
 export type HandlePublishDecisionResult = {
   outcome: HandlePublishDecisionOutcome;
@@ -777,6 +787,21 @@ export class TelegramBot {
       return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
     }
 
+    // 2026-09-22 네이버 재개로 버튼이 3개가 됐다. **분기가 없으면 어떤 버튼을 눌러도 Blogspot이
+    // 발행된다** - 아직 연결 안 된 동작은 여기서 확실히 막는다.
+    if (parsed.action !== "blogspot") {
+      const label = parsed.action === "naver" ? "네이버 발행" : "이미지 수정";
+      return {
+        outcome: { status: "not_wired", action: parsed.action },
+        message: [
+          `🚧 <b>${label}은 아직 연결 중입니다</b>`,
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          "이 버튼을 눌러도 아무 일도 일어나지 않습니다(발행되지 않습니다).",
+        ].join("\n"),
+      };
+    }
+
     const published = await this.publishToBlogspot(parsed.jobId);
 
     if (!published.ok) {
@@ -983,7 +1008,7 @@ export class TelegramBot {
 
     const retryable = outcome.status === "failed" || outcome.status === "job_not_found";
     const button: TelegramInlineKeyboardButton = retryable
-      ? { text: "🚀 블로그 발행 (재시도)", callback_data: buildPublishDecisionCallbackData(parsed.jobId) }
+      ? { text: `${PUBLISH_RETRY_LABEL[parsed.action]} (재시도)`, callback_data: buildPublishDecisionCallbackData(parsed.jobId, parsed.action) }
       : { text: outcome.status === "already_done" ? "✅ 이미 발행됨" : "✅ 발행됨", callback_data: "noop" };
 
     // 원래 키보드에서 발행 버튼만 갈아끼운다 - "원고 페이지 열기" 같은 링크 버튼은 살려야 한다.

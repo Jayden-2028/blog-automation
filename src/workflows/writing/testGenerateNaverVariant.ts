@@ -48,6 +48,11 @@ async function main(): Promise<void> {
   assert(prompt.includes("같은 게시물로 보지 않을"), "배리에이션 목적(중복 회피)이 실려야 한다");
   assert(prompt.includes("소제목의 순서와 다루는 내용"), "구조는 유지한다는 지시가 있어야 한다");
   assert(prompt.includes("voice.md"), "어투 규격을 읽으라는 지시가 있어야 한다");
+  // 참고 자료 링크아웃 제거(2026-09-22 사용자 결정). 블로그 원고와 갈리는 유일한 구조 차이라
+  // 규칙이 프롬프트에서 빠지면 조용히 예전처럼 링크가 따라붙는다.
+  assert(prompt.includes("'참고 자료' 블록은 통째로 뺀다"), "참고 자료 제거 규칙이 실려야 한다");
+  assert(prompt.includes("`**요약**` 블록은 그대로 둔다"), "요약은 남긴다는 지시가 있어야 한다");
+  assert(!prompt.includes("'참고 자료' 목록도 그대로 옮긴다"), "옛 규칙(그대로 옮긴다)이 남아 있으면 안 된다");
   assert(prompt.includes(SOURCE_BODY), "원본 본문이 실려야 한다");
   console.log("✅ 프롬프트 - 마커 불변 + 중복 회피 목적 + 구조 유지 + 어투 규격");
 
