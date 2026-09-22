@@ -1,6 +1,7 @@
 // publishArticleToBlogspot 오케스트레이션 테스트. 모든 의존성(DB/LLM/Blogger)을 주입한다.
 import { publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
 import { BLOGGER_CONFIG } from "../../config/publishTargets.js";
+import { startOfKstDay } from "../../services/supabase/repositories/publicationRepository.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -86,7 +87,8 @@ async function main(): Promise<void> {
   let variantCalls = 0;
   const limited = await publishArticleToBlogspot("job-1", {
     ...baseDeps,
-    countToday: async () => 5,
+    // 설정값을 그대로 읽는다 - 상한을 조정할 때마다 테스트가 깨지면 안 된다(2026-09-21 5 -> 20).
+    countToday: async () => BLOGGER_CONFIG.dailyLimit,
     generateVariant: async () => {
       variantCalls++;
       return baseDeps.generateVariant();
@@ -235,6 +237,25 @@ async function main(): Promise<void> {
   assert(!publicHtml.includes("[IMAGE:"), `공개 발행에서는 마커가 독자에게 보이면 안 된다 (${publicHtml})`);
   assert(publicHtml.includes("본문 시작") && publicHtml.includes("본문 끝"), "마커만 지우고 본문은 살려야 한다");
   console.log("✅ 초안 -> 마커 유지(TODO) / 공개 -> 마커 제거, 본문은 보존");
+
+  // 일일 상한의 "오늘"은 한국시간 자정 기준이어야 한다(2026-09-21).
+  // 실제로 도는 곳은 UTC 러너라, 로컬 자정을 쓰면 카운터가 한국시간 오전 9시에 초기화된다.
+  // 밤에 상한에 걸린 원고가 다음 날 아침 9시까지 막혀, 사용자가 보는 "오늘"과 어긋났다.
+  {
+    // 한국시간 2026-09-21 08:00 (= UTC 2026-09-20 23:00). 로컬(UTC) 자정 기준이면 9/20으로
+    // 새고, 한국시간 기준이면 9/21이 된다 - 둘이 갈리는 시각이라 여기서 잡힌다.
+    const beforeNine = startOfKstDay(new Date("2026-09-20T23:00:00Z"));
+    assert(beforeNine.toISOString() === "2026-09-20T15:00:00.000Z", `한국시간 자정이어야 한다 (${beforeNine.toISOString()})`);
+
+    // 한국시간 자정 직후도 같은 날이어야 한다(경계가 하루 밀리면 안 된다).
+    const justAfterMidnight = startOfKstDay(new Date("2026-09-20T15:00:00Z"));
+    assert(justAfterMidnight.toISOString() === "2026-09-20T15:00:00.000Z", `자정 직후는 그날이어야 한다 (${justAfterMidnight.toISOString()})`);
+
+    // 한국시간 자정 1분 전은 전날이다.
+    const justBefore = startOfKstDay(new Date("2026-09-20T14:59:00Z"));
+    assert(justBefore.toISOString() === "2026-09-19T15:00:00.000Z", `자정 직전은 전날이어야 한다 (${justBefore.toISOString()})`);
+    console.log("✅ 일일 상한의 \"오늘\" - 한국시간 자정 기준");
+  }
 
   console.log("\n✅ 전체 테스트 통과");
 }

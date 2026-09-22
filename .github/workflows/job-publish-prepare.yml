@@ -76,6 +76,9 @@ jobs:
           # 첫 재수집 배치에서 실제로 빠져 있어 후보가 전부 "Missing NAVER_CLIENT_ID"로 비었다(실측).
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          # 구글 이미지 색인을 네이버와 함께 쓴다(2026-09-21). 없으면 네이버 후보만으로 계속 돈다.
+          # 구글 공식 API(Custom Search JSON)는 신규 발급이 막혀 Serper 중계를 쓴다.
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           MANUSCRIPT_IMAGE_GENERATION: ${{ vars.MANUSCRIPT_IMAGE_GENERATION }}
           IMAGE_AB_COMPARE: ${{ vars.IMAGE_AB_COMPARE }}
@@ -93,4 +96,6 @@ jobs:
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
+          # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.
+          BLOGGER_DAILY_LIMIT: ${{ vars.BLOGGER_DAILY_LIMIT }}
         run: npm run job:publish-poll

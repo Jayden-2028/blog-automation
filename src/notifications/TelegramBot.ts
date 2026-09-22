@@ -17,10 +17,11 @@ import { spawnDetachedTask } from "../jobs/lib/spawnDetachedTask.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
+import type { TelegramInlineKeyboardButton } from "./TelegramNotifier.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
-import { parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
+import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -961,6 +962,50 @@ export class TelegramBot {
     });
   }
 
+  /**
+   * 발행 버튼을 결과에 맞게 되돌린다.
+   *
+   * 왜 필요한가(2026-09-21 실측 - 이디야 원고): Cloudflare Worker가 콜백을 받는 순간 버튼을
+   * "⏳ 처리 중…" 하나로 잠근다(중복 클릭 방지). 승인 버튼은 러너가 markReviewButtonsDecided로
+   * 최종 라벨을 다시 씌우는데, **발행 버튼에는 그게 없었다**. 그래서 발행이 실패하면(일일 상한
+   * 등) 버튼이 영영 "처리 중…"에 멈춰 다시 누를 수 없었다 - 자동 재시도도 없으니 원고가 그대로
+   * 묻힌다.
+   *
+   * 실패면 **버튼을 되살린다**(사람이 다시 눌러야 하므로). 성공이면 눌린 표시로 잠근다.
+   */
+  private async markPublishButtonSettled(
+    query: TelegramCallbackQuery,
+    outcome: HandlePublishDecisionResult["outcome"]
+  ): Promise<void> {
+    const messageId = query.message?.message_id;
+    const parsed = parsePublishDecisionCallbackData(query.data);
+    if (messageId === undefined || !parsed) return;
+
+    const retryable = outcome.status === "failed" || outcome.status === "job_not_found";
+    const button: TelegramInlineKeyboardButton = retryable
+      ? { text: "🚀 블로그 발행 (재시도)", callback_data: buildPublishDecisionCallbackData(parsed.jobId) }
+      : { text: outcome.status === "already_done" ? "✅ 이미 발행됨" : "✅ 발행됨", callback_data: "noop" };
+
+    // 원래 키보드에서 발행 버튼만 갈아끼운다 - "원고 페이지 열기" 같은 링크 버튼은 살려야 한다.
+    // Worker가 이미 버튼을 "처리 중…" 하나로 덮었다면 원본이 없으니 발행 버튼만 다시 세운다.
+    const original = query.message?.reply_markup?.inline_keyboard;
+    const hadPublishButton = original?.some((row) =>
+      row.some((b) => parsePublishDecisionCallbackData(b.callback_data) !== null)
+    );
+    const keyboard =
+      original && hadPublishButton
+        ? original.map((row) =>
+            row.map((b) => (parsePublishDecisionCallbackData(b.callback_data) ? button : b))
+          )
+        : [[button]];
+
+    await this.post("editMessageReplyMarkup", {
+      chat_id: this.chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: keyboard },
+    });
+  }
+
   // ---------- 수신 루프 ----------
 
   /**
@@ -1019,6 +1064,7 @@ export class TelegramBot {
       const publishResult = await this.handlePublishDecisionCallback(update.callback_query);
       if (publishResult.outcome.status !== "ignored") {
         await this.answerCallbackQuery(update.callback_query.id, "발행 처리 중...").catch(() => {});
+        await this.markPublishButtonSettled(update.callback_query, publishResult.outcome).catch(() => {});
         if (publishResult.message) await this.sendMessage(publishResult.message).catch(() => {});
         return { handled: true, publishDecisionResult: publishResult };
       }

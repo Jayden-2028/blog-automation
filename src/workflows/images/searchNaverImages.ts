@@ -23,6 +23,11 @@ export type ImageCandidate = {
   thumbnail: string;
   width: number | null;
   height: number | null;
+  /**
+   * 그 사진이 실린 페이지. 네이버 응답에는 없어 null이고, 구글(Custom Search)은 contextLink로 준다
+   * (2026-09-21). 검증 단계가 "이 인물이 맞는지"를 얼굴이 아니라 출처로 판단할 때 쓴다.
+   */
+  sourcePage?: string | null;
 };
 
 export type SearchImages = (query: string) => Promise<ImageCandidate[]>;

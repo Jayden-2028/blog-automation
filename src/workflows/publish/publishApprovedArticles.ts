@@ -114,8 +114,9 @@ export async function publishApprovedArticles(
 
     const blocker = await preflight(job);
     if (blocker) {
-      // job 전체를 이번엔 건너뛴다. approved로 남으므로 다음 폴링에서 재시도하지만, 사람이
-      // 정리(job:close 또는 이미지 교체)하기 전까지는 계속 deferred다.
+      // job 전체를 이번엔 건너뛴다. approved로 남아 다음 실행 때 다시 대상이 되지만, 그 "다음
+      // 실행"은 저절로 오지 않는다 - 폴링은 폐지됐고(2026-09-14) 사람이 버튼을 눌러야 돈다.
+      // 정리(job:close 또는 이미지 교체) 전까지는 계속 deferred다.
       results.push({
         job,
         channels: activeChannels.map((channel) => ({ channel, status: "deferred" as const, reason: blocker })),
@@ -167,7 +168,8 @@ export async function publishApprovedArticles(
     }
 
     // job.status -> published 조건: 활성 채널 전부가 "성공/임시저장/이미완료"여야 한다.
-    // deferred(상한초과, 미구현)나 failed가 하나라도 있으면 approved로 남겨 다음 폴링에서 재시도한다.
+    // deferred(상한초과, 미구현)나 failed가 하나라도 있으면 approved로 남긴다. 다만 자동
+    // 재시도는 없다 - 사람이 버튼을 다시 눌러야 다음 실행이 온다(폴링 폐지, 2026-09-14).
     const allSettled = channels.every(
       (c) => c.status === "published" || c.status === "draft" || c.status === "already_done"
     );

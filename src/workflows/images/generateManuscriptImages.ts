@@ -20,6 +20,10 @@ import type { UploadArticleImageResult } from "../../services/supabase/storage/u
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
+
+/** 동시에 생성할 자리 수(2026-09-21). 유료 API라 상한을 둔다. */
+const IMAGE_CONCURRENCY = 3;
 
 export type GenerateManuscriptImagesInput = {
   jobId: string;
@@ -134,10 +138,14 @@ export async function generateManuscriptImages(
     failures.push(`AI 생성 대상 ${aiSlots.length}개 중 상한(${config.maxPerArticle})까지만 생성했습니다.`);
   }
 
-  for (const { block, index } of targets) {
+  // 자리마다 생성·업로드가 도는데 서로 독립이라 순차로 둘 이유가 없다(2026-09-21).
+  // 이전 주석은 "병렬은 rate limit에 걸린다"고 했는데 그건 **같은 자리를 두 provider로 찍는
+  // A/B 비교** 이야기였다 - 그 안쪽 루프는 지금도 순차로 둔다. 바깥(자리 간)만 상한을 두고 편다.
+  const generateSlot = async ({ block, index }: (typeof targets)[number]): Promise<ManuscriptImage[]> => {
+    const slotImages: ManuscriptImage[] = [];
     if (!block.prompt) {
       failures.push(`[이미지 ${index}] 프롬프트를 찾지 못해 건너뜁니다(마커 수와 imagePrompts 길이 불일치).`);
-      images.push({
+      slotImages.push({
         index,
         description: block.description,
         prompt: null,
@@ -146,7 +154,7 @@ export async function generateManuscriptImages(
         fileName: `${fileStem(index, block.description)}.png`,
         error: "프롬프트 없음",
       });
-      continue;
+      return slotImages;
     }
 
     for (const provider of providers) {
@@ -171,7 +179,7 @@ export async function generateManuscriptImages(
 
       if (!result.ok) {
         failures.push(`[이미지 ${index}/${provider}] 생성 실패: ${result.error}`);
-        images.push({
+        slotImages.push({
           index,
           description: block.description,
           prompt: block.prompt,
@@ -195,7 +203,7 @@ export async function generateManuscriptImages(
 
       if (!uploaded.ok) {
         failures.push(`[이미지 ${index}/${provider}] 업로드 실패: ${uploaded.error}`);
-        images.push({
+        slotImages.push({
           index,
           description: block.description,
           prompt: block.prompt,
@@ -207,7 +215,7 @@ export async function generateManuscriptImages(
         continue;
       }
 
-      images.push({
+      slotImages.push({
         index,
         description: block.description,
         prompt: block.prompt,
@@ -217,7 +225,11 @@ export async function generateManuscriptImages(
         error: null,
       });
     }
-  }
+    return slotImages;
+  };
+
+  const perSlot = await mapWithConcurrency(targets, IMAGE_CONCURRENCY, generateSlot);
+  for (const slotImages of perSlot) images.push(...slotImages);
 
   return { images, failures };
 }

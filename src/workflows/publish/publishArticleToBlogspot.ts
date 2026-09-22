@@ -271,7 +271,9 @@ export async function publishArticleToBlogspot(
     return {
       ok: false,
       reason: "daily_limit",
-      detail: `오늘 Blogspot 발행이 상한(${BLOGGER_CONFIG.dailyLimit})에 도달했습니다. 다음 폴링에서 재시도합니다.`,
+      // "다음 폴링에서 재시도한다"고 쓰면 안 된다 - 폴링은 2026-09-14에 폐지됐고 발행을
+      // 재시도하는 스케줄은 하나도 없다. 사람이 버튼을 다시 누르지 않으면 그대로 묻힌다.
+      detail: `오늘 Blogspot 발행이 상한(${BLOGGER_CONFIG.dailyLimit})에 도달했습니다. 자동 재시도는 없습니다 - 자정(한국시간)이 지난 뒤 발행 버튼을 다시 눌러주세요.`,
     };
   }
 

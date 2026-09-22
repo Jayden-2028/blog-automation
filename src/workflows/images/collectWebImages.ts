@@ -17,6 +17,7 @@ import { rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { keywordSlug } from "../../config/pipelinePaths.js";
+import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
@@ -24,7 +25,8 @@ import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
-import { searchNaverImages } from "./searchNaverImages.js";
+import { broadenQuery } from "./broadenQuery.js";
+import { searchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 
@@ -32,8 +34,17 @@ import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 const PREFERRED_MIN_WIDTH = 1200;
 /** 한 자리에 내려받아 비교할 후보 수 상한(2026-09-18 B안). 프롬프트가 길어지고 내려받기도 늘어난다. */
 const MAX_CANDIDATES = 4;
-/** 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변). */
-const HARD_MIN_WIDTH = 600;
+/** 동시에 처리할 자리 수(2026-09-21). 판정·내려받기가 전부 외부 호출이라 상한을 둔다. */
+const SLOT_CONCURRENCY = 3;
+/**
+ * 긴 변이 이보다 작으면 본문에 쓸 수 없는 크기로 보고 거부한다(2026-09-17 저녁: 너비→긴 변).
+ *
+ * 2026-09-21 600 → 400으로 완화(사용자 결정). 600 기준에서 지창욱 인스타 셀카 자리가 540×582
+ * 후보를 떨어뜨리고 빈 채로 남았다. **작은 사진 한두 장이 빈 자리보다 낫다** - 나머지 이미지
+ * 품질이 받쳐주면 한 장이 작아도 글이 성립한다. 디스커버 썸네일 기준(1200px)은 경고로만 남기고
+ * 저장은 하므로, 이 값은 "본문에 넣었을 때 알아볼 수 있는 최소치"로만 쓴다.
+ */
+const HARD_MIN_WIDTH = 400;
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
 const MIN_LANDSCAPE_RATIO = 1.3;
 
@@ -347,17 +358,27 @@ export function buildPrompt(
     lines.push("");
     lines.push(`### 자리 ${slot.index}`);
     lines.push(`- 필요한 이미지: ${slot.description}`);
-    if (slot.query) lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
+    if (slot.query) {
+      lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
+      const broader = broadenQuery(slot.query);
+      if (broader) {
+        lines.push(`  (이 검색어로 안 나오면 **고유명사만 남겨** 다시 찾는다: "${broader}". 연도·"사진"·`);
+        lines.push(`  "장면" 같은 수식을 뺀 쪽이 실제로 더 많이 나온다 - 2022년이 아니어도 맥락이 맞으면 쓴다.)`);
+      }
+    }
     lines.push("- 이 이미지가 요약해야 할 문단:");
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
     const found = candidates.get(slot.index) ?? [];
     if (found.length > 0) {
-      lines.push("- 네이버 이미지 검색 후보(**먼저 여기서 고른다**. 제목으로 출처를 짐작하고, 맞는 게 없을 때만 web_search):");
+      lines.push("- 이미지 검색 후보(네이버 + 구글, **먼저 여기서 고른다**. 맞는 게 없을 때만 web_search):");
       found.forEach((c, i) => {
         const size = c.width && c.height ? `${c.width}×${c.height}` : "크기 미상";
         lines.push(`  ${i + 1}. [${size}] ${c.title.slice(0, 60)} — ${c.link}`);
+        // 출처 페이지는 구글 후보에만 있다. 인물이 맞는지 **얼굴이 아니라 이 주소로** 판단한다.
+        if (c.sourcePage) lines.push(`      출처: ${c.sourcePage}`);
       });
-      lines.push("  후보를 고르면 `imageUrl`에 그 URL을 그대로 넣고, `sourcePage`는 알면 적고 모르면 빈 문자열로 둔다.");
+      lines.push("  후보를 고르면 `imageUrl`에 그 URL을 그대로 넣고, `sourcePage`는 위에 적힌 것이 있으면 그대로,");
+      lines.push("  없으면 네가 확인한 페이지 주소를 적는다(모르면 빈 문자열).");
     }
   }
 
@@ -408,6 +429,16 @@ const BROWSER_HEADERS: Record<string, string> = {
   "Sec-Fetch-Site": "same-origin",
 };
 
+/** 헤더에 실어도 되는 형태로. ASCII 밖의 글자를 퍼센트 인코딩한다. */
+export function safeHeaderUrl(value: string): string {
+  try {
+    return new URL(value).href;
+  } catch {
+    // URL로 안 파싱되는 값이라도 헤더를 터뜨리지는 않게 한다.
+    return encodeURI(value);
+  }
+}
+
 async function fetchOnce(
   url: string,
   referer: string | null
@@ -415,7 +446,10 @@ async function fetchOnce(
   try {
     const headers = { ...BROWSER_HEADERS };
     if (referer) {
-      headers.Referer = referer;
+      // 헤더 값은 Latin-1만 담을 수 있다. 한글이 든 주소를 그대로 넣으면 요청을 보내기도 전에
+      // "Cannot convert argument to a ByteString"으로 터진다(2026-09-21 실측 - 한글 경로를 쓰는
+      // 기사 페이지에서 자리가 통째로 비었다). URL로 정규화해 퍼센트 인코딩한다.
+      headers.Referer = safeHeaderUrl(referer);
       // 같은 사이트에서 온 것처럼 보이게 한다 - 핫링크 차단은 대개 이 조합을 본다.
       try {
         headers.Origin = new URL(referer).origin;
@@ -482,9 +516,29 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   거리에서'라고 잘못 적었고, 실내 사진이라는 이유로 진짜 인물 사진을 버렸다.)",
     "2. **같은 주제면 합격이다.** 문단이 사진보다 더 세부적인 것(결말 해석, 타임테이블, 수치)을",
     "   말하더라도 그 이유로 떨어뜨리지 않는다. 제외는 **다른 주제·다른 행사·다른 인물·다른 작품**일 때다.",
+    "2-1. **다만 '없으니까 대신 이거'는 안 된다**(2026-09-21 사용자 반려). 마커가 특정 맥락을",
+    "   지목했는데(예: '포틀랜드 트레일블레이저스 관련') 후보에 그 맥락이 하나도 없으면, 같은",
+    "   인물이 나온 **다른 행사** 사진으로 채우지 말고 `picked: null`로 비운다. 실측 반려: 마커는",
+    "   포틀랜드인데 아시안게임 시상식 사진을 넣고 캡션까지 사진에 맞춰 바꿔, 본문은 포틀랜드를",
+    "   말하는데 그림은 시상식이 됐다. **빈 자리가 어긋난 사진보다 낫다.**",
+    "2-1-예외. **제품은 착용샷이 없으면 제품 컷으로 받는다**(2026-09-21 사용자 결정). 마커가",
+    "   \"A가 B 브랜드 옷을 입은 사진\"을 요구하는데 그런 착용샷이 없고 **B 제품 자체를 보여주는",
+    "   사진**이 있으면 그것을 고른다. 이건 위 2-1이 막는 '다른 것으로 때우기'가 아니다 - 마커가",
+    "   지목한 **그 물건이 맞기** 때문이다(다른 행사 사진으로 바꾸는 것과 다르다). 독자가 보려는",
+    "   것도 '그 옷이 어떻게 생겼나'다. 단, **다른 브랜드 제품이면 제외한다**(실측: 에르에르를",
+    "   찾는데 halfclub·모즈핏 제품이 후보로 왔다).",
+    "2-2. **얼굴로 인물을 특정하려 하지 마라.** 너는 한국 선수·배우의 얼굴을 신뢰성 있게 구분하지",
+    "   못한다(실측: '이현중이 덩크하는 장면'이라 적고 고른 사진이 다른 선수였다). 그 인물인지는",
+    "   **출처 페이지로 판단한다** - 그 인물을 다루는 기사·공식 페이지에 실린 사진이면 맞다고 보고,",
+    "   출처가 그 인물과 무관하거나 알 수 없으면 '맞다'고 단정하지 말고 근거에 그렇게 적는다.",
     "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 제외.",
     "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 제외.",
-    "5. 둘 이상이 맞으면 **문단을 더 구체적으로 보여주는 쪽**을, 그래도 비슷하면 큰 쪽을 고른다.",
+    "5. **단독 인물 자리인데 여러 명이 나온 단체·그룹 사진이면 제외한다** - '~의 모습', '~만' 같은",
+    "   표현으로 그 자리가 한 사람만 보여줘야 하는 자리인데, 후보에 그 사람이 다른 여러 사람과",
+    "   나란히 나와 있고 그 사람만 알아보기 어려우면 떨어뜨린다. 그 사람이 화면 중심에 크게 혼자",
+    "   나온 사진(다른 사람이 배경에 살짝 스쳐도 무방)만 합격이다. 설명 자체가 '둘이 함께', '멤버들과'",
+    "   처럼 여러 인물을 요구하면 이 규칙은 적용하지 않는다.",
+    "6. 둘 이상이 맞으면 **문단을 더 구체적으로 보여주는 쪽**을, 그래도 비슷하면 큰 쪽을 고른다.",
     "",
     '마지막 줄에 JSON 한 줄만 답한다: {"picked": 2, "reason": "한 문장"}',
     '맞는 것이 하나도 없으면 {"picked": null, "reason": "왜 전부 안 되는지 한 문장"}.',
@@ -551,20 +605,31 @@ export async function collectWebImages(
   if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
-  const searchImages = options.searchImages === undefined ? searchNaverImages : options.searchImages;
-  const candidates = new Map<number, ImageCandidate[]>();
+  const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
+  // 검색창에서 미리 받아둔 후보(자리별). 에이전트가 고른 URL이 전부 막히면 여기서 건진다.
+  const prefetched = new Map<number, ImageCandidate[]>();
   if (searchImages) {
     await Promise.all(
       input.slots.map(async (slot) => {
         const query = (slot.query ?? slot.description).replace(/\s*—\s*웹\s*검색\s*$/, "").trim();
         const list = await searchImages(query);
-        if (list.length > 0) candidates.set(slot.index, list);
+        // 원고가 준 검색어는 "2022년 인스타그램 셀카 사진"처럼 시점·형식까지 박아 넣는 경우가
+        // 많아 후보가 0건으로 끝난다(2026-09-21 실측). 그러면 고유명사만 남겨 한 번 더 찾는다 -
+        // §8-1-1로 작성 규칙은 고쳤지만 그 전에 쓰인 원고는 검색어가 이미 굳어 있다.
+        if (list.length > 0) {
+          prefetched.set(slot.index, list);
+          return;
+        }
+        const broader = broadenQuery(query);
+        if (!broader) return;
+        const retry = await searchImages(broader);
+        if (retry.length > 0) prefetched.set(slot.index, retry);
       })
     );
   }
 
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots, candidates),
+    prompt: buildPrompt(input.keyword, input.slots, prefetched),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });
@@ -577,15 +642,19 @@ export async function collectWebImages(
 
   const found: WebImageRecord[] = [];
 
-  for (const slot of input.slots) {
+  // 자리마다 후보를 내려받아 **실제로 열어 보고** 고른다. 이 판정이 자리당 최대 3분이라
+  // 순차로 돌면 자리 4개짜리 원고에서만 10분 넘게 쓴다(2026-09-21 실측 - 원고 1건 40~50분의
+  // 큰 축이었다). 자리끼리는 완전히 독립이고 파일명도 자리 번호로 갈려 충돌하지 않는다.
+  // 무제한 병렬이 아니라 상한을 두는 이유는 mapWithConcurrency 주석 참고(429·일시 차단 회피).
+  const processSlot = async (slot: WebImageSlot): Promise<WebImageRecord | null> => {
     const result = results.find((r) => r.index === slot.index);
     if (!result) {
       failures.push(`[자리 ${slot.index}] 웹 검색 에이전트 응답에 없습니다.`);
-      continue;
+      return null;
     }
     if (result.skipped || !result.imageUrl) {
       failures.push(`[자리 ${slot.index}] 찾지 못함: ${result.skipReason || "사유 없음"}`);
-      continue;
+      return null;
     }
 
     // 출처 분류는 내려받기 **전에** 본다 - 쓸 수 없는 자료를 디스크에 남길 이유가 없다.
@@ -595,15 +664,27 @@ export async function collectWebImages(
       failures.push(
         `[자리 ${slot.index}] 쓸 수 없는 자료라 건너뜁니다(${result.reusePermission}: ${result.license}) - 유료 스톡이거나 변경 금지(ND)입니다.`
       );
-      continue;
+      return null;
     }
 
     // 1순위 + 대체 후보를 함께 내려받아 **한 번에 비교해 고른다**(2026-09-18 B안).
     // 전에는 1순위 하나만 받아 합·불을 판정했고, 떨어지면 그 자리는 끝이었다.
-    const rawCandidates = [
+    // 에이전트가 고른 것 + 대체 후보. 그 뒤에 **미리 받아둔 검색 후보**를 이어 붙인다
+    // (2026-09-21 실측): 안은진 원고 자리 6은 에이전트가 후보를 1개만 줬고 그게 핫링크 차단
+    // (403)이라 자리가 통째로 비었다. 네이버가 준 직접 이미지 URL 12장이 손에 있었는데 쓰지
+    // 않았다. 검색 후보는 색인에서 온 직접 URL이라 대체로 잘 받아진다.
+    const agentPicks = [
       { imageUrl: result.imageUrl, sourcePage: result.sourcePage, license: result.license },
       ...(result.alternates ?? []),
     ];
+    const searchFallback = (prefetched.get(slot.index) ?? []).map((candidate) => ({
+      imageUrl: candidate.link,
+      sourcePage: candidate.sourcePage ?? "",
+      // 검색 후보는 출처를 우리가 단정할 수 없다 - 분류는 비워 두고 비전 검증에 맡긴다.
+      license: "",
+    }));
+    const seenUrls = new Set(agentPicks.map((c) => c.imageUrl));
+    const rawCandidates = [...agentPicks, ...searchFallback.filter((c) => !seenUrls.has(c.imageUrl))];
 
     const readSize = options.readSize ?? readImageSize;
     const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
@@ -620,11 +701,13 @@ export async function collectWebImages(
       license: string;
     };
     const candidates: Downloaded[] = [];
+    // 후보 한 장이 실패한 사유. 자리가 끝내 비었을 때만 보고한다 - 한 장 실패는 정상 과정이다.
+    const rejected: string[] = [];
 
     for (const cand of rawCandidates) {
       if (candidates.length >= MAX_CANDIDATES) break;
       if (!/^https?:\/\//i.test(cand.imageUrl)) {
-        failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
+        rejected.push(`URL 형식이 아님(${cand.imageUrl.slice(0, 60)})`);
         continue;
       }
 
@@ -634,7 +717,7 @@ export async function collectWebImages(
         try {
           sourcePage = new URL(cand.imageUrl).origin;
         } catch {
-          failures.push(`[자리 ${slot.index}] 후보가 URL 형식이 아닙니다(${cand.imageUrl.slice(0, 60)}).`);
+          rejected.push(`URL 형식이 아님(${cand.imageUrl.slice(0, 60)})`);
           continue;
         }
       }
@@ -642,20 +725,20 @@ export async function collectWebImages(
       const downloaded = await fetchImage({ url: cand.imageUrl, referer: sourcePage });
       if (!downloaded.ok || !downloaded.buffer) {
         // URL을 같이 남긴다 - 자동으로 못 받은 이미지는 사람이 브라우저로 직접 저장할 수 있다.
-        failures.push(
-          `[자리 ${slot.index}] 후보 내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
+        rejected.push(
+          `내려받기 실패: ${downloaded.error ?? "알 수 없는 오류"}\n      이미지: ${cand.imageUrl}\n      출처: ${sourcePage}`
         );
         continue;
       }
       const extension = extensionFor(downloaded.contentType ?? "");
       if (!extension) {
-        failures.push(`[자리 ${slot.index}] 후보가 이미지가 아닙니다(content-type: ${downloaded.contentType || "없음"}).`);
+        rejected.push(`이미지가 아님(content-type: ${downloaded.contentType || "없음"})`);
         continue;
       }
       const size = readSize(downloaded.buffer);
       const longSide = size ? Math.max(size.width, size.height) : null;
       if (longSide !== null && longSide < HARD_MIN_WIDTH) {
-        failures.push(`[자리 ${slot.index}] 후보가 너무 작습니다(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px).`);
+        rejected.push(`너무 작음(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px)`);
         continue;
       }
 
@@ -676,8 +759,13 @@ export async function collectWebImages(
     }
 
     if (candidates.length === 0) {
-      failures.push(`[자리 ${slot.index}] 쓸 수 있는 후보를 하나도 내려받지 못했습니다.`);
-      continue;
+      // 여기까지 왔다는 건 후보를 **전부** 써보고도 안 됐다는 뜻이다. 사유를 다 남긴다 -
+      // 뒤에 사람이 브라우저로 직접 저장할 때 어디서 막혔는지가 단서가 된다.
+      const detail = rejected.length ? `\n      - ${rejected.join("\n      - ")}` : "";
+      failures.push(
+        `[자리 ${slot.index}] 후보 ${rawCandidates.length}장을 모두 써봤지만 쓸 수 있는 것이 없습니다.${detail}`
+      );
+      return null;
     }
 
     // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
@@ -704,7 +792,7 @@ export async function collectWebImages(
         failures.push(
           `[자리 ${slot.index}] 후보 ${openable.length}장 중 쓸 만한 것이 없어 비웠습니다: ${verdict.reason}`
         );
-        continue;
+        return null;
       }
       chosen = openable.find((c) => c.number === verdict.picked) ?? openable[0];
       if (candidates.length > 1) {
@@ -766,23 +854,29 @@ export async function collectWebImages(
       if (!uploaded.ok) {
         await rm(filePath, { force: true });
         failures.push(`[자리 ${slot.index}] 업로드 실패: ${uploaded.error}`);
-        continue;
+        return null;
       }
       storageUrl = uploaded.url;
     }
 
-    found.push({
+    void rawExtension;
+    return {
       index: slot.index,
       fileName,
       imageUrl: chosen.imageUrl,
       sourcePage: chosen.sourcePage,
-      alt: result.alt || slot.description,
-      caption: result.caption || slot.description,
+      // 캡션은 **마커가 요구한 것**을 기준으로 둔다(2026-09-21). 수집기가 쓴 설명을 그대로 쓰면
+      // 사진에 맞춰 캡션이 바뀌어, 본문은 A를 말하는데 그림 설명은 B가 되는 드리프트가 생긴다
+      // (실측: 마커는 '포틀랜드'인데 캡션이 '금메달 기념촬영'으로 바뀌었다).
+      alt: slot.description,
+      caption: slot.description,
       license: chosen.license || "출처 확인 필요",
       storageUrl,
-    });
-    void rawExtension;
-  }
+    };
+  };
+
+  const outcomes = await mapWithConcurrency(input.slots, SLOT_CONCURRENCY, processSlot);
+  for (const outcome of outcomes) if (outcome) found.push(outcome);
 
   // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라
   // (응답 누락/URL 형식/403/크기/비율/검증 탈락/업로드 실패…) 각 지점에 push를 넣으면 언젠가 한

@@ -1,0 +1,57 @@
+# Search Console 일일 성과 수집(2026-09-21, 1단계).
+#
+# 가볍다 - LLM도 이미지 생성도 없고 GSC 읽기 + Supabase upsert만 한다. claude CLI 설치 단계가
+# 없는 이유도 그래서다(manuscripts-refresh.yml과 같은 부류).
+#
+# 발화는 Cloudflare Worker 크론이 한다(cloudflare/telegram-relay). GitHub 네이티브 schedule은
+# 이 저장소에서 매일 4~5시간씩 밀린 이력이 있어 쓰지 않는다 - 다른 정기 작업과 같은 경로를 탄다.
+#
+# ⚠️ GSC 데이터는 2~3일 지연된다. CLI가 기본으로 3일 전을 조회하므로 실행 날짜와 데이터 날짜가
+# 다르다(normalizeSearchRows.ts REPORT_LAG_DAYS).
+
+name: analytics-search
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "조회할 날짜(YYYY-MM-DD). 비우면 3일 전"
+        required: false
+        type: string
+      days:
+        description: "그 날짜부터 과거 며칠치(백필). 비우면 1"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+# 같은 날짜를 두 번 받아도 upsert라 안전하지만, 굳이 겹쳐 돌릴 이유가 없다.
+concurrency:
+  group: analytics-search
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run analytics:search
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+          GSC_SITE_URL: ${{ vars.GSC_SITE_URL }}
+        run: |
+          npm run analytics:search -- --apply \
+            ${{ inputs.date && format('--date={0}', inputs.date) || '' }} \
+            ${{ inputs.days && format('--days={0}', inputs.days) || '' }}

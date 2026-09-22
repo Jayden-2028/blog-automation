@@ -65,4 +65,6 @@ jobs:
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           # 버튼 경로는 호출 인자로 공개(asDraft:false)를 명시하므로 이 값에 영향받지 않는다.
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
+          # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.
+          BLOGGER_DAILY_LIMIT: ${{ vars.BLOGGER_DAILY_LIMIT }}
         run: npm run job:telegram-update

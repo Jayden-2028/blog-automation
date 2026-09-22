@@ -22,4 +22,6 @@ GITHUB_REPO = "blog-automation"
 # (buildDailyQueryPool.ts 주석 참고).
 # src/index.ts의 SCHEDULED_WORKFLOWS와 반드시 같이 바꿀 것.
 [triggers]
-crons = ["0 23 * * *", "0 3 * * *", "0 9 * * *"]
+# 09:30 KST(00:30 UTC)에 Search Console 성과 수집을 하나 더 돌린다(2026-09-21). 키워드 수집과
+# 겹치지 않는 시간대로 뒀다 - 읽기만 하는 가벼운 작업이라 순서 의존도 없다.
+crons = ["0 23 * * *", "0 3 * * *", "0 9 * * *", "30 0 * * *", "0 1 * * 1"]

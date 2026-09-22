@@ -21,7 +21,8 @@ const STATUS_LINE: Record<string, string> = {
   draft: "📝 임시저장 완료",
   already_done: "↩︎ 이미 처리됨",
   skipped: "· 건너뜀",
-  deferred: "⏳ 보류(다음 폴링 재시도)",
+  // 폴링은 폐지됐다(2026-09-14) - 자동 재시도가 없으니 그렇게 쓰면 기다리다 묻힌다.
+  deferred: "⏳ 보류(버튼을 다시 눌러야 함)",
   failed: "⚠️ 실패",
 };
 

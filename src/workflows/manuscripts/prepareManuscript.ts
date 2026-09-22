@@ -39,6 +39,10 @@ import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js
 import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
+import { alignImagePrompts } from "./alignImagePrompts.js";
+import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
+import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
+import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import {
   readInstagramCandidates,
@@ -66,6 +70,8 @@ export type PrepareManuscriptResult =
 
 export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
+  /** 내부 링크 후보(이미 발행된 글). 기본은 publications에서 읽는다. false면 링크를 붙이지 않는다. */
+  loadPublishedPosts?: (() => Promise<PublishedPost[]>) | false;
   createVariantArticle?: (input: {
     jobId: string;
     title: string;
@@ -217,6 +223,40 @@ async function defaultWriteManuscriptFile(path: string, content: string): Promis
   await writeFile(path, content, "utf8");
 }
 
+/**
+ * 이미 발행된 글 중 관련 있는 것을 본문 끝에 내부 링크로 붙인다(2026-09-22).
+ *
+ * 실패해도 원고를 막지 않는다 - 링크는 부가 기능이고, 여기서 예외를 던지면 원고 준비 전체가
+ * 실패한다. 발행 기록을 못 읽으면 링크 없이 그대로 간다.
+ *
+ * **새로 만드는 배리에이션에만** 붙인다. 이미 만들어진 원고를 재사용하는 경로에서 본문만 바꾸면
+ * DB의 article 행과 원고 파일이 어긋난다.
+ */
+async function withRelatedPosts(
+  content: string,
+  job: ArticleJobRow,
+  options: PrepareManuscriptOptions
+): Promise<string> {
+  const loadPublished = options.loadPublishedPosts;
+  if (loadPublished === false) return content;
+
+  try {
+    const candidates = await (loadPublished ?? listPublishedPosts)();
+    const related = pickRelatedPosts(
+      { jobId: job.id, keyword: job.keyword, category: job.category ?? null },
+      candidates
+    );
+    if (related.length === 0) return content;
+    console.log(`· [manuscripts] ${job.keyword}: 내부 링크 ${related.length}개를 붙였습니다.`);
+    return appendRelatedPosts(content, related);
+  } catch (error) {
+    console.warn(
+      `⚠️ [manuscripts] ${job.keyword}: 내부 링크를 붙이지 못했습니다(무시하고 계속): ${error instanceof Error ? error.message : error}`
+    );
+    return content;
+  }
+}
+
 export async function prepareManuscript(
   job: ArticleJobRow,
   options: PrepareManuscriptOptions = {}
@@ -239,8 +279,18 @@ export async function prepareManuscript(
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
+  // 네이버 배리에이션은 **기본으로 끈다**(2026-09-21 사용자 결정). 채널이 Blogspot 하나인데
+  // (CLAUDE.md) 원고마다 LLM 호출이 한 번 더 돌아 2~5분을 먹고 있었다. 뷰어의 네이버 복사
+  // 버튼용이라 없으면 그 버튼만 숨는다(renderManuscriptPage가 naver: null을 이미 처리한다).
+  // 코드는 지우지 않는다 - 네이버를 다시 쓰게 되면 NAVER_VARIANT_ENABLED=true로 되살린다.
+  // 이미 만들어 둔 원고의 naverVariant는 metadata에 남아 있어 그대로 보인다.
+  const naverEnabled = process.env.NAVER_VARIANT_ENABLED === "true";
   const makeNaverVariant =
-    options.generateNaverVariant === undefined ? generateNaverVariant : options.generateNaverVariant;
+    options.generateNaverVariant === undefined
+      ? naverEnabled
+        ? generateNaverVariant
+        : false
+      : options.generateNaverVariant;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
@@ -296,16 +346,33 @@ export async function prepareManuscript(
     slug = result.variant.slug;
     tags = result.variant.tags;
     shortName = result.variant.shortName;
+    content = await withRelatedPosts(content, job, options);
     await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
     await mergeJobMetadata(job.id, {
       channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags, shortName } } satisfies ChannelMetaMap,
     });
   }
 
+  const imageFailures: string[] = [];
+
+  // 배리에이션이 문단을 재배열하면 마커 순서도 바뀌는데, imagePrompts는 **기준 원고 순서**로
+  // 저장돼 있다. 번호로만 짝지으면 통째로 밀려 "검색은 A, 판정은 B"가 된다 - 2026-09-21 지창욱
+  // 원고에서 6자리 중 5자리가 이렇게 어긋나 웹 검색이 전부 실패했다. 재배열을 막는 대신(그건
+  // 배리에이션의 일이다) 설명을 보고 검색어가 제 마커를 따라가게 맞춘다.
+  const aligned = alignImagePrompts(baseArticle.content ?? "", content, imagePrompts);
+  const slotPrompts = aligned ? aligned.prompts : imagePrompts;
+  if (aligned?.reordered) {
+    console.log(`· [manuscripts] ${job.keyword}: 배리에이션이 마커를 재배열해 검색어를 다시 맞췄습니다.`);
+  }
+  if (aligned && aligned.unmatched.length > 0) {
+    imageFailures.push(
+      `기준 원고에 대응이 없는 마커 ${aligned.unmatched.join(", ")}번 - 검색어를 비웠습니다(엉뚱한 검색어를 붙이지 않기 위해).`
+    );
+  }
+
   // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
   let images: ManuscriptImage[] = readJobManuscriptImages(job);
-  const imageFailures: string[] = [];
 
   // 인스타 캡처 job인데 자리가 비어 있으면 후보에서 다시 승격한다(2026-09-22).
   //
@@ -316,10 +383,12 @@ export async function prepareManuscript(
   // 바로 그 증상이 수정할 때마다 되풀이된다.
   //
   // 원본 후보는 metadata.instagramImages에 그대로 남아 있으므로 여기서 현재 마커 수에 맞춰 다시
-  // 자른다. 판단은 selectPromotableImages 하나로 통일돼 있다(자동 승격·수동 CLI와 같은 규칙).
+  // 자른다. 기준은 imagePrompts(기준 원고)가 아니라 **slotPrompts**(배리에이션)다 - 실제로
+  // 발행되는 것은 배리에이션이고, 배리에이션이 마커를 줄이거나 늘리면 자리 수도 그쪽을 따른다.
+  // 판단은 selectPromotableImages 하나로 통일돼 있다(자동 승격·수동 CLI와 같은 규칙).
   if (images.length === 0) {
     const candidates = readInstagramCandidates(job.metadata as Record<string, unknown> | null);
-    const { promote, filledSlots } = selectPromotableImages(candidates, imagePrompts.length);
+    const { promote, filledSlots } = selectPromotableImages(candidates, slotPrompts.length);
     if (promote) {
       images = promote;
       await mergeJobMetadata(job.id, { images, imagesReadyAt: now().toISOString() });
@@ -334,7 +403,7 @@ export async function prepareManuscript(
       keyword: job.keyword,
       date,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
     });
     images = outcome.images;
     imageFailures.push(...outcome.failures);
@@ -349,7 +418,7 @@ export async function prepareManuscript(
     const outcome = await renderTableImages({
       jobId: job.id,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -368,7 +437,7 @@ export async function prepareManuscript(
     const outcome = await capturePages({
       jobId: job.id,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -391,7 +460,7 @@ export async function prepareManuscript(
       jobId: job.id,
       keyword: job.keyword,
       body: content,
-      imagePrompts,
+      imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
     });
     imageFailures.push(...outcome.failures);
@@ -416,7 +485,7 @@ export async function prepareManuscript(
 
       if (fallback.slots.length > 0) {
         const filled = await generateImages(
-          { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts },
+          { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts: slotPrompts },
           { onlyIndexes: [], fallbackSlots: fallback.slots }
         );
         imageFailures.push(...filled.failures);
@@ -463,7 +532,9 @@ export async function prepareManuscript(
     shortName,
     tags,
     body: content,
-    imagePrompts,
+    // 뷰어와 .md 파일도 정렬된 검색어를 쓴다 - 여기가 기준 원고 순서면 화면에서 캡션과 프롬프트가
+    // 어긋나 보인다(2026-09-21 사용자 리포트: 캡션 "톰포드 화보"에 프롬프트 "제작발표회").
+    imagePrompts: slotPrompts,
     images,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,

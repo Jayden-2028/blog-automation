@@ -115,15 +115,50 @@ async function main(): Promise<void> {
       }
     );
     assert(html.found.length === 0, "HTML을 이미지로 저장하면 안 된다");
-    assert(html.failures[0].includes("이미지가 아닙니다"), `사유가 분명해야 한다 (${html.failures[0]})`);
+    assert(html.failures[0].includes("이미지가 아님"), `사유가 분명해야 한다 (${html.failures[0]})`);
     console.log("✅ content-type이 이미지가 아니면 거부");
+
+    // 4-1) 첫 후보가 막혀도 **다음 후보로 넘어간다**(2026-09-21 톰크루즈 원고 실측).
+    //      예전에는 한 장이 실패하면 그 자리를 통째로 포기해, 뒤에 멀쩡한 후보가 3장 남아 있어도
+    //      버렸다. 핫링크 차단(403)과 HTML 응답은 흔한 일이라 자리 하나가 그대로 비었다.
+    {
+      const attempted: string[] = [];
+      const next = await collectWebImages(
+        { keyword: "k", dir, slots: [slots[0]] },
+        {
+          searchImages: false,
+          chooseImage: okVerify,
+          runCodex: codexReply([
+            slotReply({
+              imageUrl: "https://example.com/blocked.png",
+              alternates: [
+                { imageUrl: "https://example.com/also-bad.png", sourcePage: "https://example.com/b", license: "" },
+                { imageUrl: "https://example.com/good.png", sourcePage: "https://example.com/c", license: "" },
+              ],
+            }),
+          ]),
+          fetchImage: async ({ url }) => {
+            attempted.push(url);
+            if (url.includes("blocked")) return { ok: false as const, error: "HTTP 403" };
+            if (url.includes("also-bad")) return { ok: true as const, buffer: Buffer.from("<html>"), contentType: "text/html" };
+            return { ok: true as const, buffer: PNG_1200, contentType: "image/png" };
+          },
+        }
+      );
+      assert(attempted.length === 3, `후보 3장을 다 써봐야 한다 (${attempted.length}장)`);
+      assert(next.found.length === 1, `세 번째 후보로 자리를 채워야 한다 (${JSON.stringify(next.failures)})`);
+      assert(next.found[0].sourcePage === "https://example.com/c", "채택된 후보의 출처가 남아야 한다");
+      // 중간에 실패한 후보는 정상 과정이다 - 자리가 채워졌으면 실패로 보고하지 않는다.
+      assert(next.failures.length === 0, `자리를 채웠으면 실패 보고가 없어야 한다 (${JSON.stringify(next.failures)})`);
+      console.log("✅ 첫 후보가 막혀도 다음 후보로 넘어간다");
+    }
 
     // 5) 너무 작은 이미지는 거부하고, 애매한 크기는 경고하되 저장한다.
     const small = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: async () => ({ ok: true as const, buffer: PNG_300, contentType: "image/png" }) }
     );
-    assert(small.found.length === 0 && small.failures[0].includes("너무 작습니다"), `300px는 거부해야 한다 (${JSON.stringify(small.failures)})`);
+    assert(small.found.length === 0 && small.failures[0].includes("너무 작음"), `300px는 거부해야 한다 (${JSON.stringify(small.failures)})`);
     console.log("✅ 최소 해상도 미달 거부");
 
     // 5-1) 출처 분류 게이트(2026-09-17 저녁, 사용자 결정 C안): 유료 스톡·ND만 거부한다. 그 전 기준
@@ -162,17 +197,23 @@ async function main(): Promise<void> {
     assert(portraitFirst.found.length === 1, `자리 1도 세로를 저장해야 한다 (${JSON.stringify(portraitFirst.failures)})`);
     assert(portraitFirst.failures.some((f) => f.includes("정사각·세로")), "경고는 남겨야 한다");
 
-    // 긴 변 기준: 450×700(세로, 긴 변 700)은 통과, 500×400(긴 변 500)은 거부.
+    // 긴 변 기준(2026-09-21: 600 → 400 완화). 540×582는 예전엔 떨어졌지만 이제 통과한다 -
+    // 실측에서 지창욱 인스타 셀카 자리가 이 크기 때문에 빈 채로 남았다(빈 자리보다 낫다는 결정).
     const tallSmall = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
       { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 450, height: 700 }) }
     );
-    assert(tallSmall.found.length === 1, "긴 변이 600 이상이면 너비가 작아도 저장한다");
+    assert(tallSmall.found.length === 1, "긴 변이 기준 이상이면 너비가 작아도 저장한다");
+    const previouslyRejected = await collectWebImages(
+      { keyword: "k", dir, slots: [slots[0]] },
+      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 540, height: 582 }) }
+    );
+    assert(previouslyRejected.found.length === 1, "540×582는 이제 통과해야 한다(완화 전에는 거부됐다)");
     const tiny = await collectWebImages(
       { keyword: "k", dir, slots: [slots[0]] },
-      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 500, height: 400 }) }
+      { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply()]), fetchImage: okFetch, readSize: () => ({ width: 300, height: 250 }) }
     );
-    assert(tiny.found.length === 0 && tiny.failures[0].includes("너무 작습니다"), "긴 변 600 미만은 거부한다");
+    assert(tiny.found.length === 0 && tiny.failures[0].includes("너무 작음"), "긴 변 400 미만은 여전히 거부한다");
     console.log("✅ 크기 검증 - 긴 변 600px 기준, 세로·정사각은 자리 1도 저장");
 
     // 5-2-1) 이미지 검색 후보(2026-09-17 저녁): 후보가 프롬프트에 실리고, 후보에서 고르면 sourcePage가
@@ -190,7 +231,7 @@ async function main(): Promise<void> {
         fetchImage: okFetch,
       }
     );
-    assert(seenPrompt.includes("네이버 이미지 검색 후보") && seenPrompt.includes("https://img.example.net/p.png"), "후보가 프롬프트에 실려야 한다");
+    assert(seenPrompt.includes("이미지 검색 후보(네이버 + 구글") && seenPrompt.includes("https://img.example.net/p.png"), "후보가 프롬프트에 실려야 한다");
     assert(fromCandidate.found.length === 1 && fromCandidate.found[0].sourcePage === "https://img.example.net", `출처 도메인 폴백이 필요하다 (${JSON.stringify(fromCandidate.failures)})`);
     console.log("✅ 이미지 검색 후보 - 프롬프트에 실리고, 출처 없는 후보는 도메인으로 폴백");
 

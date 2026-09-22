@@ -1046,4 +1046,54 @@ main().catch((error) => {
   assert(other.outcome.status === "ignored" && called === 0, "다른 콜백은 무시하고 발행하지 않는다");
 
   console.log("✅ 발행 버튼 - 공개 발행 / 중복 안내 / 실패 시 수동 발행 안내 / 남의 콜백 무시");
+
+  // 5) 발행이 끝나면 버튼을 되돌린다(2026-09-21 실측 - 이디야 원고).
+  //    Cloudflare Worker가 콜백을 받는 순간 버튼을 "⏳ 처리 중…" 하나로 잠그는데, 발행 경로에는
+  //    그걸 되돌리는 코드가 없었다. 그래서 실패하면(일일 상한 등) 버튼이 영영 "처리 중…"에 멈춰
+  //    다시 누를 수 없었다 - 자동 재시도도 없으니 원고가 그대로 묻힌다.
+  {
+    const lockedKeyboard = [[{ text: "⏳ 처리 중…", callback_data: "noop" }]];
+    const updateFor = (data: string) =>
+      ({
+        update_id: 1,
+        callback_query: {
+          id: "q1",
+          data,
+          message: { chat: { id: Number(CHAT_ID) }, message_id: 7, reply_markup: { inline_keyboard: lockedKeyboard } },
+        },
+      }) as never;
+
+    const runUpdate = async (publish: () => Promise<never>) => {
+      const edits: Record<string, unknown>[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "이디야 상어점" }) as never,
+        publishToBlogspot: publish as never,
+        sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {
+          if (method === "editMessageReplyMarkup") edits.push(body);
+          return null;
+        },
+      } as never);
+      await bot.processUpdate(updateFor(`publish:${JOB}`));
+      return edits;
+    };
+
+    // 실패하면 버튼을 **되살린다** - 사람이 다시 눌러야 하니까.
+    const afterFailure = await runUpdate(async () => ({ ok: false, reason: "daily_limit", detail: "오늘 상한 도달" }) as never);
+    assert(afterFailure.length === 1, `버튼을 되돌려야 한다 (edit ${afterFailure.length}회)`);
+    const revived = JSON.stringify(afterFailure[0].reply_markup);
+    assert(revived.includes("재시도"), `실패 후에는 다시 누를 수 있어야 한다 (${revived})`);
+    assert(revived.includes(`publish:${JOB}`), "되살린 버튼이 같은 job을 가리켜야 한다");
+    assert(!revived.includes("처리 중"), "\"처리 중\"에 멈춰 있으면 안 된다");
+
+    // 성공하면 눌린 표시로 잠근다 - 또 누르면 중복 발행 시도가 된다.
+    const afterSuccess = await runUpdate(async () =>
+      ({ ok: true, publicationId: 1, url: "https://b/x.html", isDraft: false, variantCreated: false, alreadyDone: false }) as never
+    );
+    const settled = JSON.stringify(afterSuccess[0].reply_markup);
+    assert(settled.includes("✅ 발행됨") && settled.includes("noop"), `성공 뒤에는 잠가야 한다 (${settled})`);
+
+    console.log("✅ 발행 버튼 - 실패하면 되살리고, 성공하면 잠근다");
+  }
 }
