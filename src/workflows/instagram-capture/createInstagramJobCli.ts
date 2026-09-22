@@ -29,10 +29,13 @@ function fail(lines: string[]): never {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
+  // 기본은 자동 연결이다 - 텔레그램 전송부터 초안 도착까지 사람 개입이 없어야 한다(2026-09-22).
+  // 조사를 나중에 따로 돌리며 job만 만들어 보고 싶을 때 --no-research로 끊는다.
+  const noResearch = args.includes("--no-research");
   const filePath = args.find((a) => !a.startsWith("--"));
 
   if (!filePath) {
-    console.log("사용법: npm run ig:create-job -- <캡처결과.json> [--dry-run]");
+    console.log("사용법: npm run ig:create-job -- <캡처결과.json> [--dry-run] [--no-research]");
     console.log("JSON 형식은 docs/ai-handoff/INSTAGRAM_POSTING_CONVERTER.md의 '캡처 결과 JSON'을 보세요.");
     process.exit(1);
   }
@@ -110,9 +113,20 @@ async function main(): Promise<void> {
   if (result.imagesFailed > 0) {
     console.warn("⚠️ 일부 이미지가 실패했습니다 - 위 로그를 확인하고, 필요하면 캡처를 다시 올리세요.");
   }
-  console.log("\n다음 단계:");
-  console.log(`   npm run job:research -- ${result.jobId}`);
-  console.log(`   npm run job:write -- ${result.jobId}     # 여기서 이미지가 자동 승격됩니다`);
+  if (noResearch) {
+    console.log("\n⏭ --no-research - 자료조사를 발화하지 않았습니다.");
+    console.log(`   이어서 돌리려면: npm run job:research -- ${result.jobId}`);
+    return;
+  }
+
+  // 여기서부터는 기존 파이프라인이 알아서 간다: 조사 -> (자동) 집필 -> 초안 알림 -> 승인 ->
+  // 최종본 -> 발행 버튼. 사람이 다시 개입하는 첫 지점은 초안 검수다.
+  console.log("\n▶ 자료조사로 자동 연결 중...");
+  // createInstagramJob과 같은 이유로 동적 import다 - pipelineQueue가 supabase 클라이언트를 끌고
+  // 오고, 그 모듈은 로드 시점에 자격증명이 없으면 throw한다(--dry-run이 못 돌게 된다).
+  const { triggerResearchForJob } = await import("./triggerResearch.js");
+  await triggerResearchForJob(result.jobId);
+  console.log("✅ 완료 - 초안이 준비되면 Telegram으로 알림이 갑니다.");
 }
 
 main().catch((error) => {
