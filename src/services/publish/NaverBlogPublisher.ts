@@ -53,6 +53,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { chromium, type Page } from "playwright";
 
+import { NAVER_DEFAULT_CATEGORY_NO } from "../../config/naverCategoryMapping.js";
 import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
 
 /** 공백을 뺀 실제 글자 수. 본문이 실제로 채워졌는지 판정하는 데 쓴다. */
@@ -120,17 +121,15 @@ export type NaverBlogPublisherOptions = {
   blogId?: string;
   profileDir?: string;
   /**
-   * 네이버 블로그 카테고리 번호. §6-2 실측 세션에서 확인된 기본값(32 = "육아")을 그대로
-   * 쓴다 - 이 블로그(bj2028, "남매둥이 아빠")는 육아 중심 블로그라 카테고리를 세분화하지
-   * 않는다고 가정한 잠정값이다. 카테고리별로 다른 번호가 필요해지면(예: OTT/연예 카테고리
-   * 분리) 호출자가 job.category -> categoryNo 매핑표를 만들어 이 옵션으로 넘겨야 한다 -
-   * 아직 그 매핑표는 없다(§10 item 5에서 필요해지면 만든다).
+   * 네이버 블로그 카테고리 번호. 호출부가 `naverCategoryNo(job.category)`로 구해 넘긴다
+   * (2026-09-22 - 발행 대상이 whyissuenow로 바뀌면서 매핑표를 만들었다).
+   * 안 넘기면 "지금 뜨는 이슈"(1)로 간다 - 옛 기본값 32는 다른 블로그(육아)의 번호라 폐기했다.
    */
   categoryNo?: number;
   headless?: boolean;
 };
 
-const DEFAULT_CATEGORY_NO = 32;
+
 const SAVE_WAIT_MS = 3000;
 const IMAGE_UPLOAD_WAIT_MS = 3000;
 const FILE_CHOOSER_TIMEOUT_MS = 10_000;
@@ -154,7 +153,22 @@ const SELECTORS = {
   // 실행한 이전 세션이 저장 없이 중간에 끊겨 미저장 초안이 남으면) 이 클래스의 dim 오버레이가
   // 짧게 뜨며 클릭을 막는다. 정확한 트리거는 미확인이지만 셀렉터 자체는 §12 실측에서 확인됨.
   recoveryDim: ".se-popup-dim",
+  // 발행(2026-09-22 실측). 이 셋은 임시저장과 달리 **글이 실제로 공개된다** - 순서가 중요하다:
+  // 패널 열기 -> 공개 범위 고르기 -> 확정. 확정 전에 범위를 안 고르면 네이버 기본값(전체공개)이다.
+  publishPanelButton: '[data-click-area="tpb.publish"]',
+  publishConfirmButton: '[data-testid="seOnePublishBtn"]',
 } as const;
+
+/**
+ * 공개 범위. data-click-area는 네이버 자체 클릭 추적 속성이라 CSS 해시 클래스보다 안정적이다.
+ * **전체공개와 비공개를 바꿔 쓰면 사고**라 실측 라벨을 그대로 주석에 남긴다(2026-09-22 확인).
+ */
+const VISIBILITY_SELECTOR = {
+  public: '[data-click-area="tpb*i.all"]', // 전체공개 (id=open_public, testid=openType_2)
+  private: '[data-click-area="tpb*i.secret"]', // 비공개 (id=open_private, testid=openType_0)
+} as const;
+
+export type NaverVisibility = keyof typeof VISIBILITY_SELECTOR;
 
 export class NaverBlogPublisher {
   private readonly blogId: string;
@@ -168,12 +182,34 @@ export class NaverBlogPublisher {
       throw new Error("blogId가 비어 있습니다(.env의 CREATOR_ADVISOR_BLOG_ID를 확인하세요).");
     }
     this.profileDir = options.profileDir ?? NAVER_PUBLISH_CONFIG.profileDir;
-    this.categoryNo = options.categoryNo ?? DEFAULT_CATEGORY_NO;
+    this.categoryNo = options.categoryNo ?? NAVER_DEFAULT_CATEGORY_NO;
     this.headless = options.headless ?? true;
   }
 
   /** 제목/본문/이미지/태그를 채우고 임시저장한다. 실제 발행은 절대 하지 않는다(파일 상단 설명 참고). */
+  /** 임시저장까지만. 발행 버튼을 누르지 않는다. */
   async saveDraft(input: NaverDraftSaveInput): Promise<NaverDraftSaveResult> {
+    return this.fill(input, (page) => this.clickSave(page));
+  }
+
+  /**
+   * 채우고 **실제로 발행**한다(2026-09-22 사용자 결정 - 임시저장 글은 다시 열 때 레이어 팝업이
+   * 떠 흐름을 꼬이게 해서 승인 즉시 발행으로 바꿨다).
+   *
+   * 첫 운영은 `visibility: "private"`(비공개)로 돌려 결과를 눈으로 확인한 뒤 공개로 올린다.
+   */
+  async publish(
+    input: NaverDraftSaveInput,
+    visibility: NaverVisibility
+  ): Promise<NaverDraftSaveResult> {
+    return this.fill(input, (page) => this.clickPublish(page, visibility));
+  }
+
+  /** 제목·본문·이미지를 채우는 공통 흐름. 마지막 "완료" 동작만 호출자가 정한다. */
+  private async fill(
+    input: NaverDraftSaveInput,
+    finish: (page: Page) => Promise<string>
+  ): Promise<NaverDraftSaveResult> {
     const context = await chromium.launchPersistentContext(this.profileDir, { headless: this.headless });
     // 본문 붙여넣기가 실제 OS 클립보드 + Ctrl/Cmd+V를 쓰므로 미리 권한을 승인해둔다(파일 상단
     // 설명 참고) - 권한이 없으면 navigator.clipboard.write()가 조용히 막힌다.
@@ -229,7 +265,7 @@ export class NaverBlogPublisher {
       }
 
       try {
-        const draftUrl = await this.clickSave(page);
+        const draftUrl = await finish(page);
         return { ok: true, draftUrl };
       } catch (error) {
         await this.saveFailureSnapshot(page, "save");
@@ -401,6 +437,44 @@ export class NaverBlogPublisher {
     await page.waitForTimeout(SAVE_WAIT_MS);
     // 저장 성공을 알리는 정확한 신호(토스트 메시지, URL 변화 등)는 아직 실측 못함(§10 item 7) -
     // 우선 현재 URL을 draftUrl로 돌려준다.
+    return page.url();
+  }
+
+  /**
+   * **실제 발행.** 임시저장과 달리 글이 공개된다(2026-09-22 네이버 운영 재개).
+   *
+   * 이 파일은 오랫동안 "발행 버튼을 누르지 않는 것이 정의"였다. 그 전제가 사용자 결정으로
+   * 바뀌었다 - 임시저장 글은 다시 열 때 레이어 팝업이 떠 흐름을 꼬이게 해서, 승인하면 바로
+   * 발행하기로 했다.
+   *
+   * 순서: 패널 열기 -> **공개 범위 고르기** -> 확정. 범위를 먼저 고르는 것이 중요하다 -
+   * 확정 후에는 되돌릴 수 없고, 안 고르면 네이버 기본값인 전체공개로 나간다.
+   */
+  private async clickPublish(page: Page, visibility: NaverVisibility): Promise<string> {
+    await this.safeClick(page, SELECTORS.publishPanelButton);
+    await page.waitForSelector(SELECTORS.publishConfirmButton, { timeout: 15_000 });
+
+    // 공개 범위. 라디오는 label이 가리고 있을 수 있어 click()이 막히면 JS로 직접 누른다.
+    const radio = page.locator(VISIBILITY_SELECTOR[visibility]).first();
+    await radio.click({ timeout: CLICK_TIMEOUT_MS }).catch(async () => {
+      await radio.evaluate((el) => (el as unknown as { click: () => void }).click());
+    });
+    await page.waitForTimeout(500);
+
+    // 고른 값이 실제로 반영됐는지 확인한다. 여기서 틀리면 비공개로 올리려던 글이 공개된다.
+    const checked = await radio
+      .evaluate((el) => (el as unknown as { checked: boolean }).checked)
+      .catch(() => false);
+    if (!checked) {
+      throw new Error(`공개 범위(${visibility})가 선택되지 않았습니다 - 발행을 중단합니다.`);
+    }
+
+    await this.safeClick(page, SELECTORS.publishConfirmButton);
+    // 발행 후에는 글 화면으로 이동한다. URL이 바뀌는 것을 성공 신호로 본다.
+    await page.waitForURL((url) => !url.toString().includes("postwrite"), { timeout: 30_000 }).catch(() => {
+      // 못 잡아도 아래에서 현재 URL을 돌려준다 - 조용히 성공으로 속이지 않도록 호출부가 확인한다.
+    });
+    await page.waitForTimeout(SAVE_WAIT_MS);
     return page.url();
   }
 }

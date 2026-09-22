@@ -1053,6 +1053,14 @@ main().catch((error) => {
   //    다시 누를 수 없었다 - 자동 재시도도 없으니 원고가 그대로 묻힌다.
   {
     const lockedKeyboard = [[{ text: "⏳ 처리 중…", callback_data: "noop" }]];
+    const fullKeyboard = [
+      [{ text: "📄 원고 페이지 열기", callback_data: undefined }],
+      [
+        { text: "🖼 이미지 수정", callback_data: `publish:images:${JOB}` },
+        { text: "🔵 블로그 발행", callback_data: `publish:blogspot:${JOB}` },
+        { text: "🟢 네이버 발행", callback_data: `publish:naver:${JOB}` },
+      ],
+    ];
     const updateFor = (data: string) =>
       ({
         update_id: 1,
@@ -1084,7 +1092,7 @@ main().catch((error) => {
     assert(afterFailure.length === 1, `버튼을 되돌려야 한다 (edit ${afterFailure.length}회)`);
     const revived = JSON.stringify(afterFailure[0].reply_markup);
     assert(revived.includes("재시도"), `실패 후에는 다시 누를 수 있어야 한다 (${revived})`);
-    assert(revived.includes(`publish:${JOB}`), "되살린 버튼이 같은 job을 가리켜야 한다");
+    assert(revived.includes(`publish:blogspot:${JOB}`), "되살린 버튼이 같은 job·같은 동작을 가리켜야 한다");
     assert(!revived.includes("처리 중"), "\"처리 중\"에 멈춰 있으면 안 된다");
 
     // 성공하면 눌린 표시로 잠근다 - 또 누르면 중복 발행 시도가 된다.
@@ -1095,5 +1103,198 @@ main().catch((error) => {
     assert(settled.includes("✅ 발행됨") && settled.includes("noop"), `성공 뒤에는 잠가야 한다 (${settled})`);
 
     console.log("✅ 발행 버튼 - 실패하면 되살리고, 성공하면 잠근다");
+
+  // 6) 연결 안 된 동작은 **절대 발행하지 않는다**(2026-09-22 네이버 재개 작업 중).
+  //    분기가 없으면 어떤 버튼을 눌러도 Blogspot이 발행된다 - 가장 위험한 실수라 테스트로 막는다.
+  {
+    // 이미지 수정도 Blogspot을 발행하면 안 된다(자리 목록만 보낸다 - 자세한 동작은 8번 블록).
+    {
+      let publishCalls = 0;
+      const out = await publishBot(async () => {
+        publishCalls += 1;
+        return {} as never;
+      }).handlePublishDecisionCallback(query(`publish:images:${JOB}`));
+      assert(publishCalls === 0, "이미지 버튼이 Blogspot을 발행하면 안 된다");
+      assert(out.outcome.status === "queued", `queued여야 한다 (${JSON.stringify(out.outcome)})`);
+    }
+
+    // 네이버는 **여기서 발행하지 않는다** - 로그인된 브라우저가 필요해 맥의 폴러가 집어 간다.
+    // 여기서 실수로 Blogspot이 발행되면 엉뚱한 채널에 글이 올라간다.
+    {
+      let publishCalls = 0;
+      let queuedJob = "";
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "네이버 대상" }) as never,
+        publishToBlogspot: (async () => {
+          publishCalls += 1;
+          return {} as never;
+        }) as never,
+        requestNaverPublish: async (j: { id: string }) => {
+          queuedJob = j.id;
+          return { queued: true };
+        },
+        sendMessage: async () => {},
+        answerCallbackQuery: async () => {},
+      } as never);
+      const out = await bot.handlePublishDecisionCallback(query(`publish:naver:${JOB}`));
+      assert(publishCalls === 0, "네이버 버튼이 Blogspot을 발행하면 안 된다");
+      assert(queuedJob === JOB, "네이버는 대기열에 넣어야 한다");
+      assert(out.outcome.status === "queued", `queued여야 한다 (${JSON.stringify(out.outcome)})`);
+      assert(out.message.includes("예약"), "예약됐다는 안내가 있어야 한다");
+    }
+    // blogspot은 옛 형식·새 형식 모두 실제로 발행돼야 한다.
+    for (const data of [`publish:${JOB}`, `publish:blogspot:${JOB}`]) {
+      let publishCalls = 0;
+      const out = await publishBot(async () => {
+        publishCalls += 1;
+        return { ok: true, publicationId: 1, url: "https://b/x.html", isDraft: false, variantCreated: false, alreadyDone: false } as never;
+      }).handlePublishDecisionCallback(query(data));
+      assert(publishCalls === 1 && out.outcome.status === "published", `blogspot 발행이 돌아야 한다 (${data})`);
+    }
+    console.log("✅ 네이버는 예약만 / 이미지도 발행 안 함 / blogspot은 옛 형식도 동작");
+  }
+
+  // 7) **누른 버튼 하나만** 바뀐다(2026-09-22 실측 버그).
+  //    발행 콜백을 가진 버튼을 전부 갈아끼워서, 이미지 수정을 눌렀는데 블로그·네이버까지
+  //    "✅ 발행됨"으로 잠겼다. 발행되지도 않았는데 발행됐다고 표시되고 다시 누를 수도 없었다.
+  {
+    const updateWith = (data: string) =>
+      ({
+        update_id: 1,
+        callback_query: {
+          id: "q1",
+          data,
+          message: { chat: { id: Number(CHAT_ID) }, message_id: 7, reply_markup: { inline_keyboard: fullKeyboard } },
+        },
+      }) as never;
+
+    const run = async (data: string, deps: Record<string, unknown> = {}) => {
+      const edits: Record<string, unknown>[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "키워드" }) as never,
+        publishToBlogspot: (async () =>
+          ({ ok: true, publicationId: 1, url: "https://b/x.html", isDraft: false, variantCreated: false, alreadyDone: false }) as never) as never,
+        requestNaverPublish: async () => ({ queued: true }),
+        sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {
+          if (method === "editMessageReplyMarkup") edits.push(body);
+          return null;
+        },
+        ...deps,
+      } as never);
+      await bot.processUpdate(updateWith(data));
+      const rows = (edits[0]?.reply_markup as { inline_keyboard: { text: string; callback_data?: string }[][] } | undefined)?.inline_keyboard ?? [];
+      return rows;
+    };
+
+    // 이미지 수정(미연결)을 눌러도 발행 버튼 둘은 살아 있어야 한다.
+    const afterImages = await run(`publish:images:${JOB}`);
+    const actions = afterImages[1] ?? [];
+    assert(afterImages[0]?.[0]?.text.includes("원고 페이지"), "링크 버튼은 그대로여야 한다");
+    assert(actions.length === 3, `액션 버튼 3개가 유지돼야 한다 (${JSON.stringify(actions)})`);
+    assert(actions[1].callback_data === `publish:blogspot:${JOB}`, "블로그 버튼이 살아 있어야 한다");
+    assert(actions[2].callback_data === `publish:naver:${JOB}`, "네이버 버튼이 살아 있어야 한다");
+    assert(!JSON.stringify(actions).includes("발행됨"), "아무것도 발행되지 않았는데 발행됨이라고 하면 안 된다");
+
+    // 블로그 발행은 그 버튼만 잠기고 네이버는 살아 있어야 한다(둘 다 올릴 수 있다).
+    const afterBlogspot = await run(`publish:blogspot:${JOB}`);
+    const row = afterBlogspot[1] ?? [];
+    assert(row[1].text === "✅ 발행됨" && row[1].callback_data === "noop", `블로그만 잠겨야 한다 (${JSON.stringify(row[1])})`);
+    assert(row[2].callback_data === `publish:naver:${JOB}`, "네이버는 그대로 눌 수 있어야 한다");
+    assert(row[0].callback_data === `publish:images:${JOB}`, "이미지 수정도 그대로여야 한다");
+
+    // 네이버는 "예약됨"이다 - 아직 안 올라갔는데 "발행됨"이라고 하면 확인하러 갔다 헛걸음한다.
+    const afterNaver = await run(`publish:naver:${JOB}`);
+    const naverRow = afterNaver[1] ?? [];
+    assert(naverRow[2].text === "🟢 예약됨", `네이버는 예약됨이어야 한다 (${naverRow[2].text})`);
+    assert(naverRow[1].callback_data === `publish:blogspot:${JOB}`, "블로그는 그대로여야 한다");
+    console.log("✅ 누른 버튼 하나만 바뀐다 / 네이버는 예약됨 표시");
+  }
+
+  // 8) 이미지 수정 - 버튼을 누르면 자리 목록, 답장하면 그 자리를 비우고 재수집을 건다.
+  {
+    const IMAGES = [
+      { index: 1, description: "현장 사진", prompt: null, url: "https://img/1.png", provider: "web", fileName: "01.png" },
+      { index: 2, description: "인물 사진", prompt: null, url: "https://img/2.png", provider: "web", fileName: "02.png" },
+      { index: 3, description: "못 채운 자리", prompt: null, url: null, provider: null, fileName: null },
+    ];
+    const makeBotFor = (over: Record<string, unknown> = {}) => {
+      const state: { patches: Record<string, unknown>[]; sent: string[]; prepared: number } = { patches: [], sent: [], prepared: 0 };
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "키워드", metadata: { images: IMAGES } }) as never,
+        findJobByImageEditRequestMessageId: async () =>
+          ({ id: JOB, keyword: "키워드", status: "approved", metadata: { images: IMAGES } }) as never,
+        mergeJobMetadata: (async (_id: string, patch: Record<string, unknown>) => {
+          state.patches.push(patch);
+          return null;
+        }) as never,
+        // sendMessage는 주입 지점이 아니다 - 실제 API 호출을 대체하는 곳은 sendTelegramRequest다.
+        sendTelegramRequest: (async (method: string, body: Record<string, unknown>) => {
+          if (method === "sendMessage") {
+            state.sent.push(String(body.text ?? ""));
+            return { message_id: 55 };
+          }
+          return null;
+        }) as never,
+        triggerPublishPrepare: () => {
+          state.prepared += 1;
+        },
+        ...over,
+      } as never);
+      return { bot, state };
+    };
+
+    // 버튼: 자리 목록 + 답장 안내를 보내고 메시지 id를 저장한다.
+    {
+      const { bot, state } = makeBotFor();
+      const out = await bot.handlePublishDecisionCallback(query(`publish:images:${JOB}`));
+      assert(out.outcome.status === "queued", `queued여야 한다 (${JSON.stringify(out.outcome)})`);
+      assert(out.message === "", "안내는 직접 보냈으므로 중복 발송하면 안 된다");
+      const sent = state.sent.join("\n");
+      assert(sent.includes("1번") && sent.includes("3번"), "자리 목록이 보여야 한다");
+      assert(sent.includes("빈 자리 1개"), `빈 자리 수를 알려야 한다 (${sent.slice(0, 120)})`);
+      const saved = state.patches.find((p) => "imageEditRequestMessageId" in p);
+      assert(saved?.imageEditRequestMessageId === 55, "답장을 되찾을 메시지 id를 저장해야 한다");
+    }
+
+    // 답장: 지정한 자리를 비우고 요구사항을 남기고 재수집을 건다.
+    {
+      const { bot, state } = makeBotFor();
+      const out = await bot.handleImageEditReply({
+        chat: { id: Number(CHAT_ID) },
+        message_id: 60,
+        reply_to_message: { message_id: 55 },
+        text: "2번은 인물 단독샷으로",
+      } as never);
+      assert(out.outcome.status === "accepted", `처리돼야 한다 (${JSON.stringify(out.outcome)})`);
+      const patch = state.patches.find((p) => "images" in p) as { images: { index: number; url: string | null }[]; imageRequirements: Record<string, string> } | undefined;
+      assert(patch, "이미지 패치가 있어야 한다");
+      assert(patch!.images.find((i) => i.index === 2)?.url === null, "지정한 자리는 비워야 재수집 대상이 된다");
+      assert(patch!.images.find((i) => i.index === 1)?.url === "https://img/1.png", "지정 안 한 자리는 건드리면 안 된다");
+      assert(patch!.imageRequirements["2"] === "인물 단독샷으로", "자리별 요구사항이 남아야 한다");
+      assert(state.prepared === 1, "재수집을 걸어야 한다");
+      assert(out.message.includes("2번 - 인물 단독샷으로"), "읽은 내용을 되읽어줘야 한다");
+    }
+
+    // 남의 답장은 조용히 넘긴다(원고 수정 피드백 답장을 집으면 안 된다).
+    {
+      const { bot, state } = makeBotFor({ findJobByImageEditRequestMessageId: async () => null });
+      const out = await bot.handleImageEditReply({
+        chat: { id: Number(CHAT_ID) },
+        message_id: 61,
+        reply_to_message: { message_id: 999 },
+        text: "본문을 더 짧게",
+      } as never);
+      assert(out.outcome.status === "ignored", "무관한 답장은 무시해야 한다");
+      assert(state.patches.length === 0 && state.prepared === 0, "무관한 답장으로 재수집을 걸면 안 된다");
+    }
+
+    console.log("✅ 이미지 수정 - 자리 목록 / 지정 자리만 비움 / 재수집 트리거 / 남의 답장 무시");
+  }
   }
 }

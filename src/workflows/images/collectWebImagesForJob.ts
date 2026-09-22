@@ -25,6 +25,11 @@ export type CollectWebImagesForJobInput = {
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
   filledIndexes?: number[];
+  /**
+   * 자리별 사용자 요구사항(2026-09-22 "🖼 이미지 수정"). 키는 자리 번호 문자열.
+   * 사람이 결과를 보고 "2번은 인물 단독샷으로" 같이 적어 보낸 것이라, 마커 설명보다 **우선**한다.
+   */
+  requirements?: Record<string, string>;
 };
 
 export type CollectWebImagesForJobResult = {
@@ -39,7 +44,26 @@ export async function collectWebImagesForJob(
   options: CollectWebImagesOptions = {}
 ): Promise<CollectWebImagesForJobResult> {
   const filled = new Set(input.filledIndexes ?? []);
-  const slots = buildWebImageSlots(input.body, input.imagePrompts).filter((s) => !filled.has(s.index));
+  const requirements = input.requirements ?? {};
+  const slots = buildWebImageSlots(input.body, input.imagePrompts)
+    .filter((s) => !filled.has(s.index))
+    // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
+    //
+    // 2026-09-22 실측 사고: 처음에는 설명(판정 기준)에만 붙였다. 그러자 검색은 옛 검색어로 하고
+    // 판정만 빡빡해져서, 네 후보가 전부 "요청한 투샷이 아니다"로 탈락하고 자리가 비었다.
+    // 아침에 마커 정렬에서 고친 "검색은 A, 판정은 B"를 그대로 다시 만든 셈이었다.
+    //
+    // 사용자가 검색어를 직접 지정하는 경우가 대부분이라("SNL 주현영과 김원훈 으로 검색해서")
+    // **요구사항을 검색어로 쓰고**, 원래 검색어는 뒤에 남겨 맥락을 잃지 않게 한다.
+    .map((slot) => {
+      const want = requirements[String(slot.index)];
+      if (!want) return slot;
+      return {
+        ...slot,
+        query: want,
+        description: `${slot.description} (사용자 요청: ${want})`,
+      };
+    });
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
 
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.

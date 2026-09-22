@@ -43,45 +43,55 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   (`research/[키워드].md`, `drafts/[키워드].md`).
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
   researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
-- **채널은 Blogspot 하나다**(2026-09-15 사용자 결정, `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`).
-  티스토리는 로그인이 자주 풀리고 공식 API가 없어 풀 자동화가 불가능해 운영을 접었고, 관련 코드는
-  전부 삭제했다(복구는 git revert). 카테고리→채널 배정(`config/channelRouting.ts`)도 함께 사라졌다 -
-  이제 모든 카테고리가 Blogspot으로 간다. 네이버 관련 dormant 코드는 사용자가 별도 프로세스로
-  재설계 예정이라 그대로 둔다(2026-09-07 결정 유지).
+- **채널은 둘이다 - Blogspot과 네이버**(2026-09-22 사용자 결정으로 네이버 재개).
+  티스토리는 로그인이 자주 풀리고 공식 API가 없어 운영을 접었고 코드도 전부 삭제했다
+  (복구는 git revert). 카테고리→채널 배정(`config/channelRouting.ts`)은 없다 - **어느 채널에
+  올릴지는 라우팅이 아니라 사람이 버튼으로 정한다.** 둘 다 눌러도 되고 한쪽만 눌러도 된다.
+  - Blogspot(`whynowissue.blogspot.com`): 공식 API(Blogger v3). GitHub Actions에서 바로 끝난다.
+  - 네이버(`blog.naver.com/whyissuenow`): **공식 발행 API가 없다.** Playwright로 로그인된
+    브라우저를 조작하므로 GitHub Actions에서 돌릴 수 없다 - 클라우드는 요청만 남기고
+    **맥의 로컬 폴러**(`job:naver-poll`)가 집어 간다. 맥이 꺼져 있으면 켜질 때 처리된다.
+    Creator Advisor가 보는 블로그(육아)와 **다른 계정**이라 세션 프로필도 분리돼 있다
+    (`NAVER_PUBLISH_BLOG_ID`, `NAVER_PUBLISH_PROFILE_DIR`).
+  - 같은 글을 두 채널에 올리므로 **유사문서 판정**이 위험이다. `generateNaverVariant`가 텍스트를
+    다시 쓰고(이미지는 두 채널이 **같은 것**을 쓴다), 네이버 원고에서는 `참고 자료` 링크아웃을
+    뺀다. 발행 간격은 코드가 강제하지 않는다 - 사용자가 그때그때 판단한다(2026-09-22 결정).
 - 원고 내 이미지: writer가 남긴 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍으로 **승인 이후**
   자동 생성한다(`workflows/images/generateManuscriptImages.ts`). 기본은 꺼져 있다 -
   `MANUSCRIPT_IMAGE_GENERATION=true` + `OPENAI_API_KEY`/`GEMINI_API_KEY`가 있어야 실제로 호출한다
-  (유료 API라 켜는 것은 사용자 결정). 지금은 `IMAGE_AB_COMPARE=true`로 프롬프트 1개당 OpenAI·Gemini
-  양쪽을 만들어 뷰어에 나란히 띄우고, 사용자가 고른 뒤 한쪽으로 고정한다. 생성 이미지는 Supabase
+  (유료 API라 켜는 것은 사용자 결정). A/B 비교는 끝났다 - `IMAGE_AB_COMPARE=false`,
+  `IMAGE_PROVIDER=openai`로 고정됐다. 웹 검색으로 채우는 자리는 네이버 + 구글 두 색인을 쓴다
+  (구글은 공식 API가 신규 발급 차단이라 Serper 중계, `SERPER_API_KEY`). 생성 이미지는 Supabase
   Storage(`article-images`)가 원본이고 `npm run sync:images`가 맥으로 내려받는다. 옛 경로
   (`ARTICLE_IMAGE_GENERATION` + `workflows/writing/generateArticleImages.ts`, 자체 브리프 생성 후
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
   (`prompts/writing/writer.md` §8).
-- 원고 준비: 텔레그램에서 원고를 승인(✅)하면 `prepareApprovedManuscripts()`가 Blogspot 배리에이션
-  원고 1건을 만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 채운 뒤
-  `manuscripts/index.html`(날짜→주제 2단 트리, 복사/수정 버튼, 이미지 인라인)을 갱신한다.
-  작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고 배리에이션의 재료로만 쓰인다.
-  트리거는 2026-09-14부터 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
-  (`docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - 로컬 10분 폴링(`publish-poll` launchd)은 영구
-  비활성화됐고, GitHub Actions(`job-publish-prepare.yml`)가 같은 스크립트를 재사용해 실행한다.
-- **발행은 사람이 버튼을 누를 때만 일어나고, 누르면 공개다**(2026-09-19 이후 실제 동작).
-  원고 준비 완료 알림의 **🚀 블로그 발행** 버튼이 `handlePublishDecisionCallback`을 타고
-  `publishArticleToBlogspot(jobId, { asDraft: false })`를 **그 자리에서** 부른다 - 배리에이션 원고가
-  이미 있어 LLM 호출이 없고 수 초면 끝나므로 별도 워크플로우로 넘기지 않는다. 남아 있던 초안은 새
-  글을 만들지 않고 `posts.publish`로 공개 전환하며, 공개 직전에 `posts.patch`로 본문을 공개용
-  (미채움 마커 제거)으로 덮어쓴다. 사람이 원고 페이지에서 이미지까지 본 뒤 누르는 것이라 공개가
-  맞다. 뷰어에서 복사해 직접 붙여넣는 길도 그대로 열려 있다(발행 실패 시 안내가 그쪽으로 보낸다).
+- **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 Blogspot
+  배리에이션 1건을 만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 붙이고,
+  이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고 뷰어
+  페이지를 갱신한다. 작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고
+  배리에이션의 재료로만 쓰인다. 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
+  (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
+  (`job-publish-prepare.yml`)가 실행한다.
+- **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가). 원고 준비 완료
+  알림에 버튼 4개가 붙는다 - `📄 원고 페이지 열기` / `🖼 이미지 수정`(아직 미연결) /
+  `🔵 블로그 발행` / `🟢 네이버 발행`. **이미지까지 반영된 최종 원고를 뷰어에서 눈으로 본 뒤**
+  누르는 것이고, 사람이 곧 품질 게이트다. 누르지 않은 원고는 올라가지 않는다.
+  - 임시저장은 쓰지 않는다. 네이버 임시저장 글은 다시 열 때 레이어 팝업이 떠 흐름을 꼬았고,
+    Blogspot 초안은 발행 버튼이 "이미 올라가 있음"에 막혀 매번 수동 공개가 필요했다.
+  - **자동 재시도는 없다.** 실패하면 버튼이 `(재시도)`로 되살아난다 - 눌러야 다시 돈다.
+  - 하루 발행 상한은 **20건**(`BLOGGER_DAILY_LIMIT`, 2026-09-22에 5에서 상향). "오늘"은
+    **한국시간 자정** 기준이다(전에는 서버 UTC 자정이라 오전 9시에 초기화됐다).
+- **공개 범위**: Blogspot은 버튼 경로에서 `asDraft: false`로 **공개 발행**한다
+  (`BLOGGER_PUBLISH_AS_DRAFT=true`는 이 경로를 막지 못한다 - 호출 인자가 우선한다).
+  네이버는 **기본이 비공개**이고 `NAVER_PUBLISH_VISIBILITY=public`으로만 공개된다
+  (2026-09-22 사용자 결정 - 첫 운영은 비공개로 확인한 뒤 올린다).
 - **자동 발행(사람 없이 나가는 경로)은 여전히 없다.** `publishApprovedArticles.ts`(폴링 fan-out)는
-  2026-09-05부터 호출되지 않는다 - 코드와 테스트만 남아 있고 `publishPollJob`이 부르지 않는다.
-  되살리는 기준은 "원고·이미지 품질이 보장됐다"는 **사용자 판단**이다.
-- 발행 관련 환경변수(승인 없이 건드리지 않는다):
+  2026-09-05부터 호출되지 않는다 - 코드와 테스트만 남아 있다. 되살리는 기준은 "원고·이미지 품질이
+  보장됐다"는 **사용자 판단**이다.
+- 발행 게이트 환경변수(승인 없이 건드리지 않는다):
   - `BLOGGER_ENABLED` - 마스터 게이트. false면 버튼도 `disabled`로 실패한다(기본 false).
-  - `BLOGGER_PUBLISH_AS_DRAFT` - true 유지(기본 true). **단 🚀 버튼은 이 값을 무시하고 공개로
-    나간다** - 이 전역값이 지배하는 것은 지금 죽어 있는 자동 폴링 경로뿐이다. 뒤집으면 사람이
-    안 본 원고까지 공개되므로 버튼 쪽에서만 `asDraft: false`를 넘긴다.
-  - `BLOGGER_DAILY_LIMIT` - 하루 상한, 코드 기본값 20(2026-09-21에 5에서 올림, Blogger 자체 한도는
-    50). 워크플로우 vars로 조절하므로 코드 수정이 필요 없다.
   - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
     `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 
@@ -98,7 +108,8 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 
 ## 현재 핵심 문서
 
-- Blogspot 단독 운영 재설계: `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`
+- 발행 채널 설계: `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md` (제목은 "단독"이지만 2026-09-22에
+  네이버가 다시 들어왔다 - 채널 수는 위 운영 규칙이 최신이다)
 - 진척 원장(데일리 데스크 대시보드가 읽는다): `docs/ai-handoff/PROGRESS.md`
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
 - 인스타 포스팅 변환기(별도 워크트리, 미병합): `docs/ai-handoff/INSTAGRAM_POSTING_CONVERTER.md`
@@ -108,7 +119,9 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   - 사실·헤지 규칙(항상 최우선, 구 writer.md §4): `prompts/writing/rules/facts-and-hedging.md`
   - 출력 형식 계약(코드와 직결, 구 writer.md §6~10): `prompts/writing/rules/output-format.md`
   - 카테고리별 문체: `prompts/writing/style/{parenting,entertainment,trend,incident}.md`
-- SEO/AEO/GEO 규칙집: `docs/seo-guide.md`
+- SEO/AEO/GEO 규칙집: `docs/seo-guide.md` (2026-09-22에 근거 없는 규칙 7가지를 걷어냈다 -
+  취소선 항목은 "이미 확인해서 뺀 통설"이니 다시 가져오지 않는다. 문서 제목은 네이버 기준이지만
+  구글 기준이 먼저다)
 - Codex 위임 양식: `docs/ai-handoff/CODEX_TASK_TEMPLATE.md`
 - Codex 위임 스킬: `.claude/skills/delegate-codex/SKILL.md`
 

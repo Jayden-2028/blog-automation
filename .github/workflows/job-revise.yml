@@ -41,7 +41,8 @@ concurrency:
 jobs:
   revise:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 2026-09-22: job-write와 같은 이유로 45분(수정 재작성도 같은 LLM 경로다).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 

@@ -308,6 +308,23 @@ function main(): void {
   console.log("✅ image: 대진표·비교표를 AI 생성으로 지정 -> 경고");
 
   // i2) 같은 대진표라도 웹 검색이면 통과, 데이터가 아닌 장면 이미지는 AI 생성이어도 통과.
+  // 엔터·OTT는 웹 검색만 쓴다(2026-09-22). 실사가 있는데 그리거나 표로 만들 이유가 없다.
+  {
+    const body = "[IMAGE: 스마트폰 카카오톡 화면을 보며 웃는 손 — AI 생성]\n\n[IMAGE: 조회수 순위 — 표 생성]";
+    const ent = checkImagePrompts(body, "entertainment");
+    assert(
+      ent.some((c) => c.message.includes("웹 검색이 아닌 이미지 자리")),
+      `엔터 원고의 AI 생성·표 생성을 잡아야 한다 (${JSON.stringify(ent.map((c) => c.message))})`
+    );
+    // 다른 카테고리는 그대로 허용한다 - 정책·행사 원고의 표는 정보 전달 수단이다.
+    const living = checkImagePrompts(body, "living");
+    assert(
+      !living.some((c) => c.message.includes("웹 검색이 아닌 이미지 자리")),
+      "엔터가 아니면 이 검사는 걸리지 않아야 한다"
+    );
+    console.log("✅ 엔터·OTT - 웹 검색이 아닌 이미지 자리 경고");
+  }
+
   const imageOk = checkImagePrompts(
     // 장면형 AI 생성은 2026-09-17부터 실사가 기본이다(§8) - 픽스처도 그 규격을 따른다.
     "[IMAGE: 한국·일본·대만·호주 8강 대진표 — 웹 검색]\n[IMAGE PROMPT: 2026 아시안게임 야구 대진표 공식]\n\n[IMAGE: 저녁 목욕을 마친 아이를 재우는 부모 — AI 생성]\n[IMAGE PROMPT: A photorealistic photograph of a Korean parent putting a child to bed, warm lamp light, no text, 16:9]"

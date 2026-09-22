@@ -47,19 +47,29 @@ export function buildManuscriptReadyMessage(
   // 수동 발행한다. 페이지 열기와 같은 줄에 둔다(먼저 보고 나서 누르는 순서라 시선이 왼→오른쪽).
   // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다 - 여기서 예외를
   // 던지면 "원고 준비 완료" 알림 자체가 통째로 사라진다.
-  let publishButton: TelegramInlineKeyboardButton | null = null;
+  // 2026-09-22 네이버 운영 재개: 버튼이 1개 -> 3개가 됐다. 한 줄에 몰면 텔레그램에서 글자가
+  // 잘려 무슨 버튼인지 안 보이므로 줄을 나눈다.
+  //   · 이미지 수정 - 빈 자리 재수집 + 사용자가 번호·요구사항으로 지정한 자리 다시 만들기
+  //   · 블로그 발행 - Blogspot 공식 API라 GitHub Actions에서 바로 끝난다
+  //   · 네이버 발행 - 공식 API가 없어 로그인된 브라우저가 필요하다. 맥의 로컬 폴러가 집어 간다
+  let actionRow: TelegramInlineKeyboardButton[] = [];
   try {
-    publishButton = { text: "🚀 블로그 발행", callback_data: buildPublishDecisionCallbackData(outcome.topic.jobId) };
+    const jobId = outcome.topic.jobId;
+    actionRow = [
+      { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+      { text: "🔵 블로그 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") },
+      { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") },
+    ];
   } catch {
-    publishButton = null;
+    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
+    actionRow = [];
   }
 
   if (pagesUrl) {
-    const row: TelegramInlineKeyboardButton[] = [{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }];
-    if (publishButton) row.push(publishButton);
-    buttons = [row];
+    buttons = [[{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }]];
+    if (actionRow.length > 0) buttons.push(actionRow);
   } else {
-    if (publishButton) buttons = [[publishButton]];
+    if (actionRow.length > 0) buttons = [actionRow];
     lines.push("", `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`, "위 파일을 브라우저로 열어 원고를 확인·복사해 붙여넣어 주세요.");
   }
 

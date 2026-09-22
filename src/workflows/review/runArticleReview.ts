@@ -47,7 +47,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
     }),
     ...checkAttributionHedging(input.article.content),
     ...checkVoice(input.article.content),
-    ...checkImagePrompts(input.article.content),
+    ...checkImagePrompts(input.article.content, input.job.category),
   ];
 
   // error를 먼저 보여준다 - 알림에서 잘릴 때 중요한 것이 남아야 한다.

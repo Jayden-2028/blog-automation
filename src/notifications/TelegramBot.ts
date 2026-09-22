@@ -9,6 +9,7 @@
 import { getKeywordRankingByRunAndRank } from "../services/supabase/repositories/keywordRankingRepository.js";
 import {
   listArticlesByJobId,
+  updateArticle,
   updateArticleStatus as updateArticleStatusRepo,
 } from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
@@ -22,6 +23,14 @@ import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
+import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
+import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
+import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
+import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
+import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
+import { applyImageEditRequest, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
+import type { MarkerChange } from "../workflows/images/applyImageEditRequest.js";
+import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -152,12 +161,30 @@ export type HandleResearchDecisionOutcome =
 
 export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
+/** 실패 후 되살릴 버튼 문구. 누른 그 동작으로 되돌려야 한다(네이버를 눌렀는데 블로그 버튼이 오면 안 된다). */
+const PUBLISH_RETRY_LABEL: Record<PublishDecisionAction, string> = {
+  blogspot: "🔵 블로그 발행",
+  naver: "🟢 네이버 발행",
+  images: "🖼 이미지 수정",
+};
+
 export type HandlePublishDecisionOutcome =
   | { status: "ignored"; reason: "not_a_publish_decision" | "wrong_chat" }
   | { status: "job_not_found" }
   | { status: "published"; url: string }
   | { status: "already_done"; url: string }
-  | { status: "failed"; reason: string };
+  | { status: "failed"; reason: string }
+  /** 버튼은 붙었으나 처리 경로가 아직 연결되지 않았다(2026-09-22 네이버 재개 작업 중). */
+  | { status: "not_wired"; action: PublishDecisionAction }
+  /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
+  | { status: "queued"; action: PublishDecisionAction };
+
+export type HandleImageEditResult = {
+  outcome:
+    | { status: "ignored"; reason: "wrong_chat" | "not_a_reply" | "empty_text" | "no_matching_job" }
+    | { status: "accepted"; jobId: string; requests: ImageEditRequest[] };
+  message: string;
+};
 
 export type HandlePublishDecisionResult = {
   outcome: HandlePublishDecisionOutcome;
@@ -201,6 +228,11 @@ export type TelegramBotOptions = {
   loadJobById?: (jobId: string) => Promise<ArticleJobRow | null>;
   /** 테스트 주입: 실제 Blogger 호출을 대체한다. 기본은 publishArticleToBlogspot(공개 발행). */
   publishToBlogspot?: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
+  /**
+   * 네이버 발행 **예약**. 여기서 실제 발행을 하지 않는다 - 로그인된 브라우저가 필요해
+   * GitHub Actions에서 못 돌린다. 맥의 로컬 폴러가 이 요청을 집어 간다.
+   */
+  requestNaverPublish?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   /** 승인(confirm) 시 원고 상태도 함께 바꾸는 데 쓴다(SPRINT_3_DESIGN.md 8절). job의 최신 원고 1건을 찾는다. */
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
@@ -243,6 +275,10 @@ export type TelegramBotOptions = {
    * **approved**인 job을 jsonb 필터로 직접 찾는다(승인 후 최종본을 보고 고치는 경우가 있다).
    */
   findJobByEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
+  findJobByImageEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
+  /** 이미지 수정에서 본문 마커를 고칠 때 쓴다. */
+  loadArticlesByJobId?: (jobId: string) => Promise<ArticleRow[]>;
+  updateArticleContent?: (articleId: number, content: string) => Promise<unknown>;
 
   // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
   /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
@@ -270,6 +306,7 @@ export class TelegramBot {
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly publishToBlogspot: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
+  private readonly requestNaverPublish: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
@@ -279,6 +316,9 @@ export class TelegramBot {
   private readonly triggerPublishPrepare: () => void;
   private readonly triggerRevision: (jobId: string, feedback: string) => void;
   private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
+  private readonly findJobByImageEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
+  private readonly loadArticlesByJobId: (jobId: string) => Promise<ArticleRow[]>;
+  private readonly updateArticleContent: (articleId: number, content: string) => Promise<unknown>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
@@ -304,6 +344,7 @@ export class TelegramBot {
     // 버튼으로 누르는 발행은 **공개**다 - 사람이 최종 원고를 보고 결정한 것이므로.
     this.publishToBlogspot =
       options.publishToBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId, { asDraft: false }));
+    this.requestNaverPublish = options.requestNaverPublish ?? ((job) => requestNaverPublish(job));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
     this.findLatestArticleByJobId =
@@ -336,6 +377,12 @@ export class TelegramBot {
     this.findJobByEditRequestMessageId =
       options.findJobByEditRequestMessageId ??
       ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId));
+    this.findJobByImageEditRequestMessageId =
+      options.findJobByImageEditRequestMessageId ??
+      ((messageId) => ArticleJobRepository.findByImageEditRequestMessageId(messageId));
+    this.loadArticlesByJobId = options.loadArticlesByJobId ?? ((jobId) => listArticlesByJobId(jobId));
+    this.updateArticleContent =
+      options.updateArticleContent ?? ((articleId, content) => updateArticle(articleId, { content }));
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -777,6 +824,70 @@ export class TelegramBot {
       return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
     }
 
+    // 2026-09-22 네이버 재개로 버튼이 3개가 됐다. **분기가 없으면 어떤 버튼을 눌러도 Blogspot이
+    // 발행된다** - 동작별로 확실히 갈라 놓는다.
+    if (parsed.action === "naver") {
+      // 네이버는 로그인된 브라우저가 필요해 여기(GitHub Actions)서 끝낼 수 없다. 요청만 남기고
+      // 맥의 로컬 폴러가 집어 간다 - 맥이 꺼져 있으면 켜질 때 처리된다(요청은 DB에 남는다).
+      const queued = await this.requestNaverPublish(job);
+      return {
+        outcome: { status: "queued", action: "naver" },
+        message: [
+          queued.queued ? "🟢 <b>네이버 발행을 예약했습니다</b>" : "ℹ️ <b>이미 예약돼 있습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          queued.queued
+            ? "맥이 켜져 있으면 곧 올라갑니다. 완료되면 주소를 보내드립니다."
+            : escapeTelegramHtml(queued.reason ?? ""),
+        ].join("\n"),
+      };
+    }
+
+    if (parsed.action === "images") {
+      // 자리 목록을 보여주고 **답장**을 기다린다. 여기서 바로 재수집하지 않는 이유는, 어느
+      // 자리가 마음에 안 드는지 사람만 알기 때문이다(빈 자리는 지정 없이도 자동으로 채운다).
+      const images = readJobManuscriptImages(job);
+      const lines = images.length
+        ? images.map((image) => {
+            const mark = image.url ? "🖼" : "⬜";
+            return `${mark} ${image.index}번 ${escapeTelegramHtml((image.description ?? "").slice(0, 34))}`;
+          })
+        : ["(이미지 자리가 없습니다)"];
+      const empty = images.filter((image) => !image.url).length;
+
+      const sent = await this.sendMessage(
+        [
+          "🖼 <b>이미지 수정</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          ...lines,
+          "",
+          empty > 0 ? `빈 자리 ${empty}개는 지정하지 않아도 다시 채웁니다.` : "빈 자리는 없습니다.",
+          "",
+          "이 메시지에 <b>답장</b>으로 바꾸고 싶은 자리를 적어주세요.",
+          "예) <code>2번은 인물 단독샷으로, 5번은 제품 컷으로</code>",
+          "번호만 적으면 그 자리를 그냥 다시 찾습니다. 빈 자리만 채우려면 <code>없음</code>이라고 답장하세요.",
+        ].join("\n")
+      ).catch(() => null);
+
+      await this.mergeJobMetadata(job.id, { imageEditRequestMessageId: sent?.message_id ?? null });
+
+      // 안내는 위에서 이미 보냈다 - message를 비워 중복 발송을 막는다.
+      return { outcome: { status: "queued", action: "images" }, message: "" };
+    }
+
+    if (parsed.action !== "blogspot") {
+      return {
+        outcome: { status: "not_wired", action: parsed.action },
+        message: [
+          "🚧 <b>아직 연결되지 않은 동작입니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          "이 버튼을 눌러도 아무 일도 일어나지 않습니다(발행되지 않습니다).",
+        ].join("\n"),
+      };
+    }
+
     const published = await this.publishToBlogspot(parsed.jobId);
 
     if (!published.ok) {
@@ -962,6 +1073,92 @@ export class TelegramBot {
     });
   }
 
+
+  /**
+   * "🖼 이미지 수정" 안내에 달린 답장을 처리한다(2026-09-22).
+   *
+   * 지정된 자리의 기존 이미지를 비우고(안 비우면 "채워진 자리"로 보고 건너뛴다) 자리별
+   * 요구사항을 남긴 뒤 재수집 게이트를 연다. 실제 수집은 job-publish-prepare가 한다.
+   *
+   * 읽은 내용을 **되읽어 보여준다** - 느슨하게 파싱하므로 잘못 읽었으면 사용자가 바로 알아야 한다.
+   */
+  async handleImageEditReply(message: TelegramMessage): Promise<HandleImageEditResult> {
+    if (String(message.chat.id) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+    const replyToId = message.reply_to_message?.message_id;
+    if (replyToId === undefined) {
+      return { outcome: { status: "ignored", reason: "not_a_reply" }, message: "" };
+    }
+    const text = message.text?.trim();
+    if (!text) {
+      return { outcome: { status: "ignored", reason: "empty_text" }, message: "" };
+    }
+
+    const job = await this.findJobByImageEditRequestMessageId(replyToId);
+    if (!job) {
+      // 이미지 수정 요청과 무관한 답장이다 - 조용히 넘긴다(다른 핸들러가 볼 수도 있다).
+      return { outcome: { status: "ignored", reason: "no_matching_job" }, message: "" };
+    }
+
+    // 같은 요청에 두 번째 답장이 와도 두 번 돌지 않게 즉시 지운다.
+    await this.mergeJobMetadata(job.id, { imageEditRequestMessageId: null });
+
+    const images = readJobManuscriptImages(job);
+    const requests = parseImageEditReply(text, Math.max(images.length, 1));
+    const applied = applyImageEditRequest(images, requests);
+    await this.mergeJobMetadata(job.id, applied.patch);
+
+    // 사용자가 획득 방식을 지시했으면 **본문 마커를 실제로 고친다**(2026-09-22).
+    // 어느 자리를 어떻게 채울지는 전부 마커의 `— 웹 검색` 표기로 갈리므로, metadata만 고치면
+    // 요청한 방식으로 채우는 코드가 그 자리를 쳐다보지도 않는다.
+    const markerChanges = await this.rewriteJobImageMarkers(job.id, requests).catch((error) => {
+      console.warn(`⚠️ [telegram] 마커 수정 실패(요구사항만 반영합니다): ${error instanceof Error ? error.message : error}`);
+      return [] as MarkerChange[];
+    });
+
+    this.triggerPublishPrepare();
+
+    const lines = [
+      "🖼 <b>이미지를 다시 만듭니다</b>",
+      "",
+      `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+      escapeTelegramHtml(describeImageEditRequests(requests)),
+    ];
+    if (markerChanges.length > 0) {
+      lines.push(
+        "",
+        ...markerChanges.map((change) => `${change.index}번 방식을 바꿉니다: ${change.from} → ${ACQUISITION_LABEL[change.to]}`)
+      );
+    }
+    if (applied.cleared.length > 0) {
+      lines.push("", `기존 이미지를 비운 자리: ${applied.cleared.join(", ")}번`);
+    }
+    lines.push("", "완료되면 원고 준비 알림을 다시 보내드립니다.");
+
+    return {
+      outcome: { status: "accepted", jobId: job.id, requests },
+      message: lines.join("\n"),
+    };
+  }
+
+
+  /**
+   * 사용자가 지시한 획득 방식을 본문 마커에 반영한다. 배리에이션 article을 직접 고친다 -
+   * prepareManuscript가 재사용 경로에서 그 본문을 그대로 쓰기 때문이다.
+   */
+  private async rewriteJobImageMarkers(jobId: string, requests: readonly ImageEditRequest[]): Promise<MarkerChange[]> {
+    if (requests.length === 0) return [];
+    const articles = await this.loadArticlesByJobId(jobId);
+    const target = [...articles].reverse().find((article) => article.platform != null) ?? articles[articles.length - 1];
+    if (!target?.content) return [];
+
+    const { body, changes } = rewriteAcquisitions(target.content, requests);
+    if (changes.length === 0) return [];
+    await this.updateArticleContent(target.id, body);
+    return changes;
+  }
+
   /**
    * 발행 버튼을 결과에 맞게 되돌린다.
    *
@@ -981,23 +1178,62 @@ export class TelegramBot {
     const parsed = parsePublishDecisionCallbackData(query.data);
     if (messageId === undefined || !parsed) return;
 
-    const retryable = outcome.status === "failed" || outcome.status === "job_not_found";
-    const button: TelegramInlineKeyboardButton = retryable
-      ? { text: "🚀 블로그 발행 (재시도)", callback_data: buildPublishDecisionCallbackData(parsed.jobId) }
-      : { text: outcome.status === "already_done" ? "✅ 이미 발행됨" : "✅ 발행됨", callback_data: "noop" };
+    // **누른 버튼 하나만** 바꾼다. 2026-09-22 실측: 발행 콜백을 가진 버튼을 전부 갈아끼워서,
+    // 이미지 수정을 눌렀는데 블로그·네이버 버튼까지 "✅ 발행됨"으로 잠겼다. 발행되지도 않았는데
+    // 발행됐다고 표시되고 다시 누를 수도 없는, 두 겹으로 잘못된 상태였다.
+    const settled = (action: PublishDecisionAction): OutgoingButton | null => {
+      if (action !== parsed.action) return null; // 다른 버튼은 건드리지 않는다
 
-    // 원래 키보드에서 발행 버튼만 갈아끼운다 - "원고 페이지 열기" 같은 링크 버튼은 살려야 한다.
-    // Worker가 이미 버튼을 "처리 중…" 하나로 덮었다면 원본이 없으니 발행 버튼만 다시 세운다.
+      switch (outcome.status) {
+        case "published":
+          return { text: "✅ 발행됨", callback_data: "noop" };
+        case "already_done":
+          return { text: "✅ 이미 발행됨", callback_data: "noop" };
+        case "queued":
+          // 네이버는 여기서 끝나지 않는다 - 맥의 폴러가 실제로 올린다. 잠그되 "발행됨"이라고
+          // 말하지 않는다. 아직 안 올라갔는데 올라갔다고 하면 사용자가 확인하러 갔다 헛걸음한다.
+          return { text: "🟢 예약됨", callback_data: "noop" };
+        case "not_wired":
+          // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
+          return null;
+        default:
+          // 실패·job 없음 - 사람이 다시 눌러야 하므로 되살린다.
+          return {
+            text: `${PUBLISH_RETRY_LABEL[action]} (재시도)`,
+            callback_data: buildPublishDecisionCallbackData(parsed.jobId, action),
+          };
+      }
+    };
+
     const original = query.message?.reply_markup?.inline_keyboard;
     const hadPublishButton = original?.some((row) =>
       row.some((b) => parsePublishDecisionCallbackData(b.callback_data) !== null)
     );
-    const keyboard =
-      original && hadPublishButton
-        ? original.map((row) =>
-            row.map((b) => (parsePublishDecisionCallbackData(b.callback_data) ? button : b))
-          )
-        : [[button]];
+
+    type OutgoingButton = { text: string; callback_data?: string; url?: string };
+    let keyboard: OutgoingButton[][];
+    if (original && hadPublishButton) {
+      // "원고 페이지 열기" 같은 링크 버튼과 누르지 않은 발행 버튼은 그대로 둔다.
+      keyboard = original.map((row): OutgoingButton[] =>
+        row.map((b): OutgoingButton => {
+          const own = parsePublishDecisionCallbackData(b.callback_data);
+          if (!own) return b;
+          return settled(own.action) ?? b;
+        })
+      );
+    } else {
+      // Worker가 버튼을 "처리 중…" 하나로 덮어 원본이 없다 - 세 버튼을 다시 세운다.
+      // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
+      keyboard = [
+        (["images", "blogspot", "naver"] as PublishDecisionAction[]).map(
+          (action) =>
+            settled(action) ?? {
+              text: PUBLISH_RETRY_LABEL[action],
+              callback_data: buildPublishDecisionCallbackData(parsed.jobId, action),
+            }
+        ),
+      ];
+    }
 
     await this.post("editMessageReplyMarkup", {
       chat_id: this.chatId,
@@ -1032,11 +1268,22 @@ export class TelegramBot {
     publishDecisionResult?: HandlePublishDecisionResult;
     researchTrigger?: ResearchTriggerResult;
     editFeedbackResult?: HandleEditFeedbackResult;
+    imageEditResult?: HandleImageEditResult;
   }> {
     if (!update.callback_query) {
       // callback_query가 아니면 콜백 3종 파서를 시도할 이유가 없다 - update.message가 있으면
       // "수정 필요" 답장인지만 확인한다(handleEditFeedbackMessage 참고).
       if (!update.message) return { handled: false };
+
+      // 답장 종류가 둘이다 - 원고 수정 피드백과 이미지 수정. 서로 다른 metadata 키로 job을 찾으므로
+      // 남의 답장을 집지 않는다. 이미지 쪽을 먼저 보는 이유는 없다(배타적이라 순서가 결과를
+      // 바꾸지 않는다) - 먼저 물어보고 아니면 다음으로 넘긴다.
+      const imageEditResult = await this.handleImageEditReply(update.message);
+      if (imageEditResult.outcome.status !== "ignored") {
+        if (imageEditResult.message) await this.sendMessage(imageEditResult.message).catch(() => {});
+        return { handled: true, imageEditResult };
+      }
+
       const editFeedbackResult = await this.handleEditFeedbackMessage(update.message);
       if (editFeedbackResult.message) await this.sendMessage(editFeedbackResult.message).catch(() => {});
       return { handled: editFeedbackResult.outcome.status !== "ignored", editFeedbackResult };

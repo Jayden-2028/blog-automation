@@ -1,6 +1,6 @@
 // 기획 브리프 테스트. 자동완성 HTTP와 Claude 호출을 주입해 외부 호출 없이 질의 생성·파싱·서식만 본다.
 
-import { buildAutocompleteQueries, collectAutocomplete } from "./fetchNaverAutocomplete.js";
+import { buildAutocompleteQueries, collectAutocomplete, relevantSuggestions } from "./fetchNaverAutocomplete.js";
 import { buildBriefPrompt, buildKeywordBrief, formatBriefForPrompt, parseBriefOutput, readJobBrief } from "./buildKeywordBrief.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -32,6 +32,27 @@ function assert(condition: unknown, message: string): asserts condition {
   assert(all.includes("분장놀이 결선 일정"), "두 번째 그룹의 새 항목이 빠졌습니다");
   assert(groups.every((g) => g.suggestions.length > 0), "빈 그룹이 남았습니다");
   console.log("✅ 자동완성 그룹 - 질의 제외·중복 제거·빈 그룹 제거");
+
+// 키워드와 한 글자도 안 겹치는 자동완성은 버린다(2026-09-22 실측).
+// "…여배우"를 던졌더니 `배우 김혜숙 별세`, `내일배움카드`가 돌아왔다 - 기획을 엉뚱한 데로 끈다.
+{
+  const kept = relevantSuggestions("낼 모레 50인데 너무 예뻐서 20대로 오해받는 여배우", [
+    "여배우 동안",
+    "내일배움카드",
+    "나라배움터",
+    "배우 김혜숙 별세",
+    "20대 피부관리",
+  ]);
+  assert(kept.includes("여배우 동안"), "키워드 토큰이 든 것은 남아야 한다");
+  assert(kept.includes("20대 피부관리"), "다른 토큰이라도 겹치면 남는다");
+  assert(!kept.includes("내일배움카드"), "'배움'만 걸린 것은 버려야 한다");
+  assert(!kept.includes("나라배움터"), "'배움'만 걸린 것은 버려야 한다");
+  assert(!kept.includes("배우 김혜숙 별세"), "'배우'만 걸린 다른 주제는 버려야 한다");
+
+  // 한 글자 키워드처럼 토큰을 못 만들면 거르지 않는다 - 전부 버리는 것보다 낫다.
+  assert(relevantSuggestions("아", ["아무거나"]).length === 1, "토큰이 없으면 거르지 않는다");
+  console.log("✅ 자동완성 관련성 - 키워드와 안 겹치는 제안은 버린다");
+}
 }
 
 // --- 3. 프롬프트에 자동완성·제목·유형 기준·예시가 실린다 --------------------------------------
