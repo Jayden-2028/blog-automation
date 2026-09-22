@@ -466,6 +466,34 @@ async function main(): Promise<void> {
   const parsed = extractTrailingJson(noisy) as { slots: { index: number }[] };
   assert(parsed?.slots?.[0]?.index === 1, `잡음 속에서 JSON을 찾아야 한다 (${JSON.stringify(parsed)})`);
   assert(extractTrailingJson("아무 JSON도 없음") === null, "JSON이 없으면 null이어야 한다");
+
+  // 여러 줄로 예쁘게 출력된 JSON도 읽어야 한다(2026-09-22 실측 사고).
+  // 줄 단위로만 파싱하던 때는 검색이 후보를 다 찾아놓고도 결과를 통째로 버렸다.
+  {
+    const pretty = [
+      "후보를 정리했습니다.",
+      "{",
+      '  "slots": [',
+      "    {",
+      '      "index": 1,',
+      '      "imageUrl": "https://img-cdn.theqoo.net/QvKRjF.webp",',
+      '      "sourcePage": "https://biz.chosun.com/entertainment/",',
+      '      "license": "더쿠에 재게시된 카카오톡 대화 캡처(원출처 불명확)",',
+      '      "alternates": []',
+      "    }",
+      "  ]",
+      "}",
+    ].join("\n");
+    const parsedPretty = extractTrailingJson(pretty) as { slots: { index: number; license: string }[] } | null;
+    assert(parsedPretty?.slots?.[0]?.index === 1, `여러 줄 JSON을 읽어야 한다 (${JSON.stringify(parsedPretty)})`);
+    assert(parsedPretty!.slots[0].license.includes("원출처"), "문자열 안 괄호에 속으면 안 된다");
+
+    // 값 안에 중괄호·따옴표가 들어 있어도 균형을 잘못 세면 안 된다.
+    const tricky = '설명\n{\n  "note": "중괄호 { 와 \\" 따옴표 } 가 값에 있음",\n  "ok": true\n}';
+    const parsedTricky = extractTrailingJson(tricky) as { ok: boolean } | null;
+    assert(parsedTricky?.ok === true, `문자열 안의 괄호를 건너뛰어야 한다 (${JSON.stringify(parsedTricky)})`);
+    console.log("✅ 여러 줄 JSON 추출 - 문자열 안 괄호에 속지 않는다");
+  }
   console.log("✅ codex 출력 잡음 속 JSON 추출");
 
   console.log("\n✅ collectWebImages 테스트 전체 통과");

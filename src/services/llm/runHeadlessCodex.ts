@@ -60,9 +60,57 @@ export type WebSearchAgent = (options: RunHeadlessCodexOptions) => Promise<RunHe
  * "tokens used" 같은 잡음을 함께 뱉고, 최종 JSON이 한 번이 아니라 두 번(응답 본문 + 마지막 요약)
  * 찍히기도 한다. 끝에서부터 거슬러 올라가며 처음으로 파싱되는 줄을 쓰면 형식이 조금 흔들려도 견딘다.
  */
-export function extractTrailingJson(stdout: string): unknown | null {
-  const lines = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+/**
+ * 문자열·이스케이프를 건너뛰며 괄호 균형을 맞춰, 텍스트에서 **마지막 JSON 덩어리**를 찾는다.
+ *
+ * 왜 필요한가(2026-09-22 실측): 원래는 줄 단위로만 파싱했다. 에이전트가 JSON을 여러 줄로 예쁘게
+ * 출력하면 어느 줄도 단독으로는 파싱되지 않아 **결과를 통째로 버렸다** - 주현영 원고에서 검색이
+ * 조선비즈·더쿠 후보를 다 찾아놓고도 "JSON을 찾지 못했습니다"로 끝났다.
+ */
+function findBalancedJson(text: string): unknown | null {
+  const closers = new Set(["}", "]"]);
+  for (let end = text.length - 1; end >= 0; end -= 1) {
+    if (!closers.has(text[end])) continue;
 
+    // 이 닫는 괄호와 짝이 맞는 여는 괄호를 뒤에서 앞으로 찾는다.
+    let depth = 0;
+    let inString = false;
+    for (let start = end; start >= 0; start -= 1) {
+      const ch = text[start];
+
+      if (inString) {
+        // 앞의 백슬래시 개수가 홀수면 이스케이프된 따옴표다.
+        if (ch === '"') {
+          let slashes = 0;
+          for (let k = start - 1; k >= 0 && text[k] === "\\"; k -= 1) slashes += 1;
+          if (slashes % 2 === 0) inString = false;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (ch === "}" || ch === "]") depth += 1;
+      else if (ch === "{" || ch === "[") {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(text.slice(start, end + 1));
+          } catch {
+            break; // 이 구간은 JSON이 아니다 - 더 앞의 닫는 괄호로 넘어간다.
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function extractTrailingJson(stdout: string): unknown | null {
+  // 빠른 경로: 한 줄에 통째로 담긴 경우(대부분).
+  const lines = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i];
     if (!line.startsWith("{") && !line.startsWith("[")) continue;
@@ -72,7 +120,9 @@ export function extractTrailingJson(stdout: string): unknown | null {
       continue;
     }
   }
-  return null;
+
+  // 여러 줄에 걸쳐 있거나 앞뒤에 설명이 붙은 경우.
+  return findBalancedJson(stdout);
 }
 
 export async function runHeadlessCodex(options: RunHeadlessCodexOptions): Promise<RunHeadlessCodexResult> {
