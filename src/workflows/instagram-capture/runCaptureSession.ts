@@ -19,11 +19,17 @@ export type RunCaptureSessionDeps = {
   capture: (url: string) => Promise<CarouselCapture>;
   /** 슬라이드를 보고 판정한다. */
   judge: (capture: CarouselCapture, entry: InstagramQueueEntry) => Promise<CarouselJudgement>;
-  /** 오버레이가 있는 슬라이드의 깨끗한 원본을 찾는다. 못 찾으면 null. */
+  /**
+   * 오버레이가 있는 슬라이드의 깨끗한 원본을 찾는다. 못 찾으면 null.
+   *
+   * tempDir는 **이번 캡처의 임시 디렉터리**다. 내려받은 파일을 다른 데 쓰면 cleanup이 못 지워
+   * 쌓이고(매 실행마다 샌다), 두 항목을 잇달아 처리할 때 같은 파일명으로 부딪힌다.
+   */
   findCleanAlternative: (input: {
     keyword: string;
     description: string;
     slideIndex: number;
+    tempDir: string;
   }) => Promise<CleanAlternative | null>;
   /** 임시 디렉터리 정리. */
   cleanup: (tempDir: string) => Promise<void>;
@@ -75,6 +81,7 @@ export async function runCaptureSession(
         keyword: judgement.searchKeyword,
         description,
         slideIndex: slide.slideIndex,
+        tempDir: captured.tempDir,
       });
       if (alternative) {
         images.push({

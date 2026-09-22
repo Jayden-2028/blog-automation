@@ -42,29 +42,45 @@ function usable(candidate: ImageCandidate): boolean {
   return true;
 }
 
-async function download(url: string, referer: string | null): Promise<Buffer | null> {
+export type Downloaded = { buffer: Buffer; contentType: string };
+
+async function download(url: string, referer: string | null): Promise<Downloaded | null> {
   try {
     const headers = { ...HEADERS };
     if (referer) headers.Referer = safeHeaderUrl(referer);
     const response = await fetch(url, { headers, redirect: "follow" });
     if (!response.ok) return null;
     const buffer = Buffer.from(await response.arrayBuffer());
-    return buffer.length > 0 ? buffer : null;
+    if (buffer.length === 0) return null;
+    return { buffer, contentType: response.headers.get("content-type") ?? "" };
   } catch {
     return null;
   }
 }
 
+/**
+ * 파일 확장자를 실제 content-type에서 정한다.
+ *
+ * 왜 중요한가: createInstagramJob의 guessMimeType은 **확장자만 보고** MIME을 정하고, 그 MIME이
+ * Storage에 저장되는 content-type이자 파일 확장자가 된다(uploadArticleImage). 확장자를 .img처럼
+ * 두면 전부 image/png로 올라가, 내용은 JPEG인데 png라고 적힌 파일이 나간다.
+ */
+export function extensionForContentType(contentType: string): string {
+  const type = contentType.split(";")[0].trim().toLowerCase();
+  if (type === "image/jpeg" || type === "image/jpg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "image/gif") return "gif";
+  return "png";
+}
+
 export type FindCleanAlternativeDeps = {
   search?: (query: string) => Promise<ImageCandidate[]>;
-  fetchImage?: (url: string, referer: string | null) => Promise<Buffer | null>;
-  /** 내려받은 파일을 둘 디렉터리. 캡처 임시 디렉터리를 그대로 쓴다. */
-  tempDir: string;
+  fetchImage?: (url: string, referer: string | null) => Promise<Downloaded | null>;
 };
 
 export async function findCleanAlternative(
-  input: { keyword: string; description: string; slideIndex: number },
-  deps: FindCleanAlternativeDeps
+  input: { keyword: string; description: string; slideIndex: number; tempDir: string },
+  deps: FindCleanAlternativeDeps = {}
 ): Promise<CleanAlternative | null> {
   const search = deps.search ?? searchImagesMerged;
   const fetchImage = deps.fetchImage ?? download;
@@ -75,11 +91,12 @@ export async function findCleanAlternative(
   // 후보를 순서대로 받아 본다 - 핫링크 차단으로 앞쪽이 막혀도 자리를 통째로 버리지 않는다
   // (2026-09-21에 고친 것과 같은 실패 유형).
   for (const candidate of candidates.slice(0, 5)) {
-    const buffer = await fetchImage(candidate.link, candidate.sourcePage ?? null);
-    if (!buffer) continue;
+    const downloaded = await fetchImage(candidate.link, candidate.sourcePage ?? null);
+    if (!downloaded) continue;
 
-    const localPath = join(deps.tempDir, `alt-${input.slideIndex}.img`);
-    await writeFile(localPath, buffer);
+    // 캡처 임시 디렉터리에 쓴다 - cleanup이 같이 지우고, 항목끼리 파일명이 부딪히지 않는다.
+    const localPath = join(input.tempDir, `alt-${input.slideIndex}.${extensionForContentType(downloaded.contentType)}`);
+    await writeFile(localPath, downloaded.buffer);
     return {
       localPath,
       // 출처 페이지를 모르면 이미지 URL이라도 남긴다 - 저작권 판단의 근거가 되어야 한다.

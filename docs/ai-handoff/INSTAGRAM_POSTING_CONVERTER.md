@@ -158,6 +158,7 @@ npm run test:ig-promote                승격 규칙 불변식(8건)
 npm run test:ig-capture-file           캡처 JSON 검증 규격(11건)
 npm run test:ig-capture-session        캡처 세션 정책·실패 처리(8건)
 npm run test:ig-capture-queue          대기열 재시도·포기 규칙(8건)
+npm run test:ig-alternative            대체 이미지 소싱 규격(7건)
 ```
 
 ## 현재 상태 (2026-09-21)

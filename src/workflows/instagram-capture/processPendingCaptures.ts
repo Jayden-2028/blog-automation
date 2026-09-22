@@ -66,9 +66,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
       judge: async (captured, queueEntry) =>
         (await import("./judgeCarouselSlides.js")).judgeCarouselSlides(captured, queueEntry),
       findCleanAlternative: async (input) =>
-        (await import("./findCleanAlternative.js")).findCleanAlternative(input, {
-          tempDir: process.env.TMPDIR ?? "/tmp",
-        }),
+        (await import("./findCleanAlternative.js")).findCleanAlternative(input),
       cleanup: (dir) => rm(dir, { recursive: true, force: true }),
     });
 

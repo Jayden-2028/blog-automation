@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     findCleanAlternative: async (input) => {
       console.log(`\n▶ 자리 ${input.slideIndex} 대체 이미지 검색...`);
       const { findCleanAlternative } = await import("./findCleanAlternative.js");
-      const found = await findCleanAlternative(input, { tempDir: captured?.tempDir ?? "/tmp" });
+      const found = await findCleanAlternative(input);
       console.log(found ? `   찾음: ${found.sourcePage}` : "   못 찾음 - 이 자리는 비웁니다");
       return found;
     },
