@@ -2,7 +2,7 @@
 //
 // 사람이 텔레그램에서 급히 치는 글이라 형식을 강제할 수 없다. 느슨하게 읽되 **잘못 읽지는
 // 않아야** 한다 - 엉뚱한 자리를 다시 만들면 멀쩡한 이미지를 잃는다.
-import { describeImageEditRequests, inferAcquisition, parseImageEditReply } from "./imageEditRequest.js";
+import { describeImageEditRequests, inferAcquisition, parseImageEditReply, splitSearchInstruction } from "./imageEditRequest.js";
 import { rewriteAcquisitions } from "./applyImageEditRequest.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -130,6 +130,26 @@ const eq = (text: string, expected: Array<[number, string]>) => {
   const untouched = rewriteAcquisitions(body, [{ index: 2, requirement: "더 큰 사진으로" }]);
   assert(untouched.body === body && untouched.changes.length === 0, "방식 지시가 없으면 본문 무변경");
   console.log("✅ 마커 수정 - 지시한 자리만 방식 전환, 나머지는 보존");
+}
+
+// --- 10. 검색어와 원하는 그림을 갈라낸다(2026-09-22 실측 사고) ----------------------------------
+// 문장을 통째로 검색창에 넣어 1·5번 자리가 비었다. 사용자가 실제로 보낸 문장 그대로 시험한다.
+{
+  const cases: Array<[string, string]> = [
+    ["SNL 주현영과 김원훈 으로 검색해서 나오는 투샷 이미지 넣어주세요.", "SNL 주현영과 김원훈"],
+    ["주현영 김원훈 우연히 보자 검색해서 나오는 카카오톡 캡쳐 이미지 넣어주세요.", "주현영 김원훈 우연히 보자"],
+    ["주현영 김원훈 연락공개 로 검색해서 나오는 주현영 유튜브 영상 캡쳐 이미지 넣어주세요.", "주현영 김원훈 연락공개"],
+  ];
+  for (const [text, expected] of cases) {
+    const got = splitSearchInstruction(text);
+    assert(got.query === expected, `검색어를 뽑아야 한다\n     "${text}"\n     받은 값: "${got.query}"\n     기대값: "${expected}"`);
+    assert(got.want.length > 0 && got.want !== text, `원하는 그림도 남아야 한다 (${got.want})`);
+  }
+
+  // "검색"이라는 말이 없으면 못 가른다 - 호출부가 기존 검색어를 쓴다.
+  assert(splitSearchInstruction("더 큰 사진으로").query === "", "검색 지시가 없으면 검색어를 비운다");
+  assert(splitSearchInstruction("검색해서 나오는 투샷").query === "", "앞이 비면 검색어를 못 뽑은 것이다");
+  console.log("✅ 검색어 추출 - 문장이 아니라 검색어만 검색창에 넣는다");
 }
 
 console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");

@@ -15,6 +15,7 @@ import { resolve } from "node:path";
 
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
 import { buildWebImageSlots, collectWebImages } from "./collectWebImages.js";
+import { splitSearchInstruction } from "./imageEditRequest.js";
 import type { CollectWebImagesOptions, UnfilledSlot } from "./collectWebImages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
@@ -56,12 +57,20 @@ export async function collectWebImagesForJob(
     // 사용자가 검색어를 직접 지정하는 경우가 대부분이라("SNL 주현영과 김원훈 으로 검색해서")
     // **요구사항을 검색어로 쓰고**, 원래 검색어는 뒤에 남겨 맥락을 잃지 않게 한다.
     .map((slot) => {
-      const want = requirements[String(slot.index)];
-      if (!want) return slot;
+      const requirement = requirements[String(slot.index)];
+      if (!requirement) return slot;
+
+      // 사용자는 "<검색어> 로 검색해서 나오는 <어떤 그림>"으로 쓴다. 문장을 통째로 검색창에
+      // 넣으면 아무것도 안 나온다(2026-09-22 실측 - 1·5번 자리가 그래서 비었다).
+      const { query, want } = splitSearchInstruction(requirement);
       return {
         ...slot,
-        query: want,
-        description: `${slot.description} (사용자 요청: ${want})`,
+        // 검색어를 못 뽑았으면 기존 검색어를 그대로 둔다 - 문장을 넣느니 낫다.
+        query: query || slot.query,
+        // **설명을 사용자 말로 갈아 끼운다.** 덧붙이기만 하면 옛 설명이 판정을 끌고 간다
+        // (실측: 자리 5의 옛 설명이 "조회수·추천수·댓글수"라, 유튜브 캡처를 요청했는데도
+        // 검증자가 "조회수를 요약할 이미지가 없다"며 전부 버렸다).
+        description: want,
       };
     });
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };

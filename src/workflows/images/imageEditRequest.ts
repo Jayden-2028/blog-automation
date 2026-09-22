@@ -95,3 +95,26 @@ export function inferAcquisition(requirement: string): RequestedAcquisition | nu
 
   return null;
 }
+
+/**
+ * 요구사항에서 **검색어와 원하는 그림**을 갈라낸다(2026-09-22 실측 사고).
+ *
+ * 사용자는 보통 "<검색어> 로 검색해서 나오는 <어떤 그림>" 형태로 쓴다. 이 문장을 통째로
+ * 검색창에 넣으면 당연히 아무것도 안 나온다 - 실제로 그렇게 돌려서 1·5번 자리가 비었다.
+ *
+ *   "SNL 주현영과 김원훈 으로 검색해서 나오는 투샷 이미지 넣어주세요."
+ *     -> query: "SNL 주현영과 김원훈"   want: "투샷 이미지 넣어주세요."
+ *
+ * "검색"이라는 말이 없으면 갈라낼 수 없다 - 그때는 query를 비우고 호출부가 기존 검색어를 쓴다.
+ */
+export function splitSearchInstruction(requirement: string): { query: string; want: string } {
+  const text = (requirement ?? "").trim();
+  const matched = text.match(/^(.*?)\s*(?:으로|로|를|을)?\s*검색(?:해서|하면|해|해보면)?\s*(?:나오는|나온)?\s*(.*)$/);
+  if (!matched) return { query: "", want: text };
+
+  const query = matched[1].trim();
+  const want = matched[2].trim();
+  // 앞이 비면("검색해서 나오는 투샷") 검색어를 못 뽑은 것이다.
+  if (!query) return { query: "", want: text };
+  return { query, want: want || text };
+}
