@@ -124,6 +124,30 @@ npm run ig:capture -- --first --dry-run --keep
 
 세션이 풀리면 `ig:login`을 다시 돌린다(같은 디렉터리에 덮어쓴다).
 
+## 소유 범위 — 이 기능이 건드려도 되는 것 (2026-09-23)
+
+인스타 컨버터와 블로그 자동화는 **같은 저장소·같은 `article_jobs` 테이블**을 쓰면서 세션은
+따로 돈다. 경계를 적어 두지 않으면 한쪽 세션이 다른 쪽 자동화를 켜 버린다 — 2026-09-23에
+실제로 그랬다. 이 기능 작업 중 `naver-poll`을 launchd에 올렸고, 그 폴러가 **다른 세션이 걸어둔**
+네이버 발행 요청 1건을 집어 가 실제로 발행했다. 발행은 되돌릴 수 없다.
+
+| | 인스타 컨버터 (이 문서) | 블로그 자동화 |
+|---|---|---|
+| 워크트리 | `ig-dev` (feat/instagram-keyword-source) | `prod` (main) |
+| launchd | `instagram-capture-poll` | `naver-poll`, `manuscript-export` |
+| 수집 큐 | `data/instagram-queue.jsonl` | `article_jobs` |
+| 텔레그램 봇 | `INSTAGRAM_BOT_TOKEN` | `TELEGRAM_BOT_TOKEN` |
+| offset | `instagram-capture-bot` | GH Actions `telegram-update.yml` |
+
+**수집 큐는 이미 완전히 분리돼 있다** — 봇 토큰, offset receiverId, 실행 락이 전부 따로다.
+
+**발행 큐는 공유다.** 네이버 발행 요청은 전용 테이블이 아니라 `job.metadata.naverPublish`에
+달리고, `listPendingNaverRequests()`는 `status`만 보고 **출처를 보지 않는다**. 인스타 출신 job은
+`metadata.source = "instagram_manual"`로 구분되므로 기술적으로는 거를 수 있지만, 2026-09-23에
+**나누지 않기로 했다**(A안). 폴러가 둘이 되면 🟢 버튼 하나가 출처에 따라 다른 폴러에 걸리고,
+한쪽이 안 떠 있으면 그 글만 조용히 안 올라간다 — 원인 찾기가 더 어려워진다. 큐는 하나로 두고
+**폴러 소유권으로 가른다.**
+
 ## 알려진 위험
 
 - **로그인 세션 만료.** 티스토리를 접은 것과 같은 구조다. 다만 실패해도 큐에 남고 알림만 가므로
@@ -138,3 +162,5 @@ npm run ig:capture -- --first --dry-run --keep
 - 인스타 **탐색**(이슈 페이지 훑기)으로 범위를 넓히지 않는다 - 기각된 설계다
   (`INSTAGRAM_KEYWORD_SOURCE.md`). 사용자가 지목한 URL 하나만 연다.
 - 캡처 실패를 이미지 없는 job 생성으로 때우지 않는다.
+- **`naver-poll`을 비롯해 블로그 자동화 쪽 launchd를 올리거나 내리지 않는다.** 위 소유 범위 표
+  참고. 인스타 원고도 🟢 네이버 발행 버튼을 쓰지만, 그 폴러는 이 기능 소유가 아니다.
