@@ -18,17 +18,38 @@ import type { CarouselCapture } from "./captureTypes.js";
 const DEFAULT_MAX_SLIDES = 10;
 
 /** 캐러셀 "다음" 버튼. 인스타가 DOM을 바꾸면 여기가 먼저 깨진다 - 0장이면 실패로 처리된다. */
-const NEXT_BUTTON = 'button[aria-label="다음"], button[aria-label="Next"], [aria-label="Next"], [aria-label="다음"]';
+/**
+ * 캐러셀 "다음" 컨트롤 후보.
+ *
+ * 라벨이 로케일·실험마다 달라서 한 문자열로는 못 잡는다. 부분 일치(*=)까지 써서 넓게 훑고,
+ * 그래도 못 찾으면 goToNextSlide가 키보드 화살표로 떨어진다.
+ */
+const NEXT_BUTTON = [
+  'button[aria-label="다음"]',
+  'button[aria-label="Next"]',
+  '[aria-label="다음"]',
+  '[aria-label="Next"]',
+  '[aria-label*="다음"]',
+  '[aria-label*="Next" i]',
+].join(", ");
 
 /**
  * 게시물 컨테이너 **안쪽만** 본다.
  *
- * 맨몸 `img[srcset]`을 폴백에 두면 안 된다(2026-09-22에 뺐다): 인스타가 게시물을 못 열고 홈 피드로
- * 되돌려보내면 그 선택자가 **피드 이미지에 걸려** 엉뚱한 게시물을 조용히 찍는다. 실패하는 것보다
- * 나쁘다 - 원고에 다른 사람 사진이 들어가고 아무도 모른다.
+ * 맨몸 `img`를 페이지 전체에서 고르면 안 된다: 인스타가 게시물을 못 열고 홈 피드로 되돌려보내면
+ * 그 선택자가 **피드 이미지에 걸려** 엉뚱한 게시물을 조용히 찍는다. 실패보다 나쁘다 - 원고에
+ * 다른 사람 사진이 들어가고 아무도 모른다. 주소 검증(아래)과 짝으로 막는다.
+ *
+ * `article`과 `srcset`은 쓰지 않는다(2026-09-22 실측): 실제 페이지에서 article 0개, img[srcset]
+ * 0개, img 17개였다. 예전 선택자가 둘 다 요구해 30초를 기다리다 포기했다.
  */
-const POST_CONTAINER = 'article, main [role="dialog"]';
-const ARTICLE_IMAGE = `${POST_CONTAINER} img[srcset], ${POST_CONTAINER} img[src]`;
+const POST_CONTAINER = 'main [role="dialog"], main, article';
+const POST_IMAGE = `${POST_CONTAINER} img`;
+
+/** 인스타 이미지 CDN. 아바타·아이콘·광고를 걸러내는 1차 조건. */
+const IG_CDN = /cdninstagram|fbcdn/i;
+/** 본문 사진으로 볼 최소 렌더 크기(px). 프로필 아바타는 32~56px라 이걸로 걸러진다. */
+const MIN_RENDERED = 240;
 
 /** 공유 링크의 추적 파라미터(utm_source, stkn 등)를 떼고 표준 주소로 맞춘다. */
 export function canonicalPostUrl(url: string): { url: string; shortcode: string } | null {
@@ -90,6 +111,12 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
   // page.evaluate는 DOM 타입(lib.dom)이 필요한데 이 프로젝트 tsconfig에는 없다 - locator로 읽는다.
   const text = (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).slice(0, 2000);
   const probe = await probeSelectors(page);
+  // 실제로 쓰이는 aria-label을 모아 둔다 - "다음" 버튼 라벨이 로케일·실험마다 달라서,
+  // 목록을 보면 무엇을 겨냥해야 하는지 바로 정해진다(고정 문자열로는 계속 빗나간다).
+  const labels = await page
+    .locator("[aria-label]")
+    .evaluateAll((nodes) => Array.from(new Set(nodes.map((n) => n.getAttribute("aria-label") ?? ""))).filter(Boolean))
+    .catch(() => [] as string[]);
   // HTML 원본도 남긴다 - 선택자를 고치려면 구조를 봐야 한다.
   const html = await page.content().catch(() => "");
   await writeFile(join(tempDir, "failure.html"), html, "utf8").catch(() => {});
@@ -102,6 +129,9 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
       "--- 선택자별 개수 (이 표가 핵심) ---",
       probe,
       "",
+      `--- 페이지의 aria-label ${labels.length}개 ---`,
+      labels.map((l) => `  ${l}`).join("\n"),
+      "",
       "--- body text (앞 2000자) ---",
       text,
     ].join("\n"),
@@ -111,8 +141,60 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
   // 터미널에도 바로 찍는다 - 파일을 열어 보기 전에 원인이 드러나는 일이 많다.
   console.error("\n--- 선택자별 개수 ---");
   console.error(probe);
+  if (labels.length > 0) {
+    console.error(`\n--- aria-label ${labels.length}개 ---`);
+    console.error(labels.map((l) => `  ${l}`).join("\n"));
+  }
 
   return `화면: ${shot} / 진단: ${join(tempDir, "failure.txt")} / HTML: ${join(tempDir, "failure.html")}`;
+}
+
+type PostImage = { locator: import("playwright").Locator; src: string; width: number };
+
+/**
+ * 지금 보이는 **본문 사진**을 고른다.
+ *
+ * 페이지에는 아바타·아이콘·추천 썸네일까지 섞여 17개 남짓의 img가 있다(2026-09-22 실측).
+ * 인스타 CDN에서 온 것 중 **가장 크게 렌더된 것**이 본문 사진이다 - 아바타는 32~56px이고
+ * 추천 썸네일도 본문보다 작다. 크기로 고르면 클래스명이 바뀌어도 따라갈 필요가 없다.
+ */
+async function currentPostImage(page: import("playwright").Page): Promise<PostImage | null> {
+  const all = page.locator(POST_IMAGE);
+  const count = await all.count().catch(() => 0);
+
+  let best: PostImage | null = null;
+  for (let i = 0; i < count; i += 1) {
+    const locator = all.nth(i);
+    const src = (await locator.getAttribute("src").catch(() => null)) ?? "";
+    if (!IG_CDN.test(src)) continue;
+    const box = await locator.boundingBox().catch(() => null);
+    if (!box || box.width < MIN_RENDERED || box.height < MIN_RENDERED) continue;
+    if (!best || box.width > best.width) best = { locator, src, width: box.width };
+  }
+  return best;
+}
+
+/**
+ * 캐러셀을 한 칸 넘긴다. 넘길 곳이 없으면 false(단일 이미지 게시물).
+ *
+ * "다음" 버튼은 **이미지에 마우스를 올려야** 나타나고, aria-label도 로케일·실험마다 달라서
+ * 고정 문자열로 잡으면 놓친다(실측: button[aria-label="다음"] 0개, [role=button] 30개).
+ * 그래서 (1) 호버 후 알려진 라벨들을 훑고, (2) 그래도 없으면 키보드 오른쪽 화살표를 쓴다.
+ * 넘어갔는지는 호출자가 src 변화로 판정하므로 여기서 거짓 성공을 내도 루프가 알아서 멈춘다.
+ */
+async function goToNextSlide(page: import("playwright").Page, current: PostImage): Promise<boolean> {
+  await current.locator.hover({ timeout: 3_000 }).catch(() => {});
+
+  const next = page.locator(NEXT_BUTTON).first();
+  if ((await next.count().catch(() => 0)) > 0) {
+    await next.click({ timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(700);
+    return true;
+  }
+
+  await page.keyboard.press("ArrowRight").catch(() => {});
+  await page.waitForTimeout(700);
+  return true;
 }
 
 export async function captureInstagramCarousel(
@@ -161,20 +243,27 @@ export async function captureInstagramCarousel(
       );
     }
 
-    const ready = await page
-      .waitForSelector(ARTICLE_IMAGE, { timeout: 30_000 })
-      .then(() => true)
-      .catch(() => false);
+    // 선택자만 기다리면 안 된다 - POST_IMAGE는 아바타에도 걸려서, 본문 사진이 로드되기 전에
+    // 대기가 끝나고 곧장 "슬라이드 0장"으로 실패한다. 조건(CDN + 최소 크기)을 만족하는 사진이
+    // 실제로 나타날 때까지 폴링한다.
+    let ready = false;
+    for (let waited = 0; waited < 30_000; waited += 1_000) {
+      if (await currentPostImage(page)) {
+        ready = true;
+        break;
+      }
+      await page.waitForTimeout(1_000);
+    }
     if (!ready) {
       const where = await dumpDiagnostics(page, tempDir);
       throw new Error(
-        `게시물을 열지 못했습니다(로그인 벽·동의 배너·레이아웃 변경 중 하나). ${where}\n` +
+        `본문 사진을 찾지 못했습니다(로그인 벽·동의 배너·레이아웃 변경 중 하나). ${where}\n` +
           `   창을 띄워 눈으로 보려면: IG_CAPTURE_HEADLESS=false npm run ig:capture -- <id> --dry-run --keep`
       );
     }
 
     const caption = await page
-      .locator("article h1, article [data-testid='post-comment-root'] span")
+      .locator("main h1, article h1, main [data-testid='post-comment-root'] span")
       .first()
       .innerText()
       .catch(() => "");
@@ -183,22 +272,18 @@ export async function captureInstagramCarousel(
     const seen = new Set<string>();
 
     for (let i = 1; i <= maxSlides; i += 1) {
-      const image = page.locator(ARTICLE_IMAGE).first();
-      if ((await image.count()) === 0) break;
+      const current = await currentPostImage(page);
+      if (!current) break;
 
-      // 같은 이미지를 두 번 찍으면(다음 버튼이 안 먹었다) 거기서 멈춘다.
-      const src = (await image.getAttribute("src").catch(() => null)) ?? "";
-      if (src && seen.has(src)) break;
-      if (src) seen.add(src);
+      // 같은 이미지를 두 번 찍으면(다음으로 못 넘어갔다) 거기서 멈춘다.
+      if (seen.has(current.src)) break;
+      seen.add(current.src);
 
       const localPath = join(tempDir, `slide-${i}.png`);
-      await image.screenshot({ path: localPath });
+      await current.locator.screenshot({ path: localPath });
       slides.push({ slideIndex: i, localPath });
 
-      const next = page.locator(NEXT_BUTTON).first();
-      if ((await next.count()) === 0) break;   // 단일 이미지 게시물
-      await next.click({ timeout: 5_000 }).catch(() => null);
-      await page.waitForTimeout(600);
+      if (!(await goToNextSlide(page, current))) break;
     }
 
     return { slides, caption: caption.trim(), tempDir };
