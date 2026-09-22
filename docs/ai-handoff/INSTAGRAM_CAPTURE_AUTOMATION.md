@@ -105,8 +105,17 @@ npm run ig:install-browser          # Playwright 크로미움 내려받기(최�
 # .env에 IG_BROWSER_PROFILE=/Users/<사용자>/.ig-profile 추가
 npm run ig:login                    # 창이 열리면 인스타 로그인 -> 터미널에서 Enter
 npm run ig-capture:status           # 대기열 확인
-# .env에 IG_CAPTURE_AUTO=true 추가 -> 이때부터 폴러가 캡처까지 이어서 한다
+
+# 자동화를 켜기 전에 한 건을 손으로 돌려 셀렉터가 맞는지 본다
+npm run ig:capture -- --first --dry-run --keep
+
+# 잘 되면 .env에 IG_CAPTURE_AUTO=true 추가 -> 이때부터 폴러가 캡처까지 이어서 한다
 ```
+
+`ig:capture`는 자동 경로(`processPendingCaptures`)와 **같은 함수**를 쓰되 단계마다 무엇이 나왔는지
+출력한다 - 슬라이드 몇 장을 찍었는지, 판정이 어떻게 나왔는지, 대체 이미지를 찾았는지. 셀렉터가
+틀리면 "슬라이드 0장"으로 바로 드러난다. `--dry-run`은 DB에 아무것도 쓰지 않고, `--keep`은 찍힌
+스크린샷을 남겨 눈으로 확인하게 한다.
 
 `ig:login`은 `captureInstagramCarousel`과 **같은 함수·같은 인자**로 프로필을 만든다(headless만
 끈다). `npx playwright` 한 줄로 만들면 인자가 어긋나 "로그인은 했는데 캡처는 로그인 안 된 상태"가
