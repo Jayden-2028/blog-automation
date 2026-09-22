@@ -44,12 +44,22 @@ const NEXT_BUTTON = [
  * 0개, img 17개였다. 예전 선택자가 둘 다 요구해 30초를 기다리다 포기했다.
  */
 const POST_CONTAINER = 'main [role="dialog"], main, article';
-const POST_IMAGE = `${POST_CONTAINER} img`;
+/**
+ * 페이지 전체의 img에서 고른다.
+ *
+ * main 안쪽으로 한정했다가 본문 사진을 통째로 놓쳤다(2026-09-22 실측: img 17개인데 조건을
+ * 만족하는 게 0개). 컨테이너 구조는 실험마다 바뀌므로 겨냥하지 않는다 - "다른 게시물을 찍는"
+ * 위험은 이동 후 **주소 검증**(/p/<shortcode>)이 이미 막고 있어 범위를 좁힐 이유가 없다.
+ */
+const POST_IMAGE = "img";
 
-/** 인스타 이미지 CDN. 아바타·아이콘·광고를 걸러내는 1차 조건. */
-const IG_CDN = /cdninstagram|fbcdn/i;
+/**
+ * 이미지 출처 필터. data:/blob:도 받는다 - 인스타가 blob URL로 내려주는 경우가 있고, 그걸
+ * 거르면 본문 사진이 통째로 빠진다.
+ */
+const IG_CDN = /cdninstagram|fbcdn|^blob:|^data:image/i;
 /** 본문 사진으로 볼 최소 렌더 크기(px). 프로필 아바타는 32~56px라 이걸로 걸러진다. */
-const MIN_RENDERED = 240;
+const MIN_RENDERED = 200;
 
 /** 공유 링크의 추적 파라미터(utm_source, stkn 등)를 떼고 표준 주소로 맞춘다. */
 export function canonicalPostUrl(url: string): { url: string; shortcode: string } | null {
@@ -84,8 +94,11 @@ const PROBE_SELECTORS = [
   "main",
   "article img[srcset]",
   "main img[srcset]",
+  "main img",
   "img[srcset]",
   "img",
+  '[aria-label="슬라이드"]',
+  '[aria-label="슬라이드"] img',
   'button[aria-label="다음"]',
   'button[aria-label="Next"]',
   '[aria-label="다음"]',
@@ -103,6 +116,29 @@ async function probeSelectors(page: import("playwright").Page): Promise<string> 
   return rows.join("\n");
 }
 
+/**
+ * 페이지의 img를 **전부** 훑어 크기·출처를 적는다.
+ *
+ * 선택자 개수만으로는 "img 17개인데 왜 하나도 안 걸리나"를 못 푼다 - 크기가 작아서인지,
+ * src가 예상한 CDN이 아닌지, main 밖에 있는지 알 수 없기 때문이다. 한 장씩 실측을 적으면
+ * 필터를 어디서 고쳐야 하는지가 바로 나온다.
+ */
+async function inventoryImages(page: import("playwright").Page): Promise<string> {
+  const all = page.locator("img");
+  const count = Math.min(await all.count().catch(() => 0), 30);
+  const rows: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const el = all.nth(i);
+    const src = (await el.getAttribute("src").catch(() => null)) ?? "";
+    const alt = (await el.getAttribute("alt").catch(() => null)) ?? "";
+    const box = await el.boundingBox().catch(() => null);
+    const size = box ? `${Math.round(box.width)}x${Math.round(box.height)}` : "(안 보임)";
+    const kind = src.startsWith("blob:") ? "blob" : src.startsWith("data:") ? "data" : new URL(src, "https://x/").hostname;
+    rows.push(`  ${String(i).padStart(2)}  ${size.padEnd(11)} ${kind.padEnd(28)} alt="${alt.slice(0, 40)}"`);
+  }
+  return rows.join("\n") || "  (img 없음)";
+}
+
 async function dumpDiagnostics(page: import("playwright").Page, tempDir: string): Promise<string> {
   const shot = join(tempDir, "failure.png");
   await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
@@ -111,6 +147,7 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
   // page.evaluate는 DOM 타입(lib.dom)이 필요한데 이 프로젝트 tsconfig에는 없다 - locator로 읽는다.
   const text = (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).slice(0, 2000);
   const probe = await probeSelectors(page);
+  const images = await inventoryImages(page);
   // 실제로 쓰이는 aria-label을 모아 둔다 - "다음" 버튼 라벨이 로케일·실험마다 달라서,
   // 목록을 보면 무엇을 겨냥해야 하는지 바로 정해진다(고정 문자열로는 계속 빗나간다).
   const labels = await page
@@ -129,6 +166,9 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
       "--- 선택자별 개수 (이 표가 핵심) ---",
       probe,
       "",
+      "--- img 실측 (크기 / 호스트 / alt) ---",
+      images,
+      "",
       `--- 페이지의 aria-label ${labels.length}개 ---`,
       labels.map((l) => `  ${l}`).join("\n"),
       "",
@@ -141,6 +181,8 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
   // 터미널에도 바로 찍는다 - 파일을 열어 보기 전에 원인이 드러나는 일이 많다.
   console.error("\n--- 선택자별 개수 ---");
   console.error(probe);
+  console.error("\n--- img 실측 (크기 / 호스트 / alt) ---");
+  console.error(images);
   if (labels.length > 0) {
     console.error(`\n--- aria-label ${labels.length}개 ---`);
     console.error(labels.map((l) => `  ${l}`).join("\n"));
