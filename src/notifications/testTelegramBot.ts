@@ -1099,15 +1099,43 @@ main().catch((error) => {
   // 6) 연결 안 된 동작은 **절대 발행하지 않는다**(2026-09-22 네이버 재개 작업 중).
   //    분기가 없으면 어떤 버튼을 눌러도 Blogspot이 발행된다 - 가장 위험한 실수라 테스트로 막는다.
   {
-    for (const action of ["naver", "images"]) {
+    // 이미지 수정은 아직 연결 전이다 - 눌러도 아무 일도 없어야 한다.
+    {
       let publishCalls = 0;
       const out = await publishBot(async () => {
         publishCalls += 1;
         return {} as never;
-      }).handlePublishDecisionCallback(query(`publish:${action}:${JOB}`));
-      assert(publishCalls === 0, `${action} 버튼이 Blogspot을 발행하면 안 된다`);
-      assert(out.outcome.status === "not_wired", `${action}은 not_wired여야 한다 (${JSON.stringify(out.outcome)})`);
+      }).handlePublishDecisionCallback(query(`publish:images:${JOB}`));
+      assert(publishCalls === 0, "이미지 버튼이 Blogspot을 발행하면 안 된다");
+      assert(out.outcome.status === "not_wired", `not_wired여야 한다 (${JSON.stringify(out.outcome)})`);
       assert(out.message.includes("발행되지 않습니다"), "아무 일도 없다는 점을 알려야 한다");
+    }
+
+    // 네이버는 **여기서 발행하지 않는다** - 로그인된 브라우저가 필요해 맥의 폴러가 집어 간다.
+    // 여기서 실수로 Blogspot이 발행되면 엉뚱한 채널에 글이 올라간다.
+    {
+      let publishCalls = 0;
+      let queuedJob = "";
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "네이버 대상" }) as never,
+        publishToBlogspot: (async () => {
+          publishCalls += 1;
+          return {} as never;
+        }) as never,
+        requestNaverPublish: async (j: { id: string }) => {
+          queuedJob = j.id;
+          return { queued: true };
+        },
+        sendMessage: async () => {},
+        answerCallbackQuery: async () => {},
+      } as never);
+      const out = await bot.handlePublishDecisionCallback(query(`publish:naver:${JOB}`));
+      assert(publishCalls === 0, "네이버 버튼이 Blogspot을 발행하면 안 된다");
+      assert(queuedJob === JOB, "네이버는 대기열에 넣어야 한다");
+      assert(out.outcome.status === "queued", `queued여야 한다 (${JSON.stringify(out.outcome)})`);
+      assert(out.message.includes("예약"), "예약됐다는 안내가 있어야 한다");
     }
     // blogspot은 옛 형식·새 형식 모두 실제로 발행돼야 한다.
     for (const data of [`publish:${JOB}`, `publish:blogspot:${JOB}`]) {
@@ -1118,7 +1146,7 @@ main().catch((error) => {
       }).handlePublishDecisionCallback(query(data));
       assert(publishCalls === 1 && out.outcome.status === "published", `blogspot 발행이 돌아야 한다 (${data})`);
     }
-    console.log("✅ 연결 안 된 동작은 발행하지 않는다 / blogspot은 옛 형식도 동작");
+    console.log("✅ 네이버는 예약만 / 이미지는 미연결 / blogspot은 옛 형식도 동작");
   }
   }
 }

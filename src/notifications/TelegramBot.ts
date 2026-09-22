@@ -23,6 +23,7 @@ import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
+import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -167,7 +168,9 @@ export type HandlePublishDecisionOutcome =
   | { status: "already_done"; url: string }
   | { status: "failed"; reason: string }
   /** 버튼은 붙었으나 처리 경로가 아직 연결되지 않았다(2026-09-22 네이버 재개 작업 중). */
-  | { status: "not_wired"; action: PublishDecisionAction };
+  | { status: "not_wired"; action: PublishDecisionAction }
+  /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
+  | { status: "queued"; action: PublishDecisionAction };
 
 export type HandlePublishDecisionResult = {
   outcome: HandlePublishDecisionOutcome;
@@ -211,6 +214,11 @@ export type TelegramBotOptions = {
   loadJobById?: (jobId: string) => Promise<ArticleJobRow | null>;
   /** 테스트 주입: 실제 Blogger 호출을 대체한다. 기본은 publishArticleToBlogspot(공개 발행). */
   publishToBlogspot?: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
+  /**
+   * 네이버 발행 **예약**. 여기서 실제 발행을 하지 않는다 - 로그인된 브라우저가 필요해
+   * GitHub Actions에서 못 돌린다. 맥의 로컬 폴러가 이 요청을 집어 간다.
+   */
+  requestNaverPublish?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   /** 승인(confirm) 시 원고 상태도 함께 바꾸는 데 쓴다(SPRINT_3_DESIGN.md 8절). job의 최신 원고 1건을 찾는다. */
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
@@ -280,6 +288,7 @@ export class TelegramBot {
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly publishToBlogspot: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
+  private readonly requestNaverPublish: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
@@ -314,6 +323,7 @@ export class TelegramBot {
     // 버튼으로 누르는 발행은 **공개**다 - 사람이 최종 원고를 보고 결정한 것이므로.
     this.publishToBlogspot =
       options.publishToBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId, { asDraft: false }));
+    this.requestNaverPublish = options.requestNaverPublish ?? ((job) => requestNaverPublish(job));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
     this.findLatestArticleByJobId =
@@ -788,13 +798,29 @@ export class TelegramBot {
     }
 
     // 2026-09-22 네이버 재개로 버튼이 3개가 됐다. **분기가 없으면 어떤 버튼을 눌러도 Blogspot이
-    // 발행된다** - 아직 연결 안 된 동작은 여기서 확실히 막는다.
+    // 발행된다** - 동작별로 확실히 갈라 놓는다.
+    if (parsed.action === "naver") {
+      // 네이버는 로그인된 브라우저가 필요해 여기(GitHub Actions)서 끝낼 수 없다. 요청만 남기고
+      // 맥의 로컬 폴러가 집어 간다 - 맥이 꺼져 있으면 켜질 때 처리된다(요청은 DB에 남는다).
+      const queued = await this.requestNaverPublish(job);
+      return {
+        outcome: { status: "queued", action: "naver" },
+        message: [
+          queued.queued ? "🟢 <b>네이버 발행을 예약했습니다</b>" : "ℹ️ <b>이미 예약돼 있습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          queued.queued
+            ? "맥이 켜져 있으면 곧 올라갑니다. 완료되면 주소를 보내드립니다."
+            : escapeTelegramHtml(queued.reason ?? ""),
+        ].join("\n"),
+      };
+    }
+
     if (parsed.action !== "blogspot") {
-      const label = parsed.action === "naver" ? "네이버 발행" : "이미지 수정";
       return {
         outcome: { status: "not_wired", action: parsed.action },
         message: [
-          `🚧 <b>${label}은 아직 연결 중입니다</b>`,
+          "🚧 <b>이미지 수정은 아직 연결 중입니다</b>",
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
           "이 버튼을 눌러도 아무 일도 일어나지 않습니다(발행되지 않습니다).",
