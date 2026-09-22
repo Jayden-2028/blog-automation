@@ -50,6 +50,38 @@ export type CaptureOptions = {
  * 게시물이 안 열렸을 때 **무엇이 떴는지** 남긴다. 이게 없으면 "로그인 만료 의심"이라는 추측만
  * 남고 원인(로그인 벽 / 동의 배너 / 챌린지 / 레이아웃 변경)을 가릴 수 없다.
  */
+/**
+ * 어떤 선택자가 실제로 몇 개 잡히는지 센다.
+ *
+ * 이게 없으면 "article이 없나 보다"를 추측으로 고치고 다시 돌려보기를 반복하게 된다 - 인스타
+ * DOM은 로그인 상태·레이아웃 실험마다 달라서 한 번에 맞히기 어렵다. 한 번 돌려 이 표만 보면
+ * 무엇을 겨냥해야 하는지 바로 정해진다.
+ */
+const PROBE_SELECTORS = [
+  "article",
+  'main [role="dialog"]',
+  "main",
+  "article img[srcset]",
+  "main img[srcset]",
+  "img[srcset]",
+  "img",
+  'button[aria-label="다음"]',
+  'button[aria-label="Next"]',
+  '[aria-label="다음"]',
+  '[role="button"]',
+  "video",
+  'input[name="username"]',
+];
+
+async function probeSelectors(page: import("playwright").Page): Promise<string> {
+  const rows: string[] = [];
+  for (const selector of PROBE_SELECTORS) {
+    const count = await page.locator(selector).count().catch(() => -1);
+    rows.push(`  ${String(count).padStart(4)}  ${selector}`);
+  }
+  return rows.join("\n");
+}
+
 async function dumpDiagnostics(page: import("playwright").Page, tempDir: string): Promise<string> {
   const shot = join(tempDir, "failure.png");
   await page.screenshot({ path: shot, fullPage: false }).catch(() => {});
@@ -57,12 +89,30 @@ async function dumpDiagnostics(page: import("playwright").Page, tempDir: string)
   const current = page.url();
   // page.evaluate는 DOM 타입(lib.dom)이 필요한데 이 프로젝트 tsconfig에는 없다 - locator로 읽는다.
   const text = (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).slice(0, 2000);
+  const probe = await probeSelectors(page);
+  // HTML 원본도 남긴다 - 선택자를 고치려면 구조를 봐야 한다.
+  const html = await page.content().catch(() => "");
+  await writeFile(join(tempDir, "failure.html"), html, "utf8").catch(() => {});
   await writeFile(
     join(tempDir, "failure.txt"),
-    [`title: ${title}`, `url: ${current}`, "", "--- body text (앞 2000자) ---", text].join("\n"),
+    [
+      `title: ${title}`,
+      `url: ${current}`,
+      "",
+      "--- 선택자별 개수 (이 표가 핵심) ---",
+      probe,
+      "",
+      "--- body text (앞 2000자) ---",
+      text,
+    ].join("\n"),
     "utf8"
   ).catch(() => {});
-  return `화면: ${shot} / 텍스트: ${join(tempDir, "failure.txt")} (title="${title}")`;
+
+  // 터미널에도 바로 찍는다 - 파일을 열어 보기 전에 원인이 드러나는 일이 많다.
+  console.error("\n--- 선택자별 개수 ---");
+  console.error(probe);
+
+  return `화면: ${shot} / 진단: ${join(tempDir, "failure.txt")} / HTML: ${join(tempDir, "failure.html")}`;
 }
 
 export async function captureInstagramCarousel(
