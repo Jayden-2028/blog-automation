@@ -31,6 +31,11 @@ export type CollectWebImagesForJobInput = {
    * 사람이 결과를 보고 "2번은 인물 단독샷으로" 같이 적어 보낸 것이라, 마커 설명보다 **우선**한다.
    */
   requirements?: Record<string, string>;
+  /**
+   * 사용자가 직접 찍어준 이미지 주소. 이 자리는 **검색하지 않고** 그 주소를 그대로 쓴다.
+   * 사람이 눈으로 고른 것이라 검증도 건너뛴다 - 지시가 판정보다 우선한다(사용자 결정).
+   */
+  directUrls?: Record<string, string>;
 };
 
 export type CollectWebImagesForJobResult = {
@@ -75,30 +80,78 @@ export async function collectWebImagesForJob(
     });
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
 
+  // 사용자가 주소를 찍어준 자리는 검색을 돌리지 않는다. 에이전트 대신 그 주소를 "고른 결과"로
+  // 넣어 주면, 내려받기·크기 검사·업로드는 기존 경로를 그대로 탄다(2026-09-22).
+  const directUrls = input.directUrls ?? {};
+  const directSlots = slots.filter((slot) => directUrls[String(slot.index)]);
+  const searchSlots = slots.filter((slot) => !directUrls[String(slot.index)]);
+
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.
   const dir = await mkdtemp(resolve(tmpdir(), "web-images-"));
 
   try {
-    const result = await collectWebImages(
-      { keyword: input.keyword, dir, slots },
+    const uploader =
+      options.upload ??
+      (async ({ index, buffer, mimeType }: { index: number; buffer: Buffer; mimeType: string }) => {
+        const uploaded = await uploadArticleImage({
+          jobId: input.jobId,
+          index,
+          variant: "web",
+          imageBuffer: buffer,
+          mimeType,
+        });
+        return uploaded.ok ? { ok: true as const, url: uploaded.url } : { ok: false as const, error: uploaded.error };
+      });
+
+    // 사용자가 고른 주소는 그대로 쓴다 - 사람이 눈으로 확인한 것이라 비전 검증을 하지 않는다.
+    const direct =
+      directSlots.length === 0
+        ? { found: [], failures: [], unfilled: [] }
+        : await collectWebImages(
+            { keyword: input.keyword, dir, slots: directSlots },
+            {
+              ...options,
+              upload: uploader,
+              searchImages: false,
+              verify: false,
+              runCodex: async () => ({
+                ok: true as const,
+                durationMs: 0,
+                data: {
+                  slots: directSlots.map((slot) => ({
+                    index: slot.index,
+                    imageUrl: directUrls[String(slot.index)],
+                    sourcePage: "",
+                    alt: slot.description,
+                    caption: slot.description,
+                    license: "사용자가 직접 지정",
+                    reusePermission: "unknown",
+                    rationale: "사용자가 주소를 찍어 지정한 이미지",
+                    skipped: false,
+                    skipReason: "",
+                    alternates: [],
+                  })),
+                },
+              }),
+            }
+          );
+
+    const result = searchSlots.length === 0
+      ? { found: [], failures: [], unfilled: [] }
+      : await collectWebImages(
+      { keyword: input.keyword, dir, slots: searchSlots },
       {
         ...options,
-        upload:
-          options.upload ??
-          (async ({ index, buffer, mimeType }) => {
-            const uploaded = await uploadArticleImage({
-              jobId: input.jobId,
-              index,
-              variant: "web",
-              imageBuffer: buffer,
-              mimeType,
-            });
-            return uploaded.ok ? { ok: true, url: uploaded.url } : { ok: false, error: uploaded.error };
-          }),
+        upload: uploader,
       }
     );
 
-    const images: ManuscriptImage[] = result.found
+    // 사용자가 지정한 자리와 검색으로 채운 자리를 합친다.
+    const found = [...direct.found, ...result.found];
+    const failures = [...direct.failures, ...result.failures];
+    const unfilled = [...direct.unfilled, ...result.unfilled];
+
+    const images: ManuscriptImage[] = found
       .filter((record) => record.storageUrl)
       .map((record) => ({
         index: record.index,
@@ -113,7 +166,7 @@ export async function collectWebImagesForJob(
         license: record.license,
       }));
 
-    return { images, failures: result.failures, unfilled: result.unfilled };
+    return { images, failures, unfilled };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
