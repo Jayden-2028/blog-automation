@@ -5,7 +5,12 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { buildAlternativeQuery, extensionForContentType, findCleanAlternative } from "./findCleanAlternative.js";
+import {
+  buildAlternativeQuery,
+  extensionForContentType,
+  findCleanAlternative,
+  isBlockedSource,
+} from "./findCleanAlternative.js";
 import type { Downloaded } from "./findCleanAlternative.js";
 import type { ImageCandidate } from "../images/searchNaverImages.js";
 
@@ -14,6 +19,55 @@ function candidate(patch: Partial<ImageCandidate> = {}): ImageCandidate {
 }
 
 const tests: Array<[string, () => Promise<void>]> = [
+  [
+    "인스타 도메인은 대체 이미지 후보에서 뺀다",
+    () => {
+      // 2026-09-23: 실측에서 대체 이미지의 출처가 또 다른 인스타 게시물이었다(job ec21f085).
+      // 오버레이 없는 깨끗한 원본을 찾는 게 목적인데 같은 플랫폼의 다른 뉴스 카드를 물어오면
+      // 목적이 무너지고, 저작권 판단도 원본과 다를 바 없다.
+      assert.equal(isBlockedSource({ link: "https://scontent-xxx.cdninstagram.com/a.jpg" }), true);
+      assert.equal(
+        isBlockedSource({ link: "https://img.test/a.jpg", sourcePage: "https://www.instagram.com/p/AbC/" }),
+        true,
+        "이미지가 밖에 있어도 출처가 인스타면 뺀다"
+      );
+      assert.equal(isBlockedSource({ link: "https://x.fbcdn.net/a.jpg" }), true, "인스타 CDN");
+      assert.equal(isBlockedSource({ link: "https://www.threads.net/@a/post/1" }), true);
+      assert.equal(
+        isBlockedSource({ link: "https://imgnews.naver.net/a.jpg", sourcePage: "https://n.news.naver.com/1" }),
+        false,
+        "언론사는 그대로 쓴다"
+      );
+      assert.equal(
+        isBlockedSource({ link: "https://notinstagram.com/a.jpg" }),
+        false,
+        "도메인 끝만 같은 다른 사이트를 오인하면 안 된다"
+      );
+      return Promise.resolve();
+    },
+  ],
+  [
+    "검색 결과에 인스타만 있으면 대체 이미지를 포기한다",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "alt-blocked-"));
+      try {
+        const found = await findCleanAlternative(
+          { keyword: "주제어", description: "설명", slideIndex: 1, tempDir: dir },
+          {
+            search: async () => [
+              candidate({ link: "https://scontent.cdninstagram.com/a.jpg" }),
+              candidate({ link: "https://img.test/b.jpg", sourcePage: "https://www.instagram.com/p/X/" }),
+            ],
+            fetchImage: async () => ({ buffer: Buffer.from("x"), contentType: "image/jpeg" }),
+          }
+        );
+        assert.equal(found, null, "인스타뿐이면 자리를 비우는 게 맞다 - 엉뚱한 출처를 남기지 않는다");
+        assert.deepEqual(await readdir(dir), [], "받지도 않아야 한다");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  ],
   [
     "content-type으로 확장자를 정한다",
     () => {
