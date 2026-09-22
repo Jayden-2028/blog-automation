@@ -21,6 +21,13 @@ export type BuildResearchPromptInput = {
   /** 에이전트가 정확히 여기에 Write해야 한다(절대 경로). */
   outputPath: string;
   today: string;
+  /**
+   * 인스타그램 수동 큐레이션 job의 원본 자료(2026-09-21). 캡션 + 캐러셀 이미지에 번인된 텍스트.
+   * 있으면 이게 이 job의 1차 근거다 - researcher.md의 일반 절차보다 우선해서 이 내용의 사실관계를
+   * 검증·보강하는 데 조사를 집중시킨다. keyword는 NAVER baseline 검색용 짧은 문자열일 뿐이라
+   * 이 원문이 없으면 무엇을 다루는 글인지 절반만 아는 셈이다.
+   */
+  sourceContext?: string | null;
 };
 
 export function buildResearchPrompt(input: BuildResearchPromptInput): string {
@@ -50,6 +57,17 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     job.headline && job.headline !== job.keyword ? `- notes: 원문 제목 "${job.headline}" 맥락 참고` : null,
     `- 오늘 날짜: ${today}`,
     "",
+    ...(input.sourceContext
+      ? [
+          "이 job의 원본 자료(사용자가 인스타그램에서 직접 골라 보낸 게시물 - 1차 근거, 조사로 걷어내지 않는다):",
+          input.sourceContext,
+          "",
+          "위 원본 자료를 §2(확인된 사실)의 뼈대로 삼고, WebSearch/WebFetch는 이 내용의 사실관계 검증·",
+          "배경 보강(왜 이 일이 생겼는지, 관련 인물·수치·이전 사례)에 집중한다. 원본에 없는 내용을",
+          "지어내지 않는다 - 확인 안 되면 §7 확인 실패에 남긴다.",
+          "",
+        ]
+      : []),
     "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹/블로그 검색 결과):",
     ...baselineLines,
     "",

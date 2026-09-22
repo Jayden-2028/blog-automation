@@ -1,6 +1,17 @@
-# 인스타그램 기반 키워드 수집 — 인수인계
+# 인스타그램 기반 키워드 수집 — 인수인계 (폐기됨)
 
-> **이 문서만 읽으면 이어서 작업할 수 있다.** 2026-09-21 시작, 별도 세션으로 분리.
+> ⚠️ **이 문서의 설계는 폐기됐다(2026-09-21).** Business Discovery API가 App Review(Advanced
+> Access) 없이는 error code 10으로 전부 막힌다는 걸 실측으로 확인했고, Advanced Access는
+> 사업자등록(Business Verification)이 필요해 지금 당장은 불가능하다. Playwright 크롤링도
+> `instagram.com/robots.txt`의 전면 차단 정책과 충돌해 기각했다.
+>
+> **후속 설계는 `INSTAGRAM_POSTING_CONVERTER.md`를 본다.** 사람이 인스타를 직접 훑고 텔레그램으로
+> URL을 보내면 Claude가 브라우저로 캡처·자료조사해 원고화하는 반자동 구조로 전환했다. 아래
+> 내용(Business Discovery API, 점수 설계)은 기록으로만 남긴다 - 이어서 작업하지 말 것.
+
+---
+
+> 아래는 2026-09-21 시작 당시 원본 내용이다.
 > 작업 위치: `~/blog-automation/ig-dev` (브랜치 `feat/instagram-keyword-source`)
 
 ## 왜 이걸 만드는가

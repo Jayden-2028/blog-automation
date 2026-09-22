@@ -73,6 +73,13 @@ export type ManuscriptEntry = {
    * 생성 전이거나 실패했으면 null - 뷰어는 그때 네이버 복사 버튼을 숨긴다.
    */
   naver?: { title: string; body: string; tags: string[] } | null;
+  /**
+   * 원고 출처 표기(2026-09-21). "instagram"이면 뷰어가 별도 배지를 보여준다 - 사용자가 직접
+   * 인스타그램에서 고른 소재라는 걸 한눈에 구분하기 위해서다(일반 키워드 발굴과 다른 신뢰도/맥락).
+   */
+  sourceTag?: "instagram" | null;
+  /** sourceTag가 있을 때만 의미 있다. 배지 클릭/표시에 쓸 원본 링크. */
+  sourceUrl?: string | null;
 };
 
 export type ManuscriptTopicEntry = {

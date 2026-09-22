@@ -425,6 +425,11 @@ export async function prepareManuscript(
     }
   }
 
+  // 인스타그램 수동 큐레이션 job 배지(2026-09-21) - createInstagramJob.ts가 metadata.source에
+  // 남겨 둔 값을 그대로 읽는다. 일반 키워드 job은 이 필드가 없어 undefined -> null.
+  const sourceTag = job.metadata?.source === "instagram_manual" ? ("instagram" as const) : null;
+  const sourceUrl = sourceTag ? ((job.metadata?.instagramUrl as string | undefined) ?? null) : null;
+
   const entry: ManuscriptEntry = {
     title,
     searchDescription,
@@ -436,6 +441,8 @@ export async function prepareManuscript(
     images,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,
+    sourceTag,
+    sourceUrl,
   };
 
   await writeManuscriptFile(

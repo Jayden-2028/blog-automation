@@ -15,6 +15,12 @@ import type {
 /** PostgreSQL unique_violation. upsert 대신 insert를 쓰고 이 코드로 "이미 있음"을 판별한다. */
 const UNIQUE_VIOLATION = "23505";
 
+/**
+ * 수동 등록 job(인스타그램 등)이 쓰는 가짜 discovery_run 네임스페이스.
+ * source_run_id는 실제 discovery_runs.id가 양의 serial이라, 절대 겹치지 않는 음수 값을 고른다.
+ */
+const MANUAL_SOURCE_RUN_ID = -1;
+
 export type CreateArticleJobResult = {
   job: ArticleJobRow;
   /**
@@ -68,6 +74,48 @@ export class ArticleJobRepository {
     }
 
     throw error ?? new Error("article_jobs insert가 row를 반환하지 않았습니다.");
+  }
+
+  /**
+   * discovery_run 없이 job을 만든다(인스타그램 수동 큐레이션 등). keyword_rankings를 거치지 않으므로
+   * createFromRanking을 못 쓴다 - source_run_id/source_rank는 (run_id, rank) 유니크 인덱스를 만족시키기
+   * 위한 자리채우기일 뿐, 실제 discovery_run을 가리키지 않는다.
+   *
+   * rank는 Unix seconds를 쓴다(같은 초 안에 두 건이 들어오면 유니크 충돌 - 그때는 1씩 올려 재시도).
+   * 사람이 한 번에 하나씩 텔레그램으로 보내는 흐름이라 실제로 부딪힐 확률은 낮다.
+   */
+  static async createManual(input: {
+    keyword: string;
+    headline?: string | null;
+    category?: string | null;
+    metadata: Record<string, unknown>;
+  }): Promise<CreateArticleJobResult> {
+    let rank = Math.floor(Date.now() / 1000);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const row: ArticleJobInsert = {
+        source_run_id: MANUAL_SOURCE_RUN_ID,
+        source_rank: rank,
+        keyword: input.keyword,
+        headline: input.headline ?? null,
+        seed_query: null,
+        category: input.category ?? null,
+        total_score: null,
+        score_breakdown: null,
+        status: "selected",
+        selected_via: "manual",
+        metadata: input.metadata,
+      };
+
+      const { data, error } = await supabase.from("article_jobs").insert(row).select().single();
+      if (!error && data) return { job: data, created: true };
+
+      if (error?.code === UNIQUE_VIOLATION) {
+        rank += 1;
+        continue;
+      }
+      throw error ?? new Error("article_jobs insert가 row를 반환하지 않았습니다.");
+    }
+    throw new Error("createManual: source_rank 재시도 5회 모두 충돌했습니다.");
   }
 
   static async findByRunAndRank(runId: number, rank: number): Promise<ArticleJobRow | null> {

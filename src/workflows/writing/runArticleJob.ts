@@ -59,6 +59,7 @@ import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
 import type { ArticleReviewResult } from "../review/runArticleReview.js";
 import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, SourceRow } from "../../types/database.js";
+import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
 /**
  * 헤드리스 writer는 writer.md(500줄+) + seo-guide.md(500줄+) + research 파일(20~30KB)을 읽고,
@@ -152,7 +153,30 @@ type DefaultResearcherInput = {
   today: string;
   /** 기획 브리프(2026-09-17). 실패했으면 null - researcher.md 기본 절차로 돈다. */
   brief: KeywordBrief | null;
+  /** 인스타그램 수동 큐레이션 job의 원본 자료(2026-09-21). 아니면 null. */
+  sourceContext: string | null;
 };
+
+/**
+ * job.metadata.source === "instagram_manual"이면 캡션 + 번인 텍스트를 조사 프롬프트에 넣을
+ * 1차 근거 문자열로 만든다. 아니면 null(일반 키워드 job은 지금까지와 동일하게 동작).
+ */
+function buildInstagramSourceContext(metadata: Record<string, unknown> | null): string | null {
+  if (!metadata || metadata.source !== "instagram_manual") return null;
+
+  const caption = typeof metadata.instagramCaption === "string" ? metadata.instagramCaption.trim() : "";
+  const burnedIn = Array.isArray(metadata.instagramBurnedInText)
+    ? (metadata.instagramBurnedInText as unknown[]).filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    : [];
+  const url = typeof metadata.instagramUrl === "string" ? metadata.instagramUrl : null;
+
+  const parts: string[] = [];
+  if (url) parts.push(`원본 게시물: ${url}`);
+  if (caption) parts.push(`캡션:\n${caption}`);
+  if (burnedIn.length > 0) parts.push(`이미지에 적힌 텍스트:\n${burnedIn.map((t, i) => `${i + 1}. ${t}`).join("\n")}`);
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
 
 /**
  * Gemini는 Write 도구가 없다 - 응답 텍스트를 직접 outputPath에 쓴다. runResearcher 계약(파일이
@@ -225,6 +249,7 @@ async function runDefaultResearcher(
     outputPath: input.outputPath,
     today: input.today,
     brief: input.brief,
+    sourceContext: input.sourceContext,
   });
   return defaultRunResearcher(prompt);
 }
@@ -340,6 +365,8 @@ async function runResearchStageInner(
     }
   }
 
+  const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
+
   const freshFile = fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
@@ -347,10 +374,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
@@ -687,6 +714,29 @@ async function runWritingStageInner(
     );
   }
 
+  // 인스타 캡처 후보 승격(2026-09-22). 승인이 사람에 의해 즉시 일어날 수 있어(텔레그램 버튼),
+  // 이 시점(write 완료 = 마커 수 확정)과 승인 사이에 별도 CLI(ig:promote-images)를 기다리면 그
+  // 틈에 승인이 먼저 끝나 metadata.images가 비어 있는 채로 승인 이후 파이프라인이 돌고, 거기서
+  // 웹 이미지 자동 검색이 대신 채워 인스타 캡처 사진이 최종 원고에서 통째로 빠진다(2026-09-21
+  // 실측: "김지원 밀라노 근황" job에서 실제로 발생). 그래서 write 완료 시점에 곧바로
+  // instagramImages -> images로 옮긴다 - promoteInstagramImagesCli.ts와 같은 규칙(마커 수를
+  // 넘는 후보는 버림)이며, 그 CLI는 이미 승격된 job에 대해서는 아무 일도 하지 않으므로 안전하다.
+  const instagramCandidates =
+    job.metadata?.source === "instagram_manual"
+      ? (job.metadata?.instagramImages as ManuscriptImage[] | undefined)
+      : undefined;
+  const instagramPromotedImages =
+    Array.isArray(instagramCandidates) && instagramCandidates.length > 0
+      ? instagramCandidates.filter((c) => c.index <= parsed.imagePrompts.length)
+      : null;
+  if (instagramCandidates && instagramPromotedImages) {
+    const dropped = instagramCandidates.length - instagramPromotedImages.length;
+    if (dropped > 0) {
+      console.warn(`⚠️ [writing] 인스타 캡처 후보 중 마커(${parsed.imagePrompts.length}개)를 넘는 ${dropped}개는 버립니다.`);
+    }
+    console.log(`ℹ️ [writing] 인스타 캡처 후보 ${instagramPromotedImages.length}개를 metadata.images로 승격했습니다.`);
+  }
+
   // 이미지: 2026-09-01부터 API 자동생성 기본 보류(CLAUDE.md 운영 규칙). 보류면 writer가 남긴
   // `[IMAGE: 설명]` 마커를 본문에 그대로 두고(passthrough) 사용자가 직접 삽입한다.
   // generateArticleImages의 삽입 지점 판정은 2026-09-06부터 `**볼드**` 소제목 기준이다(writer.md §6).
@@ -800,6 +850,9 @@ async function runWritingStageInner(
     imageCounts: { succeeded: imageGeneration.images.length, failed: imageGeneration.failures.length },
     imageFailures: imageGeneration.failures,
     imageGenerationHeld,
+    ...(instagramPromotedImages
+      ? { images: instagramPromotedImages, imagesReadyAt: new Date().toISOString() }
+      : {}),
     sourceCounts: {
       total: sources.length,
       official: sources.filter((s) => s.authority === "official").length,

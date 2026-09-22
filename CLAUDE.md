@@ -88,6 +88,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 - Blogspot 단독 운영 재설계: `docs/ai-handoff/BLOGSPOT_ONLY_DESIGN.md`
 - 진척 원장(데일리 데스크 대시보드가 읽는다): `docs/ai-handoff/PROGRESS.md`
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
+- 인스타 포스팅 변환기(별도 워크트리, 미병합): `docs/ai-handoff/INSTAGRAM_POSTING_CONVERTER.md`
 - 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`
 - 집필 규격(라우팅·입력계약·체크리스트): `prompts/writing/writer.md`
