@@ -6,6 +6,7 @@
 //
 //   --dry-run  캡처·판정까지만 하고 job을 만들지 않는다(DB에 아무것도 안 쓴다)
 //   --keep     임시 디렉터리를 지우지 않는다 - 찍힌 스크린샷을 눈으로 확인할 때
+//   --headed   창을 띄운다. 인스타가 헤드리스를 탐지해 막을 때 확인·우회용
 //
 // 자동 경로(processPendingCaptures)와 **같은 함수**를 쓴다. 여기서 되면 자동에서도 된다.
 import "dotenv/config";
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
   const keep = args.includes("--keep");
+  // 인스타가 헤드리스를 탐지해 로그인 벽을 띄우면 창을 띄우는 쪽이 유일한 우회다.
+  const headed = args.includes("--headed");
   const target = args.find((a) => !a.startsWith("--")) ?? "--first";
 
   if (!instagramProfilePath()) {
@@ -57,7 +60,7 @@ async function main(): Promise<void> {
     capture: async (url) => {
       console.log("▶ 캐러셀 캡처 중...");
       const { captureInstagramCarousel } = await import("./captureInstagramCarousel.js");
-      captured = await captureInstagramCarousel(url);
+      captured = await captureInstagramCarousel(url, headed ? { headless: false } : {});
       console.log(`   슬라이드 ${captured.slides.length}장`);
       for (const s of captured.slides) console.log(`     ${s.slideIndex}. ${s.localPath}`);
       console.log(`   캡션: ${captured.caption ? `${captured.caption.slice(0, 80)}...` : "(못 읽음)"}`);
@@ -95,7 +98,8 @@ async function main(): Promise<void> {
 
   if (session.status === "failed") {
     console.error(`\n❌ 실패: ${session.error}`);
-    console.error("   셀렉터 문제로 보이면 --keep으로 다시 돌려 스크린샷을 확인하세요.");
+    console.error("   --keep으로 남은 failure.png / failure.txt를 열어 무슨 화면이 떴는지 보세요.");
+    console.error("   헤드리스 탐지가 의심되면: npm run ig:capture -- <id> --dry-run --keep --headed");
     process.exit(1);
   }
 
