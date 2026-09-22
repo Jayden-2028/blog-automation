@@ -14,9 +14,11 @@ LOG="$HOME/Library/Logs/blog-automation-instagram-capture-poll.log"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 cd "$REPO"
+# 캐러셀 캡처 + 모델 판정이 건당 수십 초다. 그 사이 유휴 절전으로 들어가면 브라우저가 끊기므로
+# caffeinate -i로 이 실행 동안만 잠들지 못하게 막는다(naver-poll과 같은 방식).
 {
   echo "── $(date '+%Y-%m-%d %H:%M:%S')"
-  npm run --silent job:ig-capture-poll 2>&1
+  /usr/bin/caffeinate -i npm run --silent job:ig-capture-poll 2>&1
 } >> "$LOG" 2>&1
 
 # 로그가 무한히 자라지 않게 최근 2000줄만 남긴다.
