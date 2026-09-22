@@ -25,6 +25,11 @@ export type CollectWebImagesForJobInput = {
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
   filledIndexes?: number[];
+  /**
+   * 자리별 사용자 요구사항(2026-09-22 "🖼 이미지 수정"). 키는 자리 번호 문자열.
+   * 사람이 결과를 보고 "2번은 인물 단독샷으로" 같이 적어 보낸 것이라, 마커 설명보다 **우선**한다.
+   */
+  requirements?: Record<string, string>;
 };
 
 export type CollectWebImagesForJobResult = {
@@ -39,7 +44,15 @@ export async function collectWebImagesForJob(
   options: CollectWebImagesOptions = {}
 ): Promise<CollectWebImagesForJobResult> {
   const filled = new Set(input.filledIndexes ?? []);
-  const slots = buildWebImageSlots(input.body, input.imagePrompts).filter((s) => !filled.has(s.index));
+  const requirements = input.requirements ?? {};
+  const slots = buildWebImageSlots(input.body, input.imagePrompts)
+    .filter((s) => !filled.has(s.index))
+    // 사용자가 적어 보낸 요구를 설명에 덧붙인다. 검색어를 만들고 후보를 고르는 판단이 전부 이
+    // 설명을 보고 이뤄지므로, 여기 얹는 것이 가장 짧은 경로다.
+    .map((slot) => {
+      const want = requirements[String(slot.index)];
+      return want ? { ...slot, description: `${slot.description} (사용자 요청: ${want})` } : slot;
+    });
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
 
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.

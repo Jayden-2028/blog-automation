@@ -153,6 +153,24 @@ export class ArticleJobRepository {
   }
 
   /**
+   * "🖼 이미지 수정" 안내 메시지에 달린 답장을 job으로 되찾는다(2026-09-22).
+   * findByEditRequestMessageId와 같은 방식이고 키만 다르다 - 두 요청이 동시에 떠 있어도
+   * 서로를 집지 않게 별도 키를 쓴다.
+   */
+  static async findByImageEditRequestMessageId(messageId: number): Promise<ArticleJobRow | null> {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("*")
+      .in("status", ["review", "approved"])
+      .filter("metadata->>imageEditRequestMessageId", "eq", String(messageId))
+      .order("selected_at", { ascending: false })
+      .limit(1);
+
+    if (error) throw error;
+    return data?.[0] ?? null;
+  }
+
+  /**
    * status와 무관하게 최근 선택된 job을 최신순으로 반환한다.
    *
    * listByStatus는 "다음 단계 워커가 집어갈 job"을 찾는 용도라 status가 고정이다. 이 메서드는

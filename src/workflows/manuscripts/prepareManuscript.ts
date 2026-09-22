@@ -34,6 +34,7 @@ import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
+import { readImageRequirements } from "../images/applyImageEditRequest.js";
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
@@ -434,6 +435,8 @@ export async function prepareManuscript(
       body: content,
       imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
+      // "🖼 이미지 수정"에서 사람이 적어 보낸 자리별 요구(2026-09-22). 없으면 빈 객체다.
+      requirements: readImageRequirements(job.metadata as Record<string, unknown> | null),
     });
     imageFailures.push(...outcome.failures);
     if (outcome.images.length > 0) {

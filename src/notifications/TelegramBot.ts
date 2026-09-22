@@ -24,6 +24,10 @@ import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } 
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
+import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
+import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
+import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
+import { applyImageEditRequest } from "../workflows/images/applyImageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -172,6 +176,13 @@ export type HandlePublishDecisionOutcome =
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
+export type HandleImageEditResult = {
+  outcome:
+    | { status: "ignored"; reason: "wrong_chat" | "not_a_reply" | "empty_text" | "no_matching_job" }
+    | { status: "accepted"; jobId: string; requests: ImageEditRequest[] };
+  message: string;
+};
+
 export type HandlePublishDecisionResult = {
   outcome: HandlePublishDecisionOutcome;
   message: string;
@@ -261,6 +272,7 @@ export type TelegramBotOptions = {
    * **approved**인 job을 jsonb 필터로 직접 찾는다(승인 후 최종본을 보고 고치는 경우가 있다).
    */
   findJobByEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
+  findJobByImageEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
 
   // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
   /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
@@ -298,6 +310,7 @@ export class TelegramBot {
   private readonly triggerPublishPrepare: () => void;
   private readonly triggerRevision: (jobId: string, feedback: string) => void;
   private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
+  private readonly findJobByImageEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
@@ -356,6 +369,9 @@ export class TelegramBot {
     this.findJobByEditRequestMessageId =
       options.findJobByEditRequestMessageId ??
       ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId));
+    this.findJobByImageEditRequestMessageId =
+      options.findJobByImageEditRequestMessageId ??
+      ((messageId) => ArticleJobRepository.findByImageEditRequestMessageId(messageId));
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -816,11 +832,44 @@ export class TelegramBot {
       };
     }
 
+    if (parsed.action === "images") {
+      // 자리 목록을 보여주고 **답장**을 기다린다. 여기서 바로 재수집하지 않는 이유는, 어느
+      // 자리가 마음에 안 드는지 사람만 알기 때문이다(빈 자리는 지정 없이도 자동으로 채운다).
+      const images = readJobManuscriptImages(job);
+      const lines = images.length
+        ? images.map((image) => {
+            const mark = image.url ? "🖼" : "⬜";
+            return `${mark} ${image.index}번 ${escapeTelegramHtml((image.description ?? "").slice(0, 34))}`;
+          })
+        : ["(이미지 자리가 없습니다)"];
+      const empty = images.filter((image) => !image.url).length;
+
+      const sent = await this.sendMessage(
+        [
+          "🖼 <b>이미지 수정</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          ...lines,
+          "",
+          empty > 0 ? `빈 자리 ${empty}개는 지정하지 않아도 다시 채웁니다.` : "빈 자리는 없습니다.",
+          "",
+          "이 메시지에 <b>답장</b>으로 바꾸고 싶은 자리를 적어주세요.",
+          "예) <code>2번은 인물 단독샷으로, 5번은 제품 컷으로</code>",
+          "번호만 적으면 그 자리를 그냥 다시 찾습니다. 빈 자리만 채우려면 <code>없음</code>이라고 답장하세요.",
+        ].join("\n")
+      ).catch(() => null);
+
+      await this.mergeJobMetadata(job.id, { imageEditRequestMessageId: sent?.message_id ?? null });
+
+      // 안내는 위에서 이미 보냈다 - message를 비워 중복 발송을 막는다.
+      return { outcome: { status: "queued", action: "images" }, message: "" };
+    }
+
     if (parsed.action !== "blogspot") {
       return {
         outcome: { status: "not_wired", action: parsed.action },
         message: [
-          "🚧 <b>이미지 수정은 아직 연결 중입니다</b>",
+          "🚧 <b>아직 연결되지 않은 동작입니다</b>",
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
           "이 버튼을 눌러도 아무 일도 일어나지 않습니다(발행되지 않습니다).",
@@ -1013,6 +1062,60 @@ export class TelegramBot {
     });
   }
 
+
+  /**
+   * "🖼 이미지 수정" 안내에 달린 답장을 처리한다(2026-09-22).
+   *
+   * 지정된 자리의 기존 이미지를 비우고(안 비우면 "채워진 자리"로 보고 건너뛴다) 자리별
+   * 요구사항을 남긴 뒤 재수집 게이트를 연다. 실제 수집은 job-publish-prepare가 한다.
+   *
+   * 읽은 내용을 **되읽어 보여준다** - 느슨하게 파싱하므로 잘못 읽었으면 사용자가 바로 알아야 한다.
+   */
+  async handleImageEditReply(message: TelegramMessage): Promise<HandleImageEditResult> {
+    if (String(message.chat.id) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+    const replyToId = message.reply_to_message?.message_id;
+    if (replyToId === undefined) {
+      return { outcome: { status: "ignored", reason: "not_a_reply" }, message: "" };
+    }
+    const text = message.text?.trim();
+    if (!text) {
+      return { outcome: { status: "ignored", reason: "empty_text" }, message: "" };
+    }
+
+    const job = await this.findJobByImageEditRequestMessageId(replyToId);
+    if (!job) {
+      // 이미지 수정 요청과 무관한 답장이다 - 조용히 넘긴다(다른 핸들러가 볼 수도 있다).
+      return { outcome: { status: "ignored", reason: "no_matching_job" }, message: "" };
+    }
+
+    // 같은 요청에 두 번째 답장이 와도 두 번 돌지 않게 즉시 지운다.
+    await this.mergeJobMetadata(job.id, { imageEditRequestMessageId: null });
+
+    const images = readJobManuscriptImages(job);
+    const requests = parseImageEditReply(text, Math.max(images.length, 1));
+    const applied = applyImageEditRequest(images, requests);
+    await this.mergeJobMetadata(job.id, applied.patch);
+    this.triggerPublishPrepare();
+
+    const lines = [
+      "🖼 <b>이미지를 다시 만듭니다</b>",
+      "",
+      `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+      escapeTelegramHtml(describeImageEditRequests(requests)),
+    ];
+    if (applied.cleared.length > 0) {
+      lines.push("", `기존 이미지를 비운 자리: ${applied.cleared.join(", ")}번`);
+    }
+    lines.push("", "완료되면 원고 준비 알림을 다시 보내드립니다.");
+
+    return {
+      outcome: { status: "accepted", jobId: job.id, requests },
+      message: lines.join("\n"),
+    };
+  }
+
   /**
    * 발행 버튼을 결과에 맞게 되돌린다.
    *
@@ -1122,11 +1225,22 @@ export class TelegramBot {
     publishDecisionResult?: HandlePublishDecisionResult;
     researchTrigger?: ResearchTriggerResult;
     editFeedbackResult?: HandleEditFeedbackResult;
+    imageEditResult?: HandleImageEditResult;
   }> {
     if (!update.callback_query) {
       // callback_query가 아니면 콜백 3종 파서를 시도할 이유가 없다 - update.message가 있으면
       // "수정 필요" 답장인지만 확인한다(handleEditFeedbackMessage 참고).
       if (!update.message) return { handled: false };
+
+      // 답장 종류가 둘이다 - 원고 수정 피드백과 이미지 수정. 서로 다른 metadata 키로 job을 찾으므로
+      // 남의 답장을 집지 않는다. 이미지 쪽을 먼저 보는 이유는 없다(배타적이라 순서가 결과를
+      // 바꾸지 않는다) - 먼저 물어보고 아니면 다음으로 넘긴다.
+      const imageEditResult = await this.handleImageEditReply(update.message);
+      if (imageEditResult.outcome.status !== "ignored") {
+        if (imageEditResult.message) await this.sendMessage(imageEditResult.message).catch(() => {});
+        return { handled: true, imageEditResult };
+      }
+
       const editFeedbackResult = await this.handleEditFeedbackMessage(update.message);
       if (editFeedbackResult.message) await this.sendMessage(editFeedbackResult.message).catch(() => {});
       return { handled: editFeedbackResult.outcome.status !== "ignored", editFeedbackResult };

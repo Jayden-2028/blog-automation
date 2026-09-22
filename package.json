@@ -109,6 +109,7 @@
     "test:serper-outage": "tsx src/workflows/images/testNotifySerperOutage.ts",
     "test:merged-search": "tsx src/workflows/images/testSearchImagesMerged.ts",
     "test:broaden-query": "tsx src/workflows/images/testBroadenQuery.ts",
+    "test:image-edit": "tsx src/workflows/images/testImageEditRequest.ts",
     "test:related-posts": "tsx src/workflows/manuscripts/testAppendRelatedPosts.ts",
     "test:align-prompts": "tsx src/workflows/manuscripts/testAlignImagePrompts.ts",
     "test:concurrency": "tsx src/services/testMapWithConcurrency.ts",
