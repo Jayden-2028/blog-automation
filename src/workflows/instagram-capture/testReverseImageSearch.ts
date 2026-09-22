@@ -1,30 +1,50 @@
-// 리버스 이미지 검색(2-b)의 결과 해석과 폴백 규칙. 브라우저는 주입해 가짜로 돌린다 -
-// lens.google.com은 CAPTCHA를 띄우므로 테스트에서 실제로 부르면 안 된다.
+// 리버스 이미지 검색(2-b)의 후보 선별·해시 비교·폴백 규칙. 브라우저는 주입해 가짜로 돌린다 -
+// lens.google.com을 테스트에서 실제로 부르면 CAPTCHA를 맞고 계정도 위험해진다.
 
 import { strict as assert } from "node:assert";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { decodeEntities, extractHits, parseOgImage, resolveHits, reverseImageSearch } from "./reverseImageSearch.js";
-import type { ReverseSearchResult } from "./reverseImageSearch.js";
+import {
+  MATCH_MAX_DISTANCE,
+  decodeEntities,
+  extractHits,
+  hammingHex,
+  pickPageImages,
+  reverseImageSearch,
+} from "./reverseImageSearch.js";
+import type { MatchedCandidate, ReverseSearchResult } from "./reverseImageSearch.js";
 import { findCleanAlternative } from "./findCleanAlternative.js";
 
-function row(patch: Partial<{ href: string; text: string }> = {}) {
-  return { href: "https://news.test/article/1", text: "기사 제목", ...patch };
+const THUMB = "data:image/jpeg;base64,AAAA";
+
+function card(patch: Partial<{ href: string; title: string; thumbnail: string }> = {}) {
+  return { href: "https://news.test/article/1", title: "기사 제목", thumbnail: THUMB, ...patch };
 }
 
-const OG = '<html><head><meta property="og:image" content="https://news.test/photo.jpg"></head></html>';
+function matched(patch: Partial<MatchedCandidate> = {}): MatchedCandidate {
+  return {
+    title: "기사",
+    link: "https://news.test/photo.jpg",
+    thumbnail: "https://news.test/photo.jpg",
+    width: null,
+    height: null,
+    sourcePage: "https://news.test/article/1",
+    matchDistance: 2,
+    ...patch,
+  };
+}
 
 const tests: Array<[string, () => Promise<void>]> = [
   [
     "구글 자체 링크는 출처 페이지가 못 된다",
     () => {
       const out = extractHits([
-        row({ href: "https://www.google.com/search?q=x" }),
-        row({ href: "https://policies.google.co.kr/terms" }),
-        row({ href: "https://lh3.googleusercontent.com/abc" }),
-        row({ href: "https://news.test/article/1" }),
+        card({ href: "https://www.google.com/search?q=x" }),
+        card({ href: "https://policies.google.co.kr/terms" }),
+        card({ href: "https://lh3.googleusercontent.com/abc" }),
+        card({ href: "https://news.test/article/1" }),
       ]);
       assert.equal(out.length, 1);
       assert.equal(out[0].sourcePage, "https://news.test/article/1");
@@ -34,62 +54,67 @@ const tests: Array<[string, () => Promise<void>]> = [
   [
     "같은 출처 페이지는 한 번만 쓴다",
     () => {
-      assert.equal(extractHits([row(), row(), row({ href: "https://other.test/2" })]).length, 2);
+      assert.equal(extractHits([card(), card(), card({ href: "https://other.test/2" })]).length, 2);
       return Promise.resolve();
     },
   ],
   [
     "인스타 출처는 페이지를 받아보지도 않는다",
     () => {
-      assert.deepEqual(extractHits([row({ href: "https://www.instagram.com/p/X/" })]), []);
+      assert.deepEqual(extractHits([card({ href: "https://www.instagram.com/p/X/" })]), []);
       return Promise.resolve();
     },
   ],
   [
-    "og:image에서 실제 이미지를 뽑는다 - 렌즈 썸네일은 205px라 못 쓴다",
-    async () => {
-      assert.equal(parseOgImage(OG, "https://news.test/a"), "https://news.test/photo.jpg");
-      assert.equal(
-        parseOgImage('<meta property="og:image" content="/rel/p.jpg">', "https://news.test/a/b"),
-        "https://news.test/rel/p.jpg",
-        "상대 경로를 절대 주소로 만들어야 한다"
-      );
-      assert.equal(
-        parseOgImage('<meta name="twitter:image" content="https://news.test/t.jpg">', "https://news.test/a"),
-        "https://news.test/t.jpg",
-        "og:image가 없으면 twitter:image"
-      );
-      assert.equal(parseOgImage("<html><head></head></html>", "https://news.test/a"), null);
+    "썸네일이 없는 카드는 기준이 없어 버린다",
+    () => {
+      // 썸네일이 해시 비교의 기준이다. 없으면 "같은 사진인지"를 판정할 근거가 없다.
+      assert.deepEqual(extractHits([card({ thumbnail: "" })]), []);
+      assert.deepEqual(extractHits([card({ thumbnail: "https://x.test/a.jpg" })]), [], "원격 주소는 기준이 아니다");
+      return Promise.resolve();
+    },
+  ],
+  [
+    "해밍 거리 - 같으면 0, 한 비트만 다르면 1",
+    () => {
+      assert.equal(hammingHex("0000000000000000", "0000000000000000"), 0);
+      assert.equal(hammingHex("0000000000000000", "0000000000000001"), 1);
+      assert.equal(hammingHex("ffffffffffffffff", "0000000000000000"), 64);
+      assert.equal(hammingHex("abc", "abcd"), Number.MAX_SAFE_INTEGER, "길이가 다르면 비교 불가");
+      assert.equal(hammingHex("zzzz", "0000"), Number.MAX_SAFE_INTEGER, "16진수가 아니면 비교 불가");
+      return Promise.resolve();
+    },
+  ],
+  [
+    "출처 페이지 이미지 후보 - og:image가 먼저, 본문 img가 뒤",
+    () => {
+      const html = `<html><head>
+        <meta property="og:image" content="https://news.test/og.jpg">
+        </head><body>
+        <img src="/body-1.jpg"><img data-src="https://news.test/body-2.jpg">
+        <img src="https://scontent.cdninstagram.com/x.jpg">
+        <img src="data:image/gif;base64,AAA">
+        </body></html>`;
+      const out = pickPageImages(html, "https://news.test/a/b");
+      assert.equal(out[0], "https://news.test/og.jpg", "대표 이미지를 먼저 본다");
+      assert.ok(out.includes("https://news.test/body-1.jpg"), "상대 경로를 절대 주소로");
+      assert.ok(out.includes("https://news.test/body-2.jpg"), "data-src도 본다");
+      assert.ok(!out.some((u) => u.includes("cdninstagram")), "인스타 이미지는 여기서도 뺀다");
+      assert.ok(!out.some((u) => u.startsWith("data:")), "data: URI는 받을 대상이 아니다");
+      return Promise.resolve();
     },
   ],
   [
     "og:image의 &amp;를 풀지 않으면 받을 때 404다",
-    async () => {
-      // 2026-09-23 실측: X(트위터) og:image가 ?format=webp&amp;name=large로 나와 그대로 받으면
-      // 404였다. 렌즈가 정확히 찾아줘도 여기서 새면 후보가 통째로 버려진다.
-      assert.equal(
-        parseOgImage(
-          '<meta property="og:image" content="https://pbs.twimg.com/media/X?format=webp&amp;name=large">',
-          "https://x.com/a/1"
-        ),
-        "https://pbs.twimg.com/media/X?format=webp&name=large"
+    () => {
+      // 2026-09-23 실측: X(트위터) og:image가 ?format=webp&amp;name=large로 나왔다.
+      const out = pickPageImages(
+        '<meta property="og:image" content="https://pbs.twimg.com/media/X?format=webp&amp;name=large">',
+        "https://x.com/a/1"
       );
+      assert.equal(out[0], "https://pbs.twimg.com/media/X?format=webp&name=large");
       assert.equal(decodeEntities("a&amp;b&#38;c"), "a&b&c");
-    },
-  ],
-  [
-    "og:image가 없는 페이지는 그 후보만 버린다",
-    async () => {
-      const out = await resolveHits(
-        [
-          { sourcePage: "https://news.test/1", title: "없음" },
-          { sourcePage: "https://news.test/2", title: "있음" },
-        ],
-        async (url) => (url.endsWith("/2") ? OG : "<html></html>")
-      );
-      assert.equal(out.length, 1);
-      assert.equal(out[0].sourcePage, "https://news.test/2");
-      assert.equal(out[0].link, "https://news.test/photo.jpg");
+      return Promise.resolve();
     },
   ],
   [
@@ -119,7 +144,22 @@ const tests: Array<[string, () => Promise<void>]> = [
     },
   ],
   [
-    "렌즈가 찾으면 그 후보를 쓰고 텍스트 검색은 아예 안 돈다",
+    "collect가 던지면 failed로 감싼다 - 호출자가 이유를 로그에 남긴다",
+    async () => {
+      process.env.LENS_REVERSE_SEARCH = "true";
+      process.env.LENS_BROWSER_PROFILE = "/tmp/lens-profile";
+      const r = await reverseImageSearch("/tmp/slide.png", {
+        collect: async () => {
+          throw new Error("크롬 실행 실패");
+        },
+      });
+      assert.equal(r.status, "failed");
+      if (r.status !== "failed") return;
+      assert.ok(r.error.includes("크롬"), r.error);
+    },
+  ],
+  [
+    "해시가 맞은 후보를 쓰고, note에 거리를 적는다",
     async () => {
       const dir = await mkdtemp(join(tmpdir(), "rev-ok-"));
       try {
@@ -129,16 +169,7 @@ const tests: Array<[string, () => Promise<void>]> = [
           {
             reverseSearch: async (): Promise<ReverseSearchResult> => ({
               status: "ok",
-              candidates: [
-                {
-                  title: "기사",
-                  link: "https://news.test/photo.jpg",
-                  thumbnail: "",
-                  width: 900,
-                  height: 700,
-                  sourcePage: "https://news.test/article/1",
-                },
-              ],
+              candidates: [matched({ matchDistance: 3 })],
             }),
             search: async () => {
               searched = true;
@@ -147,14 +178,46 @@ const tests: Array<[string, () => Promise<void>]> = [
             fetchImage: async () => ({ buffer: Buffer.from("x"), contentType: "image/jpeg" }),
           }
         );
-        assert.ok(found, "렌즈 후보를 써야 한다");
+        assert.ok(found);
         assert.equal(found?.sourcePage, "https://news.test/article/1");
-        assert.ok(found?.note?.includes("렌즈"), "어느 경로로 찾았는지 승인 단계에서 보여야 한다");
-        assert.ok(
-          found?.note?.includes("같은 사진이 아닐 수 있음"),
-          "og:image는 기사 대표 이미지라 렌즈가 매칭한 사진과 다를 수 있다 - 과신하게 적으면 안 된다"
-        );
+        assert.ok(found?.note?.includes("같은 사진"), "해시로 대조했으니 근거가 있다");
+        assert.ok(found?.note?.includes(`3/${MATCH_MAX_DISTANCE}`), `거리를 적어야 한다: ${found?.note}`);
         assert.equal(searched, false, "렌즈가 찾았으면 텍스트 검색은 낭비다");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  ],
+  [
+    "해시가 안 맞아 후보가 0개면 텍스트 검색으로 떨어진다",
+    async () => {
+      // 같은 사진을 찾는 것이 2-b의 존재 이유다. 못 찾으면 비슷한 것을 억지로 내지 않고
+      // 2-a에 넘긴다 - 그쪽은 "같은 사진이 아닐 수 있음"이라고 정직하게 적는다.
+      const dir = await mkdtemp(join(tmpdir(), "rev-nomatch-"));
+      try {
+        let searched = false;
+        const found = await findCleanAlternative(
+          { keyword: "주제어", description: "설명", slideIndex: 1, tempDir: dir, slidePath: "/tmp/slide.png" },
+          {
+            reverseSearch: async (): Promise<ReverseSearchResult> => ({ status: "ok", candidates: [] }),
+            search: async () => {
+              searched = true;
+              return [
+                {
+                  title: "기사",
+                  link: "https://news.test/b.jpg",
+                  thumbnail: "",
+                  width: 900,
+                  height: 700,
+                  sourcePage: "https://news.test/2",
+                },
+              ];
+            },
+            fetchImage: async () => ({ buffer: Buffer.from("x"), contentType: "image/jpeg" }),
+          }
+        );
+        assert.equal(searched, true);
+        assert.ok(found?.note?.includes("같은 사진이 아닐 수 있음"), found?.note ?? "note 없음");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -166,7 +229,7 @@ const tests: Array<[string, () => Promise<void>]> = [
       const dir = await mkdtemp(join(tmpdir(), "rev-blocked-"));
       try {
         let searched = false;
-        const found = await findCleanAlternative(
+        await findCleanAlternative(
           { keyword: "주제어", description: "설명", slideIndex: 1, tempDir: dir, slidePath: "/tmp/slide.png" },
           {
             reverseSearch: async (): Promise<ReverseSearchResult> => ({ status: "blocked" }),
@@ -187,8 +250,6 @@ const tests: Array<[string, () => Promise<void>]> = [
           }
         );
         assert.equal(searched, true, "막혔다고 대체 이미지를 통째로 포기하면 안 된다");
-        assert.ok(found, "폴백으로라도 후보를 내야 한다");
-        assert.ok(found?.note?.includes("검색어"), "텍스트 검색 경로임을 적어야 한다");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -206,7 +267,14 @@ const tests: Array<[string, () => Promise<void>]> = [
               throw new Error("브라우저 실행 실패");
             },
             search: async () => [
-              { title: "기사", link: "https://news.test/c.jpg", thumbnail: "", width: 900, height: 700, sourcePage: "https://news.test/3" },
+              {
+                title: "기사",
+                link: "https://news.test/c.jpg",
+                thumbnail: "",
+                width: 900,
+                height: 700,
+                sourcePage: "https://news.test/3",
+              },
             ],
             fetchImage: async () => ({ buffer: Buffer.from("x"), contentType: "image/jpeg" }),
           }
@@ -253,14 +321,10 @@ const tests: Array<[string, () => Promise<void>]> = [
             reverseSearch: async (): Promise<ReverseSearchResult> => ({
               status: "ok",
               candidates: [
-                {
-                  title: "인스타",
+                matched({
                   link: "https://scontent.cdninstagram.com/a.jpg",
-                  thumbnail: "",
-                  width: 900,
-                  height: 700,
                   sourcePage: "https://www.instagram.com/p/X/",
-                },
+                }),
               ],
             }),
             search: async () => {

@@ -16,8 +16,8 @@ import { join } from "node:path";
 
 import { safeHeaderUrl } from "../images/collectWebImages.js";
 import { isBlockedSource } from "./blockedSources.js";
-import { reverseImageSearch } from "./reverseImageSearch.js";
-import type { ReverseSearchResult } from "./reverseImageSearch.js";
+import { MATCH_MAX_DISTANCE, reverseImageSearch } from "./reverseImageSearch.js";
+import type { MatchedCandidate, ReverseSearchResult } from "./reverseImageSearch.js";
 import { searchImagesMerged } from "../images/searchImagesMerged.js";
 import type { ImageCandidate } from "../images/searchNaverImages.js";
 import type { CleanAlternative } from "./runCaptureSession.js";
@@ -126,7 +126,10 @@ export async function findCleanAlternative(
 
   const textHits = reverseHits.length > 0 ? [] : (await search(query).catch(() => [])).filter(usable);
   if (reverseHits.length > 0) via = "reverse";
-  const found = reverseHits.length > 0 ? reverseHits : textHits;
+  const found: ImageCandidate[] = reverseHits.length > 0 ? reverseHits : textHits;
+  // 렌즈 경로에서만 있는 값. note에 적어 승인 단계에 넘긴다.
+  const distanceOf = (candidate: ImageCandidate): number | null =>
+    (candidate as Partial<MatchedCandidate>).matchDistance ?? null;
 
   // **출처 페이지가 있는 후보를 먼저 쓴다**(2026-09-22 실측 대응). 네이버 이미지 검색은
   // sourcePage를 주지 않아 폴백이 이미지 파일 URL을 출처로 남겼다
@@ -147,16 +150,16 @@ export async function findCleanAlternative(
     // 출처 페이지를 끝내 못 구하면 이미지 URL이라도 남기되, **그 사실을 note에 적는다** -
     // 승인 단계에서 사람이 "출처를 열어볼 수 없는 후보"임을 알고 판단해야 한다.
     const unknownSource = !candidate.sourcePage;
+    const matchDistance = distanceOf(candidate);
     return {
       localPath,
       sourcePage: candidate.sourcePage ?? candidate.link,
       note:
         (via === "reverse"
-          ? // 렌즈가 지목한 것은 **페이지**다. 거기서 실제로 받는 것은 그 페이지의 og:image이고,
-            // 그건 기사 대표 이미지라 렌즈가 매칭한 사진과 다를 수 있다(2026-09-23 실측:
-            // 인스타는 정우성·박정민 2인 사진, og:image는 4개월 전 기사의 3인 사진이었다).
-            // "같은 사진"이라고 적으면 승인 단계에서 사람이 과신한다.
-            "구글 렌즈가 지목한 출처 페이지의 대표 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)"
+          ? // 이제는 근거가 있다 - 렌즈 썸네일과 지각 해시로 대조해 통과한 것만 온다.
+            // 거리를 같이 적어 승인 단계에서 사람이 강도를 판단할 수 있게 한다
+            // (0이면 사실상 동일, 12가 상한).
+            `구글 렌즈로 찾은 같은 사진(해시 거리 ${matchDistance ?? "?"}/${MATCH_MAX_DISTANCE} - 승인 단계에서 확인)`
           : `검색어 "${query}"로 찾은 대체 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)`) +
         (unknownSource ? " ⚠️ 출처 페이지 불명(이미지 주소만 있음)" : ""),
     };
