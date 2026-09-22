@@ -60,3 +60,38 @@ export function describeImageEditRequests(requests: readonly ImageEditRequest[])
     .map((request) => (request.requirement ? `${request.index}번 - ${request.requirement}` : `${request.index}번 - 다시 찾기`))
     .join("\n");
 }
+
+/** 마커 끝에 붙는 획득 방식 표기. parseImageAcquisition이 읽는 문구와 1:1이어야 한다. */
+export const ACQUISITION_LABEL = {
+  search: "웹 검색",
+  ai: "AI 생성",
+  table: "표 생성",
+  capture: "페이지 캡처",
+} as const;
+
+export type RequestedAcquisition = keyof typeof ACQUISITION_LABEL;
+
+/**
+ * 요구사항에서 **사용자가 원한 획득 방식**을 읽는다(2026-09-22 사용자 결정 - "지시대로 해라").
+ *
+ * 애매하면 `null`을 돌려주고 호출부가 **현재 방식을 유지**한다. 잘못 바꾸면 멀쩡한 자리를
+ * 망치므로, 명확히 지시했을 때만 전환한다.
+ *
+ * 순서가 규칙이다. "검색해서 나오는 카카오톡 캡쳐"처럼 여러 단서가 섞이면 **검색이 이긴다** -
+ * 사용자가 "검색"이라고 말한 이상 어디서 구할지는 정해진 것이고, "캡쳐"는 무엇을 구할지다.
+ */
+export function inferAcquisition(requirement: string): RequestedAcquisition | null {
+  const text = (requirement ?? "").trim();
+  if (!text) return null;
+
+  // 1) 검색 - 가장 강한 신호다. 검색어까지 지정한 경우가 여기 들어온다.
+  if (/검색|찾아|구글|네이버/.test(text)) return "search";
+  // 2) AI 생성 - 실물이 없어도 되는 그림을 원하는 경우.
+  if (/AI|에이아이|일러스트|그려|그림으로|생성해/i.test(text)) return "ai";
+  // 3) 표 - 데이터 정리를 원하는 경우.
+  if (/표로|표\s*생성|도표|차트|인포그래픽/.test(text)) return "table";
+  // 4) 페이지 캡처 - "페이지"가 함께 나올 때만. "카카오톡 캡쳐"를 여기로 보내면 안 된다.
+  if (/페이지\s*캡처|사이트\s*캡처|홈페이지.*캡처/.test(text)) return "capture";
+
+  return null;
+}

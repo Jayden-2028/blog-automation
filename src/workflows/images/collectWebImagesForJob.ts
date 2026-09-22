@@ -47,11 +47,22 @@ export async function collectWebImagesForJob(
   const requirements = input.requirements ?? {};
   const slots = buildWebImageSlots(input.body, input.imagePrompts)
     .filter((s) => !filled.has(s.index))
-    // 사용자가 적어 보낸 요구를 설명에 덧붙인다. 검색어를 만들고 후보를 고르는 판단이 전부 이
-    // 설명을 보고 이뤄지므로, 여기 얹는 것이 가장 짧은 경로다.
+    // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
+    //
+    // 2026-09-22 실측 사고: 처음에는 설명(판정 기준)에만 붙였다. 그러자 검색은 옛 검색어로 하고
+    // 판정만 빡빡해져서, 네 후보가 전부 "요청한 투샷이 아니다"로 탈락하고 자리가 비었다.
+    // 아침에 마커 정렬에서 고친 "검색은 A, 판정은 B"를 그대로 다시 만든 셈이었다.
+    //
+    // 사용자가 검색어를 직접 지정하는 경우가 대부분이라("SNL 주현영과 김원훈 으로 검색해서")
+    // **요구사항을 검색어로 쓰고**, 원래 검색어는 뒤에 남겨 맥락을 잃지 않게 한다.
     .map((slot) => {
       const want = requirements[String(slot.index)];
-      return want ? { ...slot, description: `${slot.description} (사용자 요청: ${want})` } : slot;
+      if (!want) return slot;
+      return {
+        ...slot,
+        query: want,
+        description: `${slot.description} (사용자 요청: ${want})`,
+      };
     });
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
 

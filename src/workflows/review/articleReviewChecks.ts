@@ -443,7 +443,10 @@ export function classifyImageMarker(description: string): ImageMarkerViolation |
   return null;
 }
 
-export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
+/** 엔터·연예·OTT는 웹 검색만 쓴다(2026-09-22 사용자 결정, output-format.md §8-1-2). */
+const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott"]);
+
+export function checkImagePrompts(rawBody: string | null, category?: string | null): ReviewCheck[] {
   if (!rawBody) return [];
 
   const descriptions = [...rawBody.matchAll(IMAGE_DESCRIPTION_PATTERN)].map((m) => m[1].trim());
@@ -458,6 +461,21 @@ export function checkImagePrompts(rawBody: string | null): ReviewCheck[] {
         `글자·데이터가 핵심인 이미지를 AI 생성으로 지정한 마커 ${dataAsAi.length}개: "${dataAsAi[0].slice(0, 30)}…"` +
         " (output-format.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
     });
+  }
+
+  // 엔터·연예·OTT는 실사가 널려 있어 그릴 이유가 없고, 실존 인물을 AI로 그리면 가짜가 된다.
+  // 규칙을 프롬프트에만 두면 모델이 가끔 어기므로 여기서 잡는다.
+  if (category && SEARCH_ONLY_CATEGORIES.has(category)) {
+    const notSearch = descriptions.filter((d) => /AI\s*생성|표\s*생성/.test(d));
+    if (notSearch.length > 0) {
+      checks.push({
+        category: "quality",
+        severity: "warning",
+        message:
+          `연예·OTT 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
+          " (output-format.md §8-1-2 - 실사가 있는데 그리거나 표로 만들 이유가 없다, 웹 검색으로)",
+      });
+    }
   }
 
   const screens = descriptions.filter((d) => classifyImageMarker(d) === "screen_capture");

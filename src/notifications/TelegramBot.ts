@@ -9,6 +9,7 @@
 import { getKeywordRankingByRunAndRank } from "../services/supabase/repositories/keywordRankingRepository.js";
 import {
   listArticlesByJobId,
+  updateArticle,
   updateArticleStatus as updateArticleStatusRepo,
 } from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
@@ -27,7 +28,9 @@ import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
 import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
-import { applyImageEditRequest } from "../workflows/images/applyImageEditRequest.js";
+import { applyImageEditRequest, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
+import type { MarkerChange } from "../workflows/images/applyImageEditRequest.js";
+import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
@@ -273,6 +276,9 @@ export type TelegramBotOptions = {
    */
   findJobByEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
   findJobByImageEditRequestMessageId?: (messageId: number) => Promise<ArticleJobRow | null>;
+  /** 이미지 수정에서 본문 마커를 고칠 때 쓴다. */
+  loadArticlesByJobId?: (jobId: string) => Promise<ArticleRow[]>;
+  updateArticleContent?: (articleId: number, content: string) => Promise<unknown>;
 
   // 아래는 pollOnce의 수신 루프를 테스트에서 대체하기 위한 주입 지점(실 텔레그램/Supabase 호출 방지).
   /** 저장된 offset 조회. 기본은 TelegramOffsetRepository. */
@@ -311,6 +317,8 @@ export class TelegramBot {
   private readonly triggerRevision: (jobId: string, feedback: string) => void;
   private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
   private readonly findJobByImageEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
+  private readonly loadArticlesByJobId: (jobId: string) => Promise<ArticleRow[]>;
+  private readonly updateArticleContent: (articleId: number, content: string) => Promise<unknown>;
   private readonly rejectJob: (jobId: string, reason: string) => Promise<Awaited<ReturnType<typeof rejectArticleJob>>>;
   private readonly getStoredOffset: (receiverId: string) => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number, receiverId: string) => Promise<unknown>;
@@ -372,6 +380,9 @@ export class TelegramBot {
     this.findJobByImageEditRequestMessageId =
       options.findJobByImageEditRequestMessageId ??
       ((messageId) => ArticleJobRepository.findByImageEditRequestMessageId(messageId));
+    this.loadArticlesByJobId = options.loadArticlesByJobId ?? ((jobId) => listArticlesByJobId(jobId));
+    this.updateArticleContent =
+      options.updateArticleContent ?? ((articleId, content) => updateArticle(articleId, { content }));
     this.getStoredOffset =
       options.getStoredOffset ?? ((receiverId) => TelegramOffsetRepository.getLastUpdateId(receiverId));
     this.advanceStoredOffset =
@@ -1097,6 +1108,15 @@ export class TelegramBot {
     const requests = parseImageEditReply(text, Math.max(images.length, 1));
     const applied = applyImageEditRequest(images, requests);
     await this.mergeJobMetadata(job.id, applied.patch);
+
+    // 사용자가 획득 방식을 지시했으면 **본문 마커를 실제로 고친다**(2026-09-22).
+    // 어느 자리를 어떻게 채울지는 전부 마커의 `— 웹 검색` 표기로 갈리므로, metadata만 고치면
+    // 요청한 방식으로 채우는 코드가 그 자리를 쳐다보지도 않는다.
+    const markerChanges = await this.rewriteJobImageMarkers(job.id, requests).catch((error) => {
+      console.warn(`⚠️ [telegram] 마커 수정 실패(요구사항만 반영합니다): ${error instanceof Error ? error.message : error}`);
+      return [] as MarkerChange[];
+    });
+
     this.triggerPublishPrepare();
 
     const lines = [
@@ -1105,6 +1125,12 @@ export class TelegramBot {
       `<b>${escapeTelegramHtml(job.keyword)}</b>`,
       escapeTelegramHtml(describeImageEditRequests(requests)),
     ];
+    if (markerChanges.length > 0) {
+      lines.push(
+        "",
+        ...markerChanges.map((change) => `${change.index}번 방식을 바꿉니다: ${change.from} → ${ACQUISITION_LABEL[change.to]}`)
+      );
+    }
     if (applied.cleared.length > 0) {
       lines.push("", `기존 이미지를 비운 자리: ${applied.cleared.join(", ")}번`);
     }
@@ -1114,6 +1140,23 @@ export class TelegramBot {
       outcome: { status: "accepted", jobId: job.id, requests },
       message: lines.join("\n"),
     };
+  }
+
+
+  /**
+   * 사용자가 지시한 획득 방식을 본문 마커에 반영한다. 배리에이션 article을 직접 고친다 -
+   * prepareManuscript가 재사용 경로에서 그 본문을 그대로 쓰기 때문이다.
+   */
+  private async rewriteJobImageMarkers(jobId: string, requests: readonly ImageEditRequest[]): Promise<MarkerChange[]> {
+    if (requests.length === 0) return [];
+    const articles = await this.loadArticlesByJobId(jobId);
+    const target = [...articles].reverse().find((article) => article.platform != null) ?? articles[articles.length - 1];
+    if (!target?.content) return [];
+
+    const { body, changes } = rewriteAcquisitions(target.content, requests);
+    if (changes.length === 0) return [];
+    await this.updateArticleContent(target.id, body);
+    return changes;
   }
 
   /**

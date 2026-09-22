@@ -8,7 +8,8 @@
 // 그쪽은 사람이 터미널에서 돌리는 일괄 도구고, 이쪽은 텔레그램 버튼 경로다.
 
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
-import type { ImageEditRequest } from "./imageEditRequest.js";
+import { ACQUISITION_LABEL, inferAcquisition } from "./imageEditRequest.js";
+import type { ImageEditRequest, RequestedAcquisition } from "./imageEditRequest.js";
 
 /** job.metadata 안의 키. 자리별 요구사항을 다음 수집이 읽는다. */
 export const IMAGE_REQUIREMENTS_KEY = "imageRequirements";
@@ -77,4 +78,56 @@ export function readImageRequirements(metadata: Record<string, unknown> | null):
     if (typeof value === "string" && value.trim()) out[key] = value.trim();
   }
   return out;
+}
+
+
+/** 본문 마커 한 줄. 설명과 획득 방식이 ` — `로 붙어 있다. */
+const MARKER_LINE = /^\[IMAGE:\s*([\s\S]*?)\]\s*$/;
+
+export type MarkerChange = { index: number; from: string; to: RequestedAcquisition };
+
+/**
+ * 사용자가 지시한 대로 본문 마커의 **획득 방식을 바꾼다**(2026-09-22).
+ *
+ * 왜 본문을 고쳐야 하나: 어느 자리를 어떻게 채울지는 전부 마커 끝의 `— 웹 검색` 표기로 갈린다
+ * (buildWebImageSlots는 `search`만 보고, 표 렌더러는 `table`만 본다). metadata만 고치면 요청한
+ * 방식으로 채우는 코드가 그 자리를 아예 쳐다보지 않는다 - 2026-09-22 실측에서 사용자가 "검색해서
+ * 나오는 카톡 캡처"를 요청한 자리가 `AI 생성`이라 검색이 한 번도 안 돌았다.
+ *
+ * 지시가 애매하면 바꾸지 않는다. 잘못 바꾸면 멀쩡한 자리를 망친다.
+ */
+export function rewriteAcquisitions(
+  body: string,
+  requests: readonly ImageEditRequest[]
+): { body: string; changes: MarkerChange[] } {
+  const wanted = new Map<number, RequestedAcquisition>();
+  for (const request of requests) {
+    const acquisition = inferAcquisition(request.requirement);
+    if (acquisition) wanted.set(request.index, acquisition);
+  }
+  if (wanted.size === 0) return { body, changes: [] };
+
+  const changes: MarkerChange[] = [];
+  let index = 0;
+  const lines = body.split("\n").map((line) => {
+    const matched = line.trim().match(MARKER_LINE);
+    if (!matched) return line;
+    index += 1;
+
+    const want = wanted.get(index);
+    if (!want) return line;
+
+    const inner = matched[1].trim();
+    // 설명과 기존 방식을 가른다. 방식 표기가 없으면 통째로 설명으로 본다.
+    const split = inner.lastIndexOf("—");
+    const description = (split >= 0 ? inner.slice(0, split) : inner).trim();
+    const from = (split >= 0 ? inner.slice(split + 1) : "").trim();
+    const to = ACQUISITION_LABEL[want];
+    if (from === to) return line; // 이미 그 방식이다
+
+    changes.push({ index, from: from || "(없음)", to: want });
+    return `[IMAGE: ${description} — ${to}]`;
+  });
+
+  return { body: lines.join("\n"), changes };
 }

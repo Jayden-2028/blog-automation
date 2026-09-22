@@ -2,7 +2,8 @@
 //
 // 사람이 텔레그램에서 급히 치는 글이라 형식을 강제할 수 없다. 느슨하게 읽되 **잘못 읽지는
 // 않아야** 한다 - 엉뚱한 자리를 다시 만들면 멀쩡한 이미지를 잃는다.
-import { describeImageEditRequests, parseImageEditReply } from "./imageEditRequest.js";
+import { describeImageEditRequests, inferAcquisition, parseImageEditReply } from "./imageEditRequest.js";
+import { rewriteAcquisitions } from "./applyImageEditRequest.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -75,6 +76,60 @@ const eq = (text: string, expected: Array<[number, string]>) => {
   assert(text.includes("5번 - 다시 찾기"), `요구사항이 없으면 그렇게 보여야 한다 (${text})`);
   assert(describeImageEditRequests([]).includes("빈 자리만"), "지정이 없으면 그 사실을 알려야 한다");
   console.log("✅ 되읽기 - 잘못 읽었으면 사용자가 바로 안다");
+}
+
+// --- 8. 지시에서 획득 방식을 읽는다(2026-09-22 사용자 결정 - "지시대로 해라") ----------------
+{
+  // 검색이 가장 강한 신호다. "검색해서 나오는 카카오톡 캡쳐"는 캡처가 아니라 검색이다 -
+  // 사용자가 "검색"이라 말한 이상 어디서 구할지는 정해졌고 "캡쳐"는 무엇을 구할지다.
+  assert(inferAcquisition("SNL 주현영과 김원훈 으로 검색해서 나오는 투샷") === "search", "검색 지시");
+  assert(inferAcquisition("주현영 김원훈 우연히 보자 검색해서 나오는 카카오톡 캡쳐") === "search", "검색이 캡처를 이긴다");
+  assert(inferAcquisition("AI로 그려주세요") === "ai", "AI 지시");
+  assert(inferAcquisition("일러스트로 넣어주세요") === "ai", "일러스트도 AI");
+  assert(inferAcquisition("표로 정리해주세요") === "table", "표 지시");
+  assert(inferAcquisition("공식 홈페이지 페이지 캡처로") === "capture", "페이지 캡처 지시");
+
+  // 애매하면 바꾸지 않는다 - 잘못 바꾸면 멀쩡한 자리를 망친다.
+  assert(inferAcquisition("더 큰 사진으로") === null, "방식 언급이 없으면 유지");
+  assert(inferAcquisition("") === null, "빈 요구는 유지");
+  console.log("✅ 획득 방식 추론 - 검색 우선, 애매하면 유지");
+}
+
+// --- 9. 본문 마커를 실제로 고친다(2026-09-22 실측 사고) -----------------------------------------
+// 사용자가 "검색해서 나오는 카톡 캡처"를 요청한 자리가 `AI 생성`이라 검색이 한 번도 안 돌았다.
+// 마커를 안 고치면 요청한 방식으로 채우는 코드가 그 자리를 쳐다보지도 않는다.
+{
+  const body = [
+    "앞 문단입니다.",
+    "",
+    "[IMAGE: 주현영과 김원훈 투샷 — 웹 검색]",
+    "",
+    "가운데 문단입니다.",
+    "",
+    "[IMAGE: 스마트폰 카카오톡 화면을 보며 웃는 손 — AI 생성]",
+    "",
+    "[IMAGE: 조회수·추천수·댓글수 — 표 생성]",
+  ].join("\n");
+
+  const { body: next, changes } = rewriteAcquisitions(body, [
+    { index: 2, requirement: "주현영 김원훈 카톡 검색해서 나오는 캡쳐" },
+    { index: 3, requirement: "주현영 유튜브 영상 캡쳐 검색해서" },
+  ]);
+
+  assert(changes.length === 2, `두 자리가 바뀌어야 한다 (${JSON.stringify(changes)})`);
+  assert(next.includes("[IMAGE: 스마트폰 카카오톡 화면을 보며 웃는 손 — 웹 검색]"), "AI 생성 -> 웹 검색");
+  assert(next.includes("[IMAGE: 조회수·추천수·댓글수 — 웹 검색]"), "표 생성 -> 웹 검색");
+  assert(next.includes("[IMAGE: 주현영과 김원훈 투샷 — 웹 검색]"), "지정 안 한 자리는 그대로");
+  assert(next.includes("가운데 문단입니다."), "본문이 보존돼야 한다");
+
+  // 이미 그 방식이면 바꾸지 않는다(변경 기록도 남기지 않는다).
+  const same = rewriteAcquisitions(body, [{ index: 1, requirement: "다시 검색해주세요" }]);
+  assert(same.changes.length === 0, "이미 웹 검색인 자리는 변경 없음");
+
+  // 방식 지시가 없으면 본문을 건드리지 않는다.
+  const untouched = rewriteAcquisitions(body, [{ index: 2, requirement: "더 큰 사진으로" }]);
+  assert(untouched.body === body && untouched.changes.length === 0, "방식 지시가 없으면 본문 무변경");
+  console.log("✅ 마커 수정 - 지시한 자리만 방식 전환, 나머지는 보존");
 }
 
 console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");
