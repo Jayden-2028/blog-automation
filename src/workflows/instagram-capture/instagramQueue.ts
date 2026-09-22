@@ -68,7 +68,7 @@ export function listPendingEntries(path: string = INSTAGRAM_QUEUE_PATH): Instagr
 
 export function markEntry(
   id: string,
-  patch: Partial<Pick<InstagramQueueEntry, "status" | "jobId">>,
+  patch: Partial<Pick<InstagramQueueEntry, "status" | "jobId" | "attempts" | "lastError">>,
   path: string = INSTAGRAM_QUEUE_PATH
 ): void {
   const entries = readQueue(path);

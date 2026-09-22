@@ -158,6 +158,8 @@
     "test:instagram-capture-bot": "tsx src/notifications/testInstagramCaptureBot.ts",
     "test:ig-promote": "tsx src/workflows/instagram-capture/testSelectPromotableImages.ts",
     "test:ig-capture-file": "tsx src/workflows/instagram-capture/testParseCaptureFile.ts",
+    "test:ig-capture-session": "tsx src/workflows/instagram-capture/testRunCaptureSession.ts",
+    "test:ig-capture-queue": "tsx src/workflows/instagram-capture/testProcessPendingCaptures.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",
     "test:heavy-pipeline-lock": "tsx src/jobs/lib/testHeavyPipelineLock.ts",

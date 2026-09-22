@@ -15,6 +15,13 @@ export type InstagramQueueEntry = {
   status: "pending" | "done" | "skipped";
   /** done/skipped로 바뀐 뒤 생성된 article_jobs.id. */
   jobId?: string;
+  /**
+   * 캡처 자동화가 실패한 횟수(2026-09-22). 같은 항목이 매 분 영원히 재시도되지 않도록
+   * MAX_CAPTURE_ATTEMPTS를 넘으면 skipped로 내리고 알린다 - 사람이 수동으로 처리하면 된다.
+   */
+  attempts?: number;
+  /** 마지막 실패 사유. 사람이 대기열을 볼 때 무엇이 막혔는지 알 수 있게 남긴다. */
+  lastError?: string;
 };
 
 /**

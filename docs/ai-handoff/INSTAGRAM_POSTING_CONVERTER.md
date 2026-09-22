@@ -139,6 +139,11 @@ src/workflows/instagram-capture/createInstagramJob.ts   캡처 결과 -> article
 src/workflows/instagram-capture/createInstagramJobCli.ts     캡처 JSON -> job(검증 포함)
 src/workflows/instagram-capture/parseCaptureFile.ts     캡처 JSON 검증·정규화
 src/workflows/instagram-capture/selectPromotableImages.ts  후보 -> images 승격 규칙(유일한 기준)
+src/workflows/instagram-capture/processPendingCaptures.ts    대기열 -> 캡처 -> job(폴러가 부른다)
+src/workflows/instagram-capture/runCaptureSession.ts    캡처 1건 오케스트레이션(정책 적용)
+src/workflows/instagram-capture/captureInstagramCarousel.ts  Playwright 캐러셀 캡처(맥 전용)
+src/workflows/instagram-capture/judgeCarouselSlides.ts  슬라이드 판정(헤드리스 claude -p)
+src/workflows/instagram-capture/findCleanAlternative.ts   오버레이 슬라이드의 대체 이미지
 src/workflows/instagram-capture/promoteInstagramImagesCli.ts  이미지 승격
 src/workflows/instagram-capture/showQueueStatusCli.ts   대기열 확인
 ```
@@ -151,6 +156,8 @@ npm run ig:promote-images -- <jobId>   job:write 이후 이미지 승격
 npm run test:instagram-capture-bot     봇 로직 단위 테스트(4건)
 npm run test:ig-promote                승격 규칙 불변식(8건)
 npm run test:ig-capture-file           캡처 JSON 검증 규격(11건)
+npm run test:ig-capture-session        캡처 세션 정책·실패 처리(8건)
+npm run test:ig-capture-queue          대기열 재시도·포기 규칙(8건)
 ```
 
 ## 현재 상태 (2026-09-21)
