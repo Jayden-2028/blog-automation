@@ -98,6 +98,23 @@ IG_CAPTURE_MAX_SLIDES=   기본 10. 캐러셀이 길 때 상한
 `IG_CAPTURE_AUTO`를 기본 false로 두는 이유: 로그인 프로필이 준비되기 전에 켜지면 매 분 실패
 알림이 온다. 프로필을 만들고 한 건 수동으로 확인한 뒤 켠다.
 
+## 맥에서 처음 켜는 순서
+
+```bash
+npm run ig:install-browser          # Playwright 크로미움 내려받기(최초 1회)
+# .env에 IG_BROWSER_PROFILE=/Users/<사용자>/.ig-profile 추가
+npm run ig:login                    # 창이 열리면 인스타 로그인 -> 터미널에서 Enter
+npm run ig-capture:status           # 대기열 확인
+# .env에 IG_CAPTURE_AUTO=true 추가 -> 이때부터 폴러가 캡처까지 이어서 한다
+```
+
+`ig:login`은 `captureInstagramCarousel`과 **같은 함수·같은 인자**로 프로필을 만든다(headless만
+끈다). `npx playwright` 한 줄로 만들면 인자가 어긋나 "로그인은 했는데 캡처는 로그인 안 된 상태"가
+되기 쉬워서 전용 명령을 뒀다. 로그인이 실제로 됐는지도 확인하고 끝난다 - 창만 닫고 넘어가면
+캡처가 매 분 실패한다.
+
+세션이 풀리면 `ig:login`을 다시 돌린다(같은 디렉터리에 덮어쓴다).
+
 ## 알려진 위험
 
 - **로그인 세션 만료.** 티스토리를 접은 것과 같은 구조다. 다만 실패해도 큐에 남고 알림만 가므로

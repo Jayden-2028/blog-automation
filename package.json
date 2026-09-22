@@ -173,6 +173,8 @@
     "job:watchdog": "tsx src/jobs/watchdogJob.ts",
     "job:ig-capture-poll": "tsx src/jobs/instagramCapturePollJob.ts",
     "ig-capture:status": "tsx src/workflows/instagram-capture/showQueueStatusCli.ts",
+    "ig:login": "tsx src/workflows/instagram-capture/instagramLoginCli.ts",
+    "ig:install-browser": "playwright install chromium",
     "ig:create-job": "tsx src/workflows/instagram-capture/createInstagramJobCli.ts",
     "ig:promote-images": "tsx src/workflows/instagram-capture/promoteInstagramImagesCli.ts",
     "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",
