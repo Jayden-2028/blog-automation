@@ -132,6 +132,49 @@ const tests: Array<[string, () => Promise<void>]> = [
     },
   ],
   [
+    "출처 페이지가 있는 후보를 먼저 쓴다",
+    async () => {
+      // 네이버는 sourcePage를 안 준다. 폴백이 이미지 파일 URL을 출처로 남기면 사람이 열어
+      // 저작권을 판단할 페이지가 사라진다(2026-09-22 실측: imgnews.naver.net/....jpg).
+      const dir = await mkdtemp(join(tmpdir(), "alt-test-"));
+      try {
+        const found = await findCleanAlternative(
+          { keyword: "주제", description: "", slideIndex: 1, tempDir: dir },
+          {
+            search: async () => [
+              candidate({ link: "https://naver.test/a.jpg", sourcePage: null }),
+              candidate({ link: "https://google.test/b.jpg", sourcePage: "https://news.test/article" }),
+            ],
+            fetchImage: async (): Promise<Downloaded> => ({ buffer: Buffer.from("ok"), contentType: "image/jpeg" }),
+          }
+        );
+        assert.equal(found?.sourcePage, "https://news.test/article", "출처 있는 쪽이 먼저여야 한다");
+        assert.ok(!found?.note?.includes("출처 페이지 불명"));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  ],
+  [
+    "출처를 끝내 못 구하면 note에 그 사실을 적는다",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "alt-test-"));
+      try {
+        const found = await findCleanAlternative(
+          { keyword: "주제", description: "", slideIndex: 1, tempDir: dir },
+          {
+            search: async () => [candidate({ link: "https://naver.test/a.jpg", sourcePage: null })],
+            fetchImage: async (): Promise<Downloaded> => ({ buffer: Buffer.from("ok"), contentType: "image/jpeg" }),
+          }
+        );
+        assert.ok(found);
+        assert.ok(found.note?.includes("출처 페이지 불명"), `승인 단계에서 알아야 한다: ${found.note}`);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  ],
+  [
     "검색어는 주제어 + 짧은 설명 (수식이 길면 0건으로 끝난다)",
     () => {
       assert.equal(buildAlternativeQuery("김지원", "레드카펫 전신샷"), "김지원 레드카펫 전신샷");

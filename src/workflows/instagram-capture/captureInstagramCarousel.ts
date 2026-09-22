@@ -62,6 +62,23 @@ const IG_CDN = /cdninstagram|fbcdn|^blob:|^data:image/i;
 const MIN_RENDERED = 200;
 
 /** 공유 링크의 추적 파라미터(utm_source, stkn 등)를 떼고 표준 주소로 맞춘다. */
+/**
+ * og:description에서 캡션만 뽑는다.
+ *
+ * 왜 meta인가(2026-09-22 실측): DOM 선택자로 캡션을 잡으려다 빈 문자열만 얻었다. 인스타는
+ * 레이아웃 실험이 잦아 캡션 위치가 고정이 아니지만, og:description은 링크 미리보기용이라
+ * 구조가 안정적이다. 형식은 대체로
+ *   `1,234 likes, 56 comments - username on September 9, 2026: "본문"`
+ * 이라 마지막 `: "` 뒤를 본문으로 본다. 형식이 달라지면 통째로 돌려준다(없는 것보다 낫다).
+ */
+export function captionFromOgDescription(raw: string): string {
+  const text = raw.trim();
+  if (!text) return "";
+  const quoted = text.match(/:\s*"([\s\S]*)"\s*$/);
+  if (quoted) return quoted[1].trim();
+  return text;
+}
+
 export function canonicalPostUrl(url: string): { url: string; shortcode: string } | null {
   const match = url.match(/instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
   if (!match) return null;
@@ -304,11 +321,17 @@ export async function captureInstagramCarousel(
       );
     }
 
-    const caption = await page
-      .locator("main h1, article h1, main [data-testid='post-comment-root'] span")
-      .first()
-      .innerText()
-      .catch(() => "");
+    // og:description을 먼저 본다 - DOM 선택자는 레이아웃 실험마다 빗나가는데(실측: 빈 문자열)
+    // 이 meta는 링크 미리보기용이라 구조가 안정적이다. 없으면 DOM으로 떨어진다.
+    const ogDescription =
+      (await page.locator('meta[property="og:description"]').first().getAttribute("content").catch(() => null)) ?? "";
+    const caption =
+      captionFromOgDescription(ogDescription) ||
+      (await page
+        .locator("main h1, article h1, main [data-testid='post-comment-root'] span")
+        .first()
+        .innerText()
+        .catch(() => ""));
 
     const slides: CarouselCapture["slides"] = [];
     const seen = new Set<string>();

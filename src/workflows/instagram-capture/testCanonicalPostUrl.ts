@@ -2,7 +2,7 @@
 
 import { strict as assert } from "node:assert";
 
-import { canonicalPostUrl } from "./captureInstagramCarousel.js";
+import { canonicalPostUrl, captionFromOgDescription } from "./captureInstagramCarousel.js";
 
 const cases: Array<[string, string | null]> = [
   // 큐에 실제로 들어온 형태(텔레그램 공유 링크).
@@ -42,8 +42,30 @@ try {
   console.error(`❌ shortcode 추출: ${shortcode}`);
 }
 
+// --- 캡션 추출 ---
+const captionCases: Array<[string, string]> = [
+  ['1,234 likes, 56 comments - tripin.ko on September 9, 2026: "그 시절 우리를 밤잠 설치게 한 legend"',
+   "그 시절 우리를 밤잠 설치게 한 legend"],
+  // 여러 줄 캡션도 통째로 살린다.
+  ['12 likes - user on 2026: "첫 줄\n둘째 줄"', "첫 줄\n둘째 줄"],
+  // 형식이 다르면 통째로 돌려준다 - 없는 것보다 낫다.
+  ["형식이 전혀 다른 설명", "형식이 전혀 다른 설명"],
+  ["", ""],
+  ["   ", ""],
+];
+for (const [input, expected] of captionCases) {
+  const actual = captionFromOgDescription(input);
+  try {
+    assert.equal(actual, expected);
+    console.log(`✅ 캡션: ${input.slice(0, 45) || "(빈 값)"}`);
+  } catch {
+    failed += 1;
+    console.error(`❌ 캡션 추출\n   입력: ${input}\n   기대: ${expected}\n   실제: ${actual}`);
+  }
+}
+
 if (failed > 0) {
   console.error(`\n❌ 주소 정규화 테스트 ${failed}건 실패`);
   process.exit(1);
 }
-console.log("\n🎉 주소 정규화 테스트 통과");
+console.log("\n🎉 주소·캡션 테스트 통과");

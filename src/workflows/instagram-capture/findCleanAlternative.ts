@@ -86,7 +86,14 @@ export async function findCleanAlternative(
   const fetchImage = deps.fetchImage ?? download;
 
   const query = buildAlternativeQuery(input.keyword, input.description);
-  const candidates = (await search(query).catch(() => [])).filter(usable);
+  const found = (await search(query).catch(() => [])).filter(usable);
+
+  // **출처 페이지가 있는 후보를 먼저 쓴다**(2026-09-22 실측 대응). 네이버 이미지 검색은
+  // sourcePage를 주지 않아 폴백이 이미지 파일 URL을 출처로 남겼다
+  // (http://imgnews.naver.net/.../0003806827_001.jpg). 그건 사람이 열어 저작권을 판단할 수 있는
+  // 페이지가 아니라, 정책(INSTAGRAM_POSTING_CONVERTER.md - web_alternative는 sourcePage 필수)의
+  // 근거가 사라진다. 구글(Serper)은 contextLink로 출처 페이지를 준다.
+  const candidates = [...found.filter((c) => c.sourcePage), ...found.filter((c) => !c.sourcePage)];
 
   // 후보를 순서대로 받아 본다 - 핫링크 차단으로 앞쪽이 막혀도 자리를 통째로 버리지 않는다
   // (2026-09-21에 고친 것과 같은 실패 유형).
@@ -97,11 +104,15 @@ export async function findCleanAlternative(
     // 캡처 임시 디렉터리에 쓴다 - cleanup이 같이 지우고, 항목끼리 파일명이 부딪히지 않는다.
     const localPath = join(input.tempDir, `alt-${input.slideIndex}.${extensionForContentType(downloaded.contentType)}`);
     await writeFile(localPath, downloaded.buffer);
+    // 출처 페이지를 끝내 못 구하면 이미지 URL이라도 남기되, **그 사실을 note에 적는다** -
+    // 승인 단계에서 사람이 "출처를 열어볼 수 없는 후보"임을 알고 판단해야 한다.
+    const unknownSource = !candidate.sourcePage;
     return {
       localPath,
-      // 출처 페이지를 모르면 이미지 URL이라도 남긴다 - 저작권 판단의 근거가 되어야 한다.
       sourcePage: candidate.sourcePage ?? candidate.link,
-      note: `검색어 "${query}"로 찾은 대체 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)`,
+      note:
+        `검색어 "${query}"로 찾은 대체 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)` +
+        (unknownSource ? " ⚠️ 출처 페이지 불명(이미지 주소만 있음)" : ""),
     };
   }
 
