@@ -87,6 +87,47 @@
 많으면 넘치는 건 버림). `npm run ig:promote-images -- <jobId>`는 이 수정 전에 만들어진 job을
 수동으로 복구할 때만 쓰는 안전망 CLI다.
 
+## 캡처 결과 JSON (캡처 세션 -> job)
+
+캡처 세션은 슬라이드 판단을 마친 뒤 이 모양의 JSON 파일을 쓰고 `npm run ig:create-job`에 넘긴다.
+예전에는 `createInstagramJob()`을 부르는 코드가 없어 매번 일회용 스크립트를 짜야 했다(2026-09-22
+이전). 이제는 이 파일 하나가 계약이다.
+
+```json
+{
+  "queueEntryId": "42",
+  "instagramUrl": "https://www.instagram.com/p/XXXX/",
+  "caption": "게시물 캡션 원문(없으면 \"\")",
+  "burnedInText": ["정보 슬라이드에 박힌 텍스트", "..."],
+  "searchKeyword": "자료조사·원고의 주제어",
+  "category": "entertainment",
+  "images": [
+    { "slideIndex": 1, "kind": "instagram_capture", "localPath": "/abs/path/slide1.png" },
+    { "slideIndex": 2, "kind": "web_alternative", "localPath": "/abs/path/slide2.jpg",
+      "sourcePage": "https://news.example/article", "note": "리버스 검색으로 찾은 원본" }
+  ],
+  "profileEmbedUrl": null
+}
+```
+
+- `category`는 `incident` / `entertainment` / `ott` / `parenting` / `living` / `community` 중
+  하나이거나 `null`이다(`keywordCategoryRules.ts`의 `KeywordCategory`).
+- `kind`가 `web_alternative`면 `sourcePage`가 **필수**다 - 저작권 판단을 사람이 하기로 한
+  정책(위 "이미지 소싱 정책")의 근거가 거기서 나온다.
+- 같은 `slideIndex`에 `instagram_capture`와 `web_alternative`를 함께 두면 뷰어가 A/B로 나란히
+  띄운다. 같은 kind를 두 번 두는 것은 거부된다.
+- `burnedInText`는 **이미지를 못 쓰더라도 항상 채운다** - `buildResearchPrompt.ts`가 이걸 리서치
+  1차 근거로 주입한다.
+
+```bash
+npm run ig:create-job -- capture.json --dry-run   # 검증만, 아무것도 쓰지 않는다
+npm run ig:create-job -- capture.json             # job 생성 + 이미지 업로드 + 큐 항목 done 표시
+```
+
+`--dry-run`은 Supabase 자격증명 없이도 돈다(그쪽 모듈을 실제로 쓸 때만 부른다). 규격 오류는
+하나씩이 아니라 **모아서** 보고하고, 큐에 없는 `queueEntryId`·이미 처리된 항목·없거나 0바이트인
+이미지 파일도 **쓰기 전에** 막는다 - job row가 먼저 생기면 되돌리기가 번거롭기 때문이다.
+
 ## 코드 위치
 
 ```
@@ -95,6 +136,9 @@ src/jobs/instagramCapturePollJob.ts                CLI 진입점(launchd가 60�
 src/workflows/instagram-capture/types.ts           공용 타입 (InstagramCaptureResult 등)
 src/workflows/instagram-capture/instagramQueue.ts  로컬 JSONL 큐
 src/workflows/instagram-capture/createInstagramJob.ts   캡처 결과 -> article_jobs
+src/workflows/instagram-capture/createInstagramJobCli.ts     캡처 JSON -> job(검증 포함)
+src/workflows/instagram-capture/parseCaptureFile.ts     캡처 JSON 검증·정규화
+src/workflows/instagram-capture/selectPromotableImages.ts  후보 -> images 승격 규칙(유일한 기준)
 src/workflows/instagram-capture/promoteInstagramImagesCli.ts  이미지 승격
 src/workflows/instagram-capture/showQueueStatusCli.ts   대기열 확인
 ```
@@ -102,8 +146,11 @@ src/workflows/instagram-capture/showQueueStatusCli.ts   대기열 확인
 ```
 npm run job:ig-capture-poll     텔레그램 폴링 1회(launchd가 60초 주기로 호출)
 npm run ig-capture:status       대기 중인 큐 항목 확인
+npm run ig:create-job -- <json> [--dry-run]   캡처 JSON -> job
 npm run ig:promote-images -- <jobId>   job:write 이후 이미지 승격
 npm run test:instagram-capture-bot     봇 로직 단위 테스트(4건)
+npm run test:ig-promote                승격 규칙 불변식(8건)
+npm run test:ig-capture-file           캡처 JSON 검증 규격(11건)
 ```
 
 ## 현재 상태 (2026-09-21)
