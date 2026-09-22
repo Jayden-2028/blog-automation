@@ -161,6 +161,7 @@
     "test:ig-capture-session": "tsx src/workflows/instagram-capture/testRunCaptureSession.ts",
     "test:ig-capture-queue": "tsx src/workflows/instagram-capture/testProcessPendingCaptures.ts",
     "test:ig-alternative": "tsx src/workflows/instagram-capture/testFindCleanAlternative.ts",
+    "test:ig-post-url": "tsx src/workflows/instagram-capture/testCanonicalPostUrl.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",
     "test:heavy-pipeline-lock": "tsx src/jobs/lib/testHeavyPipelineLock.ts",

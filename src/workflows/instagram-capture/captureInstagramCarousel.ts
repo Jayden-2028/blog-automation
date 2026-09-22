@@ -19,9 +19,23 @@ const DEFAULT_MAX_SLIDES = 10;
 
 /** 캐러셀 "다음" 버튼. 인스타가 DOM을 바꾸면 여기가 먼저 깨진다 - 0장이면 실패로 처리된다. */
 const NEXT_BUTTON = 'button[aria-label="다음"], button[aria-label="Next"], [aria-label="Next"], [aria-label="다음"]';
-const ARTICLE_IMAGE = "article img[srcset], article img[src], main img[srcset], img[srcset]";
-/** 게시물이 떴다고 볼 수 있는 표식. article 하나만 기다리면 레이아웃이 바뀔 때 통째로 실패한다. */
-const POST_READY = 'article, main [role="dialog"], img[srcset]';
+
+/**
+ * 게시물 컨테이너 **안쪽만** 본다.
+ *
+ * 맨몸 `img[srcset]`을 폴백에 두면 안 된다(2026-09-22에 뺐다): 인스타가 게시물을 못 열고 홈 피드로
+ * 되돌려보내면 그 선택자가 **피드 이미지에 걸려** 엉뚱한 게시물을 조용히 찍는다. 실패하는 것보다
+ * 나쁘다 - 원고에 다른 사람 사진이 들어가고 아무도 모른다.
+ */
+const POST_CONTAINER = 'article, main [role="dialog"]';
+const ARTICLE_IMAGE = `${POST_CONTAINER} img[srcset], ${POST_CONTAINER} img[src]`;
+
+/** 공유 링크의 추적 파라미터(utm_source, stkn 등)를 떼고 표준 주소로 맞춘다. */
+export function canonicalPostUrl(url: string): { url: string; shortcode: string } | null {
+  const match = url.match(/instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+)/);
+  if (!match) return null;
+  return { url: `https://www.instagram.com/p/${match[1]}/`, shortcode: match[1] };
+}
 
 export function instagramProfilePath(): string | null {
   return process.env.IG_BROWSER_PROFILE?.trim() || null;
@@ -82,11 +96,23 @@ export async function captureInstagramCarousel(
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+
+    const canonical = canonicalPostUrl(url);
+    if (!canonical) throw new Error(`인스타 게시물 주소가 아닙니다: ${url}`);
+    await page.goto(canonical.url, { waitUntil: "domcontentloaded", timeout: 60_000 });
 
     // 로그인 벽이 뜨면 여기서 걸린다 - article이 안 나타난다.
+    // 되돌려보내졌는지 먼저 본다. 로그인 벽·삭제된 게시물·차단이면 인스타는 홈이나 로그인으로
+    // 보내는데, 그 화면에도 이미지가 많아 선택자만으로는 구분되지 않는다.
+    if (!page.url().includes(`/p/${canonical.shortcode}`)) {
+      const where = await dumpDiagnostics(page, tempDir);
+      throw new Error(
+        `게시물로 못 갔습니다 - ${page.url()} 로 되돌려보내졌습니다(삭제·비공개·로그인 벽 중 하나). ${where}`
+      );
+    }
+
     const ready = await page
-      .waitForSelector(POST_READY, { timeout: 30_000 })
+      .waitForSelector(ARTICLE_IMAGE, { timeout: 30_000 })
       .then(() => true)
       .catch(() => false);
     if (!ready) {
