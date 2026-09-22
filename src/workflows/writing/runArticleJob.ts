@@ -44,6 +44,8 @@ import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
+import { reviseBriefWithResearch } from "../brief/reviseBriefWithResearch.js";
+import type { ReviseBriefInput, ReviseBriefResult } from "../brief/reviseBriefWithResearch.js";
 import { countImageMarkers } from "./generateArticleVariant.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
@@ -484,6 +486,11 @@ function dedupeSourceInserts(items: SourceInsert[]): SourceInsert[] {
 
 export type RunWritingStageOptions = {
   /**
+   * 테스트 주입: 브리프 재작성(2026-09-22). 기본은 reviseBriefWithResearch(LLM 1콜).
+   * 테스트에서 LLM을 타면 안 되므로 반드시 주입한다.
+   */
+  reviseBrief?: (input: ReviseBriefInput) => Promise<ReviseBriefResult>;
+  /**
    * 테스트 주입: 헤드리스 writer 실행을 대체한다. rawOutput은 성공 시에도 채운다(2026-09-15) -
    * 모델이 도구 실행 자체는 "성공"(exit 0)으로 끝냈지만 draft 파일을 안 쓴 경우(마커 형식 대신
    * 확인 요청/거부성 응답 등, 민감한 실제 사건 소재에서 관측됨), 그 실제 응답 내용을 알 방법이
@@ -641,13 +648,36 @@ async function runWritingStageInner(
   if (fileModifiedWithin(draftPath, 2 * 60 * 60 * 1000)) {
     console.log(`ℹ️ [writing] 최근 draft 파일 재사용(재작성 생략): ${draftPath}`);
   } else {
+    // 브리프를 리서치에 비추어 다시 쓴다(2026-09-22). 1차는 **제목만 보고** 만든 추정이라
+    // 사실과 각도가 틀릴 수 있고, 그대로 두면 틀린 전제가 소제목으로 굳는다.
+    // 실패해도 집필을 막지 않는다 - 1차를 그대로 쓴다(지금까지의 동작).
+    const firstBrief = readJobBrief(job.metadata as Record<string, unknown> | null);
+    let brief = firstBrief;
+    if (firstBrief) {
+      const research = await readFile(researchPath, "utf8").catch(() => "");
+      const revised = await (options.reviseBrief ?? reviseBriefWithResearch)({
+        keyword: job.keyword,
+        brief: firstBrief,
+        research,
+      });
+      if (revised.status === "failed") {
+        console.warn(`⚠️ [writing] 브리프 재작성 실패(1차를 그대로 씁니다): ${revised.error}`);
+      } else {
+        brief = revised.brief;
+        if (revised.status === "revised") {
+          console.log(`· [writing] 브리프를 리서치에 맞춰 고쳤습니다: ${revised.changed}`);
+          await ArticleJobRepository.mergeMetadata(jobId, { briefRevised: revised.changed, brief });
+        }
+      }
+    }
+
     const prompt = buildWritingPrompt({
       job,
       researchFilePath: researchPath,
       draftFilePath: draftPath,
       isMedical,
       today,
-      brief: readJobBrief(job.metadata as Record<string, unknown> | null),
+      brief,
     });
     const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
     const ran = await runWriter(prompt, draftPath);
