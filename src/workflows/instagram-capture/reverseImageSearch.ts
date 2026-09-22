@@ -12,6 +12,7 @@
 // CAPTCHA를 풀지 않는다. 뜨면 포기한다.
 import { chromium } from "playwright";
 
+import { isBlockedSource, hostOf } from "./blockedSources.js";
 import type { ImageCandidate } from "../images/searchNaverImages.js";
 
 /** 구글 로그인 프로필 경로(맥 전용). 없으면 리버스 검색을 건너뛴다. */
@@ -33,50 +34,125 @@ export type ReverseSearchResult =
 /** 결과에서 버릴 도메인. 구글 자체 링크와 이미지 호스팅은 출처 페이지가 못 된다. */
 const NOISE = /(^|\.)(google\.[a-z.]+|gstatic\.com|googleusercontent\.com|youtube\.com|schema\.org)$/i;
 
-function hostOf(url: string): string | null {
+/** 렌즈가 지목한 "이 사진이 실린 페이지". */
+export type LensHit = { sourcePage: string; title: string };
+
+/**
+ * 렌즈 결과에서 출처 페이지만 뽑는다.
+ *
+ * 왜 이미지를 같이 안 집는가(2026-09-23 실측): 결과 카드의 썸네일은 205px짜리 data: URI이고
+ * `<a>` 바깥에 있다. 받을 수 있는 원본 주소를 렌즈가 주지 않는다. 그래서 여기서는 **출처
+ * 페이지만** 확보하고, 실제 이미지는 그 페이지의 og:image에서 받는다(resolveImage).
+ */
+export function extractHits(rows: Array<{ href: string; text: string }>): LensHit[] {
+  const seen = new Set<string>();
+  const out: LensHit[] = [];
+  for (const row of rows) {
+    const host = hostOf(row.href);
+    if (!host || NOISE.test(host)) continue;
+    // 인스타는 2-a와 같은 이유로 뺀다. 여기서 걸러야 쓸데없이 페이지를 받지 않는다.
+    if (isBlockedSource({ sourcePage: row.href })) continue;
+    if (seen.has(row.href)) continue;
+    seen.add(row.href);
+    out.push({ sourcePage: row.href, title: row.text });
+  }
+  return out;
+}
+
+/**
+ * 출처 페이지의 대표 이미지(og:image)를 뽑는다.
+ *
+ * 기사 페이지의 og:image는 그 기사가 실은 **원본 해상도 사진**이다. 렌즈 썸네일(205px)보다
+ * 훨씬 낫고, 링크 미리보기용이라 구조가 안정적이다(캡션을 og:description에서 뽑기로 한 것과
+ * 같은 이유).
+ */
+/**
+ * HTML 속성값의 엔티티를 푼다.
+ *
+ * 2026-09-23 실측: X(트위터)의 og:image가 `?format=webp&amp;name=large`로 나와 그대로 받으면
+ * 404다. `&amp;`가 쿼리 구분자를 망가뜨린다. 속성값에 흔한 것만 푼다.
+ */
+export function decodeEntities(value: string): string {
+  return value
+    .replace(/&(?:amp|AMP);/g, "&")
+    .replace(/&(?:quot|QUOT);/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&(?:lt|LT);/g, "<")
+    .replace(/&(?:gt|GT);/g, ">")
+    .replace(/&#0*(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, code: string) => String.fromCodePoint(parseInt(code, 16)));
+}
+
+export function parseOgImage(html: string, pageUrl: string): string | null {
+  const head = html.slice(0, 200_000);
+  for (const re of [
+    /<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+  ]) {
+    const m = head.match(re);
+    if (!m?.[1]) continue;
+    try {
+      return new URL(decodeEntities(m[1]), pageUrl).toString();
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export type ReverseSearchDeps = {
+  /** 테스트에서 브라우저를 갈아끼운다. */
+  collect?: (slidePath: string, profile: string) => Promise<LensHit[] | "blocked">;
+  /** 출처 페이지 HTML을 받아온다. */
+  fetchHtml?: (url: string) => Promise<string | null>;
+};
+
+/** og:image를 찾으려고 출처 페이지를 받는다. 실패하면 그 후보만 버린다. */
+async function downloadHtml(url: string): Promise<string | null> {
   try {
-    return new URL(url).hostname.toLowerCase();
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+      },
+      redirect: "follow",
+    });
+    if (!response.ok) return null;
+    return await response.text();
   } catch {
     return null;
   }
 }
 
-/**
- * 렌즈 결과 페이지에서 "이 사진이 실린 페이지" 후보를 긁는다.
- *
- * 링크마다 붙어 있는 썸네일(img)을 같이 집어 ImageCandidate로 만든다. 썸네일은 렌즈가 주는
- * 저해상도라 그대로 쓰지 않고, 출처 페이지를 열어 받는 것은 기존 다운로드 경로가 한다.
- */
-export function extractCandidates(
-  rows: Array<{ href: string; text: string; image: string | null; width: number | null; height: number | null }>
-): ImageCandidate[] {
-  const seen = new Set<string>();
+/** 페이지를 열어 실제 이미지 주소를 붙인다. 앞에서부터 최대 limit건만 받는다. */
+export async function resolveHits(
+  hits: LensHit[],
+  fetchHtml: (url: string) => Promise<string | null>,
+  limit = 6
+): Promise<ImageCandidate[]> {
   const out: ImageCandidate[] = [];
-  for (const row of rows) {
-    const host = hostOf(row.href);
-    if (!host || NOISE.test(host)) continue;
-    if (seen.has(row.href)) continue;
-    seen.add(row.href);
-    // link(이미지 직접 주소)가 없으면 쓸 수 없다 - 받을 대상이 없다.
-    if (!row.image) continue;
+  for (const hit of hits.slice(0, limit)) {
+    const html = await fetchHtml(hit.sourcePage);
+    if (!html) continue;
+    const image = parseOgImage(html, hit.sourcePage);
+    if (!image) continue;
+    if (isBlockedSource({ link: image })) continue;
     out.push({
-      title: row.text,
-      link: row.image,
-      thumbnail: row.image,
-      width: row.width,
-      height: row.height,
-      sourcePage: row.href,
+      title: hit.title,
+      link: image,
+      thumbnail: image,
+      // 크기는 모른다 - usable()이 크기 미상 후보는 남긴다.
+      width: null,
+      height: null,
+      sourcePage: hit.sourcePage,
     });
   }
   return out;
 }
 
-export type ReverseSearchDeps = {
-  /** 테스트에서 브라우저를 갈아끼운다. */
-  collect?: (slidePath: string, profile: string) => Promise<ReverseSearchResult>;
-};
-
-async function collectWithBrowser(slidePath: string, profile: string): Promise<ReverseSearchResult> {
+async function collectWithBrowser(slidePath: string, profile: string): Promise<LensHit[] | "blocked"> {
   // 로그인 쿠키가 유지돼야 하므로 persistent context. 인스타 캡처와 같은 회피 인자를 쓴다.
   const context = await chromium.launchPersistentContext(profile, {
     headless: process.env.LENS_HEADLESS !== "false",
@@ -98,7 +174,7 @@ async function collectWithBrowser(slidePath: string, profile: string): Promise<R
     await input.setInputFiles(slidePath);
 
     await page.waitForURL(/\/search|\/sorry/, { timeout: 60_000 }).catch(() => {});
-    if (page.url().includes("/sorry")) return { status: "blocked" };
+    if (page.url().includes("/sorry")) return "blocked";
 
     // 결과가 비동기로 채워진다. 링크가 붙을 때까지 짧게 폴링한다 - page.evaluate로 document를
     // 만지지 않는 것은 이 저장소의 관례다(tsconfig에 DOM lib이 없다). 로케이터로만 읽는다.
@@ -109,29 +185,20 @@ async function collectWithBrowser(slidePath: string, profile: string): Promise<R
     }
 
     const total = Math.min(await links.count().catch(() => 0), 60);
-    const rows: Array<{ href: string; text: string; image: string | null; width: number | null; height: number | null }> =
-      [];
+    const rows: Array<{ href: string; text: string }> = [];
     for (let i = 0; i < total; i += 1) {
       const anchor = links.nth(i);
       const href = await anchor.getAttribute("href").catch(() => null);
       if (!href) continue;
-      const img = anchor.locator("img").first();
-      const image = (await img.count().catch(() => 0)) > 0 ? await img.getAttribute("src").catch(() => null) : null;
-      const box = image ? await img.boundingBox().catch(() => null) : null;
       rows.push({
         href,
         text: ((await anchor.innerText().catch(() => "")) || (await anchor.getAttribute("aria-label").catch(() => "")) || "")
           .trim()
           .slice(0, 120),
-        image,
-        width: box ? Math.round(box.width) : null,
-        height: box ? Math.round(box.height) : null,
       });
     }
 
-    return { status: "ok", candidates: extractCandidates(rows) };
-  } catch (error) {
-    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+    return extractHits(rows);
   } finally {
     await context.close().catch(() => {});
   }
@@ -150,5 +217,13 @@ export async function reverseImageSearch(
   if (!profile) return { status: "skipped", reason: "LENS_BROWSER_PROFILE이 없습니다(npm run ig:lens-login)." };
 
   const collect = deps.collect ?? collectWithBrowser;
-  return collect(slidePath, profile);
+  const fetchHtml = deps.fetchHtml ?? downloadHtml;
+
+  try {
+    const hits = await collect(slidePath, profile);
+    if (hits === "blocked") return { status: "blocked" };
+    return { status: "ok", candidates: await resolveHits(hits, fetchHtml) };
+  } catch (error) {
+    return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+  }
 }

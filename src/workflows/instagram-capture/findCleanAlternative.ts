@@ -15,6 +15,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { safeHeaderUrl } from "../images/collectWebImages.js";
+import { isBlockedSource } from "./blockedSources.js";
 import { reverseImageSearch } from "./reverseImageSearch.js";
 import type { ReverseSearchResult } from "./reverseImageSearch.js";
 import { searchImagesMerged } from "../images/searchImagesMerged.js";
@@ -31,32 +32,6 @@ const HEADERS: Record<string, string> = {
 /** 본문에서 알아볼 수 있는 최소 크기. collectWebImages의 완화된 기준(2026-09-21)과 맞춘다. */
 const MIN_EDGE = 400;
 
-/**
- * 대체 이미지로 쓰지 않을 도메인(2026-09-23 사용자 결정).
- *
- * 왜 인스타를 빼는가: 지금 찾는 것은 오버레이가 없는 **깨끗한 원본**이다. 그런데 검색이
- * 물어온 게 또 다른 인스타 게시물이면 같은 종류의 뉴스 카드일 확률이 높고(번인 텍스트를
- * 피하려는 목적이 무너진다), 저작권 판단도 원본 게시물과 다를 바 없다. 실측에서 실제로
- * 다른 인스타 게시물이 출처로 잡혔다(job ec21f085).
- */
-const BLOCKED_HOSTS = ["instagram.com", "cdninstagram.com", "fbcdn.net", "threads.net", "threads.com"];
-
-function hostOf(url: string): string | null {
-  try {
-    return new URL(url).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-/** 이미지 주소든 출처 페이지든 한쪽이라도 막힌 도메인이면 후보에서 뺀다. */
-export function isBlockedSource(candidate: Pick<ImageCandidate, "link" | "sourcePage">): boolean {
-  const hosts = [hostOf(candidate.link), candidate.sourcePage ? hostOf(candidate.sourcePage) : null];
-  return hosts.some(
-    (host) => host !== null && BLOCKED_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))
-  );
-}
-
 export function buildAlternativeQuery(keyword: string, description: string): string {
   // 설명이 길면 검색이 0건으로 끝난다("2022년 인스타그램 셀카 사진" 같은 수식이 붙는 문제와 같다).
   // 주제어를 앞에 두고 설명은 짧게 덧붙인다.
@@ -72,6 +47,9 @@ function usable(candidate: ImageCandidate): boolean {
   if (width !== null && height !== null && (width < MIN_EDGE || height < MIN_EDGE)) return false;
   return true;
 }
+
+// 2-a와 2-b가 같은 규칙을 쓰도록 공용 모듈에서 가져와 다시 내보낸다.
+export { isBlockedSource };
 
 export type Downloaded = { buffer: Buffer; contentType: string };
 
