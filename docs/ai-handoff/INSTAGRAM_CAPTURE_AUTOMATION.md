@@ -81,11 +81,39 @@ job:ig-capture-poll (launchd 60초)
 아니라 "같은 주제 사진"이라 정확도가 떨어진다** - 원 정책도 이것을 차선책으로 적어 뒀다.
 Serper는 이미 쓰고 있는 경로라 새 비용이 아니다.
 
-### 2-b단계(나중): 진짜 리버스 이미지 검색
+### 2-b단계(2026-09-23 붙임): 진짜 리버스 이미지 검색
 
-Playwright로 `lens.google.com`에 슬라이드를 업로드해 같은 사진의 출처를 찾는다. 무료이고
-정확하지만 DOM 의존이 크다. **2-a를 먼저 돌려 보고 실제로 부족할 때** 붙인다 - 안 그러면
-검증되지 않은 취약점을 미리 들이는 셈이다.
+2-a를 실제로 돌려 보니 부족했다. job `ec21f085`의 대체 이미지 출처가 **또 다른 인스타
+게시물**이었다 - 오버레이를 피하려는 목적이 무너진다. 조건이 충족돼 붙였다
+(`reverseImageSearch.ts`).
+
+Playwright로 `lens.google.com/upload`에 슬라이드를 올린다. 실측으로 확인한 선택자는
+`input[name="encoded_image"]` 하나다. 대화상자 안에도 file input이 둘 더 있지만 그쪽은
+아무 일도 일어나지 않는다.
+
+**진짜 벽은 DOM이 아니라 봇 차단이었다.** 익명 컨텍스트로 올리면 결과 페이지가
+`/sorry/index`(CAPTCHA)로 간다. 헤드리스를 꺼도 똑같았다. CAPTCHA는 풀지 않는다.
+
+그래서 **로그인된 전용 크롬 프로필**을 쓴다(`npm run ig:lens-login`, 인스타 프로필과 분리).
+사람 트래픽으로 보일 가능성을 높이는 것이지 보장이 아니다 - 그래서 렌즈를 단독으로 세우지
+않고 **막히면 2-a로 떨어진다**. 렌즈가 막힌 날에도 대체 이미지가 통째로 사라지지 않는다.
+
+```
+IG_CAPTURE_AUTO 경로
+  슬라이드에 오버레이 있음
+    → 2-b 렌즈 리버스 검색 (LENS_REVERSE_SEARCH=true + LENS_BROWSER_PROFILE)
+        ok      → 같은 사진의 출처 페이지를 후보로
+        blocked → ⚠️ 로그 남기고 ↓
+        skipped → 조용히 ↓
+    → 2-a 텍스트 검색(네이버 + Serper)
+    → 둘 다 없으면 그 자리는 비운다
+```
+
+어느 경로로 찾았는지는 `note`에 적어 승인 단계에서 보이게 한다.
+
+**인스타 도메인은 양쪽 경로 모두에서 뺀다**(2026-09-23 사용자 결정, `isBlockedSource`) -
+`instagram.com` / `cdninstagram.com` / `fbcdn.net` / threads 계열. 같은 플랫폼의 다른
+게시물은 같은 종류의 뉴스 카드일 확률이 높고, 저작권 판단도 원본과 다를 바 없다.
 
 ## 새 환경변수
 
@@ -93,6 +121,9 @@ Playwright로 `lens.google.com`에 슬라이드를 업로드해 같은 사진의
 IG_BROWSER_PROFILE=      Playwright 로그인 프로필 경로(맥). 없으면 캡처를 건너뛰고 알린다
 IG_CAPTURE_AUTO=         기본 false. true여야 폴러가 캡처까지 이어서 한다
 IG_CAPTURE_MAX_SLIDES=   기본 10. 캐러셀이 길 때 상한
+LENS_REVERSE_SEARCH=     기본 false. true여야 2-b 리버스 검색을 먼저 쓴다
+LENS_BROWSER_PROFILE=    구글 로그인 프로필 경로(맥). npm run ig:lens-login으로 만든다
+LENS_HEADLESS=           false로 두면 렌즈 창을 띄운다(무슨 화면인지 눈으로 볼 때)
 ```
 
 `IG_CAPTURE_AUTO`를 기본 false로 두는 이유: 로그인 프로필이 준비되기 전에 켜지면 매 분 실패

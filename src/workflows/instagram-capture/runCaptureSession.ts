@@ -30,6 +30,7 @@ export type RunCaptureSessionDeps = {
     description: string;
     slideIndex: number;
     tempDir: string;
+    slidePath?: string | null;
   }) => Promise<CleanAlternative | null>;
   /**
    * 임시 디렉터리 정리. **실패했을 때만** 이 안에서 부른다.
@@ -97,6 +98,8 @@ export async function runCaptureSession(
         description,
         slideIndex: slide.slideIndex,
         tempDir: captured.tempDir,
+        // 리버스 검색(2-b)의 입력. 이 슬라이드와 **같은 사진**을 찾는 데 쓴다.
+        slidePath: slide.localPath,
       });
       if (alternative) {
         images.push({

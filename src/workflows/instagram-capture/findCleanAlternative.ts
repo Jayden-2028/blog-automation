@@ -4,8 +4,10 @@
 // "같은 주제 사진"이라 정확도가 떨어진다 - 원 정책(INSTAGRAM_POSTING_CONVERTER.md)도 이것을
 // 차선책으로 적어 뒀다. 최종 판단은 사람이 승인 단계에서 하므로 후보만 준비한다.
 //
-// 2-b단계(나중): lens.google.com에 슬라이드를 올려 진짜 리버스 이미지 검색. 무료지만 DOM 의존이
-// 커서, 2-a를 실제로 돌려 보고 부족할 때 붙인다 - INSTAGRAM_CAPTURE_AUTOMATION.md 참고.
+// 2-b단계(2026-09-23 붙임): lens.google.com에 슬라이드를 올려 진짜 리버스 이미지 검색. 2-a를
+// 실제로 돌려 보니 엉뚱한 출처가 붙어(job ec21f085 - 다른 인스타 게시물) 조건이 충족됐다.
+// **렌즈를 먼저 쓰고, 못 구하면 2-a로 떨어진다** - 렌즈는 CAPTCHA로 막힐 수 있어서 단독으로
+// 세울 수 없다(reverseImageSearch.ts).
 //
 // 새 유료 API를 부르지 않는다. Serper는 이미 파이프라인이 쓰는 경로다.
 
@@ -13,6 +15,8 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { safeHeaderUrl } from "../images/collectWebImages.js";
+import { reverseImageSearch } from "./reverseImageSearch.js";
+import type { ReverseSearchResult } from "./reverseImageSearch.js";
 import { searchImagesMerged } from "../images/searchImagesMerged.js";
 import type { ImageCandidate } from "../images/searchNaverImages.js";
 import type { CleanAlternative } from "./runCaptureSession.js";
@@ -103,17 +107,48 @@ export function extensionForContentType(contentType: string): string {
 export type FindCleanAlternativeDeps = {
   search?: (query: string) => Promise<ImageCandidate[]>;
   fetchImage?: (url: string, referer: string | null) => Promise<Downloaded | null>;
+  reverseSearch?: (slidePath: string) => Promise<ReverseSearchResult>;
+};
+
+export type FindCleanAlternativeInput = {
+  keyword: string;
+  description: string;
+  slideIndex: number;
+  tempDir: string;
+  /** 오버레이가 있는 그 슬라이드의 파일 경로. 리버스 검색의 입력이다. 없으면 2-a만 쓴다. */
+  slidePath?: string | null;
 };
 
 export async function findCleanAlternative(
-  input: { keyword: string; description: string; slideIndex: number; tempDir: string },
+  input: FindCleanAlternativeInput,
   deps: FindCleanAlternativeDeps = {}
 ): Promise<CleanAlternative | null> {
   const search = deps.search ?? searchImagesMerged;
   const fetchImage = deps.fetchImage ?? download;
+  const reverse = deps.reverseSearch ?? ((slidePath: string) => reverseImageSearch(slidePath));
 
   const query = buildAlternativeQuery(input.keyword, input.description);
-  const found = (await search(query).catch(() => [])).filter(usable);
+
+  // 2-b: 같은 사진을 먼저 찾는다. 꺼져 있거나(skipped) 막히면(blocked) 조용히 2-a로 간다 -
+  // 여기서 멈추면 렌즈가 막힌 날에는 대체 이미지가 통째로 사라진다.
+  let reverseHits: ImageCandidate[] = [];
+  let via: "reverse" | "text" = "text";
+  if (input.slidePath) {
+    const result = await reverse(input.slidePath).catch(
+      (error): ReverseSearchResult => ({ status: "failed", error: String(error) })
+    );
+    if (result.status === "ok") {
+      reverseHits = result.candidates.filter(usable);
+    } else if (result.status === "blocked") {
+      console.warn("⚠️ [ig-capture] 구글 렌즈가 막혔습니다(CAPTCHA) - 텍스트 검색으로 갑니다.");
+    } else if (result.status === "failed") {
+      console.warn(`⚠️ [ig-capture] 리버스 검색 실패: ${result.error} - 텍스트 검색으로 갑니다.`);
+    }
+  }
+
+  const textHits = reverseHits.length > 0 ? [] : (await search(query).catch(() => [])).filter(usable);
+  if (reverseHits.length > 0) via = "reverse";
+  const found = reverseHits.length > 0 ? reverseHits : textHits;
 
   // **출처 페이지가 있는 후보를 먼저 쓴다**(2026-09-22 실측 대응). 네이버 이미지 검색은
   // sourcePage를 주지 않아 폴백이 이미지 파일 URL을 출처로 남겼다
@@ -138,7 +173,9 @@ export async function findCleanAlternative(
       localPath,
       sourcePage: candidate.sourcePage ?? candidate.link,
       note:
-        `검색어 "${query}"로 찾은 대체 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)` +
+        (via === "reverse"
+          ? "구글 렌즈 리버스 검색으로 찾은 같은 사진(출처 페이지 확인 필요)"
+          : `검색어 "${query}"로 찾은 대체 이미지(같은 사진이 아닐 수 있음 - 승인 단계에서 확인)`) +
         (unknownSource ? " ⚠️ 출처 페이지 불명(이미지 주소만 있음)" : ""),
     };
   }
