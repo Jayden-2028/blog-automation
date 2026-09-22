@@ -99,6 +99,7 @@ async function main(): Promise<void> {
     loadArticles: async () => [],
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -115,6 +116,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -142,6 +144,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -180,6 +183,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -200,6 +204,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -220,6 +225,7 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -245,6 +251,7 @@ async function main(): Promise<void> {
     },
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -271,6 +278,7 @@ async function main(): Promise<void> {
       writeManuscriptFile: async () => {},
       generateImages: false,
       collectWebImages: false,
+    loadPublishedPosts: false,
       renderTableImages: false,
       capturePages: false,
       generateNaverVariant: false,
@@ -290,6 +298,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -312,6 +321,7 @@ async function main(): Promise<void> {
       imagePatches.push(patch);
     },
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -378,6 +388,7 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async () => {},
     collectWebImages: false,
+    loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
     generateNaverVariant: false,
@@ -531,6 +542,7 @@ async function main(): Promise<void> {
       renderTableImages: false,
       capturePages: false,
       generateNaverVariant: false,
+      loadPublishedPosts: false,
       collectWebImages: async (input) => {
         calls.push(input.filledIndexes);
         return {
@@ -571,6 +583,57 @@ async function main(): Promise<void> {
     assert(savedImages[0].index === 1 && savedImages[1].index === 2, "자리 번호 순으로 정렬돼야 한다");
     assert(savedImages[0].sourcePage === "https://example.com/a", "출처가 보존돼야 한다(발행 시 표기 필요)");
     console.log("✅ 웹 검색 자리 수집 - 생성분과 병합 + 출처 보존 + 재수집 게이트");
+  }
+
+  // 12) 내부 링크가 배리에이션 본문과 DB 행에 함께 들어간다(2026-09-22).
+  //     서치콘솔이 우리 글을 전부 "참조 페이지 없음"으로 보던 문제 - 본문 내부 링크가 0개였다.
+  //     본문에만 넣고 DB 행에 안 넣으면 원고 파일과 article 행이 어긋나므로 둘 다 확인한다.
+  {
+    let savedContent = "";
+    const result = await prepareManuscript(job("a", "entertainment"), {
+      loadArticles: async () => [baseArticle()],
+      createVariantArticle: async (input) => {
+        savedContent = input.content;
+        return variantArticle(99);
+      },
+      generateVariant: async () => ({
+        status: "success" as const,
+        variant: {
+          title: "배리에이션",
+          searchDescription: "설명",
+          slug: "s",
+          shortName: "짧은이름",
+          tags: ["t"],
+          body: "본문입니다.\n\n**참고 자료**\n- [바깥](https://news.example.com/1)",
+        },
+        durationMs: 1,
+      }),
+      loadPublishedPosts: async () => [
+        {
+          jobId: "other",
+          title: "관련 있는 지난 글",
+          url: "https://b.example.com/old.html",
+          keyword: "테스트 키워드 a 관련",
+          category: "entertainment",
+          publishedAt: "2026-09-20T00:00:00Z",
+        },
+      ],
+      generateImages: false,
+      collectWebImages: false,
+      renderTableImages: false,
+      capturePages: false,
+      generateNaverVariant: false,
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async () => ({}),
+    });
+    assert(result.status === "success", `내부 링크 경로 실패 (${JSON.stringify(result)})`);
+    assert(savedContent.includes("https://b.example.com/old.html"), "DB에 저장되는 본문에 링크가 있어야 한다");
+    assert(savedContent.includes("관련 있는 지난 글"), "앵커 텍스트가 글 제목이어야 한다");
+    assert(
+      savedContent.indexOf("함께 보면 좋은 글") < savedContent.indexOf("**참고 자료**"),
+      "우리 글 링크가 바깥 출처보다 앞에 와야 한다"
+    );
+    console.log("✅ 내부 링크 - 배리에이션 본문과 DB 행에 함께 삽입");
   }
 
   console.log("\n✅ 전체 통과");

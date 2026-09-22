@@ -104,3 +104,75 @@ export async function countTodayPublicationsByPlatform(platform: string): Promis
   if (error) throw error;
   return count ?? 0;
 }
+
+/** 이미 발행돼 링크를 걸 수 있는 글. 내부 링크 삽입(2026-09-22)이 후보로 쓴다. */
+export type PublishedPost = {
+  jobId: string;
+  title: string;
+  url: string;
+  keyword: string;
+  category: string | null;
+  publishedAt: string;
+};
+
+/**
+ * 실제로 발행된 글 목록(최신순). 내부 링크 후보용이다.
+ *
+ * 왜 필요한가(2026-09-22): 서치콘솔이 우리 글 대부분을 "참조 페이지 없음"으로 본다. 실측하니
+ * 발행된 26개 URL 중 19개가 홈에서도 본문에서도 링크되지 않은 고아 페이지였고, 본문 내부 링크는
+ * **0개**였다. 구글 공식 문서는 "매일 찾는 새 페이지의 압도적 다수는 링크를 통해서"라고 말한다 -
+ * 링크가 없으면 사이트맵 하나에만 의존하게 된다.
+ *
+ * writer는 다른 글의 주소를 알 방법이 없어 구조적으로 링크를 쓸 수 없었다. 그래서 여기서 실제
+ * 발행 기록을 읽어 넘겨준다(LLM이 지어낸 주소가 섞이지 않는다).
+ */
+export async function listPublishedPosts(limit = 200): Promise<PublishedPost[]> {
+  const { data: publications, error: publicationError } = await supabase
+    .from("publications")
+    .select("article_id,published_url,created_at")
+    .eq("status", "published")
+    .not("published_url", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (publicationError) throw publicationError;
+  if (!publications || publications.length === 0) return [];
+
+  const { data: articles, error: articleError } = await supabase
+    .from("articles")
+    .select("id,job_id,title")
+    .in("id", publications.map((row) => row.article_id));
+  if (articleError) throw articleError;
+
+  const articleById = new Map((articles ?? []).map((row) => [row.id as number, row]));
+  const jobIds = [...new Set((articles ?? []).map((row) => row.job_id as string).filter(Boolean))];
+  if (jobIds.length === 0) return [];
+
+  const { data: jobs, error: jobError } = await supabase
+    .from("article_jobs")
+    .select("id,keyword,category")
+    .in("id", jobIds);
+  if (jobError) throw jobError;
+
+  const jobById = new Map((jobs ?? []).map((row) => [row.id as string, row]));
+
+  const posts: PublishedPost[] = [];
+  const seenJobs = new Set<string>();
+  for (const publication of publications) {
+    const article = articleById.get(publication.article_id as number);
+    if (!article) continue;
+    const job = jobById.get(article.job_id as string);
+    if (!job) continue;
+    // 같은 job이 여러 번 발행됐어도(수정 재발행) 최신 것 하나만 후보로 둔다.
+    if (seenJobs.has(job.id as string)) continue;
+    seenJobs.add(job.id as string);
+    posts.push({
+      jobId: job.id as string,
+      title: (article.title as string) ?? (job.keyword as string),
+      url: publication.published_url as string,
+      keyword: (job.keyword as string) ?? "",
+      category: (job.category as string) ?? null,
+      publishedAt: publication.created_at as string,
+    });
+  }
+  return posts;
+}

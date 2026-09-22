@@ -40,6 +40,9 @@ import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
+import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
+import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
+import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -63,6 +66,8 @@ export type PrepareManuscriptResult =
 
 export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
+  /** 내부 링크 후보(이미 발행된 글). 기본은 publications에서 읽는다. false면 링크를 붙이지 않는다. */
+  loadPublishedPosts?: (() => Promise<PublishedPost[]>) | false;
   createVariantArticle?: (input: {
     jobId: string;
     title: string;
@@ -214,6 +219,40 @@ async function defaultWriteManuscriptFile(path: string, content: string): Promis
   await writeFile(path, content, "utf8");
 }
 
+/**
+ * 이미 발행된 글 중 관련 있는 것을 본문 끝에 내부 링크로 붙인다(2026-09-22).
+ *
+ * 실패해도 원고를 막지 않는다 - 링크는 부가 기능이고, 여기서 예외를 던지면 원고 준비 전체가
+ * 실패한다. 발행 기록을 못 읽으면 링크 없이 그대로 간다.
+ *
+ * **새로 만드는 배리에이션에만** 붙인다. 이미 만들어진 원고를 재사용하는 경로에서 본문만 바꾸면
+ * DB의 article 행과 원고 파일이 어긋난다.
+ */
+async function withRelatedPosts(
+  content: string,
+  job: ArticleJobRow,
+  options: PrepareManuscriptOptions
+): Promise<string> {
+  const loadPublished = options.loadPublishedPosts;
+  if (loadPublished === false) return content;
+
+  try {
+    const candidates = await (loadPublished ?? listPublishedPosts)();
+    const related = pickRelatedPosts(
+      { jobId: job.id, keyword: job.keyword, category: job.category ?? null },
+      candidates
+    );
+    if (related.length === 0) return content;
+    console.log(`· [manuscripts] ${job.keyword}: 내부 링크 ${related.length}개를 붙였습니다.`);
+    return appendRelatedPosts(content, related);
+  } catch (error) {
+    console.warn(
+      `⚠️ [manuscripts] ${job.keyword}: 내부 링크를 붙이지 못했습니다(무시하고 계속): ${error instanceof Error ? error.message : error}`
+    );
+    return content;
+  }
+}
+
 export async function prepareManuscript(
   job: ArticleJobRow,
   options: PrepareManuscriptOptions = {}
@@ -303,6 +342,7 @@ export async function prepareManuscript(
     slug = result.variant.slug;
     tags = result.variant.tags;
     shortName = result.variant.shortName;
+    content = await withRelatedPosts(content, job, options);
     await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
     await mergeJobMetadata(job.id, {
       channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags, shortName } } satisfies ChannelMetaMap,
