@@ -150,6 +150,10 @@ const tests: Array<[string, () => Promise<void>]> = [
         assert.ok(found, "렌즈 후보를 써야 한다");
         assert.equal(found?.sourcePage, "https://news.test/article/1");
         assert.ok(found?.note?.includes("렌즈"), "어느 경로로 찾았는지 승인 단계에서 보여야 한다");
+        assert.ok(
+          found?.note?.includes("같은 사진이 아닐 수 있음"),
+          "og:image는 기사 대표 이미지라 렌즈가 매칭한 사진과 다를 수 있다 - 과신하게 적으면 안 된다"
+        );
         assert.equal(searched, false, "렌즈가 찾았으면 텍스트 검색은 낭비다");
       } finally {
         await rm(dir, { recursive: true, force: true });
