@@ -46,7 +46,12 @@ concurrency:
 jobs:
   write:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # 2026-09-22: 25분 -> 45분. "낼 모레 50인데..." 원고가 25분 26초에 잘렸다 - 본문(4,072자)은
+    # 이미 저장됐는데 상태 전환과 텔레그램 알림을 못 해서 job이 writing에 갇혔다. 사람이 보기에는
+    # "원고가 안 온다"인데 실제로는 다 써져 있는, 알아채기 어려운 실패 방식이다.
+    # 평소 5~13분이라 25분도 넉넉해 보였지만 긴 원고에서 넘겼다. 시간 초과는 LLM 호출값을 통째로
+    # 버리므로 여유를 크게 두는 편이 싸다.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
