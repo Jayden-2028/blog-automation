@@ -56,6 +56,16 @@ async function main(): Promise<void> {
   let captured: CarouselCapture | null = null;
   let judged: CarouselJudgement | null = null;
 
+  // 임시 디렉터리 정리. runCaptureSession은 **실패했을 때만** 이걸 부른다 - 성공하면 이미지를
+  // 아직 안 읽었으므로 createInstagramJob이 끝난 뒤 여기서 직접 부른다(2026-09-23).
+  const finishTemp = async (dir: string): Promise<void> => {
+    if (keep) {
+      console.log(`\n▶ --keep - 임시 파일을 남겼습니다: ${dir}`);
+      return;
+    }
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  };
+
   const session = await runCaptureSession(entry, {
     capture: async (url) => {
       console.log("▶ 캐러셀 캡처 중...");
@@ -87,13 +97,7 @@ async function main(): Promise<void> {
       console.log(found ? `   찾음: ${found.sourcePage}` : "   못 찾음 - 이 자리는 비웁니다");
       return found;
     },
-    cleanup: async (dir) => {
-      if (keep) {
-        console.log(`\n▶ --keep - 임시 파일을 남겼습니다: ${dir}`);
-        return;
-      }
-      await rm(dir, { recursive: true, force: true });
-    },
+    cleanup: finishTemp,
   });
 
   if (session.status === "failed") {
@@ -109,6 +113,7 @@ async function main(): Promise<void> {
   if (!parsed.ok) {
     console.error(`\n❌ 캡처 결과가 규격에 맞지 않습니다:`);
     for (const e of parsed.errors) console.error(`   - ${e}`);
+    await finishTemp(session.tempDir);
     process.exit(1);
   }
   for (const w of parsed.warnings) console.warn(`⚠️ ${w}`);
@@ -116,6 +121,7 @@ async function main(): Promise<void> {
   if (dryRun) {
     console.log("\n✅ --dry-run이라 job을 만들지 않았습니다.");
     console.log(JSON.stringify(parsed.capture, null, 2));
+    await finishTemp(session.tempDir);
     return;
   }
 
@@ -123,6 +129,7 @@ async function main(): Promise<void> {
   const { createInstagramJob } = await import("./createInstagramJob.js");
   const created = await createInstagramJob(parsed.capture);
   console.log(`✅ job ${created.jobId} (이미지 ${created.imagesSaved}장 저장, ${created.imagesFailed}장 실패)`);
+  await finishTemp(session.tempDir);
 
   console.log("\n▶ 자료조사로 자동 연결 중...");
   const { triggerResearchForJob } = await import("./triggerResearch.js");

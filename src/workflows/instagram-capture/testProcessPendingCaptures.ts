@@ -1,6 +1,10 @@
 // 대기열 처리의 실패·재시도 규칙. 브라우저·모델·DB는 전부 주입해 가짜로 돌린다.
 
 import { strict as assert } from "node:assert";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { MAX_ATTEMPTS, processPendingCaptures } from "./processPendingCaptures.js";
 import { normalizeJudgement } from "./judgeCarouselSlides.js";
@@ -20,10 +24,13 @@ function entry(patch: Partial<InstagramQueueEntry> = {}): InstagramQueueEntry {
   };
 }
 
-const okSession: RunCaptureSessionResult = {
+type ReadySession = Extract<RunCaptureSessionResult, { status: "ready" }>;
+
+const okSession: ReadySession = {
   status: "ready",
   slidesUsed: 2,
   slidesDropped: 0,
+  tempDir: "/tmp/ig-capture-test-없는경로",
   capture: {
     queueEntryId: "42",
     instagramUrl: "https://www.instagram.com/p/abc/",
@@ -91,7 +98,7 @@ const tests: Array<[string, () => Promise<void>]> = [
   [
     "규격에 안 맞는 캡처 결과는 job을 만들지 않는다",
     async () => {
-      const broken: RunCaptureSessionResult = {
+      const broken: ReadySession = {
         ...okSession,
         capture: { ...okSession.capture, searchKeyword: "", category: "연예" as string },
       };
@@ -100,6 +107,53 @@ const tests: Array<[string, () => Promise<void>]> = [
       assert.equal(r.created, 0);
       assert.equal(r.failed, 1);
       assert.deepEqual(h.research, [], "검증에 걸린 job은 조사도 안 돈다");
+    },
+  ],
+  [
+    "job을 만드는 동안 임시 이미지가 살아 있고, 끝나면 지워진다",
+    async () => {
+      // 2026-09-23 회귀: runCaptureSession이 성공하자마자 tempDir를 지워서 createInstagramJob이
+      // 이미지를 못 읽었다. 로그에는 ⚠️ 한 줄만 남고 결과는 "생성 1 / 실패 0"이라 이미지 0장짜리
+      // job이 조용히 나갔다. 가짜가 아니라 진짜 파일로 확인한다.
+      const dir = await mkdtemp(join(tmpdir(), "ig-capture-test-"));
+      const localPath = join(dir, "alt-1.png");
+      await writeFile(localPath, "이미지 내용");
+
+      let seenByCreateJob: string | null = null;
+      const r = await processPendingCaptures({
+        listPending: () => [entry()],
+        runSession: async () => ({ ...okSession, tempDir: dir }),
+        createJob: async () => {
+          // createInstagramJob이 하는 일: localPath를 읽는다. 이때 파일이 있어야 한다.
+          seenByCreateJob = await readFile(localPath, "utf-8");
+          return { jobId: "job-1", imagesSaved: 1, imagesFailed: 0 };
+        },
+        triggerResearch: async () => {},
+        mark: () => {},
+      } as Parameters<typeof processPendingCaptures>[0]);
+
+      assert.equal(r.created, 1);
+      assert.equal(seenByCreateJob, "이미지 내용", "job을 만들 때 이미지가 아직 있어야 한다");
+      assert.equal(existsSync(dir), false, "job을 만든 뒤에는 임시 디렉터리를 지워야 한다");
+    },
+  ],
+  [
+    "검증에 걸려 job을 안 만들어도 임시 디렉터리는 지운다",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "ig-capture-test-"));
+      await processPendingCaptures({
+        listPending: () => [entry()],
+        runSession: async () => ({
+          ...okSession,
+          tempDir: dir,
+          capture: { ...okSession.capture, searchKeyword: "" },
+        }),
+        createJob: async () => ({ jobId: "job-x", imagesSaved: 0, imagesFailed: 0 }),
+        triggerResearch: async () => {},
+        mark: () => {},
+      } as Parameters<typeof processPendingCaptures>[0]);
+      assert.equal(existsSync(dir), false, "어느 갈래로 빠져나가든 정리해야 한다");
+      await rm(dir, { recursive: true, force: true });
     },
   ],
   [

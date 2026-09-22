@@ -31,12 +31,25 @@ export type RunCaptureSessionDeps = {
     slideIndex: number;
     tempDir: string;
   }) => Promise<CleanAlternative | null>;
-  /** 임시 디렉터리 정리. */
+  /**
+   * 임시 디렉터리 정리. **실패했을 때만** 이 안에서 부른다.
+   *
+   * 성공하면 결과의 이미지가 아직 이 디렉터리 안의 파일을 가리키고 있다 - 여기서 지우면
+   * createInstagramJob이 읽을 때 파일이 없다. 성공 시에는 tempDir를 호출자에게 넘기고,
+   * 호출자가 job 생성을 마친 뒤 지운다.
+   */
   cleanup: (tempDir: string) => Promise<void>;
 };
 
 export type RunCaptureSessionResult =
-  | { status: "ready"; capture: InstagramCaptureResult; slidesUsed: number; slidesDropped: number }
+  | {
+      status: "ready";
+      capture: InstagramCaptureResult;
+      slidesUsed: number;
+      slidesDropped: number;
+      /** 아직 안 지운 임시 디렉터리. 호출자가 이미지를 다 읽은 뒤 반드시 지운다. */
+      tempDir: string;
+    }
   | { status: "failed"; error: string };
 
 export async function runCaptureSession(
@@ -44,6 +57,8 @@ export async function runCaptureSession(
   deps: RunCaptureSessionDeps
 ): Promise<RunCaptureSessionResult> {
   let captured: CarouselCapture | null = null;
+  // 성공해서 tempDir를 호출자에게 넘겼는가. 넘겼으면 여기서 지우면 안 된다.
+  let handedOff = false;
 
   try {
     captured = await deps.capture(entry.instagramUrl);
@@ -97,10 +112,12 @@ export async function runCaptureSession(
       }
     }
 
+    handedOff = true;
     return {
       status: "ready",
       slidesUsed: images.length,
       slidesDropped,
+      tempDir: captured.tempDir,
       capture: {
         queueEntryId: entry.id,
         instagramUrl: entry.instagramUrl,
@@ -117,6 +134,6 @@ export async function runCaptureSession(
   } catch (error) {
     return { status: "failed", error: error instanceof Error ? error.message : String(error) };
   } finally {
-    if (captured) await deps.cleanup(captured.tempDir).catch(() => {});
+    if (captured && !handedOff) await deps.cleanup(captured.tempDir).catch(() => {});
   }
 }

@@ -85,37 +85,44 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
       continue;
     }
 
-    // createInstagramJob에 넘기기 전에 ig:create-job과 **같은 검증**을 통과시킨다 - 자동 경로라고
-    // 검사를 건너뛰면 잘못된 job이 조용히 생기고, 그때는 되돌리기가 번거롭다.
-    const parsed = parseCaptureFile(session.capture as unknown);
-    if (!parsed.ok) {
-      result.failed += 1;
-      const error = `캡처 결과가 규격에 맞지 않습니다: ${parsed.errors.join(" / ")}`;
-      if (attempts >= MAX_ATTEMPTS) {
-        result.givenUp += 1;
-        mark(entry.id, { status: "skipped", attempts, lastError: error });
-      } else {
-        mark(entry.id, { attempts, lastError: error });
+    // 여기부터는 session.tempDir 안의 파일을 읽는다. runCaptureSession은 성공했을 때 일부러
+    // 지우지 않고 넘긴다 - 거기서 지우면 createInstagramJob이 읽을 이미지가 없다(2026-09-23).
+    // 어느 갈래로 빠져나가든 마지막에 지운다.
+    try {
+      // createInstagramJob에 넘기기 전에 ig:create-job과 **같은 검증**을 통과시킨다 - 자동 경로라고
+      // 검사를 건너뛰면 잘못된 job이 조용히 생기고, 그때는 되돌리기가 번거롭다.
+      const parsed = parseCaptureFile(session.capture as unknown);
+      if (!parsed.ok) {
+        result.failed += 1;
+        const error = `캡처 결과가 규격에 맞지 않습니다: ${parsed.errors.join(" / ")}`;
+        if (attempts >= MAX_ATTEMPTS) {
+          result.givenUp += 1;
+          mark(entry.id, { status: "skipped", attempts, lastError: error });
+        } else {
+          mark(entry.id, { attempts, lastError: error });
+        }
+        result.messages.push(`⚠️ ${entry.instagramUrl}\n   ${error}`);
+        continue;
       }
-      result.messages.push(`⚠️ ${entry.instagramUrl}\n   ${error}`);
-      continue;
-    }
 
-    const created = await createJob(parsed.capture);
-    result.created += 1;
-    // createInstagramJob이 큐 항목을 done으로 바꾼다. attempts는 기록용으로 남긴다.
-    mark(entry.id, { attempts });
+      const created = await createJob(parsed.capture);
+      result.created += 1;
+      // createInstagramJob이 큐 항목을 done으로 바꾼다. attempts는 기록용으로 남긴다.
+      mark(entry.id, { attempts });
 
-    await triggerResearch(created.jobId).catch((error) => {
-      // job은 이미 만들어졌다 - 조사 발화만 실패한 것이라 수동으로 이어 돌릴 수 있다.
+      await triggerResearch(created.jobId).catch((error) => {
+        // job은 이미 만들어졌다 - 조사 발화만 실패한 것이라 수동으로 이어 돌릴 수 있다.
+        result.messages.push(
+          `⚠️ job ${created.jobId}는 만들었지만 자료조사 발화에 실패했습니다: ${error instanceof Error ? error.message : error}\n   이어서: npm run job:research -- ${created.jobId}`
+        );
+      });
+
       result.messages.push(
-        `⚠️ job ${created.jobId}는 만들었지만 자료조사 발화에 실패했습니다: ${error instanceof Error ? error.message : error}\n   이어서: npm run job:research -- ${created.jobId}`
+        `✅ ${entry.instagramUrl}\n   job ${created.jobId} (이미지 ${session.slidesUsed}장${session.slidesDropped > 0 ? `, 자리 ${session.slidesDropped}개 비움` : ""}) - 조사 시작`
       );
-    });
-
-    result.messages.push(
-      `✅ ${entry.instagramUrl}\n   job ${created.jobId} (이미지 ${session.slidesUsed}장${session.slidesDropped > 0 ? `, 자리 ${session.slidesDropped}개 비움` : ""}) - 조사 시작`
-    );
+    } finally {
+      await rm(session.tempDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   return result;

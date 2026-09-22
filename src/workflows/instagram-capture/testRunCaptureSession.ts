@@ -154,12 +154,21 @@ const tests: Array<[string, () => Promise<void>]> = [
     },
   ],
   [
-    "성공이든 실패든 임시 디렉터리를 정리한다",
+    "성공하면 정리하지 않고 tempDir를 넘긴다 - 이미지를 아직 안 읽었다",
     async () => {
+      // 2026-09-23 회귀: 여기서 지우면 createInstagramJob이 읽을 때 파일이 없어
+      // 이미지 0장짜리 job이 조용히 만들어졌다. 정리는 호출자가 job을 만든 뒤에 한다.
       const okLog: string[] = [];
-      await runCaptureSession(entry(), deps({}, okLog));
-      assert.deepEqual(okLog, ["cleanup:/tmp/ig-xyz"]);
-
+      const r = await runCaptureSession(entry(), deps({}, okLog));
+      assert.deepEqual(okLog, [], "성공했는데 정리하면 이미지를 잃는다");
+      assert.equal(r.status, "ready");
+      if (r.status !== "ready") return;
+      assert.equal(r.tempDir, "/tmp/ig-xyz", "호출자가 지울 수 있게 경로를 넘겨야 한다");
+    },
+  ],
+  [
+    "실패하면 그 자리에서 임시 디렉터리를 정리한다",
+    async () => {
       const failLog: string[] = [];
       await runCaptureSession(
         entry(),
