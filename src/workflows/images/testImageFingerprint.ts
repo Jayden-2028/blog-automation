@@ -66,13 +66,14 @@ async function main(): Promise<void> {
     console.log("✅ claim - 같은 컷 차단 + 겹친 상대 표시");
   }
 
-  // 5) fail-open. 지문을 못 구했다고 멀쩡한 이미지를 버리면 자리가 빈다.
+  // 5) fail-open. 지문을 못 구했다고 **다른** 이미지를 버리면 자리가 빈다.
+  //    (바이트가 같은 파일은 지문과 무관하게 막힌다 - 아래 10번)
   {
     const deduper = new ImageDeduper({ fingerprint: async () => null });
-    const a = await deduper.claim("자리 1", buf("x"), "image/png");
-    const b = await deduper.claim("자리 2", buf("x"), "image/png");
-    assert(!a.duplicate && !b.duplicate, "지문을 못 구하면 전부 통과시킨다");
-    console.log("✅ 지문 실패는 통과(fail-open)");
+    const a = await deduper.claim("자리 1", buf("사진 A"), "image/png");
+    const b = await deduper.claim("자리 2", buf("사진 B"), "image/png");
+    assert(!a.duplicate && !b.duplicate, "지문을 못 구하면 서로 다른 파일은 전부 통과시킨다");
+    console.log("✅ 지문 실패는 통과(fail-open) - 서로 다른 파일");
   }
 
   // 6) 동시 호출. 자리들이 병렬로 도는 실제 조건이다 - 검사와 등록 사이가 갈리면 둘 다 통과한다.
@@ -85,11 +86,13 @@ async function main(): Promise<void> {
         return { hash: "1111111111111111", swapped: "1111111111111111" };
       },
     });
+    // 바이트는 **다르지만** 지문이 같은 두 파일(재압축본 등). 해시 지름길이 아니라
+    // 지문 단계의 뮤텍스를 검증하는 것이 이 테스트의 목적이다.
     const [x, y] = await Promise.all([
-      deduper.claim("자리 1", buf("same"), "image/png"),
-      deduper.claim("자리 2", buf("same"), "image/png"),
+      deduper.claim("자리 1", buf("같은 장면 A본"), "image/png"),
+      deduper.claim("자리 2", buf("같은 장면 B본"), "image/png"),
     ]);
-    assert(calls === 2, "둘 다 지문을 계산해야 한다");
+    assert(calls === 2, "바이트가 다르면 둘 다 지문을 계산해야 한다");
     const blocked = [x, y].filter((r) => r.duplicate).length;
     assert(blocked === 1, `동시에 들어와도 하나만 통과해야 한다 (막힌 수: ${blocked})`);
     console.log("✅ 동시 호출에서도 하나만 통과(뮤텍스)");
@@ -165,6 +168,22 @@ async function main(): Promise<void> {
     assert(afterAmbiguous === 1, "애매한 구간에서는 비전을 부른다");
     assert(amb.duplicate && amb.against === "자리 1", "비전이 같다고 하면 막는다");
     console.log("✅ 애매한 구간에서만 비전 호출 - 장윤주 케이스 경로");
+  }
+
+  // 10) **지문이 실패해도 바이트가 같으면 막는다**(2026-09-24 실측 사고).
+  //     실측에서 1번과 2번이 md5까지 같은 파일인데 차단 메시지가 한 줄도 안 나왔다 - Chromium
+  //     지문이 안 돌았다는 뜻이다. 그 경우에도 완전히 같은 파일만은 확실히 막아야 한다.
+  {
+    const deduper = new ImageDeduper({ fingerprint: async () => null }); // 지문 항상 실패
+    const same = buf("완전히 같은 바이트");
+    const first = await deduper.claim("자리 1", same, "image/jpeg");
+    const second = await deduper.claim("자리 2", Buffer.from(same), "image/jpeg");
+    assert(!first.duplicate, "첫 번째는 통과");
+    assert(second.duplicate && second.against === "자리 1", "지문이 죽어도 같은 파일은 막아야 한다");
+
+    const other = await deduper.claim("자리 3", buf("다른 바이트"), "image/jpeg");
+    assert(!other.duplicate, "다른 파일은 통과해야 한다");
+    console.log("✅ 지문이 실패해도 바이트가 같으면 차단(Chromium 무관)");
   }
 
   console.log("\n🎉 같은 컷 검출 테스트 통과");

@@ -16,6 +16,8 @@
 // **고장 나면 통과시킨다.** 지문을 못 구했다고 멀쩡한 이미지를 버리면 자리가 빈다 - 빈 자리가
 // 중복보다 나쁘다(실측으로 여러 번 확인했다).
 
+import { createHash } from "node:crypto";
+
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 
@@ -155,6 +157,14 @@ export type DuplicateCheck =
  */
 export class ImageDeduper {
   private readonly registered: { key: string; filePath: string; fingerprint: ImageFingerprint }[] = [];
+  /**
+   * 바이트가 똑같은 파일을 **Chromium 없이** 잡는다(2026-09-24 실측 사고).
+   *
+   * 왜 필요한가: 지문 계산은 Chromium을 띄우는데, 실패하면 fail-open이라 조용히 전부 통과한다.
+   * 실측에서 1번과 2번이 **md5까지 같은 파일**인데 차단 메시지가 한 줄도 안 나왔다 - 지문이
+   * 안 돌았다는 뜻이다. 완전히 같은 파일만이라도 확실히 막으려면 외부 의존이 없어야 한다.
+   */
+  private readonly exactHashes = new Map<string, string>();
   private readonly maxDistance: number;
   private readonly fingerprintOne: (buffer: Buffer, mimeType: string) => Promise<ImageFingerprint | null>;
   private readonly askSameCut: DeduperOptions["askSameCut"];
@@ -254,8 +264,17 @@ export class ImageDeduper {
 
     const run = this.queue.then(async (): Promise<DuplicateCheck> => {
       try {
+        // 0) 바이트가 같으면 볼 것도 없다. 이 검사는 절대 실패하지 않는다.
+        const exact = createHash("sha256").update(buffer).digest("hex");
+        const sameFile = this.exactHashes.get(exact);
+        if (sameFile) return { duplicate: true, against: sameFile };
+
         const fingerprint = await this.fingerprintOne(buffer, mimeType);
-        if (!fingerprint) return { duplicate: false };
+        if (!fingerprint) {
+          // 지문을 못 구해도 **바이트 해시는 등록한다** - 다음 자리가 같은 파일을 받으면 막힌다.
+          this.exactHashes.set(exact, key);
+          return { duplicate: false };
+        }
 
         // 1) 거리가 확실히 가까우면 비전에 묻지 않고 막는다.
         const ambiguous: { key: string; filePath: string }[] = [];
@@ -279,6 +298,7 @@ export class ImageDeduper {
           if (matched) return { duplicate: true, against: matched };
         }
 
+        this.exactHashes.set(exact, key);
         this.registered.push({ key, filePath: slot?.filePath ?? "", fingerprint });
         return { duplicate: false };
       } finally {

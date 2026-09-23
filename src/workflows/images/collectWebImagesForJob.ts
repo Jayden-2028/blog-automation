@@ -127,15 +127,23 @@ export async function collectWebImagesForJob(
 
     // 이미 쓰고 있는 컷을 중복 검사기에 먼저 등록한다(2026-09-24). 안 하면 일부 자리만 재수집할 때
     // 이미 쓴 컷이 다시 들어온다 - 검사기는 이번 실행에서 채운 것만 알기 때문이다.
-    for (const [index, url] of Object.entries(input.existingImageUrls ?? {})) {
+    const existing = Object.entries(input.existingImageUrls ?? {});
+    let registered = 0;
+    for (const [index, url] of existing) {
       try {
         const res = await fetch(url);
         if (!res.ok) continue;
         const buffer = Buffer.from(await res.arrayBuffer());
         await deduper.claim(`자리 ${index}(이미 사용 중)`, buffer, res.headers.get("content-type") ?? "image/jpeg");
+        registered += 1;
       } catch {
         // 못 받아도 수집은 진행한다 - 중복을 놓치는 쪽이 자리를 비우는 쪽보다 낫다.
       }
+    }
+    // 몇 건이 등록됐는지 남긴다. 0이면 중복 검사가 사실상 꺼진 것이라, 로그가 없으면 다음에
+    // 또 추측하게 된다(2026-09-24 - 차단이 안 걸린 이유를 로그로 못 찾아 헤맸다).
+    if (existing.length > 0) {
+      console.log(`ℹ️ [images] 이미 쓰고 있는 컷 ${registered}/${existing.length}장을 중복 검사기에 등록했습니다.`);
     }
 
     // 사용자가 고른 주소는 그대로 쓴다 - 사람이 눈으로 확인한 것이라 비전 검증을 하지 않는다.
