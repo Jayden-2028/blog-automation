@@ -9,6 +9,7 @@
 // `fonts-noto-cjk`를 설치한다(job-publish-prepare.yml).
 
 import type { TableData } from "./extractTableData.js";
+import { barPercents, pickPictogram, toNumericRows } from "./tableVisuals.js";
 
 /** 구글 디스커버 큰 썸네일 조건(너비 1200px 이상 + 16:9). 생성 이미지와 같은 규격이다. */
 export const TABLE_IMAGE_SIZE = { width: 1536, height: 864 };
@@ -33,13 +34,37 @@ export function buildTableHtml(data: TableData): string {
 
   // label/value가 갈리는 항목만 주황 키 컬럼을 쓴다. 값이 없는 나열형은 전폭 본문색으로 둔다 -
   // 안 그러면 긴 문장이 좁은 키 컬럼에서 주황색으로 줄바꿈돼 읽기 나쁘다(실측).
-  const rows = data.rows
-    .map((row) =>
-      row.value
-        ? `<div class="row"><div class="label">${escapeHtml(row.label)}</div><div class="value">${escapeHtml(row.value)}</div></div>`
-        : `<div class="row"><div class="single">${escapeHtml(row.label)}</div></div>`
-    )
-    .join("");
+  // 값이 전부 **같은 단위의 숫자**면 막대그래프로 그린다(2026-09-23 Q6=C안). 아니면 기존 표다 -
+  // 단위가 섞였는데 막대를 그리면 길이 비교가 거짓말이 된다.
+  const numeric = toNumericRows(data.rows);
+  const icon = (label: string): string => {
+    const picto = pickPictogram(label);
+    return picto
+      ? `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="${picto.path}"/></svg>`
+      : `<span class="dot"></span>`;
+  };
+
+  // 막대 경로에서는 픽토그램을 쓰지 않는다(실측 2026-09-23): 라벨이 지역·업체명이라 규칙에
+  // 우연히 걸린 한 줄만 아이콘을 받아 나머지와 어긋난다("신세계 본점"만 핀 아이콘이 붙었다).
+  // 항목 성격을 가리키는 라벨이 아니므로 전부 점으로 통일한다.
+  const rows = numeric
+    ? numeric
+        .map((row, i) => {
+          const percent = barPercents(numeric)[i];
+          return `<div class="bar-row">
+            <div class="bar-label"><span class="dot"></span><span>${escapeHtml(row.label)}</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${percent}%"></div></div>
+            <div class="bar-value">${escapeHtml(row.display)}</div>
+          </div>`;
+        })
+        .join("")
+    : data.rows
+        .map((row) =>
+          row.value
+            ? `<div class="row">${icon(row.label)}<div class="label">${escapeHtml(row.label)}</div><div class="value">${escapeHtml(row.value)}</div></div>`
+            : `<div class="row">${icon(row.label)}<div class="single">${escapeHtml(row.label)}</div></div>`
+        )
+        .join("");
 
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><style>
@@ -56,7 +81,7 @@ export function buildTableHtml(data: TableData): string {
   }
   .rows { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: ${gap}px; padding-top: 28px; }
   .row {
-    display: flex; align-items: baseline; gap: 28px;
+    display: flex; align-items: center; gap: 20px;
     padding: ${Math.round(gap * 0.7)}px 24px; border-radius: 14px; background: #f6f1e8;
   }
   .label {
@@ -65,8 +90,23 @@ export function buildTableHtml(data: TableData): string {
   }
   .value { font-size: ${bodySize}px; font-weight: 500; color: #33404d; word-break: keep-all; flex: 1; }
   .single { font-size: ${bodySize}px; font-weight: 600; color: #33404d; word-break: keep-all; flex: 1; }
-  .single::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 50%;
-    background: #f0783c; margin-right: 16px; vertical-align: middle; }
+  /* 픽토그램 - 라벨 성격에 맞는 아이콘. 못 고른 항목은 아래 .dot으로 떨어진다. */
+  .ico { width: ${Math.round(bodySize * 1.05)}px; height: ${Math.round(bodySize * 1.05)}px;
+    flex: 0 0 auto; stroke: #f0783c; stroke-width: 2; fill: none;
+    stroke-linecap: round; stroke-linejoin: round; }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    background: #f0783c; flex: 0 0 auto; margin: 0 2px; }
+
+  /* 막대그래프 - 값이 전부 같은 단위의 숫자일 때만 쓴다. */
+  .bar-row { display: flex; align-items: center; gap: 24px;
+    padding: ${Math.round(gap * 0.7)}px 24px; border-radius: 14px; background: #f6f1e8; }
+  .bar-label { display: flex; align-items: center; gap: 14px; flex: 0 0 34%;
+    font-size: ${bodySize}px; font-weight: 700; color: #33404d; word-break: keep-all; }
+  .bar-track { flex: 1; height: ${Math.round(bodySize * 0.72)}px; border-radius: 999px; background: #e7ddcd; }
+  .bar-fill { height: 100%; border-radius: 999px;
+    background: linear-gradient(90deg, #f0783c, #f5a06a); }
+  .bar-value { flex: 0 0 auto; min-width: 18%; text-align: right;
+    font-size: ${bodySize}px; font-weight: 800; color: #f0783c; }
 </style></head>
 <body>
   <h1>${escapeHtml(data.title)}</h1>

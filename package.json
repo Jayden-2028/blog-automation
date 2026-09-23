@@ -68,6 +68,7 @@
     "test:table-image": "tsx src/workflows/images/testRenderTableImage.ts",
     "test:refix-image-markers": "tsx src/workflows/images/testRefixImageMarkers.ts",
     "test:collect-web-images": "tsx src/workflows/images/testCollectWebImages.ts",
+    "test:image-fingerprint": "tsx src/workflows/images/testImageFingerprint.ts",
     "test:fallback-images": "tsx src/workflows/images/testFallbackImages.ts",
     "test:capture-ranking": "tsx src/workflows/images/testCaptureRanking.ts",
     "test:capture-pages": "tsx src/workflows/images/testCapturePages.ts",
@@ -170,7 +171,8 @@
     "job:publish-poll": "tsx src/jobs/publishPollJob.ts",
     "job:watchdog": "tsx src/jobs/watchdogJob.ts",
     "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",
-    "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts"
+    "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts",
+    "test:table-visuals": "tsx src/workflows/images/testTableVisuals.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

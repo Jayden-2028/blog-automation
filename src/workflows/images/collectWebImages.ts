@@ -29,6 +29,7 @@ import { broadenQuery } from "./broadenQuery.js";
 import { searchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
+import { ImageDeduper } from "./imageFingerprint.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
@@ -189,6 +190,11 @@ export type CollectWebImagesOptions = {
    * false면 자르지 않는다(테스트 - 브라우저를 띄우면 안 된다).
    */
   cropTall?: false | typeof cropTallImageWithFocus;
+  /**
+   * 한 원고 안에서 같은 컷을 두 번 쓰지 않게 막는다(2026-09-23 사용자 결정, §8-8).
+   * 넘기지 않으면 검사하지 않는다 - 호출부가 원고 단위로 하나를 만들어 넘긴다.
+   */
+  deduper?: ImageDeduper;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -494,6 +500,56 @@ async function defaultFetchImage(input: {
  * 모델이 독립적으로 보는 편이 낫고, CLAUDE.md의 역할 분담(Claude가 최종 검증)과도 맞는다.
  */
 /** 후보를 한 번에 열어 보고 하나를 고른다. 아무것도 안 맞으면 picked: null. */
+/**
+ * "이 후보가 이미 쓴 컷들 중 하나와 **같은 컷**인가"를 비전으로 묻는다(2026-09-23 사용자 결정 A안).
+ *
+ * 왜 필요한가: dHash로는 못 가린다는 것이 실측으로 확인됐다. 같은 사진 두 장을 나란히 붙인
+ * 합성컷이 매체마다 다르게 잘리면 거리가 27~31로 나오는데, 전혀 다른 사진끼리도 28~36이라
+ * 구간이 완전히 겹친다. 좌우를 맞바꿔도, 패널을 나눠 교차 비교해도 갈리지 않았다.
+ *
+ * 호출 수를 줄이려고 **애매한 구간에서만** 부른다(imageFingerprint.ts의 두 상수 사이).
+ */
+export async function defaultAskSameCut(input: {
+  candidatePath: string;
+  against: { key: string; filePath: string }[];
+}): Promise<string | null> {
+  const prompt = [
+    "사진 여러 장을 Read 도구로 **전부 열어 보고**, 맨 위의 후보가 아래 목록 중 하나와",
+    "**같은 컷**인지 판정한다.",
+    "",
+    `후보: ${input.candidatePath}`,
+    "",
+    "## 이미 원고에 쓴 컷",
+    ...input.against.map((entry, i) => `${i + 1}. [${entry.key}] ${entry.filePath}`),
+    "",
+    "## 같은 컷이란",
+    "- **같은 사진**이다. 크기·화질·자른 범위·매체 워터마크가 달라도 같은 컷이다.",
+    "- 두 사진을 나란히 붙인 **합성컷**이라면, 붙인 순서가 좌우 반대여도 같은 컷이다",
+    "  (실측: 한 원고의 1번과 2번이 같은 두 장을 순서만 바꿔 붙인 것이었다).",
+    "- 같은 인물의 **다른 순간·다른 포즈·다른 옷**은 같은 컷이 아니다. 이건 통과시켜야 한다.",
+    "- 같은 행사에서 찍힌 비슷한 사진도, 포즈나 구도가 다르면 다른 컷이다.",
+    "",
+    "애매하면 **다른 컷으로 본다.** 빈 자리가 중복보다 나쁘기 때문에, 확실할 때만 같다고 답한다.",
+    "",
+    '마지막 줄에 JSON 한 줄만 답한다: {"same": 2}  (목록의 번호)',
+    '같은 것이 없으면 {"same": null}.',
+  ].join("\n");
+
+  const result = await runHeadlessClaude({
+    prompt,
+    allowedTools: ["Read"],
+    permissionMode: "acceptEdits",
+    timeoutMs: 120_000,
+  });
+  // 판정을 못 했으면 통과시킨다 - 중복을 놓치는 쪽이 멀쩡한 사진을 버리는 쪽보다 낫다.
+  if (!result.ok) return null;
+
+  const parsed = extractTrailingJson(result.output) as { same?: unknown } | null;
+  const same = parsed?.same;
+  if (typeof same !== "number" || !Number.isInteger(same)) return null;
+  return input.against[same - 1]?.key ?? null;
+}
+
 export async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
   const prompt = [
     "블로그 원고의 이미지 자리 하나에 넣을 후보 사진을 내려받았다. Read 도구로 **후보를 전부 열어 보고**",
@@ -800,6 +856,37 @@ export async function collectWebImages(
       }
     }
 
+    // 한 원고 안에서 **같은 컷**을 두 번 쓰지 않는다(2026-09-23 사용자 결정, output-format §8-8).
+    // URL이 달라도 픽셀이 같으면 중복이다 - 실측(장윤주)에서 매체가 다른 같은 합성컷이 1·2번에
+    // 나란히 들어갔고 좌우 순서만 반대였다. 중복이면 **다음 후보로 넘어간다** - 자리를 비우는 것은
+    // 마지막 수단이다(빈 자리가 중복보다 나쁘다는 것이 그동안의 실측이다).
+    if (options.deduper) {
+      const ordered = [chosen, ...candidates.filter((c) => c !== chosen)];
+      let accepted: (typeof candidates)[number] | null = null;
+      for (const candidate of ordered) {
+        const verdict = await options.deduper.claim(
+          `자리 ${slot.index}`,
+          candidate.buffer,
+          candidate.contentType,
+          { index: slot.index, filePath: candidate.filePath }
+        );
+        if (!verdict.duplicate) {
+          accepted = candidate;
+          if (candidate !== chosen) {
+            failures.push(`[자리 ${slot.index}] ℹ️ 1순위가 다른 자리와 같은 컷이라 ${candidate.number}번으로 바꿨습니다.`);
+          }
+          break;
+        }
+        failures.push(`[자리 ${slot.index}] ⚠️ ${candidate.number}번 후보가 ${verdict.against}와 같은 컷이라 건너뜁니다.`);
+      }
+      if (!accepted) {
+        for (const c of candidates) await rm(c.filePath, { force: true });
+        failures.push(`[자리 ${slot.index}] 후보가 전부 다른 자리와 같은 컷이라 비웠습니다.`);
+        return null;
+      }
+      chosen = accepted;
+    }
+
     for (const c of candidates) if (c !== chosen) await rm(c.filePath, { force: true });
 
     let { buffer, contentType, extension, size } = chosen;
@@ -875,7 +962,21 @@ export async function collectWebImages(
     };
   };
 
-  const outcomes = await mapWithConcurrency(input.slots, SLOT_CONCURRENCY, processSlot);
+  // 등록을 자리 번호 순서로 줄 세운다(2026-09-23). 자리가 3개씩 동시에 도는데, 순서가 없으면
+  // 2번이 1번보다 먼저 등록해 서로를 못 본다 - 실측(장윤주)의 중복이 정확히 1·2번이었다.
+  options.deduper?.planOrder(input.slots.map((slot) => slot.index));
+
+  // 후보를 못 구해 일찍 빠져나가는 자리가 많다(응답 누락·403·검증 탈락…). 그 자리가 게이트를
+  // 안 열면 뒤 자리가 영원히 기다리므로, **어떤 경로로 끝나든** 여기서 연다.
+  const processSlotGuarded = async (slot: WebImageSlot) => {
+    try {
+      return await processSlot(slot);
+    } finally {
+      options.deduper?.releaseTurn(slot.index);
+    }
+  };
+
+  const outcomes = await mapWithConcurrency(input.slots, SLOT_CONCURRENCY, processSlotGuarded);
   for (const outcome of outcomes) if (outcome) found.push(outcome);
 
   // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라

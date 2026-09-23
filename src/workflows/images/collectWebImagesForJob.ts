@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
-import { buildWebImageSlots, collectWebImages } from "./collectWebImages.js";
+import { buildWebImageSlots, collectWebImages, defaultAskSameCut } from "./collectWebImages.js";
+import { ImageDeduper } from "./imageFingerprint.js";
 import { splitSearchInstruction } from "./imageEditRequest.js";
 import type { CollectWebImagesOptions, UnfilledSlot } from "./collectWebImages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
@@ -89,6 +90,9 @@ export async function collectWebImagesForJob(
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.
   const dir = await mkdtemp(resolve(tmpdir(), "web-images-"));
 
+  // finally에서 닫아야 해서 try 밖에 둔다.
+  let ownedDeduper: ImageDeduper | null = null;
+
   try {
     const uploader =
       options.upload ??
@@ -103,6 +107,11 @@ export async function collectWebImagesForJob(
         return uploaded.ok ? { ok: true as const, url: uploaded.url } : { ok: false as const, error: uploaded.error };
       });
 
+    // 원고 하나에 하나만 만든다(2026-09-23, output-format §8-8). 사용자가 직접 지정한 자리와
+    // 검색으로 채운 자리가 **같은 저장소를 공유해야** 서로 간의 중복도 잡힌다.
+    ownedDeduper = options.deduper ? null : new ImageDeduper({ askSameCut: defaultAskSameCut });
+    const deduper = options.deduper ?? ownedDeduper!;
+
     // 사용자가 고른 주소는 그대로 쓴다 - 사람이 눈으로 확인한 것이라 비전 검증을 하지 않는다.
     const direct =
       directSlots.length === 0
@@ -112,6 +121,7 @@ export async function collectWebImagesForJob(
             {
               ...options,
               upload: uploader,
+              deduper,
               searchImages: false,
               verify: false,
               runCodex: async () => ({
@@ -143,6 +153,7 @@ export async function collectWebImagesForJob(
       {
         ...options,
         upload: uploader,
+        deduper,
       }
     );
 
@@ -168,6 +179,9 @@ export async function collectWebImagesForJob(
 
     return { images, failures, unfilled };
   } finally {
+    // 지문 계산용 Chromium을 닫는다. 안 닫으면 러너에 브라우저가 남는다.
+    // 호출부가 넘긴 deduper는 호출부가 닫는다 - 여기서 닫으면 재사용을 깨뜨린다.
+    if (!options.deduper) await ownedDeduper?.close();
     await rm(dir, { recursive: true, force: true });
   }
 }
