@@ -73,6 +73,25 @@ async function main(): Promise<void> {
     console.log("✅ 메시지 - 현재 상태 + 영향 + 할 일");
   }
 
+  // --- 429는 크레딧 문제가 아니다(2026-09-24 사용자 지적) -----------------------------------------
+  // 크레딧이 2,173건 남았는데 "크레딧 소진이면 충전하라"는 알림이 와서 대시보드까지 확인하게 됐다.
+  {
+    const rate = buildSerperOutageMessage({
+      status: 429,
+      message: '{"message":"Rate limit exceeded. You are allowed to submit up to 5 requests per second"}',
+      query: "연애박사 스틸컷",
+    });
+    if (!rate.text.includes("크레딧 문제가 아닙니다")) throw new Error("❌ 429는 크레딧 문제가 아니라고 말해야 한다");
+    if (rate.text.includes("충전하거나")) throw new Error("❌ 429에 충전 안내를 붙이면 안 된다");
+    if (!rate.text.includes("HTTP 429")) throw new Error("❌ 상태 코드는 그대로 실어야 한다");
+    if (!rate.text.includes("연애박사 스틸컷")) throw new Error("❌ 검색어가 실려야 한다");
+
+    const credit = buildSerperOutageMessage({ status: 403, message: "forbidden", query: "x" });
+    if (!credit.text.includes("충전하거나")) throw new Error("❌ 403은 충전 안내가 있어야 한다");
+    if (credit.text.includes("크레딧 문제가 아닙니다")) throw new Error("❌ 403에 '크레딧 문제 아님'이 붙으면 안 된다");
+    console.log("✅ 429(속도 초과)와 크레딧 소진을 구분한다");
+  }
+
   console.log("\n🎉 구글 이미지 검색 장애 알림 테스트 통과");
 }
 

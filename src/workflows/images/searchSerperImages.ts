@@ -63,27 +63,70 @@ export function resetSerperOutage(): void {
   outage = null;
 }
 
+/**
+ * Serper는 **초당 5건**까지만 받는다(2026-09-24 실측 429).
+ *
+ * 왜 제한이 필요해졌나: 서치풀을 붙이면서 자리당 질의가 8개가 됐고, 자리 3개가 동시에 도니
+ * 한꺼번에 24건이 나갔다. 전부 429로 떨어지면 그 자리의 후보가 통째로 사라진다 - 실측에서
+ * 키노라이츠 질의가 이렇게 죽어 기사 사진이 대신 들어갔다.
+ *
+ * 4건/초로 잡는다(상한 5에서 한 칸 여유). 호출을 **줄 세워** 간격을 벌린다.
+ */
+const MIN_INTERVAL_MS = 250;
+let nextSlotAt = 0;
+
+async function waitForSlot(): Promise<void> {
+  const now = Date.now();
+  const startAt = Math.max(now, nextSlotAt);
+  nextSlotAt = startAt + MIN_INTERVAL_MS;
+  const delay = startAt - now;
+  if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+}
+
+/** 테스트용 - 실행 간 대기열이 새지 않게 한다. */
+export function resetSerperRateLimit(): void {
+  nextSlotAt = 0;
+}
+
+/** 429는 **일시적**이다. 크레딧 소진(402·403)과 달리 잠깐 쉬면 풀린다. */
+export function isRateLimited(status: number): boolean {
+  return status === 429;
+}
+
 export async function searchSerperImages(
   query: string,
-  options: { fetchImpl?: typeof fetch } = {}
+  options: { fetchImpl?: typeof fetch; retries?: number } = {}
 ): Promise<ImageCandidate[]> {
   const apiKey = process.env.SERPER_API_KEY;
   const trimmed = query.trim();
   if (!apiKey || !trimmed) return [];
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  let res: Response;
-  try {
-    res = await fetchImpl(ENDPOINT, {
-      method: "POST",
-      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-      // 한국 독자용 블로그다 - 한국 결과를 우선한다(네이버와 겹치되 색인이 달라 후보가 넓어진다).
-      body: JSON.stringify({ q: trimmed, gl: "kr", hl: "ko", num: DISPLAY }),
-    });
-  } catch {
-    // 네트워크 실패로 수집 전체를 멈추지 않는다 - 네이버 후보로 계속 간다.
-    return [];
+  const maxRetries = options.retries ?? 2;
+
+  let res: Response | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    await waitForSlot();
+    try {
+      res = await fetchImpl(ENDPOINT, {
+        method: "POST",
+        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        // 한국 독자용 블로그다 - 한국 결과를 우선한다(네이버와 겹치되 색인이 달라 후보가 넓어진다).
+        body: JSON.stringify({ q: trimmed, gl: "kr", hl: "ko", num: DISPLAY }),
+      });
+    } catch {
+      // 네트워크 실패로 수집 전체를 멈추지 않는다 - 네이버 후보로 계속 간다.
+      return [];
+    }
+
+    // 429는 잠깐 쉬고 다시 던진다. 한 번 걸렸다고 그 자리를 포기할 이유가 없다.
+    if (res.status === 429 && attempt < maxRetries) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      continue;
+    }
+    break;
   }
+  if (!res) return [];
 
   if (!res.ok) {
     // 크레딧 소진·키 오류·한도 초과가 전부 여기로 온다. 수집은 네이버 후보만으로 계속 가되,
