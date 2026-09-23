@@ -493,7 +493,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     function figureHtml(topic, n, block) {
       var shots = imagesFor(topic, n);
       var lab = '<span class="cutlab">' + n + '</span>';
-      var caption = block.description || "캡션 없음";
+      // 캡션은 **수집된 이미지의 것**을 먼저 쓴다(2026-09-24). 검증자가 실제 사진을 보고 다시 쓴
+      // 값이라 마커 원문보다 정확하다. 마커 원문은 획득 방식 꼬리(" — 웹 검색")까지 붙어 있어
+      // 검토할 때 헷갈린다. 수집 전이거나 캡션이 없으면 마커 원문에서 그 꼬리만 떼어 쓴다.
+      var caption = (shots[0] && shots[0].description)
+        || String(block.description || "").replace(/\s*—\s*(웹 검색|AI 생성|표 생성|페이지 캡처)\s*$/, "")
+        || "캡션 없음";
 
       if (shots.length === 0) {
         var body = '<div class="missing">이미지 미생성 — 아래 프롬프트로 직접 만들어 이 자리에 넣으세요.</div>';
