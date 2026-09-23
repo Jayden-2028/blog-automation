@@ -454,6 +454,11 @@ export async function prepareManuscript(
       jobId: job.id,
       keyword: job.keyword,
       category: job.category ?? null,
+      // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
+      // 같은 사진이 다시 들어오는 것을 막는다.
+      existingImageUrls: Object.fromEntries(
+        images.filter((i) => i.url).map((i) => [i.index, i.url as string])
+      ),
       body: content,
       imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),

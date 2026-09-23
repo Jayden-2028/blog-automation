@@ -33,6 +33,14 @@ export type CollectWebImagesForJobInput = {
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
   filledIndexes?: number[];
   /**
+   * 이미 채워진 자리의 이미지 URL(2026-09-24 실측 사고). 중복 검사기에 **미리 등록**한다.
+   *
+   * 왜 필요한가: 채워진 자리는 수집에서 통째로 건너뛰므로 중복 검사기가 그 이미지를 본 적이
+   * 없다. 그래서 일부 자리만 재수집하면 **이미 쓴 컷이 그대로 다시 들어온다** - 실측에서
+   * 2번 자리가 1번과 **바이트까지 같은 파일**을 받았다.
+   */
+  existingImageUrls?: Record<number, string>;
+  /**
    * 자리별 사용자 요구사항(2026-09-22 "🖼 이미지 수정"). 키는 자리 번호 문자열.
    * 사람이 결과를 보고 "2번은 인물 단독샷으로" 같이 적어 보낸 것이라, 마커 설명보다 **우선**한다.
    */
@@ -116,6 +124,19 @@ export async function collectWebImagesForJob(
     // 검색으로 채운 자리가 **같은 저장소를 공유해야** 서로 간의 중복도 잡힌다.
     ownedDeduper = options.deduper ? null : new ImageDeduper({ askSameCut: defaultAskSameCut });
     const deduper = options.deduper ?? ownedDeduper!;
+
+    // 이미 쓰고 있는 컷을 중복 검사기에 먼저 등록한다(2026-09-24). 안 하면 일부 자리만 재수집할 때
+    // 이미 쓴 컷이 다시 들어온다 - 검사기는 이번 실행에서 채운 것만 알기 때문이다.
+    for (const [index, url] of Object.entries(input.existingImageUrls ?? {})) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const buffer = Buffer.from(await res.arrayBuffer());
+        await deduper.claim(`자리 ${index}(이미 사용 중)`, buffer, res.headers.get("content-type") ?? "image/jpeg");
+      } catch {
+        // 못 받아도 수집은 진행한다 - 중복을 놓치는 쪽이 자리를 비우는 쪽보다 낫다.
+      }
+    }
 
     // 사용자가 고른 주소는 그대로 쓴다 - 사람이 눈으로 확인한 것이라 비전 검증을 하지 않는다.
     const direct =
