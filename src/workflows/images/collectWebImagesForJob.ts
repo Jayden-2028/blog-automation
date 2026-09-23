@@ -23,6 +23,11 @@ import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 export type CollectWebImagesForJobInput = {
   jobId: string;
   keyword: string;
+  /**
+   * job의 카테고리(2026-09-24). 어디를 먼저 뒤질지(서치풀)와 화질 하한을 정한다.
+   * 없으면 예전 동작 - 일반 이미지 검색.
+   */
+  category?: string | null;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -122,6 +127,7 @@ export async function collectWebImagesForJob(
               ...options,
               upload: uploader,
               deduper,
+              category: input.category ?? null,
               searchImages: false,
               verify: false,
               runCodex: async () => ({
@@ -154,6 +160,7 @@ export async function collectWebImagesForJob(
         ...options,
         upload: uploader,
         deduper,
+        category: input.category ?? null,
       }
     );
 

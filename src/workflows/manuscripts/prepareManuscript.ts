@@ -107,6 +107,8 @@ export type PrepareManuscriptOptions = {
     | ((input: {
         jobId: string;
         keyword: string;
+        /** 서치풀·화질 하한을 정한다(2026-09-24). */
+        category?: string | null;
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
@@ -451,6 +453,7 @@ export async function prepareManuscript(
     const outcome = await collectWebImages({
       jobId: job.id,
       keyword: job.keyword,
+      category: job.category ?? null,
       body: content,
       imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),

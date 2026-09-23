@@ -30,6 +30,7 @@ import { searchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 import { ImageDeduper } from "./imageFingerprint.js";
+import { describeSearchPools, expandQueriesForPools } from "./imageSearchPools.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
@@ -46,6 +47,19 @@ const SLOT_CONCURRENCY = 3;
  * 저장은 하므로, 이 값은 "본문에 넣었을 때 알아볼 수 있는 최소치"로만 쓴다.
  */
 const HARD_MIN_WIDTH = 400;
+/**
+ * 작품·연예(entertainment·ott) 자리의 하한(2026-09-24 사용자 지적).
+ *
+ * 이 카테고리는 **공식 배포 스틸이 존재한다**(실측: 키노라이츠에 2747x1920). 그런데 일반 검색이
+ * 물어 온 700px 기사 캡처가 하한 400을 통과해 그대로 실렸다. 공식 스틸이 있는 판에 기사 사진을
+ * 받을 이유가 없으므로 이 카테고리만 하한을 올린다.
+ *
+ * 다른 카테고리에는 적용하지 않는다 - 사건·정책은 애초에 큰 사진이 없는 경우가 많고, 거기서
+ * 하한을 올리면 자리가 빈다(빈 자리가 더 나쁘다는 것이 그동안의 실측이다).
+ */
+const ARTWORK_MIN_WIDTH = 900;
+/** 이 카테고리는 공식 스틸이 존재한다고 보고 하한을 올린다. */
+const ARTWORK_CATEGORIES: ReadonlySet<string> = new Set(["entertainment", "ott"]);
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
 const MIN_LANDSCAPE_RATIO = 1.3;
 
@@ -171,7 +185,19 @@ export type ChooseImageInput = {
 };
 
 /** `picked`가 null이면 "쓸 만한 것이 없다"는 뜻이다. */
-export type ChooseImageResult = { picked: number | null; reason: string };
+export type ChooseImageResult = {
+  picked: number | null;
+  reason: string;
+  /**
+   * 고른 사진을 **실제로 보고 다시 쓴 캡션**(2026-09-24 사용자 지적).
+   *
+   * 없으면 호출부가 마커 설명을 그대로 쓴다(예전 동작). 왜 필요한가: 캡션을 마커 설명으로
+   * 고정한 것은 2026-09-21에 "캡션 드리프트"(사진에 맞춰 캡션이 바뀌어 본문과 어긋남)를
+   * 막으려던 것인데, 그 대가로 **검증되지 않은 주장이 캡션으로 굳었다** - 실측(연애박사)에서
+   * "예고편 명대사 장면"이라 써 둔 자리에 썸네일이 왔는데 캡션은 그대로였다.
+   */
+  caption?: string;
+};
 
 export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 codex 실행. */
@@ -195,6 +221,11 @@ export type CollectWebImagesOptions = {
    * 넘기지 않으면 검사하지 않는다 - 호출부가 원고 단위로 하나를 만들어 넘긴다.
    */
   deduper?: ImageDeduper;
+  /**
+   * job의 카테고리(2026-09-24). 어디를 먼저 뒤질지(서치풀)와 화질 하한을 정한다.
+   * 없으면 예전 동작 - 일반 이미지 검색.
+   */
+  category?: string | null;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -303,7 +334,9 @@ const OUTPUT_SCHEMA = {
 export function buildPrompt(
   keyword: string,
   slots: WebImageSlot[],
-  candidates: Map<number, ImageCandidate[]> = new Map()
+  candidates: Map<number, ImageCandidate[]> = new Map(),
+  /** 카테고리별 서치풀을 정하려고 받는다(2026-09-24). 없으면 예전과 같은 일반 검색이다. */
+  category: string | null = null
 ): string {
   const lines = [
     "너는 한국어 블로그 원고에 넣을 **실제 이미지**를 웹에서 찾는다. 이미지를 만들지 않는다.",
@@ -356,6 +389,8 @@ export function buildPrompt(
     "- 공공누리 포털 kogl.or.kr (기관 통합 검색)",
     "- 각 부처·지자체 보도자료에 첨부된 사진",
     "검색어에 `공공누리`, `보도자료`, `정책브리핑`을 붙여 보는 것이 효과적이다.",
+    "",
+    ...describeSearchPools(keyword, category),
     "",
     "## 자리별 지시",
   ];
@@ -596,7 +631,21 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   처럼 여러 인물을 요구하면 이 규칙은 적용하지 않는다.",
     "6. 둘 이상이 맞으면 **문단을 더 구체적으로 보여주는 쪽**을, 그래도 비슷하면 큰 쪽을 고른다.",
     "",
-    '마지막 줄에 JSON 한 줄만 답한다: {"picked": 2, "reason": "한 문장"}',
+    "7. **번인·저화질을 뒤로 민다**(2026-09-24). 매체 로고·자막·워터마크가 찍힌 재가공 이미지와",
+    "   같은 장면의 깨끗한 원본이 함께 있으면 **깨끗하고 큰 쪽**을 고른다. 작품 스틸은 공식 배포본이",
+    "   보통 1500px 이상이라, 700px짜리 기사 캡처가 유일한 후보가 아니라면 그것을 고르지 않는다.",
+    "",
+    "## 캡션 다시 쓰기 (2026-09-24 사용자 지적)",
+    "고른 사진을 **실제로 보고** 캡션을 쓴다. 마커 설명은 *무엇을 찾아야 했는지*일 뿐이고, 실제로",
+    "무엇이 왔는지와 다를 수 있다. 실측 사고: \"예고편 명대사 장면\"이라 적힌 자리에 예고편 썸네일이",
+    "왔는데 캡션은 그대로 나갔다 - 독자에게는 거짓말이다.",
+    "",
+    "- **사진에 보이는 것만** 쓴다. 인물·작품·장면을 사진으로 확인할 수 없으면 캡션에 넣지 않는다.",
+    "- 출처가 분명하면 끝에 출처를 붙인다(\"사진=ENA\", \"출처: 뉴시스\").",
+    "- **캡션을 정직하게 썼더니 위 문단과 어긋난다면, 그 사진은 이 자리에 맞지 않는 것이다**",
+    "  - `picked: null`로 비운다. 캡션을 맞추려고 문단에 없는 말을 지어내지 않는다.",
+    "",
+    '마지막 줄에 JSON 한 줄만 답한다: {"picked": 2, "caption": "사진을 보고 쓴 캡션", "reason": "한 문장"}',
     '맞는 것이 하나도 없으면 {"picked": null, "reason": "왜 전부 안 되는지 한 문장"}.',
   ].join("\n");
 
@@ -617,8 +666,13 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
   }
   if (parsed.picked === null) return { picked: null, reason };
   const picked = typeof parsed.picked === "number" ? parsed.picked : Number.NaN;
+  // 사진을 보고 다시 쓴 캡션. 빈 문자열이면 없는 것으로 보고 호출부가 마커 설명을 쓴다.
+  const rewritten = typeof (parsed as { caption?: unknown }).caption === "string"
+    ? (parsed as { caption: string }).caption.trim()
+    : "";
+  const caption = rewritten ? { caption: rewritten } : {};
   return Number.isInteger(picked) && input.candidates.some((c) => c.number === picked)
-    ? { picked, reason }
+    ? { picked, reason, ...caption }
     : { picked: input.candidates[0]?.number ?? null, reason: "고른 번호가 후보에 없어 1순위를 씁니다" };
 }
 
@@ -668,10 +722,47 @@ export async function collectWebImages(
     await Promise.all(
       input.slots.map(async (slot) => {
         const query = (slot.query ?? slot.description).replace(/\s*—\s*웹\s*검색\s*$/, "").trim();
-        const list = await searchImages(query);
+
+        // 원고 검색어 + **카테고리 서치풀 질의**를 함께 돌린다(2026-09-24).
+        // 원고 검색어만 쓰면 일반 색인에서 기사 사진·재가공 썸네일이 올라온다 - 실측에서
+        // `추영우 김소현 연애박사`는 700px 기사 사진을, `연애박사 키노라이츠`는 2747x1920
+        // 공식 스틸을 줬다. 순서는 유지한다(원고 검색어가 먼저, 서치풀이 뒤).
+        const queries = expandQueriesForPools(query, input.keyword, options.category ?? null);
+        const results = await Promise.all(queries.map((q) => searchImages(q).catch(() => [])));
+
+        // 질의별 결과를 **번갈아** 섞는다(2026-09-24). 이어 붙이면 원고 검색어 결과가 앞을 다
+        // 차지해, 후보를 4장만 내려받는 지금 구조에서는 서치풀 결과가 에이전트에게 보이지도
+        // 않는다(실측: 후보가 20 -> 127건으로 늘었는데 상위 4건은 그대로 기사 사진이었다).
+        // 번갈아 넣으면 원고 검색어의 자리 특정성과 서치풀의 공식 스틸을 둘 다 위로 올린다.
+        const seen = new Set<string>();
+        const list: ImageCandidate[] = [];
+        const longest = Math.max(0, ...results.map((r) => r.length));
+        for (let rank = 0; rank < longest; rank += 1) {
+          for (const result of results) {
+            const candidate = result[rank];
+            if (!candidate || seen.has(candidate.link)) continue;
+            seen.add(candidate.link);
+            list.push(candidate);
+          }
+        }
+
         // 원고가 준 검색어는 "2022년 인스타그램 셀카 사진"처럼 시점·형식까지 박아 넣는 경우가
         // 많아 후보가 0건으로 끝난다(2026-09-21 실측). 그러면 고유명사만 남겨 한 번 더 찾는다 -
         // §8-1-1로 작성 규칙은 고쳤지만 그 전에 쓰인 원고는 검색어가 이미 굳어 있다.
+        // 작품·연예는 어차피 긴 변 900px 미만을 거부한다. **고르기 전에** 걸러야 내려받기
+        // 자리(자리당 4장)를 작은 사진에 낭비하지 않는다(2026-09-24). 크기를 모르는 후보는
+        // 남긴다 - 검색 API가 크기를 안 주는 경우가 있고, 내려받은 뒤 다시 검사한다.
+        const quality = ARTWORK_CATEGORIES.has(options.category ?? "")
+          ? list.filter((c) => {
+              const longSide = Math.max(c.width ?? 0, c.height ?? 0);
+              return longSide === 0 || longSide >= ARTWORK_MIN_WIDTH;
+            })
+          : list;
+
+        if (quality.length > 0) {
+          prefetched.set(slot.index, quality);
+          return;
+        }
         if (list.length > 0) {
           prefetched.set(slot.index, list);
           return;
@@ -685,7 +776,7 @@ export async function collectWebImages(
   }
 
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots, prefetched),
+    prompt: buildPrompt(input.keyword, input.slots, prefetched, options.category ?? null),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });
@@ -793,8 +884,10 @@ export async function collectWebImages(
       }
       const size = readSize(downloaded.buffer);
       const longSide = size ? Math.max(size.width, size.height) : null;
-      if (longSide !== null && longSide < HARD_MIN_WIDTH) {
-        rejected.push(`너무 작음(${size?.width}×${size?.height}, 긴 변 최소 ${HARD_MIN_WIDTH}px)`);
+      // 작품·연예는 공식 스틸이 존재하므로 하한이 더 높다(2026-09-24).
+      const minLongSide = ARTWORK_CATEGORIES.has(options.category ?? "") ? ARTWORK_MIN_WIDTH : HARD_MIN_WIDTH;
+      if (longSide !== null && longSide < minLongSide) {
+        rejected.push(`너무 작음(${size?.width}×${size?.height}, 긴 변 최소 ${minLongSide}px)`);
         continue;
       }
 
@@ -828,6 +921,8 @@ export async function collectWebImages(
     // 그 형식은 판정 대상에서 빼고, 열 수 있는 후보가 하나도 없으면 1순위를 그대로 쓴다.
     const openable = candidates.filter((c) => c.extension !== "avif");
     let chosen = candidates[0];
+    /** 검증자가 실제 사진을 보고 다시 쓴 캡션. 비면 마커 설명을 그대로 쓴다. */
+    let rewrittenCaption = "";
 
     if (verify && openable.length === 0) {
       failures.push(`[자리 ${slot.index}] ⚠️ avif라 비전 검증을 건너뛰고 저장했습니다 - 뷰어에서 한 번 확인하세요.`);
@@ -851,6 +946,8 @@ export async function collectWebImages(
         return null;
       }
       chosen = openable.find((c) => c.number === verdict.picked) ?? openable[0];
+      // 검증자가 사진을 보고 다시 쓴 캡션이 있으면 그것을 쓴다(2026-09-24). 없으면 마커 설명이다.
+      if (verdict.caption) rewrittenCaption = verdict.caption;
       if (candidates.length > 1) {
         failures.push(`[자리 ${slot.index}] ℹ️ 후보 ${candidates.length}장 중 ${chosen.number}번 채택: ${verdict.reason}`);
       }
@@ -956,7 +1053,10 @@ export async function collectWebImages(
       // 사진에 맞춰 캡션이 바뀌어, 본문은 A를 말하는데 그림 설명은 B가 되는 드리프트가 생긴다
       // (실측: 마커는 '포틀랜드'인데 캡션이 '금메달 기념촬영'으로 바뀌었다).
       alt: slot.description,
-      caption: slot.description,
+      // 캡션은 **검증자가 사진을 보고 쓴 것**을 우선한다(2026-09-24 사용자 지적). 그게 없을 때만
+      // 마커 설명으로 떨어진다. 마커 설명만 쓰면 "예고편 명대사 장면"이라 적힌 자리에 썸네일이
+      // 와도 캡션이 그대로 나가 독자에게 거짓이 된다.
+      caption: rewrittenCaption || slot.description,
       license: chosen.license || "출처 확인 필요",
       storageUrl,
     };
