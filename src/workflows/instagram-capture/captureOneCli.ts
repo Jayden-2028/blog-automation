@@ -1,10 +1,10 @@
 // npm run ig:capture -- <queueEntryId|--first> [--dry-run] [--keep]
 //
-// 대기열 1건을 손으로 돌려 본다. IG_CAPTURE_AUTO를 켜기 **전에** 캐러셀 셀렉터와 로그인 프로필이
-// 실제로 맞는지 확인하는 용도다 - 자동화부터 켜면 매 분 실패 알림이 오고 무엇이 틀렸는지는
-// 로그를 뒤져야 안다.
+// 대기열 1건을 손으로 돌려 본다. IG_CAPTURE_AUTO를 켜기 **전에** 슬라이드 셀렉터와 로그인
+// 프로필이 실제로 맞는지 확인하는 용도다 - 자동화부터 켜면 매 분 실패 알림이 오고 무엇이
+// 틀렸는지는 로그를 뒤져야 안다.
 //
-//   --dry-run  캡처·판정까지만 하고 job을 만들지 않는다(DB에 아무것도 안 쓴다)
+//   --dry-run  읽기까지만 하고 job을 만들지 않는다(DB에 아무것도 안 쓴다)
 //   --keep     임시 디렉터리를 지우지 않는다 - 찍힌 스크린샷을 눈으로 확인할 때
 //   --headed   창을 띄운다. 인스타가 헤드리스를 탐지해 막을 때 확인·우회용
 //
@@ -56,8 +56,8 @@ async function main(): Promise<void> {
   let captured: CarouselCapture | null = null;
   let judged: CarouselJudgement | null = null;
 
-  // 임시 디렉터리 정리. runCaptureSession은 **실패했을 때만** 이걸 부른다 - 성공하면 이미지를
-  // 아직 안 읽었으므로 createInstagramJob이 끝난 뒤 여기서 직접 부른다(2026-09-23).
+  // 임시 디렉터리 정리. 결과가 파일 경로를 들고 있지 않으므로(글자만 가져온다) runCaptureSession이
+  // 성공·실패와 무관하게 바로 부른다. --keep이면 눈으로 보라고 남긴다.
   const finishTemp = async (dir: string): Promise<void> => {
     if (keep) {
       console.log(`\n▶ --keep - 임시 파일을 남겼습니다: ${dir}`);
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
 
   const session = await runCaptureSession(entry, {
     capture: async (url) => {
-      console.log("▶ 캐러셀 캡처 중...");
+      console.log("▶ 게시물 여는 중...");
       const { captureInstagramCarousel } = await import("./captureInstagramCarousel.js");
       captured = await captureInstagramCarousel(url, headed ? { headless: false } : {});
       console.log(`   슬라이드 ${captured.slides.length}장`);
@@ -77,25 +77,15 @@ async function main(): Promise<void> {
       return captured;
     },
     judge: async (capture, queueEntry) => {
-      console.log("\n▶ 슬라이드 판정 중(claude -p)...");
+      console.log("\n▶ 슬라이드 글자 읽는 중(claude -p)...");
       const { judgeCarouselSlides } = await import("./judgeCarouselSlides.js");
       judged = await judgeCarouselSlides(capture, queueEntry);
       console.log(`   주제어: ${judged.searchKeyword}`);
       console.log(`   카테고리: ${judged.category ?? "(없음)"}`);
       for (const s of judged.slides) {
-        console.log(
-          `     ${s.slideIndex}. ${s.hasOverlay ? "오버레이 있음 → 대체 검색" : "플랫 단컷 → 그대로 사용"}` +
-            `${s.burnedInText ? ` | 번인: "${s.burnedInText.slice(0, 40)}"` : ""}`
-        );
+        console.log(`     ${s.slideIndex}. ${s.burnedInText ? `"${s.burnedInText.slice(0, 60)}"` : "(글자 없음)"}`);
       }
       return judged;
-    },
-    findCleanAlternative: async (input) => {
-      console.log(`\n▶ 자리 ${input.slideIndex} 대체 이미지 검색...`);
-      const { findCleanAlternative } = await import("./findCleanAlternative.js");
-      const found = await findCleanAlternative(input);
-      console.log(found ? `   찾음: ${found.sourcePage}` : "   못 찾음 - 이 자리는 비웁니다");
-      return found;
     },
     cleanup: finishTemp,
   });
@@ -107,13 +97,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  console.log(`\n▶ 결과: 이미지 ${session.slidesUsed}장${session.slidesDropped > 0 ? `, 자리 ${session.slidesDropped}개 비움` : ""}`);
+  if (session.status === "no_material") {
+    console.error("\n📌 읽어낸 글자가 하나도 없습니다(캡션도, 번인 텍스트도).");
+    console.error("   자동 경로에서는 이때 텔레그램으로 주제를 물어봅니다.");
+    console.error("   수동으로 이어가려면 큐 항목에 userTopic을 넣고 다시 돌리세요.");
+    process.exit(1);
+  }
+
+  console.log(`\n▶ 결과: 슬라이드 ${session.slidesRead}장에서 글자를 읽었습니다`);
 
   const parsed = parseCaptureFile(session.capture as unknown);
   if (!parsed.ok) {
-    console.error(`\n❌ 캡처 결과가 규격에 맞지 않습니다:`);
+    console.error(`\n❌ 읽어낸 결과가 규격에 맞지 않습니다:`);
     for (const e of parsed.errors) console.error(`   - ${e}`);
-    await finishTemp(session.tempDir);
     process.exit(1);
   }
   for (const w of parsed.warnings) console.warn(`⚠️ ${w}`);
@@ -121,15 +117,14 @@ async function main(): Promise<void> {
   if (dryRun) {
     console.log("\n✅ --dry-run이라 job을 만들지 않았습니다.");
     console.log(JSON.stringify(parsed.capture, null, 2));
-    await finishTemp(session.tempDir);
     return;
   }
 
   console.log("\n▶ job 생성 중...");
   const { createInstagramJob } = await import("./createInstagramJob.js");
   const created = await createInstagramJob(parsed.capture);
-  console.log(`✅ job ${created.jobId} (이미지 ${created.imagesSaved}장 저장, ${created.imagesFailed}장 실패)`);
-  await finishTemp(session.tempDir);
+  console.log(`✅ job ${created.jobId}`);
+  console.log("   원고 이미지는 집필 후 기존 파이프라인이 채웁니다(웹 검색 + 주제에 따라 AI 생성).");
 
   console.log("\n▶ 자료조사로 자동 연결 중...");
   const { triggerResearchForJob } = await import("./triggerResearch.js");

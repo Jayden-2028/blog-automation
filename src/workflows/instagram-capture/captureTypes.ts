@@ -11,15 +11,11 @@ export type CarouselCapture = {
   tempDir: string;
 };
 
-/** 슬라이드 한 장에 대한 모델 판정. */
+/** 슬라이드 한 장에서 읽어낸 것(2026-09-23: 글자만). */
 export type SlideJudgement = {
   slideIndex: number;
-  /** 워터마크·계정 로고·번인 텍스트가 있나. true면 그대로 쓰지 않는다. */
-  hasOverlay: boolean;
-  /** 이미지에 박힌 글자. 없으면 빈 문자열. 이미지를 못 써도 리서치 근거로 쓴다. */
+  /** 이미지에 박힌 글자. 없으면 빈 문자열. 캡션과 함께 자료조사의 1차 근거다. */
   burnedInText: string;
-  /** 이 슬라이드가 무엇을 보여주는지 한 줄. 대체 이미지 검색어의 재료. */
-  description: string;
 };
 
 /** 게시물 전체에 대한 판정. */

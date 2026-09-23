@@ -1,5 +1,9 @@
 // "인스타 포스팅 변환기" 파이프라인 공용 타입.
-// 흐름: 텔레그램 수신(큐 적재) -> (사람이 부를 때) 브라우저 캡처 -> article_jobs 생성 -> 기존 조사/집필.
+// 흐름: 텔레그램 수신(링크만) -> 로그인 브라우저로 캡션·번인 텍스트 읽기 -> article_jobs 생성
+// -> 기존 조사/집필 -> 기존 이미지 파이프라인.
+//
+// 2026-09-23 재설계: 게시물 **이미지는 쓰지 않는다**. 글자(캡션 + 번인 텍스트)만 자료로 가져오고,
+// 원고 이미지는 주제가 정해진 뒤 기존 파이프라인이 검색·생성한다. 저작권 판단이 통째로 빠진다.
 
 /** 텔레그램에서 받은 원문 그대로. 큐 파일(JSONL) 한 줄 = 이 타입 하나. */
 export type InstagramQueueEntry = {
@@ -11,8 +15,14 @@ export type InstagramQueueEntry = {
   telegramChatId: string;
   telegramMessageId: number;
   receivedAt: string;
-  /** 처리 완료 후에도 파일에서 바로 지우지 않고 상태만 바꾼다(재처리 방지 + 이력 확인용). */
-  status: "pending" | "done" | "skipped";
+  /**
+   * 처리 완료 후에도 파일에서 바로 지우지 않고 상태만 바꾼다(재처리 방지 + 이력 확인용).
+   *
+   * needs_topic(2026-09-23): 게시물에서 읽어낸 자료가 0이라(캡션도 번인 텍스트도 없음) 사용자에게
+   * 주제를 물어보고 답을 기다리는 상태. 답장이 오면 pending으로 돌아가되 재캡처는 하지 않는다
+   * - 같은 게시물을 다시 열어도 또 비어 있을 것이기 때문이다.
+   */
+  status: "pending" | "needs_topic" | "done" | "skipped";
   /** done/skipped로 바뀐 뒤 생성된 article_jobs.id. */
   jobId?: string;
   /**
@@ -22,37 +32,26 @@ export type InstagramQueueEntry = {
   attempts?: number;
   /** 마지막 실패 사유. 사람이 대기열을 볼 때 무엇이 막혔는지 알 수 있게 남긴다. */
   lastError?: string;
+  /**
+   * "어떤 주제로 쓸까요?" 질문 메시지의 telegram message_id(2026-09-23).
+   *
+   * 사용자가 그 메시지에 **답장**하면 어느 항목에 대한 답인지 이걸로 짚는다. 답장이 아니어도
+   * needs_topic이 하나뿐이면 받아주지만, 여럿일 때는 이 값이 유일한 단서다.
+   */
+  askedMessageId?: number;
+  /** 사용자가 답으로 준 주제. 캡션도 번인 텍스트도 없을 때의 유일한 자료다. */
+  userTopic?: string;
 };
 
-/**
- * 브라우저 캡처 단계(사람 = Claude가 직접 수행)의 산출물.
- * 이 타입 자체를 만드는 코드는 없다 - 캡처를 수행하는 세션이 이 모양대로 채워서
- * createInstagramJob에 넘긴다.
- */
+/** 게시물 1건에서 읽어낸 것. 이미지는 쓰지 않는다 - 글자만 가져온다(2026-09-23 재설계). */
 export type InstagramCaptureResult = {
   queueEntryId: string;
   instagramUrl: string;
-  /** 사람이 붙여넣었거나, 캡처 중 화면에서 옮겨적은 캡션 원문. */
+  /** 게시물 캡션(og:description에서 뽑아 군더더기를 벗긴 것). 못 읽으면 빈 문자열. */
   caption: string;
-  /** 캐러셀 이미지에 번인된 텍스트(정보 슬라이드 등). 없으면 빈 배열. */
+  /** 슬라이드 이미지에 박힌 글자. 캡션과 함께 자료조사의 1차 근거가 된다. 없으면 빈 배열. */
   burnedInText: string[];
-  /** 리서치 시드로 쓸 짧은 키워드(캡션/번인텍스트에서 판단해서 뽑는다). */
+  /** 자료조사·원고 제목의 씨앗. 캡션과 번인 텍스트에서 뽑는다. */
   searchKeyword: string;
   category: string | null;
-  /** 원고 후보 이미지. 같은 slideIndex 안에서 kind별로 A/B 비교 후보가 된다. */
-  images: InstagramCandidateImage[];
-  /** 승인 단계에서 "프로필 임베드 필요"로 표시했을 때만 채운다. */
-  profileEmbedUrl?: string | null;
-};
-
-export type InstagramCandidateImage = {
-  /** 캐러셀 슬라이드 순서(1부터). 원고의 [IMAGE: ] 마커 순서와는 무관 - 별도로 매핑한다. */
-  slideIndex: number;
-  kind: "instagram_capture" | "web_alternative";
-  /** 로컬에 저장된 파일 경로(업로드 전). */
-  localPath: string;
-  /** web_alternative일 때 찾은 곳. */
-  sourcePage?: string | null;
-  /** 재사용 근거 메모(사람이 최종 판단하지만 참고용으로 남긴다). */
-  note?: string | null;
 };

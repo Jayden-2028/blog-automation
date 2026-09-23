@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   const parsed = parseCaptureFile(raw);
   if (!parsed.ok) {
-    fail([`❌ 캡처 JSON이 규격에 맞지 않습니다 (${parsed.errors.length}건):`, ...parsed.errors.map((e) => `   - ${e}`)]);
+    fail([`❌ 캡처 JSON이 규격에 맞지 않습니다 (${parsed.errors.length}건):`, ...parsed.errors.map((e: string) => `   - ${e}`)]);
   }
   const { capture, warnings } = parsed;
 
@@ -77,26 +77,11 @@ async function main(): Promise<void> {
     warnings.push(`큐의 URL과 JSON의 instagramUrl이 다릅니다 - 큐: ${entry.instagramUrl}`);
   }
 
-  // 이미지 파일 존재·크기 확인. 업로드 중간에 터지면 일부만 올라간 채 job이 남는다.
-  const fileProblems: string[] = [];
-  for (const img of capture.images) {
-    const path = resolve(img.localPath);
-    if (!existsSync(path)) {
-      fileProblems.push(`slide ${img.slideIndex} (${img.kind}): 파일이 없습니다 - ${path}`);
-      continue;
-    }
-    const size = statSync(path).size;
-    if (size === 0) fileProblems.push(`slide ${img.slideIndex} (${img.kind}): 파일이 0바이트입니다 - ${path}`);
-  }
-  if (fileProblems.length > 0) {
-    fail([`❌ 이미지 파일 문제 ${fileProblems.length}건:`, ...fileProblems.map((p) => `   - ${p}`)]);
-  }
-
   console.log(`▶ 검증 통과: ${absolute}`);
   console.log(`   주제어 : ${capture.searchKeyword}`);
   console.log(`   카테고리: ${capture.category ?? "(없음)"}`);
   console.log(`   URL    : ${capture.instagramUrl}`);
-  console.log(`   이미지  : ${capture.images.length}장 (자리 ${new Set(capture.images.map((i) => i.slideIndex)).size}개)`);
+  console.log(`   캡션    : ${capture.caption.length}자`);
   console.log(`   번인텍스트: ${capture.burnedInText.length}건`);
   for (const w of warnings) console.warn(`⚠️ ${w}`);
 
@@ -105,14 +90,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("\n▶ job 생성 + 이미지 업로드 중...");
+  console.log("\n▶ job 생성 중...");
   const { createInstagramJob } = await import("./createInstagramJob.js");
   const result = await createInstagramJob(capture);
 
-  console.log(`\n✅ job ${result.jobId} 생성 (이미지 ${result.imagesSaved}장 저장, ${result.imagesFailed}장 실패)`);
-  if (result.imagesFailed > 0) {
-    console.warn("⚠️ 일부 이미지가 실패했습니다 - 위 로그를 확인하고, 필요하면 캡처를 다시 올리세요.");
-  }
+  console.log(`\n✅ job ${result.jobId} 생성`);
+  console.log("   원고 이미지는 집필 후 기존 파이프라인이 채웁니다(웹 검색 + 주제에 따라 AI 생성).");
   if (noResearch) {
     console.log("\n⏭ --no-research - 자료조사를 발화하지 않았습니다.");
     console.log(`   이어서 돌리려면: npm run job:research -- ${result.jobId}`);

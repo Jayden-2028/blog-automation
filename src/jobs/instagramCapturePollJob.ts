@@ -23,7 +23,7 @@ async function main(): Promise<void> {
 
   if (result.processed > 0) {
     console.log(
-      `▶ [ig-capture-poll] update ${result.processed}건 - 큐 적재 ${result.enqueued}건 / 무시 ${result.ignored}건`
+      `▶ [ig-capture-poll] update ${result.processed}건 - 큐 적재 ${result.enqueued}건 / 주제 답장 ${result.topicsAnswered}건 / 무시 ${result.ignored}건`
     );
   }
 
@@ -35,12 +35,26 @@ async function main(): Promise<void> {
     return;
   }
 
-  const captured = await processPendingCaptures();
+  const captured = await processPendingCaptures({
+    // 읽을 글자가 하나도 없는 게시물은 실패가 아니라 질문거리다. 이 봇으로 물어야 답장을
+    // 같은 봇이 받는다 - 메인 알림 봇으로 보내면 답장이 영영 돌아오지 않는다.
+    askTopic: async (entry) =>
+      bot.ask(
+        entry.telegramChatId,
+        [
+          "📌 이 게시물에서 읽어낼 내용이 없습니다(캡션도, 이미지 속 글자도).",
+          "어떤 주제로 쓸까요? 이 메시지에 답장해 주세요.",
+          "",
+          entry.instagramUrl,
+        ].join("\n")
+      ),
+  });
   if (captured.attempted === 0) return;
 
   console.log(
-    `▶ [ig-capture-poll] 캡처 ${captured.attempted}건 시도 - 생성 ${captured.created} / 실패 ${captured.failed}` +
-      (captured.givenUp > 0 ? ` / 포기 ${captured.givenUp}` : "")
+    `▶ [ig-capture-poll] ${captured.attempted}건 처리 - 생성 ${captured.created} / 실패 ${captured.failed}` +
+      (captured.givenUp > 0 ? ` / 포기 ${captured.givenUp}` : "") +
+      (captured.asked > 0 ? ` / 주제 질문 ${captured.asked}` : "")
   );
 
   // 무인으로 도는 job이라 stdout을 아무도 안 본다. **사람이 손을 대야 하는 것만** 텔레그램으로

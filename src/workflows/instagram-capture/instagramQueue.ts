@@ -66,9 +66,16 @@ export function listPendingEntries(path: string = INSTAGRAM_QUEUE_PATH): Instagr
   return readQueue(path).filter((e) => e.status === "pending");
 }
 
+/** 주제를 물어보고 답을 기다리는 항목(2026-09-23). 봇이 답장을 어디에 붙일지 고를 때 쓴다. */
+export function listAwaitingTopic(path: string = INSTAGRAM_QUEUE_PATH): InstagramQueueEntry[] {
+  return readQueue(path).filter((e) => e.status === "needs_topic");
+}
+
 export function markEntry(
   id: string,
-  patch: Partial<Pick<InstagramQueueEntry, "status" | "jobId" | "attempts" | "lastError">>,
+  patch: Partial<
+    Pick<InstagramQueueEntry, "status" | "jobId" | "attempts" | "lastError" | "askedMessageId" | "userTopic">
+  >,
   path: string = INSTAGRAM_QUEUE_PATH
 ): void {
   const entries = readQueue(path);

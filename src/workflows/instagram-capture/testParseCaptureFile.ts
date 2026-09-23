@@ -1,5 +1,5 @@
-// 캡처 JSON 검증 규격 고정. 이 검사가 느슨해지면 잘못된 JSON이 통과해 job row가 먼저 생기고,
-// 그때는 되돌리기가 번거롭다(article_jobs + Storage 업로드).
+// 읽어낸 결과의 검증 규격 고정. 이 검사가 느슨해지면 잘못된 값이 통과해 job row가 먼저 생기고,
+// 그때는 되돌리기가 번거롭다.
 
 import { strict as assert } from "node:assert";
 
@@ -13,7 +13,6 @@ function valid(): Record<string, unknown> {
     burnedInText: ["슬라이드에 적힌 텍스트"],
     searchKeyword: "김지원 밀라노",
     category: "entertainment",
-    images: [{ slideIndex: 1, kind: "instagram_capture", localPath: "/tmp/a.png" }],
   };
 }
 
@@ -30,8 +29,8 @@ const tests: Array<[string, () => void]> = [
       assert.equal(r.ok, true);
       if (!r.ok) return;
       assert.equal(r.capture.searchKeyword, "김지원 밀라노");
-      assert.equal(r.capture.images[0].sourcePage, null);
-      assert.equal(r.capture.profileEmbedUrl, null);
+      assert.equal(r.capture.caption, "캡션 원문");
+      assert.ok(!("images" in r.capture), "이미지 필드가 살아나면 옛 설계가 돌아온 것이다");
     },
   ],
   [
@@ -43,61 +42,13 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
-    "web_alternative는 출처 페이지가 없으면 거부한다",
-    () => {
-      const errs = errorsOf({ images: [{ slideIndex: 1, kind: "web_alternative", localPath: "/tmp/a.png" }] });
-      assert.ok(errs.some((e) => e.includes("sourcePage")));
-    },
-  ],
-  [
-    "slideIndex는 1 이상의 정수여야 한다",
-    () => {
-      assert.ok(errorsOf({ images: [{ slideIndex: 0, kind: "instagram_capture", localPath: "/a" }] }).length > 0);
-      assert.ok(errorsOf({ images: [{ slideIndex: 1.5, kind: "instagram_capture", localPath: "/a" }] }).length > 0);
-    },
-  ],
-  [
-    "kind는 정해진 두 값만 받는다",
-    () => {
-      assert.ok(errorsOf({ images: [{ slideIndex: 1, kind: "screenshot", localPath: "/a" }] }).some((e) => e.includes("kind")));
-    },
-  ],
-  [
     "카테고리는 KeywordCategory거나 null이어야 한다",
     () => {
       assert.ok(errorsOf({ category: "연예" }).some((e) => e.includes("category")));
       const r = parseCaptureFile({ ...valid(), category: null });
       assert.equal(r.ok, true);
+      // null은 막지 않되 알린다 - 조사 프롬프트의 topic 줄이 빠지고 집필이 기본값으로 간다.
       if (r.ok) assert.ok(r.warnings.some((w) => w.includes("category")));
-    },
-  ],
-  [
-    "같은 슬라이드의 A/B 후보는 허용, 완전 중복은 거부",
-    () => {
-      const ab = parseCaptureFile({
-        ...valid(),
-        images: [
-          { slideIndex: 1, kind: "instagram_capture", localPath: "/a" },
-          { slideIndex: 1, kind: "web_alternative", localPath: "/b", sourcePage: "https://news.test/1" },
-        ],
-      });
-      assert.equal(ab.ok, true);
-
-      const dupe = errorsOf({
-        images: [
-          { slideIndex: 1, kind: "instagram_capture", localPath: "/a" },
-          { slideIndex: 1, kind: "instagram_capture", localPath: "/b" },
-        ],
-      });
-      assert.ok(dupe.some((e) => e.includes("둘 이상")));
-    },
-  ],
-  [
-    "이미지 0장은 막지 않되 경고한다",
-    () => {
-      const r = parseCaptureFile({ ...valid(), images: [] });
-      assert.equal(r.ok, true);
-      if (r.ok) assert.ok(r.warnings.some((w) => w.includes("0장")));
     },
   ],
   [
