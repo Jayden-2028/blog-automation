@@ -7,7 +7,12 @@
 
 set -euo pipefail
 
-REPO="/Users/wooahpapa/blog-automation/ig-dev"
+# 이 스크립트가 놓인 워크트리를 스스로 찾는다(2026-09-24).
+#
+# 예전에는 ig-dev 절대경로를 박아 뒀다. main 병합 뒤 plist만 prod로 바꾸면 **prod 스크립트가
+# ig-dev 코드를 돌리는** 상태가 되는데, 겉으로는 정상으로 보여 알아채기 어렵다. 경로를
+# 스스로 구하면 어느 워크트리에 놓든 그 워크트리의 코드를 돌린다.
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="$HOME/Library/Logs/blog-automation-instagram-capture-poll.log"
 
 # launchd는 로그인 셸 PATH를 물려받지 않는다 - node/npm 위치를 직접 넣는다.
