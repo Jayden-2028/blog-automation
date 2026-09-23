@@ -18,6 +18,17 @@ const tests: Array<[string, () => void]> = [
     },
   ],
   [
+    "닫는 따옴표 뒤에 마침표가 붙어도 벗긴다",
+    () => {
+      // 2026-09-23 실측(넷플릭스 <스캔들> 게시물): 따옴표 뒤 마침표 때문에 따옴표째 저장됐다.
+      assert.equal(
+        cleanCaption('netflixkr - September 23, 2026: "아직 공개하지 않았던 장면들 #스캔들".'),
+        "아직 공개하지 않았던 장면들 #스캔들"
+      );
+      assert.equal(cleanCaption('acc - January 1, 2026: "본문", '), "본문");
+    },
+  ],
+  [
     "본문 안의 따옴표는 건드리지 않는다",
     () => {
       const out = cleanCaption('focuspic.kr - September 9, 2026: "팬들은 "역대급"이라고 반응했다"');
