@@ -156,9 +156,32 @@ type DefaultResearcherInput = {
   today: string;
   /** 기획 브리프(2026-09-17). 실패했으면 null - researcher.md 기본 절차로 돈다. */
   brief: KeywordBrief | null;
+  /** 인스타그램 수동 큐레이션 job의 원본 자료(2026-09-21). 아니면 null. */
+  sourceContext: string | null;
   /** 규격 모드(2026-09-23 검증). auto면 researcher-auto.md로 돈다. */
   mode: WritingMode;
 };
+
+/**
+ * job.metadata.source === "instagram_manual"이면 캡션 + 번인 텍스트를 조사 프롬프트에 넣을
+ * 1차 근거 문자열로 만든다. 아니면 null(일반 키워드 job은 지금까지와 동일하게 동작).
+ */
+function buildInstagramSourceContext(metadata: Record<string, unknown> | null): string | null {
+  if (!metadata || metadata.source !== "instagram_manual") return null;
+
+  const caption = typeof metadata.instagramCaption === "string" ? metadata.instagramCaption.trim() : "";
+  const burnedIn = Array.isArray(metadata.instagramBurnedInText)
+    ? (metadata.instagramBurnedInText as unknown[]).filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    : [];
+  const url = typeof metadata.instagramUrl === "string" ? metadata.instagramUrl : null;
+
+  const parts: string[] = [];
+  if (url) parts.push(`원본 게시물: ${url}`);
+  if (caption) parts.push(`캡션:\n${caption}`);
+  if (burnedIn.length > 0) parts.push(`이미지에 적힌 텍스트:\n${burnedIn.map((t, i) => `${i + 1}. ${t}`).join("\n")}`);
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
 
 /**
  * Gemini는 Write 도구가 없다 - 응답 텍스트를 직접 outputPath에 쓴다. runResearcher 계약(파일이
@@ -234,6 +257,7 @@ async function runDefaultResearcher(
     outputPath: input.outputPath,
     today: input.today,
     brief: input.brief,
+    sourceContext: input.sourceContext,
     mode: input.mode,
   });
   return defaultRunResearcher(prompt);
@@ -356,6 +380,8 @@ async function runResearchStageInner(
     }
   }
 
+  const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
+
   const freshFile = fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
@@ -363,10 +389,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, mode });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, mode });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, mode });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, mode });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

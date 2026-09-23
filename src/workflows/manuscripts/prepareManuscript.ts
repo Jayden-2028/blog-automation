@@ -24,6 +24,7 @@ import { dirname, relative } from "node:path";
 
 import { manuscriptFilePath, PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
+import { describeImagePolicy, instagramImageConfig } from "../instagram-capture/instagramImagePolicy.js";
 import {
   createArticle,
   listArticlesByJobId,
@@ -267,8 +268,25 @@ export async function prepareManuscript(
   const writeManuscriptFile = options.writeManuscriptFile ?? defaultWriteManuscriptFile;
   const mergeJobMetadata =
     options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
-  const generateImages =
+  // 인스타 job은 카테고리에 따라 AI 생성을 켠다(2026-09-23). 전역 스위치를 켜면 같은 저장소를
+  // 쓰는 일반 키워드 job까지 유료 생성이 돌기 때문에, 이 job에만 config를 덮어씌운다.
+  // 인스타 job이 아니면 null이 나오고 아무것도 바뀌지 않는다.
+  const imagePolicy = instagramImageConfig({
+    source: (job.metadata as Record<string, unknown> | null)?.source,
+    category: job.category ?? null,
+  });
+  const baseGenerateImages =
     options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
+  const generateImages =
+    imagePolicy && options.generateImages === undefined
+      ? (input: Parameters<typeof generateManuscriptImages>[0], extra?: Parameters<typeof generateManuscriptImages>[1]) =>
+          generateManuscriptImages(input, { ...extra, config: imagePolicy })
+      : baseGenerateImages;
+  const policyNote = describeImagePolicy({
+    source: (job.metadata as Record<string, unknown> | null)?.source,
+    category: job.category ?? null,
+  });
+  if (policyNote) console.log(`· [manuscripts] ${job.keyword}: ${policyNote}`);
   const collectWebImages =
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const renderTableImages =
@@ -370,6 +388,7 @@ export async function prepareManuscript(
   // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
   let images: ManuscriptImage[] = readJobManuscriptImages(job);
+
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
       jobId: job.id,
@@ -497,6 +516,11 @@ export async function prepareManuscript(
     }
   }
 
+  // 인스타그램 수동 큐레이션 job 배지(2026-09-21) - createInstagramJob.ts가 metadata.source에
+  // 남겨 둔 값을 그대로 읽는다. 일반 키워드 job은 이 필드가 없어 undefined -> null.
+  const sourceTag = job.metadata?.source === "instagram_manual" ? ("instagram" as const) : null;
+  const sourceUrl = sourceTag ? ((job.metadata?.instagramUrl as string | undefined) ?? null) : null;
+
   const entry: ManuscriptEntry = {
     title,
     searchDescription,
@@ -510,6 +534,8 @@ export async function prepareManuscript(
     images,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,
+    sourceTag,
+    sourceUrl,
   };
 
   await writeManuscriptFile(

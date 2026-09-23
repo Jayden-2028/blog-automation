@@ -9,6 +9,7 @@
 // 번호가 건너뛴 채로 보인다 - 그 자체가 "여기를 채워야 한다"는 신호다.
 
 import { mkdir, writeFile, readFile, access } from "node:fs/promises";
+import { basename } from "node:path";
 import { resolve } from "node:path";
 
 import { exportTopicDir } from "../../config/manuscriptExport.js";
@@ -96,6 +97,21 @@ export type ExportManuscriptOptions = {
   fetchImage?: (url: string) => Promise<{ ok: boolean; buffer?: Buffer; error?: string }>;
 };
 
+/**
+ * 보관함에 저장할 파일명. **경로 조각을 버리고 이름만** 쓴다.
+ *
+ * 왜 필요한가(2026-09-23 실측): 옛 인스타 경로가 fileName에 Supabase Storage 경로를 통째로
+ * 넣었다(`<jobId>/1-web_alternative.jpg`). 그대로 resolve하면 주제 폴더 안에 jobId 하위 폴더를
+ * 만들려다 ENOENT로 죽고, **그 뒤 주제가 전부 안 내려받아진다** - 09-23 내보내기가 "암살자들"에서
+ * 멈춰 이후 원고의 이미지가 통째로 비었다.
+ *
+ * 보관함 구조는 <날짜>/<주제>/NN-slug.ext 한 겹이다(manuscriptExport.ts). 어떤 fileName이 와도
+ * 그 구조를 깨지 않게 여기서 평평하게 만든다.
+ */
+export function archiveFileName(fileName: string): string {
+  return basename(fileName) || fileName;
+}
+
 async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
@@ -157,8 +173,10 @@ function buildSlots(
 
   return blocks.map((block, i) => {
     const index = i + 1;
-    const generated = images.filter((image) => image.index === index && image.url).map((image) => image.fileName);
-    const found = webImages.filter((image) => image.index === index).map((image) => image.fileName);
+    const generated = images
+      .filter((image) => image.index === index && image.url)
+      .map((image) => archiveFileName(image.fileName));
+    const found = webImages.filter((image) => image.index === index).map((image) => archiveFileName(image.fileName));
     return {
       index,
       description: block.type === "image" ? block.description : "",
@@ -257,7 +275,7 @@ export async function exportManuscript(
 
   for (const image of topic.manuscript.images) {
     if (!image.url) continue;
-    const target = resolve(dir, image.fileName);
+    const target = resolve(dir, archiveFileName(image.fileName));
 
     if (!options.force && (await exists(target))) {
       skipped += 1;
@@ -272,7 +290,7 @@ export async function exportManuscript(
 
     await writeFile(target, result.buffer);
     const size = readImageSize(result.buffer);
-    if (size) sizes.set(image.fileName, `${size.width}×${size.height}`);
+    if (size) sizes.set(archiveFileName(image.fileName), `${size.width}×${size.height}`);
     downloaded += 1;
   }
 
@@ -282,7 +300,7 @@ export async function exportManuscript(
     for (const fileName of slot.fileNames) {
       if (sizes.has(fileName)) continue;
       try {
-        const size = readImageSize(await readFile(resolve(dir, fileName)));
+        const size = readImageSize(await readFile(resolve(dir, archiveFileName(fileName))));
         if (size) sizes.set(fileName, `${size.width}×${size.height}`);
       } catch {
         // 파일이 아직 없는 경우(생성 실패 등). 크기 줄만 빠진다.

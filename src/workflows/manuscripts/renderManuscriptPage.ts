@@ -39,6 +39,8 @@ type PageTopic = {
   categoryLabel: string;
   date: string;
   title: string;
+  sourceTag: "instagram" | null;
+  sourceUrl: string | null;
   searchDescription: string | null;
   slug: string | null;
   tags: string[];
@@ -76,6 +78,8 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     categoryLabel: (entry.category && CATEGORY_LABEL[entry.category]) || entry.category || "미분류",
     date: entry.date,
     title: m.title,
+    sourceTag: m.sourceTag ?? null,
+    sourceUrl: m.sourceUrl ?? null,
     searchDescription: m.searchDescription,
     slug: m.slug,
     tags: m.tags,
@@ -117,6 +121,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   :root{color-scheme:light;
         --bg:#FAF7F2;--fg:#2B2621;--muted:#8C8178;--line:#E2D9CB;--card:#F3EDE2;
         --pen:#E8590C;--pen-soft:#FDF0E6;--warn:#8A6A22;
+        --ig:#C13584;--ig-soft:#FCE4EC;
         --font:"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
@@ -159,7 +164,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .placeholder{color:var(--muted);padding:8px}
   .cat-badge{display:inline-block;font-size:11px;font-weight:700;color:var(--pen);
           border:1px solid var(--pen);border-radius:5px;padding:2px 8px;margin-bottom:8px}
+  /* 인스타그램 수동 큐레이션 원고 배지(2026-09-21) - 사용자가 직접 고른 소재임을 한눈에 구분. */
+  .src-badge{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--ig);
+          border-radius:5px;padding:2px 8px;margin:0 0 8px 6px;text-decoration:none;vertical-align:middle}
   .doc-title{font-size:19px;font-weight:800;letter-spacing:-.025em;margin:0 0 4px;line-height:1.4}
+  .doc-title.ig{background:var(--ig-soft);padding:4px 10px;border-radius:6px;
+          box-shadow:inset 3px 0 0 var(--ig);margin-left:-10px}
   .doc-sub{color:var(--muted);font-size:12.5px;margin:0 0 18px}
   .doc-sub code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
   .doc-sub .bad{color:var(--warn);font-weight:700}
@@ -532,7 +542,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       var h = "";
       h += '<div class="cat-badge">' + esc(topic.categoryLabel) + '</div>';
-      h += '<div class="doc-title">' + esc(topic.title || topic.keyword) + '</div>';
+      if (topic.sourceTag === "instagram") {
+        h += '<a class="src-badge" href="' + esc(topic.sourceUrl || "#") + '" target="_blank" rel="noopener">'
+          + '📷 인스타 소스</a>';
+      }
+      h += '<div class="doc-title' + (topic.sourceTag === "instagram" ? " ig" : "") + '">'
+        + esc(topic.title || topic.keyword) + '</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
 
       // 2026-09-16부터 승인 시 Blogspot 초안이 자동 저장된다(제목·본문·이미지·라벨·댓글 설정까지).
@@ -738,7 +753,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         var b = document.createElement("button");
         b.className = "navbtn";
         b.setAttribute("data-job-id", topic.jobId);
-        b.textContent = topic.keyword;
+        b.textContent = (topic.sourceTag === "instagram" ? "📷 " : "") + topic.keyword;
         b.onclick = function () { render(topic.jobId); setNavOpen(false); };
         curItems.appendChild(b);
       });

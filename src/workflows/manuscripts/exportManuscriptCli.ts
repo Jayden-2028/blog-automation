@@ -49,9 +49,24 @@ async function main(): Promise<void> {
   console.log(`▶ 원고 ${targets.length}건 내보내는 중...\n`);
 
   let unfilledTotal = 0;
+  let brokenTotal = 0;
 
   for (const topic of targets) {
-    const result = await exportManuscript(topic, { force });
+    // 한 주제가 던져도 나머지를 계속 내보낸다(2026-09-23 실측 대응).
+    //
+    // 09-23 내보내기가 "암살자들"에서 ENOENT로 죽으면서 **그 뒤 주제가 전부 안 내려받아졌다**.
+    // 원인은 그 주제 하나의 파일명이었는데, 격리가 없어 피해가 나머지로 번졌다. 원고 보관은
+    // 건마다 독립이라 한 건의 실패가 다른 건을 막을 이유가 없다.
+    let result: Awaited<ReturnType<typeof exportManuscript>>;
+    try {
+      result = await exportManuscript(topic, { force });
+    } catch (error) {
+      brokenTotal += 1;
+      console.error(`❌ ${topic.date} / ${topic.keyword}`);
+      console.error(`   ${error instanceof Error ? error.message : error}`);
+      console.error("");
+      continue;
+    }
     const unfilled = result.slots.filter((s) => s.fileNames.length === 0);
     unfilledTotal += unfilled.length;
 
@@ -63,6 +78,10 @@ async function main(): Promise<void> {
       console.log(`   · [${slot.index}] ${slot.acquisition === "search" ? "웹 검색" : slot.acquisition === "capture" ? "페이지 캡처" : slot.acquisition === "table" ? "표 생성" : "미생성"} — ${slot.description}`);
     }
     console.log("");
+  }
+
+  if (brokenTotal > 0) {
+    console.log(`⚠️ ${brokenTotal}건은 내보내지 못했습니다(위 ❌). 나머지는 정상 처리했습니다.`);
   }
 
   if (unfilledTotal > 0) {

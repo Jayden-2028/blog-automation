@@ -94,6 +94,13 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   (`BLOGGER_PUBLISH_AS_DRAFT=true`는 이 경로를 막지 못한다 - 호출 인자가 우선한다).
   네이버는 **기본이 비공개**이고 `NAVER_PUBLISH_VISIBILITY=public`으로만 공개된다
   (2026-09-22 사용자 결정 - 첫 운영은 비공개로 확인한 뒤 올린다).
+- **자동 발행(사람 없이 나가는 경로)은 여전히 없다.** `publishApprovedArticles.ts`(폴링 fan-out)는
+  2026-09-05부터 호출되지 않는다 - 코드와 테스트만 남아 있다. 되살리는 기준은 "원고·이미지 품질이
+  보장됐다"는 **사용자 판단**이다.
+- 발행 게이트 환경변수(승인 없이 건드리지 않는다):
+  - `BLOGGER_ENABLED` - 마스터 게이트. false면 버튼도 `disabled`로 실패한다(기본 false).
+  - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
+    `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 
 ## 승인 없이는 금지
 
@@ -112,6 +119,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   네이버가 다시 들어왔다 - 채널 수는 위 운영 규칙이 최신이다)
 - 진척 원장(데일리 데스크 대시보드가 읽는다): `docs/ai-handoff/PROGRESS.md`
 - 상태와 다음 단계: `docs/ai-handoff/CURRENT_STATE.md`
+- 인스타 포스팅 변환기(별도 워크트리, 미병합): `docs/ai-handoff/INSTAGRAM_POSTING_CONVERTER.md`
 - 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`
 - 집필 규격(라우팅·입력계약·체크리스트): `prompts/writing/writer.md`
