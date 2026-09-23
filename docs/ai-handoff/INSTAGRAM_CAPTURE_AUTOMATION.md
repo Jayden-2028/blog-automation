@@ -184,6 +184,26 @@ npm run ig:capture -- --first --dry-run --keep
 한쪽이 안 떠 있으면 그 글만 조용히 안 올라간다 — 원인 찾기가 더 어려워진다. 큐는 하나로 두고
 **폴러 소유권으로 가른다.**
 
+## 조사·집필은 어디서 도는가 (2026-09-23)
+
+`triggerResearchForJob`은 **`GITHUB_TOKEN`이 있으면** GitHub Actions 큐에 올리고, 없으면 맥에서
+detached 프로세스로 띄운다(`spawnDetachedTask`). 로컬에 토큰이 없던 동안 인스타 job의 조사·집필이
+전부 맥에서 돌았고, **맥이 절전에 들어가면서 프로세스가 통째로 죽었다** - job 4건이
+researching/writing에 멈춘 채 발견됐다(실측).
+
+`spawnDetachedTask`가 `caffeinate`로 감싸기는 하지만 그건 **유휴 절전**만 막는다. 뚜껑을 닫거나
+직접 잠재우면 못 막는다.
+
+2026-09-23에 `.env`에 `GITHUB_TOKEN` + `GITHUB_REPOSITORY`를 넣어 클라우드 경로로 옮겼다. 둘 다
+있어야 한다 - GH Actions 러너에서는 자동으로 채워지지만 로컬에는 없다.
+
+**주의**: 이 둘은 인스타 job만이 아니라 `runResearchStageCli`의 `triggerWriting`도 바꾼다. 맥에서
+`npm run job:research`를 직접 돌리면 이제 집필이 로컬이 아니라 GH Actions에서 이어진다. 일반
+키워드 job은 원래 클라우드에서 돌고 있었으므로 동작이 통일되는 쪽이다.
+
+**토큰이 만료되면 조용히 예전 동작으로 돌아간다** - 분기가 "있으면 클라우드, 없으면 로컬"이라
+경고가 없다. 조사·집필이 다시 맥에서 돌기 시작하면 이걸 의심한다.
+
 ## 알려진 위험
 
 - **로그인 세션 만료.** 캡션도 슬라이드도 로그인 없이는 못 읽는다(2026-09-23 실측: 익명으로
