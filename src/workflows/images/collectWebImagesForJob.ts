@@ -173,7 +173,10 @@ export async function collectWebImagesForJob(
       .filter((record) => record.storageUrl)
       .map((record) => ({
         index: record.index,
-        description: record.alt,
+        // 검증자가 **사진을 보고 다시 쓴 캡션**을 우선한다(2026-09-24). record.alt는 마커 설명
+        // 그대로라, 그것만 쓰면 "예고편 명대사 장면"이라 적힌 자리에 썸네일이 와도 캡션이
+        // 안 바뀐다. 뷰어·발행이 이 description을 캡션으로 쓴다.
+        description: record.caption || record.alt,
         // 검색어는 이미지 생성 프롬프트가 아니다 - 뷰어의 "프롬프트 팩"에 섞이면 혼란스럽다.
         prompt: null,
         url: record.storageUrl ?? null,

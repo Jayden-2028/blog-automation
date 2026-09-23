@@ -59,6 +59,15 @@ const HARD_MIN_WIDTH = 400;
  * 하한을 올리면 자리가 빈다(빈 자리가 더 나쁘다는 것이 그동안의 실측이다).
  */
 const ARTWORK_MIN_WIDTH = 900;
+/**
+ * 작품 자리의 **최후 하한**(2026-09-24 실측 보정).
+ *
+ * 900을 딱딱한 하한으로 쓴 첫 판에서 조연 자리("박혁권·서정연·김민석")가 통째로 비었다.
+ * 공식 스틸은 주연 위주라 조연·인물 자리에는 큰 사진이 아예 없다. **빈 자리가 작은 사진보다
+ * 나쁘다**는 것이 이 저장소의 기존 결론이므로(HARD_MIN_WIDTH 완화 이력 참고), 900은 **선호**로
+ * 두고 거부는 여기서 한다.
+ */
+const ARTWORK_FALLBACK_MIN_WIDTH = 600;
 /** 이 카테고리는 공식 스틸이 존재한다고 보고 하한을 올린다. */
 const ARTWORK_CATEGORIES: ReadonlySet<string> = new Set(["entertainment", "ott"]);
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(output-format.md §8). */
@@ -640,6 +649,11 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "7. **번인·저화질을 뒤로 민다**(2026-09-24). 매체 로고·자막·워터마크가 찍힌 재가공 이미지와",
     "   같은 장면의 깨끗한 원본이 함께 있으면 **깨끗하고 큰 쪽**을 고른다. 작품 스틸은 공식 배포본이",
     "   보통 1500px 이상이라, 700px짜리 기사 캡처가 유일한 후보가 아니라면 그것을 고르지 않는다.",
+    "8. **나란히 붙인 합성컷을 피한다**(2026-09-24 사용자 지적, output-format §8-8). 사진 두세 장을",
+    "   좌우로 이어 붙인 이미지는 **단독 사진이 하나라도 있으면 고르지 않는다.** 썸네일에서 전부",
+    "   작게 보이고, 같은 조합이 다른 자리에도 들어와 중복이 된다.",
+    "   실측 반려: \"방영 정보\" 자리에 배우·감독·배우를 이어 붙인 3분할 이미지가 들어갔다.",
+    "   단독 사진이 하나도 없을 때만 합성컷을 쓰고, 그때는 캡션에 누가 있는지 적는다.",
     "",
     "## 캡션 다시 쓰기 (2026-09-24 사용자 지적)",
     "고른 사진을 **실제로 보고** 캡션을 쓴다. 마커 설명은 *무엇을 찾아야 했는지*일 뿐이고, 실제로",
@@ -784,12 +798,15 @@ export async function collectWebImages(
         // 작품·연예는 어차피 긴 변 900px 미만을 거부한다. **고르기 전에** 걸러야 내려받기
         // 자리(자리당 4장)를 작은 사진에 낭비하지 않는다(2026-09-24). 크기를 모르는 후보는
         // 남긴다 - 검색 API가 크기를 안 주는 경우가 있고, 내려받은 뒤 다시 검사한다.
-        const quality = ARTWORK_CATEGORIES.has(options.category ?? "")
-          ? list.filter((c) => {
-              const longSide = Math.max(c.width ?? 0, c.height ?? 0);
-              return longSide === 0 || longSide >= ARTWORK_MIN_WIDTH;
-            })
-          : list;
+        const isArtwork = ARTWORK_CATEGORIES.has(options.category ?? "");
+        const atLeast = (min: number) =>
+          list.filter((c) => {
+            const longSide = Math.max(c.width ?? 0, c.height ?? 0);
+            return longSide === 0 || longSide >= min;
+          });
+        // 큰 것을 먼저 노리되, 없으면 낮춰서라도 후보를 만든다(빈 자리가 더 나쁘다).
+        const preferred = isArtwork ? atLeast(ARTWORK_MIN_WIDTH) : list;
+        const quality = preferred.length > 0 ? preferred : isArtwork ? atLeast(ARTWORK_FALLBACK_MIN_WIDTH) : list;
 
         // 공식 스틸을 **맨 앞에** 둔다 - 이게 이 카테고리의 1순위 서치풀이다(§8-7).
         const withOfficial = [...officialStills, ...quality];
@@ -922,8 +939,11 @@ export async function collectWebImages(
       }
       const size = readSize(downloaded.buffer);
       const longSide = size ? Math.max(size.width, size.height) : null;
-      // 작품·연예는 공식 스틸이 존재하므로 하한이 더 높다(2026-09-24).
-      const minLongSide = ARTWORK_CATEGORIES.has(options.category ?? "") ? ARTWORK_MIN_WIDTH : HARD_MIN_WIDTH;
+      // 작품·연예는 공식 스틸이 존재하므로 하한이 조금 높다(2026-09-24). 다만 900은 **선호**이고
+      // 거부는 600에서 한다 - 900으로 거부했더니 조연 자리가 통째로 비었다(실측).
+      const minLongSide = ARTWORK_CATEGORIES.has(options.category ?? "")
+        ? ARTWORK_FALLBACK_MIN_WIDTH
+        : HARD_MIN_WIDTH;
       if (longSide !== null && longSide < minLongSide) {
         rejected.push(`너무 작음(${size?.width}×${size?.height}, 긴 변 최소 ${minLongSide}px)`);
         continue;
