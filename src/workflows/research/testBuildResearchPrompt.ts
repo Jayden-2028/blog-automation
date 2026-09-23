@@ -125,3 +125,31 @@ try {
   if (!spec.includes("prompts/research/researcher.md")) throw new Error("❌ 기본값이 spec이 아닙니다");
   console.log("✅ 자율 모드 - auto 규격만 로드, 브리프·수집 목록 제거, 기본값은 spec 유지");
 }
+
+// --- 인스타 원본 자료가 두 모드 모두에 실린다(2026-09-24) ---------------------------------------
+// auto 분기에 빠져 있었다. 사용자가 직접 고른 게시물이 1차 근거인데 조용히 사라지면
+// 그 job은 근거 없이 조사된다.
+{
+  const CONTEXT = "@whyissuenow 게시물: 카페 대란 현장 사진 3장 + 캡션 원문";
+  for (const mode of ["spec", "auto"] as const) {
+    const prompt = buildResearchPrompt({
+      job: { keyword: "카페 대란", headline: null, category: "community" },
+      baselineSources: [],
+      outputPath: "/tmp/r.md",
+      today: "2026-09-24",
+      sourceContext: CONTEXT,
+      mode,
+    });
+    if (!prompt.includes(CONTEXT)) throw new Error(`❌ ${mode} 모드에 인스타 원본 자료가 빠졌습니다`);
+  }
+  // 없으면 블록 자체가 붙지 않는다.
+  const without = buildResearchPrompt({
+    job: { keyword: "k", headline: null, category: null },
+    baselineSources: [],
+    outputPath: "/tmp/r.md",
+    today: "2026-09-24",
+    mode: "auto",
+  });
+  if (without.includes("원본 자료")) throw new Error("❌ 원본 자료가 없는데 블록이 붙었습니다");
+  console.log("✅ 인스타 원본 자료 - spec·auto 두 모드 모두 주입, 없으면 생략");
+}

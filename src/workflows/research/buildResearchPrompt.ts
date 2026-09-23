@@ -81,6 +81,16 @@ function buildAutoResearchPrompt(input: BuildResearchPromptInput): string {
     job.headline && job.headline !== job.keyword ? `- 원문 기사 제목: ${job.headline}` : null,
     `- 오늘 날짜: ${today}`,
     "",
+    ...(input.sourceContext
+      ? [
+          "이 job의 원본 자료(사용자가 인스타그램에서 직접 골라 보낸 게시물 - 1차 근거다):",
+          input.sourceContext,
+          "",
+          "이 원본이 조사의 출발점이다. 검색은 이 내용의 사실 확인과 배경 보강에 쓴다.",
+          "원본에 없는 내용을 지어내지 않는다.",
+          "",
+        ]
+      : []),
     "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹/블로그 검색 결과):",
     ...formatBaseline(baselineSources),
     "",
