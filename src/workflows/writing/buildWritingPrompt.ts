@@ -25,6 +25,8 @@
 import type { ArticleJobRow } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
+import { DEFAULT_WRITING_MODE } from "../../config/writingMode.js";
+import type { WritingMode } from "../../config/writingMode.js";
 
 /**
  * 카테고리 → 문체 참고 파일. writer.md §2 라우팅과 1:1 대응.
@@ -54,10 +56,63 @@ export type BuildWritingPromptInput = {
    * (writer.md §3-1). 없으면 예전처럼 쓴다.
    */
   brief?: KeywordBrief | null;
+  /**
+   * 규격 모드(2026-09-23 검증). `auto`면 writer.md·output-format.md·seo-guide 대신
+   * writer-auto.md 하나만 읽히고, 브리프 뼈대·분량·이미지 개수 지시를 뺀다.
+   */
+  mode?: WritingMode;
 };
+
+/**
+ * 자율 모드 프롬프트(2026-09-23 검증).
+ *
+ * spec 모드와 다른 점: 규격 문서 5개(2,549줄) 대신 writer-auto.md 하나만 읽는다. 브리프를
+ * 넘기지 않고, 소제목 뼈대·분량·Q&A 개수·이미지 개수·획득 방식 판정 순서를 지시하지 않는다.
+ * 남기는 것은 코드가 파싱하는 형식(볼드 소제목·이미지 마커 쌍·frontmatter)과 사실 규칙뿐이다.
+ *
+ * incident와 voice.md는 자율 대상이 아니다 - 전자는 잘못 쓰는 비용이 크고, 후자는 카테고리와
+ * 무관하게 한 목소리를 내야 해서다.
+ */
+function buildAutoWritingPrompt(input: BuildWritingPromptInput): string {
+  const { job, researchFilePath, draftFilePath, isMedical, today } = input;
+
+  return [
+    "너는 블로그 원고를 쓰는 편집자다. 아래를 Read로 읽고 그대로 따른다.",
+    "규격이나 자료조사 파일을 못 읽으면 draft 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
+    "",
+    "- prompts/writing/writer-auto.md   (자율 모드 규격 - 짧다. 전부 읽어라)",
+    "- prompts/writing/rules/topic-allocation.md   (주제 배분 - 무엇에 60%를 쓰는지 여기서 정한다)",
+    "- prompts/writing/rules/article-structure.md  (카테고리별 초안 구조·문단 흐름 - 소제목의 뼈대)",
+    job.category === "incident"
+      ? "- prompts/writing/style/incident.md   (이 job은 사건·사고다. 이 파일이 다른 모든 규칙을 이긴다)"
+      : "- prompts/writing/style/voice.md   (공통 어투·어미·인칭. 목소리는 자율 대상이 아니다)",
+    `- ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
+    "",
+    "이 job의 입력:",
+    `- keyword: ${job.keyword}`,
+    job.category ? `- category: ${job.category}` : null,
+    job.headline && job.headline !== job.keyword ? `- 원문 제목: ${job.headline}` : null,
+    `- 오늘 날짜: ${today}`,
+    isMedical ? "- 이 주제는 의학 정보를 다룬다. 확인된 출처 밖의 판단·권고를 쓰지 않는다." : null,
+    "",
+    "파이프라인이 정하는 것(규격과 충돌하면 이쪽이 우선):",
+    `- 출력은 정확히 이 절대 경로에 Write한다: ${draftFilePath}`,
+    "- 초안은 moai-marketer:content-blog 스킬로 쓰고, moai-writer:korean-humanize로 마무리한다.",
+    "- 사실은 위 자료조사 파일에서만 가져온다. WebSearch를 쓰지 않는다.",
+    "",
+    "**소제목 개수·순서·구성, 분량, 이미지 개수는 지시하지 않는다. 네가 정한다.**",
+    "규격 §1대로 자료조사 맨 위의 \"이 키워드를 검색한 사람은 ___을 알고 싶어 한다\"를 먼저 확인하고,",
+    "그 한 문장에 원고의 60% 이상을 써라. 그 문장이 자료와 어긋나면 네가 고치고 frontmatter에 남긴다.",
+    "",
+    `완료하면 파일을 저장한 뒤 마지막 줄에 \`SAVED: ${draftFilePath}\`만 답하라.`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
 
 export function buildWritingPrompt(input: BuildWritingPromptInput): string {
   const { job, researchFilePath, draftFilePath, isMedical, today } = input;
+  if ((input.mode ?? DEFAULT_WRITING_MODE) === "auto") return buildAutoWritingPrompt(input);
   const styleFile = pickStyleFile(job.category);
 
   return [
@@ -67,6 +122,8 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- prompts/writing/writer.md                       (라우팅·입력 계약·제목·저장 전 체크리스트)",
     "- prompts/writing/rules/facts-and-hedging.md      (사실 태도·헤지 금지 - 항상 최우선, 구 §4)",
     "- prompts/writing/rules/output-format.md          (출력 형식 계약 - 구 §6~10, 코드와 직결)",
+    "- prompts/writing/rules/topic-allocation.md       (주제 배분 - 내적 60%+ / 외적 40%- / 외적의 외적 0)",
+    "- prompts/writing/rules/article-structure.md      (카테고리별 초안 구조·문단 흐름 - 소제목의 뼈대)",
     "- docs/seo-guide.md                                (제목·본문·키워드·이미지·태그 규칙)",
     `- ${styleFile}   (이 카테고리의 실제 발행 최종본 기반 구조·흐름·제목 기법)`,
     // 2026-09-16: 어투·어미는 카테고리와 무관하게 voice.md 하나다(카테고리마다 어미 규칙이 달라
@@ -93,8 +150,9 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "파이프라인 오버라이드(위 문서와 충돌하면 이 지시가 우선):",
     ...(input.brief
       ? [
-          "- writer.md §3-1대로 소제목은 브리프의 Q1~Q5 순서를 뼈대로 잡는다. 리서치 파일의 섹션 순서를",
-          "  따라 쓰지 않는다. 리서치에 답이 없는 질문은 억지로 채우지 말고 frontmatter `unanswered`에",
+          "- **소제목 순서는 rules/article-structure.md의 유형별 단계를 따른다**(2026-09-23 변경).",
+          "  브리프 Q는 뼈대가 아니라 그 단계를 채울 재료다 - Q 순서대로 소제목을 만들지 않는다.",
+          "  브리프 Q 중 리서치에 답이 없는 것은 억지로 채우지 말고 frontmatter `unanswered`에",
           "  \"Q{n}\"으로 적고, `brief_coverage`에 \"답한 개수/전체\"(예: 4/5)를 적는다.",
         ]
       : []),

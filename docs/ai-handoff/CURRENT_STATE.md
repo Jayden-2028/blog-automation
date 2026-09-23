@@ -1,131 +1,86 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-22 (Asia/Seoul)
+기준일: 2026-09-23 (Asia/Seoul)
 
-## 2026-09-21~22 세션 — 인스타 포스팅 변환기 (별도 워크트리, 미병합)
+## 2026-09-23 세션 — 자율 모드(WRITING_MODE) 도입, A/B 검증 대기
 
-> **작업 위치: `~/blog-automation/ig-dev`, 브랜치 `feat/instagram-keyword-source`.**
-> **아직 `main`에 병합 안 됨** - 이 세션 내용은 `prod`/`repo` 등 다른 워크트리에는 안 보인다.
-> 자세한 설계·정책·이미지 소싱 규칙·코드 위치는 `docs/ai-handoff/INSTAGRAM_POSTING_CONVERTER.md`
-> 하나로 완결돼 있다 - 이어서 작업하려면 그 문서를 먼저 읽을 것.
+**문제**: 규격이 2,549줄 / 체크박스 115개까지 불었는데 그중 "이 키워드의 핵심이 무엇인가"를
+묻는 항목이 **0개**다. 전부 형식·태도·수치 검사다. 실측 2건에서 주제가 통째로 빠졌다.
 
-**배경**: 네이버 트렌드 기반 키워드 수집이 화제 시점보다 항상 늦게 잡혀(조회수 편차 극심 -
-1,500회 vs 대부분 10회 미만) 인스타그램을 새 소스로 시도했다. Meta Business Discovery API는
-App Review(사업자등록 필요)에 막혀 폐기, Playwright 크롤링은 robots.txt 전면 차단과 충돌해
-기각(`docs/ai-handoff/INSTAGRAM_KEYWORD_SOURCE.md`에 폐기 표시함). 대신 사람이 인스타를 직접
-훑고 텔레그램(별도 봇 `InstaTransitionBot`)으로 URL만 보내면 Claude가 브라우저로 분석·자료조사해
-원고화하는 반자동 구조로 전환.
+- **고윤정·허남준 티저**(`6c0f3716`): 프로필·SNS·보도자료는 다 모았는데 **티저 영상을 아무도
+  열어보지 않았다.** 브리프가 광고 속 연출(카페 우연)을 실제 사건으로 읽고 6월 인맥을 설명으로
+  붙였고, 집필이 그대로 따라 썼다. 2차 브리프(재작성)가 이 오류를 **강화**했다 - "티저 반응을
+  못 찾았으니 Q3을 '두 만남이 우연인가'로 바꿈"이 `briefRevised`에 그대로 남아 있다.
+- **영등포 결혼박람회**(`cab6a83e`): 브리프 질문 5개 중 3개가 "확인되지 않았다"로 끝났다.
+  **못 찾은 것이 글의 주제가 됐고**("웨딩 순서의 진짜 뜻"), 어떤 웨딩홀·드레스샵이 왔고 할인이
+  얼마인지는 한 줄도 없다. `action`은 아예 다른 박람회로 독자를 보낸다.
 
-**만든 것**: 별도 텔레그램 봇+로컬 큐+`article_jobs` 연동 전체 파이프라인(DB 마이그레이션 0건),
-launchd 자동 폴링(`com.wooahpapa.blog-automation.instagram-capture-poll`, 60초 주기, 현재
-`ig-dev`를 가리킴 - **병합 후 `prod`로 옮겨야 함**), 원고 뷰어 인스타 소스 배지.
+**한 것**: 규격을 지우지 않고 **갈아끼우는 스위치**를 넣었다(`src/config/writingMode.ts`).
 
-**엔드투엔드 1건 실행 + 실사용 버그 발견·수정**: "김지원 밀라노 근황"(job `163f9629`)으로 캡처
-→ 조사 → 집필까지 돌렸는데, 사람이 텔레그램에서 빨리 승인해버려 인스타 캡처 사진 대신 기존
-파이프라인의 웹 이미지 자동 검색이 대신 채운 경쟁 상태 버그를 발견했다. `runArticleJob.ts`의
-write 완료 시점(마커 수 확정 시점)에 즉시 승격하도록 코드로 고쳤다(`runWritingStageInner`) -
-**새 job부터는 안전, `163f9629`는 사용자 요청으로 아직 안 고치고 보류 중**(건드리지 말 것 -
-`job:revise` 재생성 여부는 사용자 판단 대기, 텔레그램 "🚀 블로그 발행" 버튼 누르면 안 됨).
+| | spec (기본) | auto |
+|---|---|---|
+| 로드 | researcher.md + writer.md + output-format + seo-guide + style (2,549줄) | `researcher-auto.md` / `writer-auto.md` 하나씩 |
+| 기획 브리프 | Q1~Q5 생성 + 리서치 후 재작성 | **안 만든다** |
+| 조사 항목 | §4 7개 카테고리 + §4-1 유형 프로파일 + §6-2 필수 목록 | **AI가 정한다** |
+| 소제목 뼈대 | 브리프 Q 순서 | **AI가 정한다** |
+| 분량·이미지 개수 | 2,000~3,000자 / 최소 5장 | **상한·하한 없다** |
+| 남는 것 | - | 형식 계약(볼드 소제목·마커 쌍·frontmatter·출처 표) + 사실 규칙 + incident + voice.md |
 
-**현재 대기열**: 2026-09-22 기준 텔레그램으로 접수된 7건이 처리 대기 중(`npm run
-ig-capture:status`로 확인). 캡처 세션(브라우저)은 사람 요청이 있어야 시작한다 - 자동화 안 함.
+`job.metadata.writingMode`가 `WRITING_MODE` 환경변수를 이긴다 - 한 런에서 키워드별로 갈려야
+A/B가 되기 때문이다. 모르는 값은 조용히 spec으로 떨어진다.
 
-**2026-09-22 후속 세션(클라우드) — 리뷰·수정 4건 + 진입점 신설 + main 당겨옴**
+**모드와 무관하게 적용한 사용자 결정 2건** (spec 규격에도 반영했다):
+- **엔터·연예·OTT는 이미지가 콘텐츠다.** 인물·작품 비주얼이 1순위, **개수 상한 없음**. 제품 컷·
+  분위기 컷이 인물 자리를 대체하지 않는다(§8-1-2, §8-4-1).
+- **정보성 원고(event·product·policy·living)는 3,000자 상한을 적용하지 않는다.** 하한만 남는다.
+  "3,000자 넘었으니 쪼갠다"도 이 유형에는 적용하지 않는다(output-format 충돌 5).
 
-`main`을 브랜치로 병합했다(충돌은 이 문서와 `prepareManuscript.ts` 둘, 사용자 승인 후 해결).
-이제 구글 이미지 검색 복구·발행 상한 20·내부 링크 등 최신 코드 위에서 돈다.
+**남은 것**: A/B 실행. `npx tsx scripts/cloneJobForWritingModeAB.ts <jobId> --confirm`으로 같은
+키워드의 auto job을 만들고(rank +1000으로 유니크 인덱스를 비켜간다) `npm run job:write`로 돌린다.
+후보 3건 - 고윤정 티저(실물을 열어야 하는 엔터), 영등포 박람회(정보 밀도), 오늘 큐의 신규 1건.
+**아직 한 건도 돌리지 않았다.** 사람이 뷰어에서 나란히 보고 판정하면 한쪽을 지운다.
 
-고친 것:
-1. **후보가 전부 마커 범위 밖이면 승격하지 않는다.** 빈 배열도 truthy라 `images: []` +
-   `imagesReadyAt`이 기록됐고, 그러면 웹 이미지 수집이 전 자리를 엉뚱한 사진으로 채운다 -
-   승격이 막으려던 바로 그 증상이다. 캐러셀 뒷번호만 캡처했는데 마커가 더 적을 때 걸린다.
-2. **`job:revise` 경로에도 재승격을 붙였다.** revise는 `images`/`imagesReadyAt`/
-   `webImagesReadyAt`을 통째로 비우는데 자동 승격은 `job:write` 안에만 있어서, 수정할 때마다
-   같은 사고가 되풀이될 상태였다. `prepareManuscript`가 자리를 비운 채 시작하면
-   `metadata.instagramImages`에서 **배리에이션 마커 수(`slotPrompts`)** 에 맞춰 다시 자른다.
-   → **`163f9629` 재생성은 이 수정 뒤에 해야 한다.** 그 전에 돌리면 이미지가 또 어긋난다.
-3. `ig:promote-images`의 "N개 자리만 후보가 있습니다" 경고가 영원히 안 찍혔다(조건 우변이
-   정의상 좌변과 같았다). 비교 대상을 마커 수로 바꾸고, A/B 후보는 한 자리로 센다.
-4. 큐 파일 경로가 `process.cwd()`에 묶여 있었다 → `PIPELINE_ROOT` 기준. 전체 재작성이라
-   임시 파일 + rename으로 바꿨다(읽고-고쳐-쓰기 사이의 유실은 남아 있다 - 주석 참고).
+## 2026-09-23 세션 — 인스타 포스팅 변환기 **재설계 + main 병합**
 
-①③의 규칙이 두 파일에 복붙돼 있던 것이 드리프트의 원인이라 **`selectPromotableImages.ts`**
-하나로 합쳤다. 자동 승격·수동 CLI·재승격 세 곳이 같은 함수를 쓴다.
+> 설계·정책·코드 위치는 `docs/ai-handoff/INSTAGRAM_CAPTURE_AUTOMATION.md` 하나로 완결돼 있다.
+> 이 브랜치(`feat/instagram-keyword-source`)는 **오늘 main에 병합됐다** - 더는 별도 워크트리
+> 전용이 아니다.
 
-**`npm run ig:create-job -- <json> [--dry-run]` 신설.** `createInstagramJob()`을 부르는 코드가
-아무 데도 없어서(호출부 0건) 캡처 세션이 매번 일회용 스크립트를 짜야 했다. 이제 JSON 하나가
-계약이고, 규격 위반·큐 미등록·이미 처리된 항목·없거나 0바이트인 파일을 **쓰기 전에** 막는다.
-`--dry-run`은 Supabase 자격증명 없이도 돈다. JSON 형식은
-`INSTAGRAM_POSTING_CONVERTER.md`의 "캡처 결과 JSON" 참고.
+**무엇이 바뀌었나**: 게시물 **이미지를 쓰지 않기로 했다**(사용자 결정). 사용자는 텔레그램으로
+링크만 보내고, 로그인 브라우저가 캡션(og:description)과 슬라이드에 박힌 번인 텍스트를 읽은 뒤
+스크린샷은 버린다. 원고 이미지는 주제가 정해진 뒤 기존 파이프라인이 채운다.
 
-`node_modules` 심링크(`/Users/wooahpapa/.../prod/node_modules`)가 실수로 커밋돼 있어 걷어냈다.
-`.gitignore` 1번 줄이 `node_modules/`(뒤 슬래시)라 디렉터리만 막고 심링크는 빠져나갔다.
+이 결정으로 통째로 사라진 것: 오버레이 판정, 대체 이미지 검색 2-a(텍스트)·2-b(구글 렌즈),
+`metadata.instagramImages` 후보와 승격 로직, 그리고 **저작권 판단 전체**.
 
-신규 테스트: `test:ig-promote`(8) · `test:ig-capture-file`(11).
+여기까지 온 근거는 실측이다. 2-a는 "같은 주제 사진"이라 엉뚱한 출처가 붙었고(job `ec21f085`가
+다른 인스타 게시물을 출처로 물어옴), 2-b는 뉴스카드 슬라이드에 **정확히 일치하는 이미지가
+세상에 없었다** - 게시자가 만든 합성물이라 그 게시물에만 있다(구글 렌즈가 직접 그렇게 답한다).
 
-**전 구간 자동화(2026-09-22, 사용자 승인)**: 텔레그램 전송 이후 원고 초안 도착까지 사람 개입이
-없어야 한다는 요구로 끊긴 고리 둘을 이었다. 설계·위험은
-`docs/ai-handoff/INSTAGRAM_CAPTURE_AUTOMATION.md` 하나에 정리돼 있다.
+**새로 넣은 것**
+- `cleanCaption` - og:description의 `1,032 likes, 7 comments - 계정 - 날짜: "..."` 군더더기 제거
+- `instagramImagePolicy` - 연예·OTT는 웹 검색만(AI가 그린 인물을 연예 기사에 붙이면 독자를
+  속인다), 그 외는 웹 검색 + AI 폴백. **전역 스위치를 켜지 않는다** - 인스타 job에만 config를
+  덮어씌운다(일반 키워드 job까지 유료 생성이 돌면 안 된다)
+- `needs_topic` - 읽을 글자가 0이면 실패가 아니라 텔레그램으로 주제를 묻고 답장을 받는다
+- `checkInstagramLogin` - 3회 실패로 포기할 때 로그인 상태를 **실제로 확인**하고 풀렸을 때만
+  `ig:login`을 안내한다
 
-- **고리 ②**(캡처 → 조사): `ig:create-job`이 `triggerResearchForJob`을 부른다. 조사 이후는 원래
-  자동이었다(2026-09-15에 조사 체크포인트 폐지 - `runResearchStageCli.ts`).
-- **고리 ①**(큐 → 캡처): `job:ig-capture-poll`이 적재 후 대기 항목을 캡처까지 이어서 처리한다.
-  분업은 `collectWebImages`와 같다 - **Node가 브라우저(Playwright), 헤드리스 Claude가 판단.**
-  모델에 브라우저를 통째로 맡기는 안은 기각했다(DOM이 바뀔 때마다 프롬프트를 고쳐야 하고 실패
-  원인이 로그에 안 남는다).
+**같이 고친 것 (인스타 밖)**
+- **`.env`에 `GITHUB_TOKEN` + `GITHUB_REPOSITORY` 추가**(사용자 승인). 없으면 조사·집필이 맥에서
+  detached 프로세스로 돌고 **맥이 잠들면 통째로 죽는다** - 실측으로 job 4건이 정지했다. 이제
+  GitHub Actions에서 돈다. 토큰이 만료되면 **경고 없이** 예전 동작으로 돌아간다는 점에 주의.
+- **보관함 내보내기가 통째로 멈추던 버그**. 옛 인스타 경로가 `fileName`에 Storage 경로를 넣어
+  `<주제>/<jobId>/파일.jpg`로 열려다 ENOENT가 났고, 루프에 격리가 없어 **그 뒤 주제의 이미지가
+  전부 로컬에 안 내려왔다**. `archiveFileName`(basename)과 주제별 try/catch로 고쳤다.
 
-**비용은 늘지 않는다**: 새 유료 API가 없다. 브라우저·구글 렌즈는 무료이고, 판정은 이미 쓰고 있는
-`claude -p`(구독 사용량)다. Serper도 기존 경로 그대로다.
+**launchd**: `instagram-capture-poll`은 여전히 `ig-dev`를 가리킨다. 병합됐으므로 `prod`로 옮겨도
+되지만 아직 안 옮겼다 - 옮길 때 `scripts/poll-instagram-capture.sh`의 `REPO`도 같이 바꾼다.
 
-**기본은 꺼져 있다**: `IG_CAPTURE_AUTO=true` + `IG_BROWSER_PROFILE`(맥의 인스타 로그인 프로필)이
-둘 다 있어야 돈다. 없으면 예전처럼 적재만 하고 끝나고 수동 경로도 그대로다.
+**소유 경계**: 이 저장소는 여러 세션이 나눠 쓴다. `naver-poll`·`manuscript-export`는 블로그
+자동화 소유이고, 인스타 세션은 `instagram-capture-poll`만 건드린다
+(`INSTAGRAM_CAPTURE_AUTOMATION.md` "소유 범위" 표).
 
-실패는 그 항목만 `pending`으로 되돌리고 `attempts`를 올린다. 3회를 넘으면 `skipped`로 내리고
-텔레그램으로 알린다. 성공·실패 모두 알림을 보낸다 - 무인 job이라 stdout을 아무도 안 본다.
-
-신규 테스트: `test:ig-capture-session`(8) · `test:ig-capture-queue`(8). 브라우저·모델·DB를 전부
-주입해 **정책과 실패 처리**를 고정했다. **인스타 실제 접속은 맥에서만 되므로 이 환경에서
-검증하지 못했다** - 캐러셀 셀렉터와 로그인 프로필은 맥에서 첫 실행으로 확인해야 한다.
-
-**남은 것**: (1) 맥에서 인스타 로그인 프로필 생성 + 첫 건 실측(캡처 셀렉터 확인), (2) `163f9629`
-재생성(`job:revise -- <id> <피드백>`), (3) 대기열 7건, (4) 안정되면 `main` 병합 + launchd `prod` 이전.
-
-**발행**: 준비 단계의 자동 초안 저장을 없애고, 텔레그램 "🚀 블로그 발행" 버튼이 **그 순간 공개
-업로드**를 한다(96aeb3a). 남아 있던 초안은 새 글을 만들지 않고 `posts.publish`로 공개 전환하며,
-공개 직전에 `posts.patch`로 본문을 공개용(미채움 마커 제거)으로 덮어쓴다(a7e2ae9). 오늘 2건 발행
-성공 - 공무원 수당, 윤가이. 퍼머링크는 예상대로 나쁘다(`/2026/09/57.html`, `blog-post_167.html`) -
-a안(Blogger 기본값 수용) 유지.
-
-**실측 교훈**: 이미 보낸 텔레그램 메시지의 버튼은 누를 때마다 **그 시점 main**으로 처리된다.
-11:16 클릭이 7분 뒤 커밋 직전 코드로 돌아 아무 일도 안 일어났다. 고친 뒤에는 알림을 다시 보내야
-한다 - `npm run manuscripts:resend-notification -- --job=<uuid>`(6d0c795).
-
-**승인 이후 수정**(사용자 요청, 2026-09-19): 최종본을 보고 고칠 수 있어야 한다. 세 군데를 고쳤다.
-1. 답장 매칭이 `status="review"`만 훑어서, **승인된 job(approved)의 수정 답장이 조용히 무시**됐다
-   (정풍운동 사례). `ArticleJobRepository.findByEditRequestMessageId`로 내리고 review+approved를 본다.
-2. `job:revise`는 이미 준비된 job이면 초안 검수로 되돌리지 않고, 게이트
-   (`channelManuscriptsReadyAt`/`images`/`imagesReadyAt`/`webImagesReadyAt`/`naverReadyAt`)를 열고
-   `job-publish-prepare.yml`을 직접 발화해 **최종본을 다시 만들어 재전송**한다.
-3. `prepareManuscript`는 기준 원고가 배리에이션보다 새것이면 배리에이션을 다시 만든다(안 그러면
-   수정이 최종본에 영영 반영되지 않는다). 그 결과 배리에이션 row가 새로 생기므로, 발행 멱등성
-   검사를 **job 전체의 publication**으로 넓혔다 - article 한 건만 보면 같은 글이 블로그에 두 번
-   올라간다. 이미 공개된 글은 `posts.getByPath`로 postId를 되찾아 본문만 덮어쓴다(주소 유지).
-
-**본문 정리**: 모델이 붙이는 군말 두 가지를 코드로 막았다(`sanitizeArticleBody.ts`) - 본문 끝
-작업 노트("분량은 공백·이미지마커 제외 약 2,200자로…", 09-19 발행분에 실제로 나갔다)와 원고 전체에
-거는 기준 시점 고지("여기 정리한 내용은 2026년 9월 기준입니다"). 낱말 목록은 계속 새서 **구조
-규칙**으로 잡는다(참고 자료 뒤 `---` 아래는 본문이 아니다 / 원고 자신을 가리키는 주어 + 연도가 둘 다
-있을 때만 고지로 본다). 값에 붙은 기준("2026년 8월 기준 지원금은 30만 원입니다")은 규칙이 요구하는
-서술이라 건드리지 않는다. 본문을 만드는 네 경로가 모두 이걸 거친다. **과거 원고 9건은 그대로 둔다**
-(2026-09-20 사용자 결정).
-
-**보관함 이동**: 발행용 원고·이미지 보관함이 `~/Documents/blog-manuscripts/whyissuenow`에서
-`~/blog-automation/blog-manuscripts/whyissuenow`로 옮겨졌다(사용자가 직접 이동, 코드가 따라감).
-`MANUSCRIPT_EXPORT_ROOT` 기본값은 홈 절대경로 대신 **PIPELINE_ROOT 기준 `../blog-manuscripts/
-whyissuenow`** - 워크트리(prod·repo·kw)가 부모를 공유해서 어느 창에서 실행해도 같은 곳을 본다.
-
-**남은 판단**: 이미지 한 장만 바꾸고 싶어도 지금은 기준 원고 재작성(LLM) + 배리에이션 재생성(LLM) +
-이미지 전량 재생성이 돈다. 이미지 슬롯만 다시 만드는 경로가 필요한지는 사용자 판단.
 
 ## 2026-09-21 세션(후속6) — 짝 밀림 수정 후 남은 두 가지 실패 유형
 

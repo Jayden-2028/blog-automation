@@ -2,8 +2,9 @@
 //
 // 사람이 텔레그램에서 급히 치는 글이라 형식을 강제할 수 없다. 느슨하게 읽되 **잘못 읽지는
 // 않아야** 한다 - 엉뚱한 자리를 다시 만들면 멀쩡한 이미지를 잃는다.
-import { describeImageEditRequests, inferAcquisition, parseImageEditReply } from "./imageEditRequest.js";
-import { rewriteAcquisitions } from "./applyImageEditRequest.js";
+import { describeImageEditRequests, inferAcquisition, parseImageEditReply, splitSearchInstruction } from "./imageEditRequest.js";
+import { applyImageEditRequest, rewriteAcquisitions } from "./applyImageEditRequest.js";
+import { isLikelyImageUrl } from "./imageEditRequest.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -130,6 +131,77 @@ const eq = (text: string, expected: Array<[number, string]>) => {
   const untouched = rewriteAcquisitions(body, [{ index: 2, requirement: "더 큰 사진으로" }]);
   assert(untouched.body === body && untouched.changes.length === 0, "방식 지시가 없으면 본문 무변경");
   console.log("✅ 마커 수정 - 지시한 자리만 방식 전환, 나머지는 보존");
+}
+
+// --- 10. 검색어와 원하는 그림을 갈라낸다(2026-09-22 실측 사고) ----------------------------------
+// 문장을 통째로 검색창에 넣어 1·5번 자리가 비었다. 사용자가 실제로 보낸 문장 그대로 시험한다.
+{
+  const cases: Array<[string, string]> = [
+    ["SNL 주현영과 김원훈 으로 검색해서 나오는 투샷 이미지 넣어주세요.", "SNL 주현영과 김원훈"],
+    ["주현영 김원훈 우연히 보자 검색해서 나오는 카카오톡 캡쳐 이미지 넣어주세요.", "주현영 김원훈 우연히 보자"],
+    ["주현영 김원훈 연락공개 로 검색해서 나오는 주현영 유튜브 영상 캡쳐 이미지 넣어주세요.", "주현영 김원훈 연락공개"],
+  ];
+  for (const [text, expected] of cases) {
+    const got = splitSearchInstruction(text);
+    assert(got.query === expected, `검색어를 뽑아야 한다\n     "${text}"\n     받은 값: "${got.query}"\n     기대값: "${expected}"`);
+    assert(got.want.length > 0 && got.want !== text, `원하는 그림도 남아야 한다 (${got.want})`);
+  }
+
+  // "검색"이라는 말이 없으면 못 가른다 - 호출부가 기존 검색어를 쓴다.
+  assert(splitSearchInstruction("더 큰 사진으로").query === "", "검색 지시가 없으면 검색어를 비운다");
+  assert(splitSearchInstruction("검색해서 나오는 투샷").query === "", "앞이 비면 검색어를 못 뽑은 것이다");
+  console.log("✅ 검색어 추출 - 문장이 아니라 검색어만 검색창에 넣는다");
+}
+
+// --- 11. URL 안의 숫자를 자리 번호로 읽지 않는다(2026-09-22 실측 사고) ------------------------
+// "https://share.google/JWMMbSFb4Q674jD0H"의 4·67·0을 자리 번호로 읽어서, 요청하지도 않은
+// 4번 자리를 비우고 5번의 요구사항은 URL 중간에서 잘렸다.
+{
+  const got = parseImageEditReply("5번 이미지 https://share.google/JWMMbSFb4Q674jD0H 이걸로 교체", 6);
+  assert(got.length === 1, `요청한 한 자리만 나와야 한다 (${JSON.stringify(got.map((g) => g.index))})`);
+  assert(got[0].index === 5, "5번이어야 한다");
+  assert(got[0].url === "https://share.google/JWMMbSFb4Q674jD0H", `링크가 온전해야 한다 (${got[0].url})`);
+  assert(got[0].requirement.includes("이미지"), `"5번 이미지"의 '이'를 조사로 먹으면 안 된다 (${got[0].requirement})`);
+
+  const second = parseImageEditReply("1번 검색어 정채연으로 나오는 프로필 사진 넣어줘 https://share.google/iyNVcgHSStLG6Ig5s", 6);
+  assert(second.length === 1 && second[0].index === 1, `1번만 나와야 한다 (${JSON.stringify(second.map((g) => g.index))})`);
+  assert(second[0].requirement.includes("정채연"), "요구사항이 온전해야 한다");
+  // 두 자리 + 링크 두 개를 한 번에 보낸 경우 - 링크가 제 자리에 붙어야 한다.
+  const two = parseImageEditReply(
+    "1번 이미지 교체 https://a.example.com/one.png\n\n5번 이미지 교체 https://b.example.com/two.png",
+    6
+  );
+  assert(two.length === 2, `두 자리만 나와야 한다 (${JSON.stringify(two.map((t) => t.index))})`);
+  assert(two[0].url?.includes("one.png"), `1번에 첫 링크가 붙어야 한다 (${two[0].url})`);
+  assert(two[1].url?.includes("two.png"), `5번에 둘째 링크가 붙어야 한다 (${two[1].url})`);
+  console.log("✅ URL 안 숫자를 자리 번호로 읽지 않는다 / 링크가 제 자리에 붙는다");
+}
+
+// --- 12. 쓸 수 없는 링크를 걸러 알려준다 --------------------------------------------------------
+// 구글 이미지 검색의 "공유" 링크는 이미지가 아니라 검색 페이지(text/html)로 연결된다.
+{
+  assert(!isLikelyImageUrl("https://share.google/JWMMbSFb4Q674jD0H"), "구글 공유 링크는 이미지가 아니다");
+  assert(!isLikelyImageUrl("https://www.google.com/search?q=x&udm=2"), "검색 결과 페이지도 아니다");
+  // 구글 썸네일은 이미지처럼 보이지만 브라우저 밖에서는 404 + 43바이트 GIF가 온다(2026-09-22 실측).
+  assert(!isLikelyImageUrl("https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRgyv&s=10"), "구글 썸네일은 못 받는다");
+  assert(isLikelyImageUrl("https://images.khan.co.kr/article/2023/06/28/news-p.v1.x_P1.png"), "언론사 원본은 통과");
+  assert(isLikelyImageUrl("https://img-cdn.theqoo.net/QvKRjF.webp"), "이미지 주소는 통과");
+  assert(isLikelyImageUrl("https://imgnews.naver.net/image/108/2025/06/27/x_002.jpg"), "뉴스 이미지도 통과");
+
+  const applied = applyImageEditRequest(
+    [{ index: 5, description: "d", prompt: null, url: "https://old/5.png", provider: "web", fileName: "05.png" } as never],
+    [{ index: 5, requirement: "이걸로 교체", url: "https://share.google/JWMMbSFb4Q674jD0H" }]
+  );
+  assert(applied.unusableUrls.includes(5), "못 쓰는 링크를 알려야 한다");
+  assert(!applied.patch.imageDirectUrls, "못 쓰는 링크는 저장하지 않는다");
+
+  const usable = applyImageEditRequest(
+    [{ index: 2, description: "d", prompt: null, url: null, provider: null, fileName: null } as never],
+    [{ index: 2, requirement: "이걸로", url: "https://img-cdn.theqoo.net/QvKRjF.webp" }]
+  );
+  assert(usable.unusableUrls.length === 0, "이미지 주소는 문제없다");
+  assert((usable.patch.imageDirectUrls as Record<string, string>)["2"].includes("theqoo"), "이미지 주소는 저장한다");
+  console.log("✅ 쓸 수 없는 링크 구분 - 검색 페이지는 거르고 이미지 주소는 저장");
 }
 
 console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");

@@ -1134,6 +1134,18 @@ export class TelegramBot {
     if (applied.cleared.length > 0) {
       lines.push("", `기존 이미지를 비운 자리: ${applied.cleared.join(", ")}번`);
     }
+    if (applied.unusableUrls.length > 0) {
+      // 구글 이미지 검색 결과의 "공유" 링크는 이미지가 아니라 검색 페이지로 연결된다.
+      // 그대로 내려받으면 HTML이 와서 자리가 빈다 - 미리 알려주는 편이 낫다.
+      lines.push(
+        "",
+        `⚠️ ${applied.unusableUrls.join(", ")}번에 주신 링크는 우리 쪽에서 받을 수 없는 주소입니다.`,
+        "구글 검색 화면의 <b>공유 링크</b>나 <b>썸네일 주소</b>는 브라우저 밖에서 열리지 않습니다.",
+        "구글 이미지에서 사진을 눌러 <b>원본 사이트로 이동</b>한 뒤, 그 사진에 마우스 오른쪽 →",
+        "<b>이미지 주소 복사</b>로 받은 주소를 주시면 그대로 씁니다(예: images.khan.co.kr/... .png).",
+        "지금은 요구사항만 반영해 다시 찾습니다."
+      );
+    }
     lines.push("", "완료되면 원고 준비 알림을 다시 보내드립니다.");
 
     return {

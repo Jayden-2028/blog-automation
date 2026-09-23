@@ -8,11 +8,13 @@
 // 그쪽은 사람이 터미널에서 돌리는 일괄 도구고, 이쪽은 텔레그램 버튼 경로다.
 
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
-import { ACQUISITION_LABEL, inferAcquisition } from "./imageEditRequest.js";
+import { ACQUISITION_LABEL, inferAcquisition, isLikelyImageUrl } from "./imageEditRequest.js";
 import type { ImageEditRequest, RequestedAcquisition } from "./imageEditRequest.js";
 
 /** job.metadata 안의 키. 자리별 요구사항을 다음 수집이 읽는다. */
 export const IMAGE_REQUIREMENTS_KEY = "imageRequirements";
+/** 사용자가 직접 찍어준 이미지 주소. 있으면 검색하지 않는다. */
+export const IMAGE_DIRECT_URLS_KEY = "imageDirectUrls";
 
 export type ApplyImageEditResult = {
   /** metadata에 병합할 패치. 그대로 mergeMetadata에 넘긴다. */
@@ -21,6 +23,8 @@ export type ApplyImageEditResult = {
   cleared: number[];
   /** 이미 비어 있어 따로 손대지 않은 자리. 어차피 재수집 대상이다. */
   alreadyEmpty: number[];
+  /** 링크를 줬지만 이미지 주소가 아니라 쓸 수 없는 자리. 사용자에게 알려야 한다. */
+  unusableUrls: number[];
 };
 
 /**
@@ -55,10 +59,21 @@ export function applyImageEditRequest(
     if (request.requirement) requirements[String(request.index)] = request.requirement;
   }
 
+  // 사용자가 이미지 주소를 찍어줬으면 검색하지 않고 그것을 쓴다(2026-09-22).
+  // 단, 구글 공유 링크처럼 이미지가 아닌 주소는 제외한다 - 내려받으면 HTML이 온다.
+  const directUrls: Record<string, string> = {};
+  const unusableUrls: number[] = [];
+  for (const request of requests) {
+    if (!request.url) continue;
+    if (isLikelyImageUrl(request.url)) directUrls[String(request.index)] = request.url;
+    else unusableUrls.push(request.index);
+  }
+
   return {
     patch: {
       images: nextImages,
       [IMAGE_REQUIREMENTS_KEY]: Object.keys(requirements).length > 0 ? requirements : null,
+      [IMAGE_DIRECT_URLS_KEY]: Object.keys(directUrls).length > 0 ? directUrls : null,
       // 게이트 열기 - 다음 job-publish-prepare 실행이 다시 수집한다.
       channelManuscriptsReadyAt: null,
       webImagesReadyAt: null,
@@ -66,7 +81,19 @@ export function applyImageEditRequest(
     },
     cleared: cleared.sort((a, b) => a - b),
     alreadyEmpty: alreadyEmpty.sort((a, b) => a - b),
+    unusableUrls: unusableUrls.sort((a, b) => a - b),
   };
+}
+
+/** 사용자가 찍어준 이미지 주소. 없으면 빈 객체. */
+export function readImageDirectUrls(metadata: Record<string, unknown> | null): Record<string, string> {
+  const raw = metadata?.[IMAGE_DIRECT_URLS_KEY];
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "string" && value.trim()) out[key] = value.trim();
+  }
+  return out;
 }
 
 /** 다음 수집이 읽을 자리별 요구사항. 없으면 빈 객체. */
