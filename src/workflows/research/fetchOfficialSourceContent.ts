@@ -14,6 +14,7 @@
 import { parse } from "node-html-parser";
 import type { HTMLElement } from "node-html-parser";
 import type { SourceInsert } from "../../types/database.js";
+import { toFetchableUrl } from "../../config/naverContentUrl.js";
 
 /** 본문 fetch 타임아웃. 정부 사이트는 응답이 느릴 수 있으나, 자료조사 전체를 오래 붙들면 안 된다. */
 export const OFFICIAL_FETCH_TIMEOUT_MS = 10_000;
@@ -78,7 +79,9 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<string>
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    // 네이버 블로그는 원본 주소가 프레임 껍데기라 본문이 없다 - 모바일 주소로 바꿔 받는다
+    // (naverContentUrl.ts에 실측 수치). 그 외 주소는 그대로다.
+    const response = await fetch(toFetchableUrl(url), {
       signal: controller.signal,
       headers: { "User-Agent": "Mozilla/5.0 (compatible; blog-automation-research/1.0)" },
     });

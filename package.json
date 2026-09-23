@@ -187,7 +187,8 @@
     "ig:create-job": "tsx src/workflows/instagram-capture/createInstagramJobCli.ts",
     "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",
     "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts",
-    "test:table-visuals": "tsx src/workflows/images/testTableVisuals.ts"
+    "test:table-visuals": "tsx src/workflows/images/testTableVisuals.ts",
+    "test:naver-content-url": "tsx src/config/testNaverContentUrl.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
