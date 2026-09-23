@@ -74,8 +74,9 @@ A/B가 되기 때문이다. 모르는 값은 조용히 spec으로 떨어진다.
   `<주제>/<jobId>/파일.jpg`로 열려다 ENOENT가 났고, 루프에 격리가 없어 **그 뒤 주제의 이미지가
   전부 로컬에 안 내려왔다**. `archiveFileName`(basename)과 주제별 try/catch로 고쳤다.
 
-**launchd**: `instagram-capture-poll`은 여전히 `ig-dev`를 가리킨다. 병합됐으므로 `prod`로 옮겨도
-되지만 아직 안 옮겼다 - 옮길 때 `scripts/poll-instagram-capture.sh`의 `REPO`도 같이 바꾼다.
+**launchd**: `instagram-capture-poll`은 **`prod`로 옮겼다**(2026-09-24 완료). 스크립트가
+`BASH_SOURCE`로 자기 워크트리를 찾으므로 경로가 박혀 있지 않다. 실행 확인함(60초 주기 로그).
+`ig-dev` 워크트리는 병합 후 제거했다.
 
 **소유 경계**: 이 저장소는 여러 세션이 나눠 쓴다. `naver-poll`·`manuscript-export`는 블로그
 자동화 소유이고, 인스타 세션은 `instagram-capture-poll`만 건드린다

@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # 인스타 포스팅 변환기 봇 폴링(launchd가 60초마다 부른다).
 #
-# 아직 feat/instagram-keyword-source worktree(ig-dev)를 직접 가리킨다 - main 병합 전이라
-# prod에는 이 코드가 없다. main에 병합되면 REPO를 prod로 옮기고 이 파일도 prod/scripts로
-# 복사해야 한다.
 
 set -euo pipefail
 
@@ -12,6 +9,7 @@ set -euo pipefail
 # 예전에는 ig-dev 절대경로를 박아 뒀다. main 병합 뒤 plist만 prod로 바꾸면 **prod 스크립트가
 # ig-dev 코드를 돌리는** 상태가 되는데, 겉으로는 정상으로 보여 알아채기 어렵다. 경로를
 # 스스로 구하면 어느 워크트리에 놓든 그 워크트리의 코드를 돌린다.
+# (2026-09-24: 병합이 끝나 ig-dev 워크트리는 제거했다. plist는 prod를 가리킨다.)
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="$HOME/Library/Logs/blog-automation-instagram-capture-poll.log"
 
