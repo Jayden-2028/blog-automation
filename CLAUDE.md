@@ -37,6 +37,13 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 
 ## 원고 파이프라인 운영 규칙
 
+- **규격 모드가 둘이다**(2026-09-23 검증, `src/config/writingMode.ts`). 기본은 `spec`(아래 규격
+  그대로). `WRITING_MODE=auto` 또는 `job.metadata.writingMode="auto"`면 자율 모드로 돌아
+  `researcher-auto.md` / `writer-auto.md` **하나씩만** 읽고, 기획 브리프·수집 카테고리·소제목
+  뼈대·분량·이미지 개수를 **AI가 정한다**. 규격 2,549줄/체크박스 115개가 주제별 핵심을 덮는지
+  보려는 것이다(실측: 고윤정 티저는 영상을 안 열어봤고, 영등포 박람회는 못 찾은 것이 주제가 됐다).
+  metadata가 환경변수를 이긴다 - 한 런에서 키워드별로 갈라야 A/B가 된다. A/B용 job 복제는
+  `npx tsx scripts/cloneJobForWritingModeAB.ts <jobId> --confirm`. 검증이 끝나면 한쪽을 지운다.
 - 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/writer.md`가
   규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
   헤드리스 실행(`claude -p`)도 이 스펙과 `docs/seo-guide.md`를 로드해 따른다. 산출물은 파일이다

@@ -157,3 +157,68 @@ try {
   console.log("✅ 기획 브리프 주입 - 소제목 뼈대·커버리지 frontmatter 지시");
 }
 
+
+// --- 자율 모드(2026-09-23 검증) - writer-auto.md 하나 + voice, 형식 지시가 전부 빠진다 ----------
+{
+  const auto = buildWritingPrompt({
+    job: { keyword: "허남준 고윤정 티저", headline: null, category: "entertainment" },
+    researchFilePath: "/tmp/r.md",
+    draftFilePath: "/tmp/d.md",
+    isMedical: false,
+    today: "2026-09-23",
+    // 재실행 job의 metadata에 브리프가 남아 있어도 자율 모드에서는 새어 들어가면 안 된다.
+    brief: {
+      type: "celebrity" as const,
+      hook: "이미 아는 사이였다",
+      questions: ["누구인가", "왜 화제인가", "언제 공개되나", "어디서 보나", "무엇을 할까"],
+      action: "계정 팔로우",
+      autocomplete: ["너를 만난 계절"],
+      generatedAt: "2026-09-23T00:00:00.000Z",
+    },
+    mode: "auto",
+  });
+
+  for (const needle of [
+    "prompts/writing/writer-auto.md",
+    "prompts/writing/style/voice.md",
+    "/tmp/r.md",
+    "SAVED: /tmp/d.md",
+    "네가 정한다",
+    "60% 이상",
+  ]) {
+    if (!auto.includes(needle)) throw new Error(`❌ 자율 모드 프롬프트에 빠졌습니다: ${needle}`);
+  }
+  for (const forbidden of [
+    "prompts/writing/writer.md",
+    "docs/seo-guide.md",
+    "output-format.md",
+    "기획 브리프",
+    "최소 5개",
+    "style/entertainment.md",
+  ]) {
+    if (auto.includes(forbidden)) throw new Error(`❌ 자율 모드에 spec 지시가 남았습니다: ${forbidden}`);
+  }
+
+  // incident는 자율 대상이 아니다 - voice 대신 incident.md가 실리고 구속력이 명시돼야 한다.
+  const autoIncident = buildWritingPrompt({
+    job: { keyword: "사고", headline: null, category: "incident" },
+    researchFilePath: "/tmp/r.md",
+    draftFilePath: "/tmp/d.md",
+    isMedical: false,
+    today: "2026-09-23",
+    mode: "auto",
+  });
+  if (!autoIncident.includes("style/incident.md")) throw new Error("❌ 자율 모드 incident에 incident.md가 없습니다");
+  if (autoIncident.includes("style/voice.md")) throw new Error("❌ incident에 voice.md가 실렸습니다");
+
+  // 기본값은 여전히 spec이다.
+  const spec = buildWritingPrompt({
+    job: { keyword: "k", headline: null, category: null },
+    researchFilePath: "/tmp/r.md",
+    draftFilePath: "/tmp/d.md",
+    isMedical: false,
+    today: "2026-09-23",
+  });
+  if (!spec.includes("prompts/writing/writer.md")) throw new Error("❌ 기본값이 spec이 아닙니다");
+  console.log("✅ 자율 모드 - auto 규격만 로드, 브리프·형식 지시 제거, incident·기본값 유지");
+}

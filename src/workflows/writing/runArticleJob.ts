@@ -55,6 +55,8 @@ import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
 import { buildWritingPrompt } from "./buildWritingPrompt.js";
+import { resolveWritingMode } from "../../config/writingMode.js";
+import type { WritingMode } from "../../config/writingMode.js";
 import { parseDraftFile } from "./parseDraftFile.js";
 import { generateArticleImages } from "./generateArticleImages.js";
 import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
@@ -154,6 +156,8 @@ type DefaultResearcherInput = {
   today: string;
   /** 기획 브리프(2026-09-17). 실패했으면 null - researcher.md 기본 절차로 돈다. */
   brief: KeywordBrief | null;
+  /** 규격 모드(2026-09-23 검증). auto면 researcher-auto.md로 돈다. */
+  mode: WritingMode;
 };
 
 /**
@@ -214,7 +218,10 @@ async function runGeminiResearcherAndSave(
 async function runDefaultResearcher(
   input: DefaultResearcherInput
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (RESEARCH_PROVIDER === "gemini") {
+  // 자율 모드는 Gemini 경로를 쓰지 않는다(2026-09-23). buildGeminiResearchPrompt는 researcher.md
+  // 규격을 텍스트로 재현한 별도 프롬프트라 auto 규격이 반영되지 않고, 자율 모드의 핵심 요구인
+  // "실물을 직접 연다"(WebFetch)를 Gemini 경로에서는 보장할 수 없다.
+  if (RESEARCH_PROVIDER === "gemini" && input.mode !== "auto") {
     const geminiResult = await runGeminiResearcherAndSave(input);
     if (geminiResult.ok) return geminiResult;
     if (!RESEARCH_FALLBACK_TO_CLAUDE) return geminiResult;
@@ -227,6 +234,7 @@ async function runDefaultResearcher(
     outputPath: input.outputPath,
     today: input.today,
     brief: input.brief,
+    mode: input.mode,
   });
   return defaultRunResearcher(prompt);
 }
@@ -329,8 +337,14 @@ async function runResearchStageInner(
   //      사후 검증이 아니라 사전 기획인 이유: 리서치가 시도조차 안 한 항목(분장놀이 "직접 가서 볼 수
   //      있나")은 뒤에서 아무리 검증해도 채울 재료가 없다. 실패하면 null로 두고 예전 절차로 간다 -
   //      브리프가 원고 생성을 막아서는 안 된다. 재실행이면 metadata에 있는 것을 재사용한다(LLM 1콜 절약).
+  //      자율 모드(2026-09-23 검증)에서는 이 단계를 통째로 건너뛴다 - 브리프의 Q1~Q5가 원고
+  //      소제목의 뼈대가 되는데, 그 뼈대를 AI가 스스로 잡게 하는 것이 이 검증의 목적이다.
+  const mode = resolveWritingMode(job.metadata as Record<string, unknown> | null);
   let brief: KeywordBrief | null = readJobBrief(job.metadata as Record<string, unknown> | null);
-  if (!brief && options.buildBrief !== false) {
+  if (mode === "auto") {
+    brief = null;
+    console.log("ℹ️ [research] 자율 모드(WRITING_MODE=auto) - 기획 브리프를 만들지 않습니다.");
+  } else if (!brief && options.buildBrief !== false) {
     const buildBrief = options.buildBrief ?? defaultBuildBrief;
     const built = await buildBrief({ job, baselineSources: baseline, today });
     if (built.status === "success") {
@@ -349,10 +363,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, mode });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, mode });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
@@ -651,7 +665,12 @@ async function runWritingStageInner(
     // 브리프를 리서치에 비추어 다시 쓴다(2026-09-22). 1차는 **제목만 보고** 만든 추정이라
     // 사실과 각도가 틀릴 수 있고, 그대로 두면 틀린 전제가 소제목으로 굳는다.
     // 실패해도 집필을 막지 않는다 - 1차를 그대로 쓴다(지금까지의 동작).
-    const firstBrief = readJobBrief(job.metadata as Record<string, unknown> | null);
+    //
+    // 자율 모드(2026-09-23 검증)는 브리프 자체가 없으므로 재작성도 건너뛴다. 실측상 이 단계가
+    // 오류를 강화하기도 했다 - 고윤정 티저 건에서 "티저 반응"을 못 찾자 Q3을 "두 사람의 만남이
+    // 우연인가"로 바꿔, 광고 속 연출을 실제 사건으로 다루는 각도를 굳혔다.
+    const mode = resolveWritingMode(job.metadata as Record<string, unknown> | null);
+    const firstBrief = mode === "auto" ? null : readJobBrief(job.metadata as Record<string, unknown> | null);
     let brief = firstBrief;
     if (firstBrief) {
       const research = await readFile(researchPath, "utf8").catch(() => "");
@@ -678,7 +697,9 @@ async function runWritingStageInner(
       isMedical,
       today,
       brief,
+      mode,
     });
+    if (mode === "auto") console.log("ℹ️ [writing] 자율 모드(WRITING_MODE=auto) - writer-auto.md로 씁니다.");
     const runWriter = options.runWriter ?? ((p) => defaultRunWriter(p));
     const ran = await runWriter(prompt, draftPath);
     if (!ran.ok) {

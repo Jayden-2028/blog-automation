@@ -25,6 +25,8 @@
 import type { ArticleJobRow } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
+import { DEFAULT_WRITING_MODE } from "../../config/writingMode.js";
+import type { WritingMode } from "../../config/writingMode.js";
 
 /**
  * 카테고리 → 문체 참고 파일. writer.md §2 라우팅과 1:1 대응.
@@ -54,10 +56,61 @@ export type BuildWritingPromptInput = {
    * (writer.md §3-1). 없으면 예전처럼 쓴다.
    */
   brief?: KeywordBrief | null;
+  /**
+   * 규격 모드(2026-09-23 검증). `auto`면 writer.md·output-format.md·seo-guide 대신
+   * writer-auto.md 하나만 읽히고, 브리프 뼈대·분량·이미지 개수 지시를 뺀다.
+   */
+  mode?: WritingMode;
 };
+
+/**
+ * 자율 모드 프롬프트(2026-09-23 검증).
+ *
+ * spec 모드와 다른 점: 규격 문서 5개(2,549줄) 대신 writer-auto.md 하나만 읽는다. 브리프를
+ * 넘기지 않고, 소제목 뼈대·분량·Q&A 개수·이미지 개수·획득 방식 판정 순서를 지시하지 않는다.
+ * 남기는 것은 코드가 파싱하는 형식(볼드 소제목·이미지 마커 쌍·frontmatter)과 사실 규칙뿐이다.
+ *
+ * incident와 voice.md는 자율 대상이 아니다 - 전자는 잘못 쓰는 비용이 크고, 후자는 카테고리와
+ * 무관하게 한 목소리를 내야 해서다.
+ */
+function buildAutoWritingPrompt(input: BuildWritingPromptInput): string {
+  const { job, researchFilePath, draftFilePath, isMedical, today } = input;
+
+  return [
+    "너는 블로그 원고를 쓰는 편집자다. 아래를 Read로 읽고 그대로 따른다.",
+    "규격이나 자료조사 파일을 못 읽으면 draft 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
+    "",
+    "- prompts/writing/writer-auto.md   (자율 모드 규격 - 짧다. 전부 읽어라)",
+    job.category === "incident"
+      ? "- prompts/writing/style/incident.md   (이 job은 사건·사고다. 이 파일이 다른 모든 규칙을 이긴다)"
+      : "- prompts/writing/style/voice.md   (공통 어투·어미·인칭. 목소리는 자율 대상이 아니다)",
+    `- ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
+    "",
+    "이 job의 입력:",
+    `- keyword: ${job.keyword}`,
+    job.category ? `- category: ${job.category}` : null,
+    job.headline && job.headline !== job.keyword ? `- 원문 제목: ${job.headline}` : null,
+    `- 오늘 날짜: ${today}`,
+    isMedical ? "- 이 주제는 의학 정보를 다룬다. 확인된 출처 밖의 판단·권고를 쓰지 않는다." : null,
+    "",
+    "파이프라인이 정하는 것(규격과 충돌하면 이쪽이 우선):",
+    `- 출력은 정확히 이 절대 경로에 Write한다: ${draftFilePath}`,
+    "- 초안은 moai-marketer:content-blog 스킬로 쓰고, moai-writer:korean-humanize로 마무리한다.",
+    "- 사실은 위 자료조사 파일에서만 가져온다. WebSearch를 쓰지 않는다.",
+    "",
+    "**소제목 개수·순서·구성, 분량, 이미지 개수는 지시하지 않는다. 네가 정한다.**",
+    "규격 §1대로 자료조사 맨 위의 \"이 키워드를 검색한 사람은 ___을 알고 싶어 한다\"를 먼저 확인하고,",
+    "그 한 문장에 원고의 60% 이상을 써라. 그 문장이 자료와 어긋나면 네가 고치고 frontmatter에 남긴다.",
+    "",
+    `완료하면 파일을 저장한 뒤 마지막 줄에 \`SAVED: ${draftFilePath}\`만 답하라.`,
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
 
 export function buildWritingPrompt(input: BuildWritingPromptInput): string {
   const { job, researchFilePath, draftFilePath, isMedical, today } = input;
+  if ((input.mode ?? DEFAULT_WRITING_MODE) === "auto") return buildAutoWritingPrompt(input);
   const styleFile = pickStyleFile(job.category);
 
   return [

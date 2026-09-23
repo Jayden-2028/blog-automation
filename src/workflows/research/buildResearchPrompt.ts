@@ -7,6 +7,8 @@
 import type { ArticleJobRow, SourceInsert } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
+import { DEFAULT_WRITING_MODE } from "../../config/writingMode.js";
+import type { WritingMode } from "../../config/writingMode.js";
 
 export type BuildResearchPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
@@ -21,22 +23,79 @@ export type BuildResearchPromptInput = {
   /** 에이전트가 정확히 여기에 Write해야 한다(절대 경로). */
   outputPath: string;
   today: string;
+  /**
+   * 규격 모드(2026-09-23 검증). `auto`면 researcher.md 대신 researcher-auto.md를 읽히고
+   * 브리프·수집 카테고리·필수 항목 지시를 전부 빼서 조사 범위를 에이전트가 정하게 한다.
+   */
+  mode?: WritingMode;
 };
+
+function formatBaseline(baselineSources: SourceInsert[]): string[] {
+  if (baselineSources.length === 0) {
+    return ["(없음 - NAVER 검색이 비었거나 실패했다. 전부 직접 조사해야 한다.)"];
+  }
+  return baselineSources.map((s, i) => {
+    const auth = s.authority ?? "미분류";
+    const url = s.url ?? "(URL 없음)";
+    // 지식iN·카페·백과는 등급만으로는 구분이 안 된다(전부 community). 독자의 질문 원문이라 표시한다.
+    const label =
+      s.source_name === "naver_kin"
+        ? " (지식iN 질문)"
+        : s.source_name === "naver_cafe"
+          ? " (카페 글)"
+          : s.source_name === "naver_encyc"
+            ? " (백과사전)"
+            : "";
+    return `${i + 1}. [${auth}]${label} ${s.title ?? "(제목 없음)"} — ${url}`;
+  });
+}
+
+/**
+ * 자율 모드 프롬프트(2026-09-23 검증).
+ *
+ * spec 모드와 다른 점: 브리프를 넘기지 않고, 수집 카테고리·유형 프로파일·필수 항목 목록을 주지
+ * 않는다. 무엇을 찾을지는 에이전트가 정한다. 남기는 것은 코드가 파싱하는 세 블록(frontmatter /
+ * 캡처할 페이지 / 전체 출처 목록)과 사실 규칙뿐이다.
+ */
+function buildAutoResearchPrompt(input: BuildResearchPromptInput): string {
+  const { job, baselineSources, outputPath, today } = input;
+
+  return [
+    "너는 블로그 원고용 자료조사 에이전트다. 아래 규격을 Read로 읽고 그대로 따른다.",
+    "규격을 못 읽으면 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
+    "",
+    "- prompts/research/researcher-auto.md   (자율 모드 규격 - 짧다. 전부 읽어라)",
+    "",
+    "이 job의 입력:",
+    `- keyword: ${job.keyword}   (이 문자열을 다듬거나 바꾸지 않는다)`,
+    job.category ? `- 분류: ${job.category}` : null,
+    job.headline && job.headline !== job.keyword ? `- 원문 기사 제목: ${job.headline}` : null,
+    `- 오늘 날짜: ${today}`,
+    "",
+    "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹/블로그 검색 결과):",
+    ...formatBaseline(baselineSources),
+    "",
+    "파이프라인이 정하는 것(규격과 충돌하면 이쪽이 우선):",
+    `- 출력 파일은 정확히 이 절대 경로에 Write한다: ${outputPath}`,
+    "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
+    "- `## 전체 출처 목록` 표에는 baseline + 네가 새로 연 URL을 전부 등급과 함께 넣는다(감사기록).",
+    "- `## 캡처할 페이지`를 둔다(없으면 \"없음\"). 집필이 여기 적힌 URL만 캡처 자리에 쓴다.",
+    "",
+    "**조사 항목 목록은 주지 않는다. 무엇을 찾을지는 네가 정한다.**",
+    "규격 §1대로 \"이 키워드를 검색한 사람은 ___을 알고 싶어 한다\"를 먼저 완성하고,",
+    "그것을 확인하는 데 필요한 것을 네가 판단해서 찾아라. 실물이 있으면 실물을 직접 연다.",
+    "",
+    "완료하면 파일을 저장한 뒤 마지막 줄에 `SAVED: <경로>`만 답하라. 다른 설명은 필요 없다.",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
 
 export function buildResearchPrompt(input: BuildResearchPromptInput): string {
   const { job, baselineSources, outputPath, today } = input;
+  if ((input.mode ?? DEFAULT_WRITING_MODE) === "auto") return buildAutoResearchPrompt(input);
 
-  const baselineLines =
-    baselineSources.length === 0
-      ? ["(없음 - NAVER 검색이 비었거나 실패했다. 전부 직접 조사해야 한다.)"]
-      : baselineSources.map((s, i) => {
-          const auth = s.authority ?? "미분류";
-          const url = s.url ?? "(URL 없음)";
-          // 지식iN·카페·백과는 등급만으로는 구분이 안 된다(전부 community). §5·§6-1에서 다르게 쓰므로 표시한다.
-          const label =
-            s.source_name === "naver_kin" ? " (지식iN 질문)" : s.source_name === "naver_cafe" ? " (카페 글)" : s.source_name === "naver_encyc" ? " (백과사전)" : "";
-          return `${i + 1}. [${auth}]${label} ${s.title ?? "(제목 없음)"} — ${url}`;
-        });
+  const baselineLines = formatBaseline(baselineSources);
 
   return [
     "너는 블로그 원고용 자료조사 에이전트다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",

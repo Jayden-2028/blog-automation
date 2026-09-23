@@ -29,6 +29,7 @@
     "test:medical-topic": "tsx src/config/testMedicalTopicRules.ts",
     "test:article-prompt": "tsx src/workflows/writing/testBuildArticlePrompt.ts",
     "test:writing-prompt": "tsx src/workflows/writing/testBuildWritingPrompt.ts",
+    "test:writing-mode": "tsx src/config/testWritingMode.ts",
     "test:parse-draft": "tsx src/workflows/writing/testParseDraftFile.ts",
     "test:collect-sources": "tsx src/workflows/research/testCollectSourcesForJob.ts",
     "test:parse-research": "tsx src/workflows/research/testParseResearchFile.ts",
