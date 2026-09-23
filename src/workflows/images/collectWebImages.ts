@@ -184,6 +184,11 @@ export type ImageChoiceCandidate = {
   /** 수집기가 URL만 보고 쓴 추측. 참고용이고 판정 기준이 아니다. */
   alt: string;
   sourcePage: string;
+  /**
+   * 그 작품의 **공식 스틸**인가(2026-09-24 사용자 결정). 키노라이츠 미디어 섹션에서 온 것.
+   * 이 자리는 문단 일치를 느슨하게 본다 - 아래 판정 규칙 2-2 참고.
+   */
+  official?: boolean;
 };
 
 export type ChooseImageInput = {
@@ -612,7 +617,9 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "",
     "## 후보",
     ...input.candidates.map(
-      (c) => `${c.number}. ${c.filePath}\n   수집기 설명(추측 - 틀릴 수 있다): ${c.alt}\n   출처: ${c.sourcePage}`
+      (c) =>
+        `${c.number}. ${c.filePath}${c.official ? "  **[공식 스틸]**" : ""}\n` +
+        `   수집기 설명(추측 - 틀릴 수 있다): ${c.alt}\n   출처: ${c.sourcePage}`
     ),
     "",
     "## 고르는 기준",
@@ -627,6 +634,13 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   인물이 나온 **다른 행사** 사진으로 채우지 말고 `picked: null`로 비운다. 실측 반려: 마커는",
     "   포틀랜드인데 아시안게임 시상식 사진을 넣고 캡션까지 사진에 맞춰 바꿔, 본문은 포틀랜드를",
     "   말하는데 그림은 시상식이 됐다. **빈 자리가 어긋난 사진보다 낫다.**",
+    "2-0. **작품 공식 스틸은 문단이 조금 안 맞아도 받는다**(2026-09-24 사용자 결정).",
+    "   후보에 `[공식 스틸]`이라고 표시된 것은 **그 작품이 배포한 스틸**이다. 영화·드라마·OTT·",
+    "   시리즈·방송 원고에서는 이런 스틸을 **문단과 정확히 일치하지 않아도 채택한다.**",
+    "   예: '감독이 유작을 남긴 사연' 문단이나 '예고편에 담긴 설렘' 문단에 작품 스틸이 붙어도 된다.",
+    "   독자가 이 글에서 보고 싶은 것은 그 작품의 비주얼이고, 공식 스틸은 어느 문단에 붙어도 그",
+    "   작품을 보여준다. 아래 2-1(다른 것으로 때우기 금지)은 **공식 스틸에 적용하지 않는다.**",
+    "   단, **다른 작품의 스틸이면 여전히 제외한다** - 느슨해지는 것은 '어느 문단이냐'뿐이다.",
     "2-1-예외. **제품은 착용샷이 없으면 제품 컷으로 받는다**(2026-09-21 사용자 결정). 마커가",
     "   \"A가 B 브랜드 옷을 입은 사진\"을 요구하는데 그런 착용샷이 없고 **B 제품 자체를 보여주는",
     "   사진**이 있으면 그것을 고른다. 이건 위 2-1이 막는 '다른 것으로 때우기'가 아니다 - 마커가",
@@ -664,6 +678,9 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "- 출처가 분명하면 끝에 출처를 붙인다(\"사진=ENA\", \"출처: 뉴시스\").",
     "- **캡션을 정직하게 썼더니 위 문단과 어긋난다면, 그 사진은 이 자리에 맞지 않는 것이다**",
     "  - `picked: null`로 비운다. 캡션을 맞추려고 문단에 없는 말을 지어내지 않는다.",
+    "  - **단, `[공식 스틸]`은 예외다**(위 2-0). 비우지 말고 사진에 보이는 것을 그대로 캡션에 쓴다",
+    "    (예: \"'연애박사' 공식 스틸 - 벤치에 나란히 앉은 두 사람. 사진=ENA\"). 문단과 다른",
+    "    장면이어도 괜찮다 - 작품 비주얼을 보여주는 것이 이 자리의 목적이다.",
     "",
     '마지막 줄에 JSON 한 줄만 답한다: {"picked": 2, "caption": "사진을 보고 쓴 캡션", "reason": "한 문장"}',
     '맞는 것이 하나도 없으면 {"picked": null, "reason": "왜 전부 안 되는지 한 문장"}.',
@@ -991,6 +1008,8 @@ export async function collectWebImages(
           filePath: c.filePath,
           alt: result.alt || slot.description,
           sourcePage: c.sourcePage,
+          // 키노라이츠 미디어 섹션에서 온 것 = 그 작품의 공식 스틸.
+          official: /kinolights\.com/i.test(c.sourcePage ?? ""),
         })),
         markerDescription: slot.description,
         context: slot.context,
