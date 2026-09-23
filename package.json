@@ -190,7 +190,8 @@
     "dryrun:daily-keyword": "tsx src/workflows/dailyKeywordDryRun.ts",
     "test:table-visuals": "tsx src/workflows/images/testTableVisuals.ts",
     "test:naver-content-url": "tsx src/config/testNaverContentUrl.ts",
-    "test:image-search-pools": "tsx src/workflows/images/testImageSearchPools.ts"
+    "test:image-search-pools": "tsx src/workflows/images/testImageSearchPools.ts",
+    "test:kinolights": "tsx src/workflows/images/testKinolightsStills.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

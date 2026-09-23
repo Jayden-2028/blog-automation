@@ -31,6 +31,7 @@ import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 import { ImageDeduper } from "./imageFingerprint.js";
 import { describeSearchPools, expandQueriesForPools } from "./imageSearchPools.js";
+import { searchKinolightsStills } from "./searchKinolightsStills.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
@@ -226,6 +227,11 @@ export type CollectWebImagesOptions = {
    * 없으면 예전 동작 - 일반 이미지 검색.
    */
   category?: string | null;
+  /**
+   * 작품 공식 스틸 직접 수집(2026-09-24). 작품·연예 카테고리에서만 부른다.
+   * false면 건너뛴다(테스트 - 외부 HTTP를 타면 안 된다).
+   */
+  searchKinolights?: false | typeof searchKinolightsStills;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -718,6 +724,32 @@ export async function collectWebImages(
   const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
   // 검색창에서 미리 받아둔 후보(자리별). 에이전트가 고른 URL이 전부 막히면 여기서 건진다.
   const prefetched = new Map<number, ImageCandidate[]>();
+
+  // 작품 공식 스틸을 **먼저** 한 번 가져와 모든 자리가 함께 쓴다(2026-09-24 사용자 지시).
+  //
+  // 왜 검색이 아니라 직접 여는가: 이미지 색인은 키노라이츠 작품 페이지의 OG 공유 이미지
+  // (1200x630)까지만 긁어 둔다. 미디어 섹션 안의 개별 스틸은 색인에 없어서 검색어에
+  // `키노라이츠`를 붙여도 안 나온다. 페이지를 열면 3000x2000 원본이 그대로 있다.
+  //
+  // 자리마다 부르지 않는다 - 작품은 하나고 스틸 목록도 하나다. 한 번만 받아 공유한다.
+  const kinolights = options.searchKinolights === undefined ? searchKinolightsStills : options.searchKinolights;
+  let officialStills: ImageCandidate[] = [];
+  if (kinolights && ARTWORK_CATEGORIES.has(options.category ?? "")) {
+    const stills = await kinolights(input.keyword).catch(() => []);
+    officialStills = stills.map((still) => ({
+      title: `${input.keyword} 공식 스틸컷`,
+      link: still.imageUrl,
+      thumbnail: still.imageUrl,
+      // 크기는 내려받은 뒤 잰다 - 키노라이츠는 원본만 주고 크기를 알려주지 않는다.
+      width: null,
+      height: null,
+      sourcePage: still.sourcePage,
+    }));
+    if (officialStills.length > 0) {
+      failures.push(`ℹ️ 키노라이츠 공식 스틸 ${officialStills.length}장을 후보에 넣었습니다.`);
+    }
+  }
+
   if (searchImages) {
     await Promise.all(
       input.slots.map(async (slot) => {
@@ -759,12 +791,18 @@ export async function collectWebImages(
             })
           : list;
 
-        if (quality.length > 0) {
-          prefetched.set(slot.index, quality);
+        // 공식 스틸을 **맨 앞에** 둔다 - 이게 이 카테고리의 1순위 서치풀이다(§8-7).
+        const withOfficial = [...officialStills, ...quality];
+        if (withOfficial.length > 0) {
+          prefetched.set(slot.index, withOfficial);
           return;
         }
         if (list.length > 0) {
-          prefetched.set(slot.index, list);
+          prefetched.set(slot.index, [...officialStills, ...list]);
+          return;
+        }
+        if (officialStills.length > 0) {
+          prefetched.set(slot.index, officialStills);
           return;
         }
         const broader = broadenQuery(query);
