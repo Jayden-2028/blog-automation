@@ -17,6 +17,7 @@ import "dotenv/config";
 import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
 import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
+import { warnLocalFallback } from "../../jobs/lib/warnLocalFallback.js";
 import { runResearchStage } from "../writing/runArticleJob.js";
 
 /**
@@ -34,6 +35,8 @@ async function triggerWriting(jobId: string): Promise<void> {
     await enqueueAndMaybeDispatch({ jobId, workflowFile: "job-write.yml" });
     return;
   }
+  // 토큰이 없으면 맥에서 돈다 - 맥이 잠들면 죽는다. 조용히 떨어지지 않게 알린다(2026-09-24).
+  await warnLocalFallback("write", jobId);
   spawnDetachedTask("job:write", [jobId]);
 }
 

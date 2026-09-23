@@ -10,6 +10,7 @@
 // DB 큐에 올리고(동시 실행 순서를 그쪽이 관리한다), 맥 로컬이면 detached 자식으로 띄운다.
 
 import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
+import { warnLocalFallback } from "../../jobs/lib/warnLocalFallback.js";
 import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
 
 export async function triggerResearchForJob(jobId: string): Promise<void> {
@@ -17,5 +18,7 @@ export async function triggerResearchForJob(jobId: string): Promise<void> {
     await enqueueAndMaybeDispatch({ jobId, workflowFile: "job-research.yml" });
     return;
   }
+  // 토큰이 없으면 맥에서 돈다 - 맥이 잠들면 죽는다. 조용히 떨어지지 않게 알린다(2026-09-24).
+  await warnLocalFallback("research", jobId);
   spawnDetachedTask("job:research", [jobId]);
 }
