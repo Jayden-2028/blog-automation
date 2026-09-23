@@ -81,6 +81,8 @@ function buildAutoWritingPrompt(input: BuildWritingPromptInput): string {
     "규격이나 자료조사 파일을 못 읽으면 draft 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
     "",
     "- prompts/writing/writer-auto.md   (자율 모드 규격 - 짧다. 전부 읽어라)",
+    "- prompts/writing/rules/topic-allocation.md   (주제 배분 - 무엇에 60%를 쓰는지 여기서 정한다)",
+    "- prompts/writing/rules/article-structure.md  (카테고리별 초안 구조·문단 흐름 - 소제목의 뼈대)",
     job.category === "incident"
       ? "- prompts/writing/style/incident.md   (이 job은 사건·사고다. 이 파일이 다른 모든 규칙을 이긴다)"
       : "- prompts/writing/style/voice.md   (공통 어투·어미·인칭. 목소리는 자율 대상이 아니다)",
@@ -120,6 +122,8 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- prompts/writing/writer.md                       (라우팅·입력 계약·제목·저장 전 체크리스트)",
     "- prompts/writing/rules/facts-and-hedging.md      (사실 태도·헤지 금지 - 항상 최우선, 구 §4)",
     "- prompts/writing/rules/output-format.md          (출력 형식 계약 - 구 §6~10, 코드와 직결)",
+    "- prompts/writing/rules/topic-allocation.md       (주제 배분 - 내적 60%+ / 외적 40%- / 외적의 외적 0)",
+    "- prompts/writing/rules/article-structure.md      (카테고리별 초안 구조·문단 흐름 - 소제목의 뼈대)",
     "- docs/seo-guide.md                                (제목·본문·키워드·이미지·태그 규칙)",
     `- ${styleFile}   (이 카테고리의 실제 발행 최종본 기반 구조·흐름·제목 기법)`,
     // 2026-09-16: 어투·어미는 카테고리와 무관하게 voice.md 하나다(카테고리마다 어미 규칙이 달라
@@ -146,8 +150,9 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "파이프라인 오버라이드(위 문서와 충돌하면 이 지시가 우선):",
     ...(input.brief
       ? [
-          "- writer.md §3-1대로 소제목은 브리프의 Q1~Q5 순서를 뼈대로 잡는다. 리서치 파일의 섹션 순서를",
-          "  따라 쓰지 않는다. 리서치에 답이 없는 질문은 억지로 채우지 말고 frontmatter `unanswered`에",
+          "- **소제목 순서는 rules/article-structure.md의 유형별 단계를 따른다**(2026-09-23 변경).",
+          "  브리프 Q는 뼈대가 아니라 그 단계를 채울 재료다 - Q 순서대로 소제목을 만들지 않는다.",
+          "  브리프 Q 중 리서치에 답이 없는 것은 억지로 채우지 말고 frontmatter `unanswered`에",
           "  \"Q{n}\"으로 적고, `brief_coverage`에 \"답한 개수/전체\"(예: 4/5)를 적는다.",
         ]
       : []),
