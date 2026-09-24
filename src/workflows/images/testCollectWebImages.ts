@@ -496,6 +496,33 @@ async function main(): Promise<void> {
   }
   console.log("✅ codex 출력 잡음 속 JSON 추출");
 
+  // --- 사람이 찍어 준 주소는 획득 방식과 무관하게 수집 대상이다(2026-09-24) -----------------------
+  // 실측 사고(오상욱 6번): `페이지 캡처` 자리에 쓸 수 있는 이미지 주소를 줬는데, 웹 검색 자리만
+  // 뽑는 바람에 그 주소를 아무도 읽지 않았다.
+  {
+    const body = [
+      "문단 A",
+      "",
+      "[IMAGE: 검색 자리 — 웹 검색]",
+      "[IMAGE PROMPT: 검색어]",
+      "",
+      "문단 B",
+      "",
+      "[IMAGE: 중계 안내 페이지 — 페이지 캡처]",
+      "[IMAGE PROMPT: https://example.com]",
+    ].join("\n");
+
+    const onlySearch = buildWebImageSlots(body, []);
+    if (onlySearch.length !== 1 || onlySearch[0].index !== 1) {
+      throw new Error(`❌ 기본은 웹 검색 자리만 (${onlySearch.map((s) => s.index).join(",")})`);
+    }
+
+    const withDirect = buildWebImageSlots(body, [], new Set([2]));
+    if (withDirect.length !== 2) throw new Error(`❌ 지정한 자리도 포함해야 한다 (${withDirect.length})`);
+    if (!withDirect.some((s) => s.index === 2)) throw new Error("❌ 2번(페이지 캡처)이 포함돼야 한다");
+    console.log("✅ 직접 지정한 자리는 획득 방식과 무관하게 수집 대상");
+  }
+
   console.log("\n✅ collectWebImages 테스트 전체 통과");
 }
 
@@ -591,4 +618,3 @@ main().catch((error) => {
     await rm(dir3, { recursive: true, force: true });
   }
 }
-

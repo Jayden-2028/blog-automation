@@ -67,7 +67,11 @@ export async function collectWebImagesForJob(
 ): Promise<CollectWebImagesForJobResult> {
   const filled = new Set(input.filledIndexes ?? []);
   const requirements = input.requirements ?? {};
-  const slots = buildWebImageSlots(input.body, input.imagePrompts)
+  // 사람이 이미지 주소를 찍어 준 자리는 **획득 방식과 무관하게** 다룬다(2026-09-24).
+  // 실측 사고: `페이지 캡처` 자리에 쓸 수 있는 주소를 줬는데 웹 검색 자리만 뽑는 바람에
+  // 그 주소를 아무도 읽지 않았다. 사람이 고른 것이 마커 표기보다 우선한다.
+  const directIndexes = new Set(Object.keys(input.directUrls ?? {}).map(Number).filter(Number.isInteger));
+  const slots = buildWebImageSlots(input.body, input.imagePrompts, directIndexes)
     .filter((s) => !filled.has(s.index))
     // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
     //

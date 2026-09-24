@@ -282,8 +282,17 @@ export type CollectWebImagesOptions = {
 /**
  * 본문에서 `웹 검색` 자리와 그 바로 위 문단을 뽑는다. index는 전체 이미지 마커 기준(1부터)이라
  * 내보내기 폴더의 파일 번호와 그대로 맞는다.
+ *
+ * `alsoInclude`에 적힌 자리는 **획득 방식과 무관하게** 포함한다(2026-09-24). 사람이 이미지
+ * 주소를 직접 찍어 준 자리가 그렇다 - 실측 사고: `페이지 캡처` 자리에 쓸 수 있는 이미지 주소를
+ * 줬는데, 이 함수가 `웹 검색`만 뽑는 바람에 그 주소를 아무도 읽지 않았다. 사람이 고른 것은
+ * 마커 표기보다 우선한다(2026-09-22 결정 "이미지 수정 요청시에는 사용자의 지시대로 해라").
  */
-export function buildWebImageSlots(body: string, imagePrompts: string[]): WebImageSlot[] {
+export function buildWebImageSlots(
+  body: string,
+  imagePrompts: string[],
+  alsoInclude: ReadonlySet<number> = new Set()
+): WebImageSlot[] {
   const blocks = parseManuscriptBlocks(body, imagePrompts);
   const slots: WebImageSlot[] = [];
   let imageIndex = 0;
@@ -292,7 +301,7 @@ export function buildWebImageSlots(body: string, imagePrompts: string[]): WebIma
   for (const block of blocks) {
     if (block.type === "image") {
       imageIndex += 1;
-      if (block.acquisition === "search") {
+      if (block.acquisition === "search" || alsoInclude.has(imageIndex)) {
         slots.push({ index: imageIndex, description: block.description, query: block.prompt, context: lastText });
       }
       continue;
