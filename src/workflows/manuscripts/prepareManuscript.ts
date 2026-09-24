@@ -35,6 +35,9 @@ import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant
 import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
+import { readJobBrief } from "../brief/buildKeywordBrief.js";
+import { removeTableMarkers } from "./removeTableMarkers.js";
+import { updateArticle } from "../../services/supabase/repositories/articleRepository.js";
 import { readImageDirectUrls, readImageRequirements } from "../images/applyImageEditRequest.js";
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
@@ -109,6 +112,7 @@ export type PrepareManuscriptOptions = {
         keyword: string;
         /** 서치풀·화질 하한을 정한다(2026-09-24). */
         category?: string | null;
+        briefType?: string | null;
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
@@ -364,10 +368,28 @@ export async function prepareManuscript(
     tags = result.variant.tags;
     shortName = result.variant.shortName;
     content = await withRelatedPosts(content, job, options);
+    // `표 생성` 자리는 만들지 않는다(2026-09-24 사용자 결정 - 메인 규칙 5번: 본문 텍스트를
+    // 그대로 옮긴 표는 모든 원고에서 금지). 저장 **전에** 지워 빈 칸이 남지 않게 한다.
+    const cleaned = removeTableMarkers(content);
+    if (cleaned.removed > 0) {
+      content = cleaned.body;
+      console.log(`ℹ️ [manuscripts] ${job.keyword}: 표 생성 자리 ${cleaned.removed}개를 뺐습니다.`);
+    }
     await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
     await mergeJobMetadata(job.id, {
       channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags, shortName } } satisfies ChannelMetaMap,
     });
+  }
+
+  // 이미 저장돼 있던 원고에도 같은 규칙을 적용한다(재실행 경로). 순위 `페이지 캡처`는
+  // 본문을 옮긴 표가 아니므로 대상이 아니다.
+  if (existing) {
+    const cleaned = removeTableMarkers(content);
+    if (cleaned.removed > 0) {
+      content = cleaned.body;
+      await updateArticle(existing.id, { content });
+      console.log(`ℹ️ [manuscripts] ${job.keyword}: 기존 원고에서 표 생성 자리 ${cleaned.removed}개를 뺐습니다.`);
+    }
   }
 
   const imageFailures: string[] = [];
@@ -454,6 +476,7 @@ export async function prepareManuscript(
       jobId: job.id,
       keyword: job.keyword,
       category: job.category ?? null,
+      briefType: readJobBrief(job.metadata as Record<string, unknown> | null)?.type ?? null,
       // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
       // 같은 사진이 다시 들어오는 것을 막는다.
       existingImageUrls: Object.fromEntries(

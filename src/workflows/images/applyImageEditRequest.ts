@@ -16,6 +16,7 @@ export const IMAGE_REQUIREMENTS_KEY = "imageRequirements";
 /** 사용자가 직접 찍어준 이미지 주소. 있으면 검색하지 않는다. */
 export const IMAGE_DIRECT_URLS_KEY = "imageDirectUrls";
 
+/** 사용자가 없애 달라고 한 자리 번호. 본문 마커째 지운다. */
 export type ApplyImageEditResult = {
   /** metadata에 병합할 패치. 그대로 mergeMetadata에 넘긴다. */
   patch: Record<string, unknown>;
@@ -25,6 +26,8 @@ export type ApplyImageEditResult = {
   alreadyEmpty: number[];
   /** 링크를 줬지만 이미지 주소가 아니라 쓸 수 없는 자리. 사용자에게 알려야 한다. */
   unusableUrls: number[];
+  /** 사용자가 **없애 달라**고 한 자리(2026-09-24). 호출부가 본문 마커를 지운다. */
+  removed: number[];
 };
 
 /**
@@ -37,7 +40,10 @@ export function applyImageEditRequest(
   images: readonly ManuscriptImage[],
   requests: readonly ImageEditRequest[]
 ): ApplyImageEditResult {
-  const targets = new Set(requests.map((request) => request.index));
+  // 삭제 요청은 다시 찾을 대상이 아니다 - 자리 자체를 없앤다.
+  const removals = requests.filter((request) => request.remove).map((request) => request.index);
+  const refills = requests.filter((request) => !request.remove);
+  const targets = new Set(refills.map((request) => request.index));
   const cleared: number[] = [];
   const alreadyEmpty: number[] = [];
 
@@ -55,7 +61,7 @@ export function applyImageEditRequest(
 
   // 자리별 요구사항. 비어 있는 요구("그냥 다시 찾아라")는 굳이 남기지 않는다.
   const requirements: Record<string, string> = {};
-  for (const request of requests) {
+  for (const request of refills) {
     if (request.requirement) requirements[String(request.index)] = request.requirement;
   }
 
@@ -63,7 +69,7 @@ export function applyImageEditRequest(
   // 단, 구글 공유 링크처럼 이미지가 아닌 주소는 제외한다 - 내려받으면 HTML이 온다.
   const directUrls: Record<string, string> = {};
   const unusableUrls: number[] = [];
-  for (const request of requests) {
+  for (const request of refills) {
     if (!request.url) continue;
     if (isLikelyImageUrl(request.url)) directUrls[String(request.index)] = request.url;
     else unusableUrls.push(request.index);
@@ -82,6 +88,7 @@ export function applyImageEditRequest(
     cleared: cleared.sort((a, b) => a - b),
     alreadyEmpty: alreadyEmpty.sort((a, b) => a - b),
     unusableUrls: unusableUrls.sort((a, b) => a - b),
+    removed: [...new Set(removals)].sort((a, b) => a - b),
   };
 }
 

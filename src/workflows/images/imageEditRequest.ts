@@ -19,7 +19,19 @@ export type ImageEditRequest = {
   requirement: string;
   /** 사용자가 붙여넣은 링크. 이미지 주소면 검색 없이 그것을 쓴다. */
   url?: string;
+  /**
+   * 이 자리를 **없애 달라**는 요청인가(2026-09-24 사용자 지시).
+   *
+   * 실측 사고(오상욱): "5번 표 이미지 삭제하세요"를 보냈는데 삭제가 지원되지 않아 **다시 찾기**
+   * 요구사항으로만 기록됐다. 자리는 그대로 남고 빈 칸이 됐다.
+   */
+  remove?: boolean;
 };
+
+/** "삭제"·"빼줘"·"지워줘"처럼 **자리를 없애 달라**는 말인가. */
+export function isRemovalRequest(requirement: string): boolean {
+  return /삭제|지워|빼\s*(주|줘|세요)|없애|제거/.test(requirement ?? "");
+}
 
 /**
  * 자리 번호. **앞뒤가 글자·숫자면 매칭하지 않는다.**
@@ -81,10 +93,12 @@ export function parseImageEditReply(text: string, maxIndex = 20): ImageEditReque
     const index = Number(match[1]);
     if (!Number.isInteger(index) || index < 1 || index > maxIndex) return;
 
+    const requirement = segment.replace(TRAILING_SEPARATORS, "").trim();
     found.push({
       index,
-      requirement: segment.replace(TRAILING_SEPARATORS, "").trim(),
+      requirement,
       ...(segmentUrls[0] ? { url: segmentUrls[0] } : {}),
+      ...(isRemovalRequest(requirement) ? { remove: true } : {}),
     });
   });
 
@@ -97,7 +111,13 @@ export function parseImageEditReply(text: string, maxIndex = 20): ImageEditReque
 export function describeImageEditRequests(requests: readonly ImageEditRequest[]): string {
   if (requests.length === 0) return "지정하신 자리가 없어 빈 자리만 다시 채웁니다.";
   return requests
-    .map((request) => (request.requirement ? `${request.index}번 - ${request.requirement}` : `${request.index}번 - 다시 찾기`))
+    .map((request) =>
+      request.remove
+        ? `${request.index}번 - **자리 삭제**`
+        : request.requirement
+          ? `${request.index}번 - ${request.requirement}`
+          : `${request.index}번 - 다시 찾기`
+    )
     .join("\n");
 }
 

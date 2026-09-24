@@ -242,6 +242,11 @@ export type CollectWebImagesOptions = {
    */
   category?: string | null;
   /**
+   * 기획 브리프 유형(2026-09-24). 서치풀을 고를 때 **category보다 먼저** 본다 -
+   * 인물 중심 원고가 living으로 분류돼 행사 서치풀을 타던 문제(오상욱 실측).
+   */
+  briefType?: string | null;
+  /**
    * 작품 공식 스틸 직접 수집(2026-09-24). 작품·연예 카테고리에서만 부른다.
    * false면 건너뛴다(테스트 - 외부 HTTP를 타면 안 된다).
    */
@@ -356,7 +361,9 @@ export function buildPrompt(
   slots: WebImageSlot[],
   candidates: Map<number, ImageCandidate[]> = new Map(),
   /** 카테고리별 서치풀을 정하려고 받는다(2026-09-24). 없으면 예전과 같은 일반 검색이다. */
-  category: string | null = null
+  category: string | null = null,
+  /** 브리프 유형. category보다 먼저 본다. */
+  briefType: string | null = null
 ): string {
   const lines = [
     "너는 한국어 블로그 원고에 넣을 **실제 이미지**를 웹에서 찾는다. 이미지를 만들지 않는다.",
@@ -410,7 +417,7 @@ export function buildPrompt(
     "- 각 부처·지자체 보도자료에 첨부된 사진",
     "검색어에 `공공누리`, `보도자료`, `정책브리핑`을 붙여 보는 것이 효과적이다.",
     "",
-    ...describeSearchPools(keyword, category),
+    ...describeSearchPools(keyword, category, briefType),
     "",
     "## 자리별 지시",
   ];
@@ -795,7 +802,7 @@ export async function collectWebImages(
         // 원고 검색어만 쓰면 일반 색인에서 기사 사진·재가공 썸네일이 올라온다 - 실측에서
         // `추영우 김소현 연애박사`는 700px 기사 사진을, `연애박사 키노라이츠`는 2747x1920
         // 공식 스틸을 줬다. 순서는 유지한다(원고 검색어가 먼저, 서치풀이 뒤).
-        const queries = expandQueriesForPools(query, input.keyword, options.category ?? null);
+        const queries = expandQueriesForPools(query, input.keyword, options.category ?? null, options.briefType ?? null);
         const results = await Promise.all(queries.map((q) => searchImages(q).catch(() => [])));
 
         // 질의별 결과를 **번갈아** 섞는다(2026-09-24). 이어 붙이면 원고 검색어 결과가 앞을 다
@@ -853,7 +860,7 @@ export async function collectWebImages(
   }
 
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots, prefetched, options.category ?? null),
+    prompt: buildPrompt(input.keyword, input.slots, prefetched, options.category ?? null, options.briefType ?? null),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });

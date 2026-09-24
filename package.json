@@ -193,7 +193,8 @@
     "test:image-search-pools": "tsx src/workflows/images/testImageSearchPools.ts",
     "test:kinolights": "tsx src/workflows/images/testKinolightsStills.ts",
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
-    "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts"
+    "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts",
+    "test:remove-table-markers": "tsx src/workflows/manuscripts/testRemoveTableMarkers.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

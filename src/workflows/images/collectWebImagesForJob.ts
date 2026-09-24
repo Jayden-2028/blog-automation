@@ -28,6 +28,8 @@ export type CollectWebImagesForJobInput = {
    * 없으면 예전 동작 - 일반 이미지 검색.
    */
   category?: string | null;
+  /** 기획 브리프 유형(2026-09-24). 서치풀 선택에서 category보다 우선한다. */
+  briefType?: string | null;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -157,6 +159,7 @@ export async function collectWebImagesForJob(
               upload: uploader,
               deduper,
               category: input.category ?? null,
+              briefType: input.briefType ?? null,
               searchImages: false,
               verify: false,
               runCodex: async () => ({
@@ -190,6 +193,7 @@ export async function collectWebImagesForJob(
         upload: uploader,
         deduper,
         category: input.category ?? null,
+        briefType: input.briefType ?? null,
       }
     );
 

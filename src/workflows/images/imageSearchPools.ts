@@ -21,33 +21,73 @@ export type ImageSearchPool = {
   note?: string;
 };
 
+/** 작품(드라마·영화·OTT·시리즈·방송) 서치풀. */
+const ARTWORK_POOLS: ImageSearchPool[] = [
+  {
+    label: "작품 공식 채널",
+    patterns: ["{키워드} 스틸컷", "{키워드} 공식 포스터", "{키워드} 제작발표회"],
+    note: "방송사·배급사·OTT가 배포한 공식 스틸·포스터가 가장 깨끗하고 크다.",
+  },
+  {
+    label: "키노라이츠",
+    patterns: ["{키워드} 키노라이츠", "site:kinolights.com {키워드}"],
+    note: "공식 페이지를 못 찾을 때 여기 미디어 섹션에 스틸이 모여 있다(m.kinolights.com).",
+  },
+  {
+    label: "출연자 공식 SNS·소속사",
+    patterns: ["{키워드} 인스타그램 공식", "{인물} 프로필"],
+    note: "인물 단독 자리는 소속사 프로필·공식 계정이 낫다.",
+  },
+];
+
 /**
- * 카테고리 → 서치풀 우선순위.
+ * 인물(연예인·스타·유명인·선수) 서치풀 — 사용자 규칙 2번(2026-09-24 신설).
  *
- * `category`는 job의 값(entertainment·ott·living·community·incident·parenting)이다.
- * 없거나 모르는 값이면 빈 배열 - 예전처럼 일반 검색으로 돈다.
+ * 규칙 원문:
+ *   1. 인물 이름 + 주제 키워드로 검색해 **비교적 최신 + 고화질**을 고른다
+ *   2. 프로필 사진은 **네이버 인물검색·나무위키**를 모두 활용한다
+ *   3. 결과가 부족하면 **이름만** 검색해 깨끗하고 범용적인 사진을 고른다
+ *
+ * 실측 사고(오상욱): 이 규칙에 실행자가 없어 `오상욱 펜싱`처럼 이름+종목만 돌았다.
+ * 주제 키워드(금메달·시상대)도, 인물검색·나무위키도 한 번도 안 봤다.
  */
-export function searchPoolsFor(category: string | null | undefined): ImageSearchPool[] {
+const PERSON_POOLS: ImageSearchPool[] = [
+  {
+    label: "인물 + 주제 키워드",
+    patterns: ["{인물} {키워드}", "{키워드}"],
+    note: "규칙 1 - 이름과 주제를 함께 넣어 그 사건의 사진을 노린다. 최신·고화질을 고른다.",
+  },
+  {
+    label: "네이버 인물검색·나무위키 프로필",
+    patterns: ["{인물} 프로필", "{인물} 네이버 인물검색", "{인물} 나무위키"],
+    note: "규칙 2 - 프로필 자리는 이 둘을 모두 본다.",
+  },
+  {
+    label: "이름만",
+    patterns: ["{인물}"],
+    note: "규칙 3 - 위에서 부족하면 이름만 검색해 깨끗하고 범용적인 사진을 고른다.",
+  },
+];
+
+/**
+ * 어느 서치풀을 쓰나.
+ *
+ * **브리프 유형을 category보다 먼저 본다**(2026-09-24). 실측에서
+ * `오상욱·추가은 금메달 황선우 은메달`이 `category=living`으로 분류돼 행사 서치풀
+ * (주최·판매 공식 페이지)을 탔다. 인물이 주인공인 원고인데 인물 서치풀에 닿을 방법이 없었다 -
+ * category만 보면 스포츠 선수·화제 인물이 영원히 living에 갇힌다.
+ */
+export function searchPoolsFor(
+  category: string | null | undefined,
+  briefType?: string | null
+): ImageSearchPool[] {
+  if (briefType === "celebrity") return PERSON_POOLS;
+  if (briefType === "drama") return ARTWORK_POOLS;
+
   switch (category) {
     case "entertainment":
     case "ott":
-      return [
-        {
-          label: "작품 공식 채널",
-          patterns: ["{키워드} 스틸컷", "{키워드} 공식 포스터", "{키워드} 제작발표회"],
-          note: "방송사·배급사·OTT가 배포한 공식 스틸·포스터가 가장 깨끗하고 크다.",
-        },
-        {
-          label: "키노라이츠",
-          patterns: ["{키워드} 키노라이츠", "site:kinolights.com {키워드}"],
-          note: "공식 페이지를 못 찾을 때 여기 미디어 섹션에 스틸이 모여 있다(m.kinolights.com).",
-        },
-        {
-          label: "출연자 공식 SNS·소속사",
-          patterns: ["{키워드} 인스타그램 공식", "{인물} 프로필"],
-          note: "인물 단독 자리는 소속사 프로필·공식 계정이 낫다.",
-        },
-      ];
+      return ARTWORK_POOLS;
     case "living":
     case "community":
       return [
@@ -71,8 +111,12 @@ export function searchPoolsFor(category: string | null | undefined): ImageSearch
 }
 
 /** 프롬프트에 넣을 블록. 풀이 없으면 빈 배열이라 프롬프트가 예전과 같아진다. */
-export function describeSearchPools(keyword: string, category: string | null | undefined): string[] {
-  const pools = searchPoolsFor(category);
+export function describeSearchPools(
+  keyword: string,
+  category: string | null | undefined,
+  briefType?: string | null
+): string[] {
+  const pools = searchPoolsFor(category, briefType);
   if (pools.length === 0) return [];
 
   const lines = [
@@ -105,9 +149,10 @@ export function describeSearchPools(keyword: string, category: string | null | u
 export function expandQueriesForPools(
   query: string,
   keyword: string,
-  category: string | null | undefined
+  category: string | null | undefined,
+  briefType?: string | null
 ): string[] {
-  const pools = searchPoolsFor(category);
+  const pools = searchPoolsFor(category, briefType);
   if (pools.length === 0) return [query];
 
   const extra = pools

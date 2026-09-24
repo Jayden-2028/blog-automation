@@ -51,4 +51,28 @@ console.log("▶ 서치풀 테스트 시작\n");
   console.log("✅ 질의 확장 - 원고 검색어 우선, 중복 없음");
 }
 
+// 5) 인물 서치풀 - 브리프 유형이 category를 이긴다(2026-09-24 오상욱 실측).
+{
+  // living으로 분류돼도 브리프가 celebrity면 인물 서치풀을 쓴다.
+  const person = searchPoolsFor("living", "celebrity");
+  assert(person.length === 3, `인물 서치풀은 3단계 (${person.length})`);
+  assert(person[0].label.includes("주제 키워드"), "1순위는 이름+주제 키워드");
+  assert(person[1].label.includes("나무위키"), "2순위는 네이버 인물검색·나무위키");
+  assert(person[2].label === "이름만", "3순위는 이름만");
+
+  // 브리프가 없으면 예전대로 category를 본다.
+  const event = searchPoolsFor("living", null);
+  assert(event[0].label.includes("주최"), "브리프가 없으면 행사 서치풀");
+
+  // drama 브리프는 작품 서치풀.
+  assert(searchPoolsFor("living", "drama")[1].label.includes("키노라이츠"), "drama는 작품 서치풀");
+
+  // 실제 질의에 인물명이 채워지는지.
+  const queries = expandQueriesForPools("오상욱", "오상욱 금메달", "living", "celebrity");
+  assert(queries.includes("오상욱 나무위키"), `나무위키 질의가 있어야 한다: ${queries.join(", ")}`);
+  assert(queries.includes("오상욱 네이버 인물검색"), "인물검색 질의가 있어야 한다");
+  assert(queries[0] === "오상욱", "원고 검색어가 맨 앞");
+  console.log("✅ 인물 서치풀 - 브리프 유형이 category보다 우선");
+}
+
 console.log("\n🎉 서치풀 테스트 통과");

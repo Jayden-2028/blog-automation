@@ -29,6 +29,7 @@ import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptMani
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
 import { applyImageEditRequest, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
+import { removeMarkersAt } from "../workflows/manuscripts/removeTableMarkers.js";
 import type { MarkerChange } from "../workflows/images/applyImageEditRequest.js";
 import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
@@ -1117,6 +1118,14 @@ export class TelegramBot {
       return [] as MarkerChange[];
     });
 
+    // "5번 표 이미지 삭제하세요" 같은 요청은 **자리를 없앤다**(2026-09-24).
+    // 예전에는 삭제를 몰라 '다시 찾기' 요구사항으로만 기록했고, 자리는 빈 칸으로 남았다.
+    if (applied.removed.length > 0) {
+      await this.removeJobImageMarkers(job.id, applied.removed).catch((error) => {
+        console.warn(`⚠️ [telegram] 자리 삭제 실패: ${error instanceof Error ? error.message : error}`);
+      });
+    }
+
     this.triggerPublishPrepare();
 
     const lines = [
@@ -1131,6 +1140,9 @@ export class TelegramBot {
         ...markerChanges.map((change) => `${change.index}번 방식을 바꿉니다: ${change.from} → ${ACQUISITION_LABEL[change.to]}`)
       );
     }
+    if (applied.removed.length > 0) {
+      lines.push("", `🗑 자리를 없앴습니다: ${applied.removed.join(", ")}번 (이미지와 마커를 함께 지웠습니다)`);
+    }
     if (applied.cleared.length > 0) {
       lines.push("", `기존 이미지를 비운 자리: ${applied.cleared.join(", ")}번`);
     }
@@ -1140,9 +1152,17 @@ export class TelegramBot {
       lines.push(
         "",
         `⚠️ ${applied.unusableUrls.join(", ")}번에 주신 링크는 우리 쪽에서 받을 수 없는 주소입니다.`,
-        "구글 검색 화면의 <b>공유 링크</b>나 <b>썸네일 주소</b>는 브라우저 밖에서 열리지 않습니다.",
-        "구글 이미지에서 사진을 눌러 <b>원본 사이트로 이동</b>한 뒤, 그 사진에 마우스 오른쪽 →",
-        "<b>이미지 주소 복사</b>로 받은 주소를 주시면 그대로 씁니다(예: images.khan.co.kr/... .png).",
+        "",
+        "<b>받을 수 없는 주소</b>",
+        "· <code>encrypted-tbn0.gstatic.com/...</code> — 구글 검색 <b>썸네일</b>",
+        "· <code>share.google/...</code> — 구글 <b>공유 링크</b>",
+        "둘 다 브라우저 밖에서는 404가 오거나 검색 페이지 HTML이 옵니다.",
+        "",
+        "<b>이렇게 주세요</b>",
+        "구글 이미지에서 사진을 눌러 <b>원본 사이트로 이동</b> → 그 사진에 오른쪽 클릭 →",
+        "<b>이미지 주소 복사</b>. 주소 끝이 <code>.jpg</code> <code>.png</code> <code>.webp</code>이거나",
+        "언론사·공식 사이트 도메인이면 맞습니다(예: <code>images.khan.co.kr/....png</code>).",
+        "",
         "지금은 요구사항만 반영해 다시 찾습니다."
       );
     }
@@ -1169,6 +1189,24 @@ export class TelegramBot {
     if (changes.length === 0) return [];
     await this.updateArticleContent(target.id, body);
     return changes;
+  }
+
+  /**
+   * 사용자가 없애 달라고 한 자리의 **마커를 본문에서 지운다**(2026-09-24).
+   *
+   * 실측 사고(오상욱): "5번 표 이미지 삭제하세요"를 보냈는데 삭제를 지원하지 않아 요구사항으로만
+   * 기록됐고, 자리는 빈 칸으로 남아 사람이 같은 요청을 반복해야 했다.
+   */
+  private async removeJobImageMarkers(jobId: string, indexes: readonly number[]): Promise<void> {
+    if (indexes.length === 0) return;
+    const articles = await this.loadArticlesByJobId(jobId);
+    // 채널 배리에이션이 이미지 수집 기준이다 - 그쪽을 고친다(rewriteJobImageMarkers와 같은 선택).
+    const target = [...articles].reverse().find((article) => article.platform != null) ?? articles[articles.length - 1];
+    if (!target?.content) return;
+
+    const { body, removed } = removeMarkersAt(target.content, indexes);
+    if (removed === 0) return;
+    await this.updateArticleContent(target.id, body);
   }
 
   /**

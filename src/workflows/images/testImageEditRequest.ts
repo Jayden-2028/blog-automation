@@ -204,4 +204,26 @@ const eq = (text: string, expected: Array<[number, string]>) => {
   console.log("✅ 쓸 수 없는 링크 구분 - 검색 페이지는 거르고 이미지 주소는 저장");
 }
 
-console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");
+  // --- 자리 삭제 요청(2026-09-24) ------------------------------------------------------------
+  // 실측 사고(오상욱): "5번 표 이미지 삭제하세요"를 보냈는데 삭제가 지원되지 않아 '다시 찾기'
+  // 요구사항으로만 기록됐고, 자리는 빈 칸으로 남았다.
+  {
+    const requests = parseImageEditReply("5번 표 이미지 삭제하세요.");
+    if (requests.length !== 1) throw new Error("❌ 1건으로 읽어야 한다");
+    if (requests[0].index !== 5) throw new Error("❌ 5번이어야 한다");
+    if (!requests[0].remove) throw new Error("❌ 삭제 요청으로 읽어야 한다");
+
+    for (const text of ["3번 빼주세요", "2번 지워줘", "4번 이미지 제거", "1번 없애주세요"]) {
+      const [r] = parseImageEditReply(text);
+      if (!r?.remove) throw new Error(`❌ 삭제로 읽어야 한다: ${text}`);
+    }
+
+    // 삭제가 아닌 일반 요청이 삭제로 오인되면 멀쩡한 자리가 사라진다.
+    for (const text of ["2번 인물 단독샷으로", "3번 더 큰 사진", "1번 다시 찾아주세요"]) {
+      const [r] = parseImageEditReply(text);
+      if (r?.remove) throw new Error(`❌ 삭제가 아닌데 삭제로 읽었다: ${text}`);
+    }
+    console.log("✅ 자리 삭제 요청 - 삭제/빼줘/지워줘/제거/없애 인식, 오인 없음");
+  }
+
+  console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");
