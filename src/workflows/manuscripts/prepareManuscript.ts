@@ -36,7 +36,7 @@ import type { GenerateArticleVariantResult } from "../writing/generateArticleVar
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
 import { readJobBrief } from "../brief/buildKeywordBrief.js";
-import { removeTableMarkers } from "./removeTableMarkers.js";
+import { removeTableMarkers, shiftImageIndexes, shiftIndexedRecord } from "./removeTableMarkers.js";
 import { updateArticle } from "../../services/supabase/repositories/articleRepository.js";
 import { readImageDirectUrls, readImageRequirements } from "../images/applyImageEditRequest.js";
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
@@ -381,17 +381,6 @@ export async function prepareManuscript(
     });
   }
 
-  // 이미 저장돼 있던 원고에도 같은 규칙을 적용한다(재실행 경로). 순위 `페이지 캡처`는
-  // 본문을 옮긴 표가 아니므로 대상이 아니다.
-  if (existing) {
-    const cleaned = removeTableMarkers(content);
-    if (cleaned.removed > 0) {
-      content = cleaned.body;
-      await updateArticle(existing.id, { content });
-      console.log(`ℹ️ [manuscripts] ${job.keyword}: 기존 원고에서 표 생성 자리 ${cleaned.removed}개를 뺐습니다.`);
-    }
-  }
-
   const imageFailures: string[] = [];
 
   // 배리에이션이 문단을 재배열하면 마커 순서도 바뀌는데, imagePrompts는 **기준 원고 순서**로
@@ -412,6 +401,35 @@ export async function prepareManuscript(
   // 이미지 생성은 원고가 확정된 뒤에만. job당 1회 - metadata.imagesReadyAt으로 멱등 처리한다.
   // 실패는 원고를 막지 않는다(images가 빈 채로 넘어가고 뷰어는 프롬프트만 보여준다).
   let images: ManuscriptImage[] = readJobManuscriptImages(job);
+  // 이미 저장돼 있던 원고에도 `표 생성` 금지를 적용한다(재실행 경로, 2026-09-24).
+  // 순위 `페이지 캡처`는 본문을 옮긴 표가 아니므로 대상이 아니다.
+  if (existing) {
+    const cleaned = removeTableMarkers(content);
+    if (cleaned.removed > 0) {
+      content = cleaned.body;
+      await updateArticle(existing.id, { content });
+
+      // **번호로 붙어 있는 것들을 같이 당긴다**(실측 사고). 마커를 지우면 그 뒤 자리 번호가
+      // 하나씩 내려가는데 metadata는 옛 번호 그대로라, 사용자가 6번에 준 이미지 주소가
+      // 존재하지 않는 자리를 가리키게 됐다.
+      images = shiftImageIndexes(images, cleaned.removedIndexes);
+      await mergeJobMetadata(job.id, {
+        images,
+        imageRequirements: shiftIndexedRecord(
+          readImageRequirements(job.metadata as Record<string, unknown> | null),
+          cleaned.removedIndexes
+        ),
+        imageDirectUrls: shiftIndexedRecord(
+          readImageDirectUrls(job.metadata as Record<string, unknown> | null),
+          cleaned.removedIndexes
+        ),
+      });
+      console.log(
+        `ℹ️ [manuscripts] ${job.keyword}: 표 생성 자리 ${cleaned.removed}개를 빼고 자리 번호를 당겼습니다(${cleaned.removedIndexes.join(", ")}번).`
+      );
+    }
+  }
+
 
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
