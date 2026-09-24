@@ -85,6 +85,13 @@ export async function collectWebImagesForJob(
       const requirement = requirements[String(slot.index)];
       if (!requirement) return slot;
 
+      // 주소를 직접 찍어 준 자리는 **설명을 갈아끼우지 않는다**(2026-09-24 실측).
+      // 그 요구사항은 "이 주소를 써라"는 지시일 뿐 캡션이 아니다. 그대로 두면
+      // "이미지 교체 https://www.sentv.co.kr/..."가 캡션으로 나간다.
+      // 이 자리는 사람이 눈으로 고른 것이라 비전 검증도 건너뛰므로 캡션을 다시 쓸 기회가
+      // 없다 - 원고 마커의 설명이 남아 있는 것 중 가장 정확하다.
+      if (directIndexes.has(slot.index)) return slot;
+
       // 사용자는 "<검색어> 로 검색해서 나오는 <어떤 그림>"으로 쓴다. 문장을 통째로 검색창에
       // 넣으면 아무것도 안 나온다(2026-09-22 실측 - 1·5번 자리가 그래서 비었다).
       const { query, want } = splitSearchInstruction(requirement);

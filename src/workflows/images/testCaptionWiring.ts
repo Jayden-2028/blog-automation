@@ -112,6 +112,37 @@ async function main(): Promise<void> {
   );
   console.log("✅ 캡션이 없으면 마커 설명으로 폴백");
 
+  // 3) 주소를 직접 찍어 준 자리는 요구사항이 캡션이 되면 안 된다(2026-09-24 실측).
+  //    "이미지 교체 https://www.sentv.co.kr/..."가 그대로 캡션으로 나갔다.
+  {
+    const direct = await collectWebImagesForJob(
+      {
+        jobId: "test-job",
+        keyword: "오상욱",
+        category: "living",
+        body: "문단\n\n[IMAGE: 중계 안내 페이지 — 페이지 캡처]\n[IMAGE PROMPT: https://example.com]",
+        imagePrompts: ["https://example.com"],
+        requirements: { "1": "이미지 교체 https://cdn.example.com/a.jpg" },
+        directUrls: { "1": "https://cdn.example.com/a.jpg" },
+      },
+      {
+        searchImages: false,
+        searchKinolights: false,
+        cropTall: false,
+        fetchImage: async () => ({ ok: true, buffer: PNG, contentType: "image/png" }),
+        readSize: () => ({ width: 800, height: 800 }),
+        upload: async ({ fileName }) => ({ ok: true as const, url: `https://storage/${fileName}` }),
+      }
+    );
+
+    assert(direct.images.length === 1, `직접 지정 자리가 채워져야 한다 (${direct.images.length})`);
+    const caption = direct.images[0].description;
+    assert(!caption.includes("http"), `캡션에 URL이 들어가면 안 된다: "${caption}"`);
+    assert(!caption.includes("이미지 교체"), `요구사항 문구가 캡션이 되면 안 된다: "${caption}"`);
+    assert(caption.includes("중계 안내"), `마커 설명이 남아야 한다: "${caption}"`);
+    console.log("✅ 직접 지정 자리는 요구사항이 아니라 마커 설명을 캡션으로 쓴다");
+  }
+
   console.log("\n🎉 캡션 배선 테스트 통과");
 }
 
