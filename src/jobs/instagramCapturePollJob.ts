@@ -13,13 +13,37 @@ import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
+import { describeRecovery, recordFailure, takeRecovery } from "./lib/outageTracker.js";
+
+/** 멈춘 기록을 남기는 곳. 원격이 죽어 있을 때도 써야 하므로 **로컬 파일**이다. */
+const OUTAGE_PATH = resolve("logs/.instagram-capture-poll-outage.json");
 
 async function main(): Promise<void> {
   const lock = acquireSingleInstanceLock(resolve("logs/.instagram-capture-poll.lock"));
   if (!lock) return;
 
   const bot = InstagramCaptureBot.fromEnv();
-  const result = await bot.pollOnce();
+
+  // 텔레그램에서 받아오는 이 구간이 장애의 길목이다(실측: 맥 네트워크가 끊겨 39시간 멈췄다).
+  // 실패는 파일에 적고 조용히 끝낸다 - 그 순간엔 알릴 방법도 없다.
+  let result: Awaited<ReturnType<typeof bot.pollOnce>>;
+  try {
+    result = await bot.pollOnce();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    const state = recordFailure(OUTAGE_PATH, reason);
+    console.error(`❌ [ig-capture-poll] 실패 ${state.failures}회째(${state.firstFailedAt}부터): ${reason}`);
+    return;
+  }
+
+  // 여기까지 왔으면 네트워크가 살아 있다 - 멈춰 있었다면 지금이 알릴 수 있는 유일한 시점이다.
+  const recovery = takeRecovery(OUTAGE_PATH);
+  if (recovery) {
+    console.log(`▶ [ig-capture-poll] ${recovery.hours}시간 만에 복구(실패 ${recovery.failures}회)`);
+    await TelegramNotifier.fromEnv()
+      .sendMessages([{ text: describeRecovery(recovery, "인스타 링크 수신") }])
+      .catch(() => {});
+  }
 
   if (result.processed > 0) {
     console.log(
