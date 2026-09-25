@@ -1,0 +1,38 @@
+# 인스타 링크 **수신**만 한다(2026-09-25). 캡처는 맥이 한다.
+#
+# 왜 클라우드로 옮겼나(실측): 링크를 받는 폴러가 맥에서만 돌았는데 네트워크 장애·절전으로 39시간
+# 멈췄다. 텔레그램은 미확인 업데이트를 24시간만 보관하므로 그 경계를 넘기면 링크가 사라진다.
+# 받는 데는 브라우저가 필요 없어 클라우드에서 돌 수 있다.
+#
+# **텔레그램을 소비하는 곳은 여기 하나다.** 맥 폴러는 Supabase 수신함에서 가져간다 -
+# 둘이 같이 getUpdates를 부르면 offset을 두고 서로 잡아먹는다.
+name: instagram-inbox-poll
+
+on:
+  schedule:
+    # 5분마다. 링크는 사람이 띄엄띄엄 보내므로 이보다 잦을 이유가 없다.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  # 겹쳐 돌면 같은 update를 두 번 가져간다.
+  group: instagram-inbox-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run job:ig-inbox-poll
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          INSTAGRAM_BOT_TOKEN: ${{ secrets.INSTAGRAM_BOT_TOKEN }}
+          INSTAGRAM_BOT_CHAT_ID: ${{ secrets.INSTAGRAM_BOT_CHAT_ID }}

@@ -10,6 +10,8 @@ import "dotenv/config";
 import { resolve } from "node:path";
 
 import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
+import { listUnclaimed, markClaimed } from "../services/supabase/repositories/instagramInboxRepository.js";
+import { appendQueueEntry, listAwaitingTopic, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
@@ -22,13 +24,58 @@ async function main(): Promise<void> {
   const lock = acquireSingleInstanceLock(resolve("logs/.instagram-capture-poll.lock"));
   if (!lock) return;
 
+  // 봇은 이제 **보내기 전용**이다(주제 질문). 받기는 클라우드가 한다.
   const bot = InstagramCaptureBot.fromEnv();
 
-  // 텔레그램에서 받아오는 이 구간이 장애의 길목이다(실측: 맥 네트워크가 끊겨 39시간 멈췄다).
-  // 실패는 파일에 적고 조용히 끝낸다 - 그 순간엔 알릴 방법도 없다.
+  // **텔레그램을 직접 받지 않는다**(2026-09-25). 받는 일은 GitHub Actions(`job:ig-inbox-poll`)가
+  // 하고 Supabase 수신함에 쌓는다. 맥은 거기서 가져간다 - 맥이 며칠을 자도 링크가 남는다.
+  // 둘이 같이 getUpdates를 부르면 offset을 두고 서로 잡아먹으므로 소비자는 하나여야 한다.
+  //
+  // 주제 답장(needs_topic)은 여전히 이 봇이 받는다 - 답장을 붙일 큐가 맥에 있기 때문이다.
   let result: Awaited<ReturnType<typeof bot.pollOnce>>;
   try {
-    result = await bot.pollOnce();
+    const inbox = await listUnclaimed();
+    let links = 0;
+    let topics = 0;
+    for (const row of inbox) {
+      if (row.kind === "topic_reply") {
+        // 어느 항목에 대한 답인지는 **여기서만** 안다 - askedMessageId가 맥의 큐에 있다.
+        const target = listAwaitingTopic().find((e) => e.askedMessageId === row.replyToMessageId);
+        if (target && row.replyText) {
+          markEntry(target.id, { status: "pending", userTopic: row.replyText });
+          topics += 1;
+        }
+        continue;
+      }
+      if (!row.instagramUrl) continue;
+      await appendQueueEntry({
+        id: row.id,
+        instagramUrl: row.instagramUrl,
+        rawCaption: row.rawCaption,
+        telegramChatId: row.telegramChatId,
+        telegramMessageId: row.telegramMessageId,
+        receivedAt: row.receivedAt,
+        status: "pending",
+        attempts: 0,
+      });
+      links += 1;
+    }
+    // 로컬 큐에 옮긴 뒤에 표시한다 - 순서가 반대면 옮기다 죽었을 때 링크를 잃는다.
+    await markClaimed(inbox.map((row) => row.id));
+    if (inbox.length > 0) {
+      console.log(`▶ [ig-capture-poll] 수신함에서 ${inbox.length}건 가져왔습니다(링크 ${links} / 주제 답장 ${topics}).`);
+    }
+
+    // 소비자가 둘이면 offset을 두고 서로 잡아먹으므로 **한쪽만** 텔레그램을 부른다.
+    //
+    // `IG_INBOX_MODE=true`면 클라우드(`instagram-inbox-poll.yml`)가 받고 맥은 수신함만 본다.
+    // 기본값은 **예전 동작**이다 - 클라우드에 시크릿을 넣고 한 번 도는 것을 확인하기 전에
+    // 맥이 손을 떼면, 그 사이 온 링크는 아무도 받지 않고 24시간 뒤 사라진다.
+    if (process.env.IG_INBOX_MODE === "true") {
+      result = { processed: 0, enqueued: links, ignored: 0, topicsAnswered: topics };
+    } else {
+      result = await bot.pollOnce();
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     const state = recordFailure(OUTAGE_PATH, reason);

@@ -34,6 +34,21 @@ export type InstagramCaptureBotOptions = {
   getStoredOffset?: () => Promise<number | null>;
   advanceStoredOffset?: (updateId: number) => Promise<unknown>;
   enqueue?: (entry: import("../workflows/instagram-capture/types.js").InstagramQueueEntry) => Promise<void>;
+  /**
+   * 어디에도 붙지 않은 **답장**을 넘겨받는다(2026-09-25).
+   *
+   * 왜 필요한가: 텔레그램 getUpdates는 봇당 소비자가 하나여야 해서, 수신을 클라우드로 옮기면
+   * 주제 답장도 클라우드가 받는다. 그런데 "어느 항목에 대한 답인지"는 맥의 큐에만 있다
+   * (askedMessageId를 맥이 붙인다). 그래서 클라우드는 **판단하지 않고 그대로 넘겨** 두고,
+   * 맥이 가져가 자기 큐에 맞춘다. 이 훅이 없으면 답장이 `ignored`로 버려지고 offset만 올라간다.
+   */
+  onUnmatchedReply?: (input: {
+    updateId: number;
+    chatId: string;
+    messageId: number;
+    replyToMessageId: number;
+    text: string;
+  }) => Promise<void>;
   /** 주제를 기다리는 항목들. 답장을 어디에 붙일지 고를 때 쓴다. */
   listAwaitingTopic?: () => import("../workflows/instagram-capture/types.js").InstagramQueueEntry[];
   /** 답으로 받은 주제를 항목에 붙이고 다시 대기로 돌린다. */
@@ -56,6 +71,7 @@ export class InstagramCaptureBot {
   private readonly getStoredOffset: () => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number) => Promise<unknown>;
   private readonly enqueue: NonNullable<InstagramCaptureBotOptions["enqueue"]>;
+  private readonly onUnmatchedReply: InstagramCaptureBotOptions["onUnmatchedReply"];
   private readonly listAwaitingTopic: NonNullable<InstagramCaptureBotOptions["listAwaitingTopic"]>;
   private readonly applyTopic: NonNullable<InstagramCaptureBotOptions["applyTopic"]>;
 
@@ -88,6 +104,7 @@ export class InstagramCaptureBot {
         const { TelegramOffsetRepository } = await import("../repositories/TelegramOffsetRepository.js");
         return TelegramOffsetRepository.setLastUpdateId(updateId, "instagram-capture-bot");
       });
+    this.onUnmatchedReply = options.onUnmatchedReply;
     this.enqueue =
       options.enqueue ??
       (async (entry) => {
@@ -213,6 +230,16 @@ export class InstagramCaptureBot {
         } else {
           ignored += 1;
         }
+      } else if (text.trim() && message.reply_to_message?.message_id && this.onUnmatchedReply) {
+        // 여기서 못 붙인 답장은 **버리지 않고 넘긴다**(2026-09-25). 붙일 큐를 가진 쪽이 맞춘다.
+        await this.onUnmatchedReply({
+          updateId: update.update_id,
+          chatId,
+          messageId: message.message_id,
+          replyToMessageId: message.reply_to_message.message_id,
+          text: text.trim(),
+        });
+        topicsAnswered += 1;
       } else {
         ignored += 1;
       }

@@ -195,7 +195,8 @@
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
     "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts",
     "test:remove-table-markers": "tsx src/workflows/manuscripts/testRemoveTableMarkers.ts",
-    "test:outage-tracker": "tsx src/jobs/lib/testOutageTracker.ts"
+    "test:outage-tracker": "tsx src/jobs/lib/testOutageTracker.ts",
+    "job:ig-inbox-poll": "tsx src/jobs/instagramInboxPollJob.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

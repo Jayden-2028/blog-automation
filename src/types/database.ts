@@ -401,6 +401,43 @@ export type TelegramOffsetInsert = {
 
 export type TelegramOffsetUpdate = Partial<TelegramOffsetInsert>;
 
+// ---------- instagram_capture_inbox ----------
+//
+// 인스타 링크 수신함(2026-09-25). GitHub Actions가 텔레그램에서 받아 넣고, 맥 폴러가 가져간다.
+// supabase/migrations/20260925120000_instagram_capture_inbox.sql 참고.
+
+export type InstagramCaptureInboxRow = {
+  /** `tg-<update_id>`. 재전달돼도 한 번만 들어가게 하는 기본키다. */
+  id: string;
+  /** `link`는 인스타 주소, `topic_reply`는 "주제가 뭔가요"에 대한 답장이다. */
+  kind: string;
+  /** topic_reply에는 없다. */
+  instagram_url: string | null;
+  reply_to_message_id: number | null;
+  reply_text: string | null;
+  raw_caption: string;
+  telegram_chat_id: string;
+  telegram_message_id: number;
+  /** 맥이 가져간 시각. null이면 아직 안 가져갔다. */
+  claimed_at: string | null;
+  received_at: string;
+};
+
+export type InstagramCaptureInboxInsert = {
+  id: string;
+  kind?: string;
+  instagram_url?: string | null;
+  reply_to_message_id?: number | null;
+  reply_text?: string | null;
+  raw_caption?: string;
+  telegram_chat_id: string;
+  telegram_message_id: number;
+  claimed_at?: string | null;
+  received_at?: string;
+};
+
+export type InstagramCaptureInboxUpdate = Partial<InstagramCaptureInboxInsert>;
+
 // ---------- manuscript_manifest_topics ----------
 // 채널별 원고 페이지(manuscripts/index.html)의 날짜->주제->채널 목록. job_id로 upsert.
 // supabase/migrations/20260915013000_manuscript_manifest_topics.sql 참고.
@@ -676,6 +713,12 @@ export type Database = {
         Row: TelegramOffsetRow;
         Insert: TelegramOffsetInsert;
         Update: TelegramOffsetUpdate;
+        Relationships: [];
+      };
+      instagram_capture_inbox: {
+        Row: InstagramCaptureInboxRow;
+        Insert: InstagramCaptureInboxInsert;
+        Update: InstagramCaptureInboxUpdate;
         Relationships: [];
       };
       manuscript_manifest_topics: {
