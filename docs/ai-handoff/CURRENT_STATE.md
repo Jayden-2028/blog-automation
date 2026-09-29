@@ -1,6 +1,38 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-24 (Asia/Seoul)
+기준일: 2026-09-29 (Asia/Seoul)
+
+## 2026-09-29 세션 — 원고 이미지를 기다리지 않고 받는 길 두 개
+
+**한 줄**: 이미지가 맥 보관함에 들어오는 데 **최대 30분**이 걸리던 것을(launchd
+`manuscript-export`) 두 가지로 줄였다. 사용자가 고른 것은 ②다.
+
+**① 뷰어 페이지 `⬇️ 이미지 저장(N장)`** (`renderManuscriptPage.ts`)
+브라우저 다운로드 폴더로 **낱장** 저장. fetch -> blob -> `a[download]`이고, 막히면 Storage의
+`?download=`로 한 번 더 시도한다(서버가 Content-Disposition으로 파일명을 정해준다).
+보관함과는 무관한 경로다 - 폰이나 다른 PC에서 이미지를 바로 손에 넣을 때 쓴다.
+
+**② 텔레그램 `⬇️ 맥으로 내려받기`** — 원래 요청은 이쪽이었다.
+보관함 내보내기를 30분 주기 전에 **지금** 돌린다. 뷰어 페이지는 자격증명이 없는 정적 페이지라
+맥에 요청을 남길 수 없어, 네이버 발행과 **같은 구조**로 텔레그램에 붙였다.
+
+```
+[⬇️ 맥으로 내려받기] -> Worker -> GH Actions: requestManuscriptExport()  (job.metadata)
+                                          ↓ 맥 launchd 폴러 60초 (job:export-poll)
+                                  exportManuscript() -> 보관함 -> 폴더 경로를 텔레그램으로
+```
+
+- 대기열은 `manuscripts/manuscriptExportQueue.ts`, 키는 `job.metadata.manuscriptExport`.
+  **네이버 발행과 달리 몇 번이고 다시 요청할 수 있다** - 같은 글을 두 번 발행하면 사고지만
+  두 번 내려받는 건 덮어쓰기일 뿐이고, 이미지 수정 뒤 다시 받는 것이 정상 흐름이다.
+  그래서 버튼도 누른 뒤 `⬇️ 요청됨 (다시)`로 남고 잠기지 않는다.
+- 30분 주기 전체 내보내기는 **그대로 둔다**. 이 폴러가 죽어도 원고는 늦어도 30분 안에 들어온다.
+- 알림 버튼이 4개가 돼 **두 줄로** 나눴다(한 줄 4개는 텔레그램이 글자를 자른다).
+  `markPublishButtonSettled`의 폴백 배치도 같은 모양으로 맞춰야 한다.
+
+**맥에서 할 일(아직 안 됨)**: `com.wooahpapa.blog-automation.export-poll.plist` 등록.
+`scripts/poll-manuscript-export.sh`를 60초 간격으로 부르면 된다(naver-poll과 같은 모양).
+등록 전에는 버튼을 눌러도 요청만 쌓이고 30분 주기 내보내기가 처리한다.
 
 ## 2026-09-24 세션 — 이미지 규칙에 실행자를 붙였다
 
