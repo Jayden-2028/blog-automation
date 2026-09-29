@@ -9,7 +9,8 @@
 
 set -euo pipefail
 
-REPO="/Users/wooahpapa/blog-automation/prod"
+# 이 스크립트가 놓인 저장소를 스스로 찾는다(맥미니 이전, 2026-09-29 - 사용자명이 박혀 있으면 새 맥에서 깨진다).
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG="$HOME/Library/Logs/blog-automation-export.log"
 
 # launchd는 로그인 셸 PATH를 물려받지 않는다 - node/npm 위치를 직접 넣는다(2026-08-27 실측과 같은 함정).
