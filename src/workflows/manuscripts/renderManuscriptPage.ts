@@ -22,7 +22,6 @@
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
-import { zipStore } from "./zipStore.js";
 
 const CATEGORY_LABEL: Record<string, string> = {
   incident: "사건사고",
@@ -41,8 +40,6 @@ type PageTopic = {
   date: string;
   title: string;
   sourceTag: "instagram" | null;
-  /** 이미지 zip 파일 이름에 쓰는 짧은 한글 키워드(보관함 폴더명과 같은 값). 없으면 키워드. */
-  shortName: string | null;
   sourceUrl: string | null;
   searchDescription: string | null;
   slug: string | null;
@@ -82,7 +79,6 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     date: entry.date,
     title: m.title,
     sourceTag: m.sourceTag ?? null,
-    shortName: m.shortName ?? null,
     sourceUrl: m.sourceUrl ?? null,
     searchDescription: m.searchDescription,
     slug: m.slug,
@@ -344,27 +340,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     // 보관함으로 내려받는다. 그 주기를 기다리지 않고, 또 맥이 아닌 기기에서도 이 화면에서 바로
     // 받으려고 붙인 버튼이다.
     //
-    // 왜 zip 한 덩어리인가: 낱장으로 내려받으면 브라우저가 "파일 여러 개 다운로드" 확인을 띄우고
-    // 받은 뒤에도 다운로드 폴더에 흩어진다. 원고 1건 = 파일 1개가 순서대로 올리기에 낫다.
-    // zipStore는 zipStore.ts를 그대로 인라인한 것이다(같은 코드가 Node 테스트를 거친다).
-    ${zipStore.toString()}
-
-    /** 파일명 충돌 방지 - A/B 비교처럼 같은 이름이 두 번 나오면 뒤엣것에 -2를 붙인다. */
-    function uniqueName(used, name) {
-      if (!used[name]) { used[name] = 1; return name; }
-      used[name] += 1;
-      var dot = name.lastIndexOf(".");
-      var stem = dot > 0 ? name.slice(0, dot) : name;
-      var ext = dot > 0 ? name.slice(dot) : "";
-      return stem + "-" + used[name] + ext;
-    }
-
-    /** zip 파일 이름. 보관함 폴더와 같은 기준(짧은 키워드)으로 짓되 경로 문자를 걷어낸다. */
-    function zipFileName(topic) {
-      var base = String(topic.shortName || topic.keyword || "원고")
-        .replace(/[/\\\\:*?"<>|]/g, " ").replace(/\\s+/g, " ").trim().slice(0, 50);
-      return topic.date + " " + (base || "원고") + ".zip";
-    }
+    // 낱장으로 받는다(zip으로 묶지 않는다 - 2026-09-29 사용자 결정). 브라우저가 "파일 여러 개를
+    // 다운로드하시겠습니까"를 한 번 묻고, 허용하면 그대로 다운로드 폴더에 떨어진다.
+    //
+    // 파일명은 manifest의 fileName(보관함·sync:images와 같은 이름)을 쓴다. 본문 순서가 이름 앞의
+    // 번호라, 받은 순서 그대로 편집기에 올리면 된다.
 
     function saveBlob(blob, fileName) {
       var url = URL.createObjectURL(blob);
@@ -378,21 +358,26 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
     }
 
-    /** fetch가 막혔을 때의 폴백 - Storage의 ?download= 파라미터로 낱장씩 받는다. */
-    function downloadOneByOne(shots) {
-      shots.forEach(function (s, i) {
-        setTimeout(function () {
-          var url = s.url + (s.url.indexOf("?") >= 0 ? "&" : "?")
-            + "download=" + encodeURIComponent(s.fileName || String(i + 1));
-          var a = document.createElement("a");
-          a.href = url;
-          a.rel = "noopener";
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        }, i * 400);
-      });
-      toast("낱장으로 내려받습니다");
+    /** 파일명 충돌 방지 - A/B 비교처럼 같은 이름이 두 번 나오면 뒤엣것에 -2를 붙인다. */
+    function uniqueName(used, name) {
+      if (!used[name]) { used[name] = 1; return name; }
+      used[name] += 1;
+      var dot = name.lastIndexOf(".");
+      var stem = dot > 0 ? name.slice(0, dot) : name;
+      var ext = dot > 0 ? name.slice(dot) : "";
+      return stem + "-" + used[name] + ext;
+    }
+
+    /** fetch가 막혔을 때의 폴백 - Storage의 ?download= 로 서버가 파일명을 정해 내려보낸다. */
+    function downloadViaLink(shot, fileName) {
+      var url = shot.url + (shot.url.indexOf("?") >= 0 ? "&" : "?")
+        + "download=" + encodeURIComponent(fileName);
+      var a = document.createElement("a");
+      a.href = url;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
 
     function downloadImages(topic, btn) {
@@ -403,38 +388,37 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       btn.disabled = true;
 
       var used = {};
-      var files = [];
+      var saved = 0;
       var failed = 0;
       var chain = Promise.resolve();
 
       shots.forEach(function (s, i) {
         chain = chain.then(function () {
           btn.textContent = "⬇️ 내려받는 중 " + (i + 1) + "/" + shots.length;
+          var name = uniqueName(used, s.fileName || (i + 1) + ".jpg");
           return fetch(s.url).then(function (res) {
             if (!res.ok) throw new Error(String(res.status));
-            return res.arrayBuffer();
-          }).then(function (buf) {
-            files.push({
-              name: uniqueName(used, s.fileName || (i + 1) + ".jpg"),
-              data: new Uint8Array(buf)
-            });
-          }).catch(function () { failed += 1; });
+            return res.blob();
+          }).then(function (blob) {
+            saveBlob(blob, name);
+            saved += 1;
+          }).catch(function () {
+            // CORS·네트워크로 fetch가 막힌 경우. 링크로 한 번 더 시도한다(성공 여부는 알 수 없어
+            // 저장한 것으로 센다 - 실패하면 브라우저가 그 자리에서 알려준다).
+            try { downloadViaLink(s, name); saved += 1; } catch (e) { failed += 1; }
+          }).then(function () {
+            // 한꺼번에 몰아치면 브라우저가 뒤엣것을 흘린다. 한 박자씩 띄운다.
+            return new Promise(function (done) { setTimeout(done, 250); });
+          });
         });
       });
 
       chain.then(function () {
         btn.disabled = false;
         btn.textContent = label;
-        if (files.length === 0) { downloadOneByOne(shots); return; }
-        try {
-          saveBlob(new Blob([zipStore(files)], { type: "application/zip" }), zipFileName(topic));
-        } catch (e) {
-          downloadOneByOne(shots);
-          return;
-        }
         toast(failed === 0
-          ? "이미지 " + files.length + "장을 저장했습니다"
-          : "이미지 " + files.length + "장 저장 · " + failed + "장 실패");
+          ? "이미지 " + saved + "장을 내려받았습니다"
+          : "이미지 " + saved + "장 저장 · " + failed + "장 실패");
       });
     }
 

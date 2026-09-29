@@ -21,8 +21,6 @@ on:
       # 이 목록도 같이 늘려야 한다(안 늘리면 또 조용히 반영 안 되는 그 사고가 재현된다).
       - "src/workflows/manuscripts/renderManuscriptPage.ts"
       - "src/workflows/manuscripts/parseManuscriptBlocks.ts"
-      # 페이지에 통째로 인라인된다(이미지 저장 버튼).
-      - "src/workflows/manuscripts/zipStore.ts"
       - "src/workflows/manuscripts/manuscriptManifest.ts"
       - "src/workflows/manuscripts/buildManuscriptPageCli.ts"
       - "src/workflows/manuscripts/deployManuscriptsPage.ts"
