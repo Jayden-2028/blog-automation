@@ -22,6 +22,7 @@
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
+import { zipStore } from "./zipStore.js";
 
 const CATEGORY_LABEL: Record<string, string> = {
   incident: "사건사고",
@@ -40,6 +41,8 @@ type PageTopic = {
   date: string;
   title: string;
   sourceTag: "instagram" | null;
+  /** 이미지 zip 파일 이름에 쓰는 짧은 한글 키워드(보관함 폴더명과 같은 값). 없으면 키워드. */
+  shortName: string | null;
   sourceUrl: string | null;
   searchDescription: string | null;
   slug: string | null;
@@ -79,6 +82,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     date: entry.date,
     title: m.title,
     sourceTag: m.sourceTag ?? null,
+    shortName: m.shortName ?? null,
     sourceUrl: m.sourceUrl ?? null,
     searchDescription: m.searchDescription,
     slug: m.slug,
@@ -333,6 +337,105 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         if (ok) { toast("복사했습니다(서식 포함)"); return; }
       } catch (e) { /* fall through */ }
       copyText(text);
+    }
+
+    // ---- 이미지 로컬 저장(2026-09-29 사용자 요청) ----
+    // 이미지는 Supabase Storage 공개 URL이고 맥의 launchd(manuscript-export)가 30분마다
+    // 보관함으로 내려받는다. 그 주기를 기다리지 않고, 또 맥이 아닌 기기에서도 이 화면에서 바로
+    // 받으려고 붙인 버튼이다.
+    //
+    // 왜 zip 한 덩어리인가: 낱장으로 내려받으면 브라우저가 "파일 여러 개 다운로드" 확인을 띄우고
+    // 받은 뒤에도 다운로드 폴더에 흩어진다. 원고 1건 = 파일 1개가 순서대로 올리기에 낫다.
+    // zipStore는 zipStore.ts를 그대로 인라인한 것이다(같은 코드가 Node 테스트를 거친다).
+    ${zipStore.toString()}
+
+    /** 파일명 충돌 방지 - A/B 비교처럼 같은 이름이 두 번 나오면 뒤엣것에 -2를 붙인다. */
+    function uniqueName(used, name) {
+      if (!used[name]) { used[name] = 1; return name; }
+      used[name] += 1;
+      var dot = name.lastIndexOf(".");
+      var stem = dot > 0 ? name.slice(0, dot) : name;
+      var ext = dot > 0 ? name.slice(dot) : "";
+      return stem + "-" + used[name] + ext;
+    }
+
+    /** zip 파일 이름. 보관함 폴더와 같은 기준(짧은 키워드)으로 짓되 경로 문자를 걷어낸다. */
+    function zipFileName(topic) {
+      var base = String(topic.shortName || topic.keyword || "원고")
+        .replace(/[/\\\\:*?"<>|]/g, " ").replace(/\\s+/g, " ").trim().slice(0, 50);
+      return topic.date + " " + (base || "원고") + ".zip";
+    }
+
+    function saveBlob(blob, fileName) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // 즉시 해제하면 사파리에서 저장이 취소되는 일이 있어 한 박자 늦춘다.
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    }
+
+    /** fetch가 막혔을 때의 폴백 - Storage의 ?download= 파라미터로 낱장씩 받는다. */
+    function downloadOneByOne(shots) {
+      shots.forEach(function (s, i) {
+        setTimeout(function () {
+          var url = s.url + (s.url.indexOf("?") >= 0 ? "&" : "?")
+            + "download=" + encodeURIComponent(s.fileName || String(i + 1));
+          var a = document.createElement("a");
+          a.href = url;
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }, i * 400);
+      });
+      toast("낱장으로 내려받습니다");
+    }
+
+    function downloadImages(topic, btn) {
+      var shots = (topic.images || []).filter(function (s) { return s.url; });
+      if (shots.length === 0) { toast("내려받을 이미지가 없습니다"); return; }
+
+      var label = btn.textContent;
+      btn.disabled = true;
+
+      var used = {};
+      var files = [];
+      var failed = 0;
+      var chain = Promise.resolve();
+
+      shots.forEach(function (s, i) {
+        chain = chain.then(function () {
+          btn.textContent = "⬇️ 내려받는 중 " + (i + 1) + "/" + shots.length;
+          return fetch(s.url).then(function (res) {
+            if (!res.ok) throw new Error(String(res.status));
+            return res.arrayBuffer();
+          }).then(function (buf) {
+            files.push({
+              name: uniqueName(used, s.fileName || (i + 1) + ".jpg"),
+              data: new Uint8Array(buf)
+            });
+          }).catch(function () { failed += 1; });
+        });
+      });
+
+      chain.then(function () {
+        btn.disabled = false;
+        btn.textContent = label;
+        if (files.length === 0) { downloadOneByOne(shots); return; }
+        try {
+          saveBlob(new Blob([zipStore(files)], { type: "application/zip" }), zipFileName(topic));
+        } catch (e) {
+          downloadOneByOne(shots);
+          return;
+        }
+        toast(failed === 0
+          ? "이미지 " + files.length + "장을 저장했습니다"
+          : "이미지 " + files.length + "장 저장 · " + failed + "장 실패");
+      });
     }
 
     function findTopic(jobId) {
@@ -631,6 +734,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         h += '<span class="doc-sub" style="align-self:center">네이버 배리에이션 없음</span>';
       }
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
+      if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
       if (edits) h += '<button class="btn" id="revert">↩️ 원본으로</button><span class="edited-badge">이 브라우저에서 수정됨</span>';
       h += '</div>';
@@ -708,6 +812,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       }
       var promptBtn = document.getElementById("c-prompt");
       if (promptBtn) promptBtn.addEventListener("click", function () { copyText(promptPack(topic)); });
+
+      var dlBtn = document.getElementById("dl-images");
+      if (dlBtn) dlBtn.addEventListener("click", function () { downloadImages(topic, dlBtn); });
 
       var editing = false;
       var editBtn = document.getElementById("edit-toggle");
