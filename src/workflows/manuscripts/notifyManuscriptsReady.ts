@@ -48,28 +48,35 @@ export function buildManuscriptReadyMessage(
   // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다 - 여기서 예외를
   // 던지면 "원고 준비 완료" 알림 자체가 통째로 사라진다.
   // 2026-09-22 네이버 운영 재개: 버튼이 1개 -> 3개가 됐다. 한 줄에 몰면 텔레그램에서 글자가
-  // 잘려 무슨 버튼인지 안 보이므로 줄을 나눈다.
+  // 잘려 무슨 버튼인지 안 보이므로 줄을 나눈다. 2026-09-29 내려받기가 붙어 4개가 됐고,
+  // 그래서 **두 줄로** 나눈다(한 줄 4개는 글자가 잘린다).
   //   · 이미지 수정 - 빈 자리 재수집 + 사용자가 번호·요구사항으로 지정한 자리 다시 만들기
+  //   · 맥으로 내려받기 - 보관함 내보내기를 30분 주기 전에 지금 돌린다. 맥의 폴러가 집어 간다
   //   · 블로그 발행 - Blogspot 공식 API라 GitHub Actions에서 바로 끝난다
   //   · 네이버 발행 - 공식 API가 없어 로그인된 브라우저가 필요하다. 맥의 로컬 폴러가 집어 간다
-  let actionRow: TelegramInlineKeyboardButton[] = [];
+  let actionRows: TelegramInlineKeyboardButton[][] = [];
   try {
     const jobId = outcome.topic.jobId;
-    actionRow = [
-      { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
-      { text: "🔵 블로그 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") },
-      { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") },
+    actionRows = [
+      [
+        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
+      ],
+      [
+        { text: "🔵 블로그 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") },
+        { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") },
+      ],
     ];
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
-    actionRow = [];
+    actionRows = [];
   }
 
   if (pagesUrl) {
     buttons = [[{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }]];
-    if (actionRow.length > 0) buttons.push(actionRow);
+    if (actionRows.length > 0) buttons.push(...actionRows);
   } else {
-    if (actionRow.length > 0) buttons = [actionRow];
+    if (actionRows.length > 0) buttons = actionRows;
     lines.push("", `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`, "위 파일을 브라우저로 열어 원고를 확인·복사해 붙여넣어 주세요.");
   }
 

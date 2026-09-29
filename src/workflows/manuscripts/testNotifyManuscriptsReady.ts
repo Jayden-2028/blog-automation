@@ -84,20 +84,23 @@ main().catch((error) => {
   process.exit(1);
 });
 
-// --- 액션 버튼(2026-09-22 네이버 재개로 1개 -> 3개) ----------------------------------------------
+// --- 액션 버튼(2026-09-22 네이버 재개로 1개 -> 3개, 2026-09-29 내려받기로 4개) ------------------
 {
   const JOB = "054bfe0b-1234-4abc-8def-0123456789ab";
   const withUuid = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
   const rows = withUuid.replyMarkup?.inline_keyboard ?? [];
 
-  // 버튼이 3개가 되면서 줄을 나눴다 - 한 줄에 몰면 텔레그램에서 글자가 잘려 구분이 안 된다.
-  if (rows.length !== 2) throw new Error(`❌ 페이지 열기 줄 + 액션 줄, 두 줄이어야 한다 (${JSON.stringify(rows)})`);
+  // 버튼이 4개가 되면서 두 줄로 나눴다 - 한 줄에 몰면 텔레그램에서 글자가 잘려 구분이 안 된다.
+  if (rows.length !== 3) throw new Error(`❌ 페이지 열기 줄 + 액션 두 줄, 세 줄이어야 한다 (${JSON.stringify(rows)})`);
   if (!rows[0][0].url?.includes(`#${JOB}`)) throw new Error("❌ 첫 줄은 원고 페이지 딥링크여야 한다");
 
-  const actions = rows[1];
-  if (actions.length !== 3) throw new Error(`❌ 액션 버튼 3개여야 한다 (${JSON.stringify(actions)})`);
+  const actions = [...rows[1], ...rows[2]];
+  if (rows[1].length !== 2 || rows[2].length !== 2) {
+    throw new Error(`❌ 액션 버튼은 두 줄에 2개씩이어야 한다 (${JSON.stringify(rows.slice(1))})`);
+  }
   const expected = [
     { needle: "이미지", data: `publish:images:${JOB}` },
+    { needle: "내려받기", data: `publish:export:${JOB}` },
     { needle: "블로그", data: `publish:blogspot:${JOB}` },
     { needle: "네이버", data: `publish:naver:${JOB}` },
   ];
@@ -111,5 +114,5 @@ main().catch((error) => {
   const legacyRows = legacy.replyMarkup?.inline_keyboard ?? [];
   if (legacyRows.length !== 1 || legacyRows[0].length !== 1) throw new Error("❌ UUID가 아니면 액션 버튼만 빠져야 한다");
   if (!legacy.text.includes("원고 준비 완료")) throw new Error("❌ 알림 본문은 그대로여야 한다");
-  console.log("✅ 액션 버튼 - 이미지 수정/블로그 발행/네이버 발행, UUID 아니면 생략");
+  console.log("✅ 액션 버튼 - 이미지 수정/맥으로 내려받기/블로그 발행/네이버 발행, UUID 아니면 생략");
 }

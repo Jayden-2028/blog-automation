@@ -25,6 +25,7 @@ import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } 
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
+import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
 import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
@@ -167,6 +168,7 @@ const PUBLISH_RETRY_LABEL: Record<PublishDecisionAction, string> = {
   blogspot: "🔵 블로그 발행",
   naver: "🟢 네이버 발행",
   images: "🖼 이미지 수정",
+  export: "⬇️ 맥으로 내려받기",
 };
 
 export type HandlePublishDecisionOutcome =
@@ -234,6 +236,11 @@ export type TelegramBotOptions = {
    * GitHub Actions에서 못 돌린다. 맥의 로컬 폴러가 이 요청을 집어 간다.
    */
   requestNaverPublish?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
+  /**
+   * 맥 보관함 내보내기 **요청**(2026-09-29). 네이버와 같은 이유로 여기서 끝낼 수 없다 -
+   * 맥 디스크에 쓰는 일이라 맥의 폴러가 집어 간다.
+   */
+  requestManuscriptExport?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   /** 승인(confirm) 시 원고 상태도 함께 바꾸는 데 쓴다(SPRINT_3_DESIGN.md 8절). job의 최신 원고 1건을 찾는다. */
   findLatestArticleByJobId?: (jobId: string) => Promise<ArticleRow | null>;
@@ -308,6 +315,7 @@ export class TelegramBot {
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly publishToBlogspot: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
   private readonly requestNaverPublish: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
+  private readonly requestManuscriptExport: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
   private readonly updateArticleStatus: (articleId: number, status: ArticleStatus) => Promise<ArticleRow | null>;
@@ -346,6 +354,8 @@ export class TelegramBot {
     this.publishToBlogspot =
       options.publishToBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId, { asDraft: false }));
     this.requestNaverPublish = options.requestNaverPublish ?? ((job) => requestNaverPublish(job));
+    this.requestManuscriptExport =
+      options.requestManuscriptExport ?? ((job) => requestManuscriptExport(job));
     this.mergeJobMetadata =
       options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
     this.findLatestArticleByJobId =
@@ -844,6 +854,23 @@ export class TelegramBot {
       };
     }
 
+    if (parsed.action === "export") {
+      // 맥 보관함 내보내기는 맥 디스크에 쓰는 일이라 여기(GitHub Actions)서 끝낼 수 없다.
+      // 네이버와 같은 구조 - 요청만 남기고 맥의 폴러(job:export-poll)가 집어 간다.
+      const queued = await this.requestManuscriptExport(job);
+      return {
+        outcome: { status: "queued", action: "export" },
+        message: [
+          queued.queued ? "⬇️ <b>맥으로 내려받기를 요청했습니다</b>" : "ℹ️ <b>이미 요청돼 있습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          queued.queued
+            ? "맥이 켜져 있으면 1분 안에 보관함에 들어옵니다. 끝나면 폴더 경로를 보내드립니다."
+            : escapeTelegramHtml(queued.reason ?? ""),
+        ].join("\n"),
+      };
+    }
+
     if (parsed.action === "images") {
       // 자리 목록을 보여주고 **답장**을 기다린다. 여기서 바로 재수집하지 않는 이유는, 어느
       // 자리가 마음에 안 드는지 사람만 알기 때문이다(빈 자리는 지정 없이도 자동으로 채운다).
@@ -1242,6 +1269,12 @@ export class TelegramBot {
         case "queued":
           // 네이버는 여기서 끝나지 않는다 - 맥의 폴러가 실제로 올린다. 잠그되 "발행됨"이라고
           // 말하지 않는다. 아직 안 올라갔는데 올라갔다고 하면 사용자가 확인하러 갔다 헛걸음한다.
+          //
+          // 내려받기는 **잠그지 않는다**(2026-09-29). 이미지 수정 뒤 다시 받는 것이 정상 흐름이라
+          // 한 번 누르면 못 누르게 되면 곤란하다. 요청됐다는 표시만 남기고 콜백은 살려 둔다.
+          if (action === "export") {
+            return { text: "⬇️ 요청됨 (다시)", callback_data: buildPublishDecisionCallbackData(parsed.jobId, action) };
+          }
           return { text: "🟢 예약됨", callback_data: "noop" };
         case "not_wired":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
@@ -1274,15 +1307,21 @@ export class TelegramBot {
     } else {
       // Worker가 버튼을 "처리 중…" 하나로 덮어 원본이 없다 - 세 버튼을 다시 세운다.
       // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
-      keyboard = [
-        (["images", "blogspot", "naver"] as PublishDecisionAction[]).map(
+      // 줄 나눔은 notifyManuscriptsReady의 배치와 같게 유지한다 - 한 줄에 4개를 몰면 텔레그램이
+      // 글자를 잘라 무슨 버튼인지 안 보인다.
+      const rows: PublishDecisionAction[][] = [
+        ["images", "export"],
+        ["blogspot", "naver"],
+      ];
+      keyboard = rows.map((row) =>
+        row.map(
           (action) =>
             settled(action) ?? {
               text: PUBLISH_RETRY_LABEL[action],
               callback_data: buildPublishDecisionCallbackData(parsed.jobId, action),
             }
-        ),
-      ];
+        )
+      );
     }
 
     await this.post("editMessageReplyMarkup", {
