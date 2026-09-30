@@ -94,7 +94,7 @@ recon 도중 robots.txt 판정 버그를 찾아 고쳤다: `Allow`를 무시하�
 |---|---|---|
 | 루리웹 `/best` | robots 금지 없음, HTTP 200(164,812자) | ✅ **provider 구현 완료** |
 | 에펨코리아 `/best` | robots 허용, HTTP 200(70~74KB, 2회). Cloudflare 차단 없음 | ✅ **provider 구현 완료** |
-| MLB파크 `/mp/best.php` | robots 금지 없음 | ⬜ 루리웹 다음 순서 |
+| MLB파크 | `User-agent: *`에 `Disallow: /`. 검색엔진 봇만 이름으로 허용 | ⛔ **제외**(사이트 전체. UA 위장이 필요해 §5-3 위반) |
 | 다음카페 `/_c21_/home` | robots는 허용하는데 HTTP 500 | ⬜ URL이 낡음. 새 URL 찾거나 드롭 |
 
 에펨코리아 파서(`src/services/community/fmkorea/`, 2026-10-01): 제목 anchor의 클래스
@@ -108,6 +108,11 @@ recon 도중 robots.txt 판정 버그를 찾아 고쳤다: `Allow`를 무시하�
 `excludeCandidateInserts`가 키워드 어휘로 걸러냈는데, 여기서는 사이트가 붙여준 표시로 더 앞단에서
 뺄 수 있다. ⚠️ 완전하지는 않다 - 실측에서 쿠팡 딜 게시글 1건이 `hotdeal0`으로 올라와 있었다
 (핫딜 게시판이 아닌 곳에 올라온 글로 보인다). LLM 추출과 키워드 필터가 2차 그물이다.
+
+**커뮤니티 확장은 여기서 끝났다(2026-10-01).** 사용자가 제시한 6곳 중 실제로 붙은 것은 루리웹과
+에펨코리아 둘이다. 나머지 넷(클리앙·인스티즈·디시인사이드·MLB파크)은 사이트가 AI 크롤러를 이름으로
+차단하거나 기본 UA를 통째로 막았다 - 우회 수단(UA 위장)은 있지만 쓰지 않는다. 수집 소스는
+더쿠·루리웹·에펨코리아 3곳으로 확정.
 
 루리웹 파서(`src/services/community/ruliweb/`): `a.subject_link` 선택(레이아웃 유틸리티 클래스
 `deco/flex/center`는 의도적으로 제외 - 디자인 변경에 같이 깨진다). 상위 3건(`tr.best_top_row`)만
