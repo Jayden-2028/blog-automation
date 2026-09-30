@@ -30,7 +30,10 @@ fi
 
 { command -v claude >/dev/null || [ -x "$HOME/.local/bin/claude" ]; } && pass "claude CLI" || soft "claude CLI 없음(로컬 헤드리스 사용 시 필요)"
 [ -d "$HOME/Library/Caches/ms-playwright" ] && pass "Playwright 브라우저" || fail "npx playwright install chromium"
-N="${NAVER_PUBLISH_PROFILE_DIR:-.local/naver-publish-profile}"; [ -d "$N" ] && pass "네이버 세션 프로필 폴더" || soft "네이버 세션 없음 -> npm run setup:naver-publish 로 로그인"
+# 프로필 경로는 셸 환경이 아니라 .env에 있으므로 거기서 읽는다(코드 기본값과 같은 우선순위).
+N="$(grep -E '^NAVER_PUBLISH_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
+N="${N:-.local/naver-publish-profile}"; N="${N/#\~/$HOME}"
+ [ -d "$N" ] && pass "네이버 세션 프로필 폴더 ($N)" || soft "네이버 세션 없음 -> npm run setup:naver-publish 로 로그인"
 pmset -g | grep -E "^\s*sleep\s+0" >/dev/null && pass "절전 꺼짐(sleep 0)" || soft "pmset sleep 0 아님 - 서버로 쓰려면 setup.sh 안내 참고"
 pass "빌드 검사는 'npm run build'로 별도 실행"
 exit $FAIL
