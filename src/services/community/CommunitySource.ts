@@ -19,9 +19,12 @@
 //   RuliwebProvider.ts 구현 완료, 아래 목록에 포함.
 // - **클리앙/인스티즈/디시인사이드**: robots.txt가 ClaudeBot·anthropic-ai·Claude-Web를 명시적으로
 //   차단한다 -> §5-3에 따라 제외. 사이트의 의사가 분명해 재검토 대상도 아니다.
-// - **에펨코리아(/best)**: robots.txt는 `Allow: /best`로 열어뒀고 실제 응답도 정상(70,175자)이다.
-//   다만 제목 anchor의 클래스명이 난독화된 형태(`a.hotdeal_var8`)라, 그 이름이 날마다 바뀌는지
-//   확인한 뒤 파서를 쓴다 - 지금 붙이면 하루 만에 0건이 될 수 있다.
+// - **에펨코리아(/best)**: robots.txt가 `Disallow: /`와 함께 `Allow: /best`, `Allow: /best2`를 둬
+//   이 두 경로만 의도적으로 열어뒀다. 실제 응답도 정상(2회 실측, HTTP 200 / 70~74KB, Cloudflare
+//   챌린지 없음) -> FmkoreaProvider.ts 구현 완료, 아래 목록에 포함.
+//   제목 anchor의 클래스(`hotdeal_var8`)는 뜻을 알 수 없어 난독화가 의심됐다. 2회 실측에서 값은
+//   같았지만 간격이 몇 시간뿐이라 "고정"의 근거로는 약하다 - 그래서 **그 클래스를 아예 쓰지 않고**
+//   의미가 분명한 `h3.title` + `span.ellipsis-target`으로 파싱한다(parseFmkoreaHtml.ts 상단 주석).
 // - **MLB파크(/mp/best.php)**: robots.txt 금지 없음. 루리웹 다음 순서.
 // - **다음카페**: robots.txt는 /_c21_/home을 허용하지만 그 URL이 HTTP 500을 반환한다(URL이 낡음).
 //
@@ -34,6 +37,7 @@
 
 import { theqooProvider } from "./theqoo/TheqooProvider.js";
 import { ruliwebProvider } from "./ruliweb/RuliwebProvider.js";
+import { fmkoreaProvider } from "./fmkorea/FmkoreaProvider.js";
 
 /** 커뮤니티 인기글 목록 항목. 제목만 쓴다 - 본문/이미지/작성자는 저장하지 않는다(§5-3). */
 export type CommunityPost = {
@@ -61,4 +65,5 @@ export type CommunitySourceProvider = {
 export const COMMUNITY_SOURCE_PROVIDERS: readonly CommunitySourceProvider[] = [
   theqooProvider,
   ruliwebProvider,
+  fmkoreaProvider,
 ];

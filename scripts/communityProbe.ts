@@ -7,6 +7,8 @@
 //   2) 후보 그룹 하나를 골라 상세(상위 tr class 포함) 보기:
 //      npx tsx scripts/communityProbe.ts <파일> "<CSS 선택자>"
 //      예: npx tsx scripts/communityProbe.ts docs/ai-handoff/community-recon/theqoo.html "td.title > a"
+//   3) 행 하나의 원본 HTML 보기(클래스 이름에 기대지 않는 파서를 쓸 때):
+//      npx tsx scripts/communityProbe.ts <파일> "<CSS 선택자>" --raw
 //
 // 원리(1단계): <a> 태그 중 텍스트 길이가 사람이 쓴 게시글 제목다운 범위(8~60자)인 것만 추리고,
 // 그 <a>의 class(또는 부모 요소의 class)별로 묶어서 몇 개씩 나오는지 센다. 실제 목록은 같은
@@ -25,6 +27,9 @@ const MIN_TITLE_LENGTH = 8;
 const MAX_TITLE_LENGTH = 60;
 const TOP_GROUPS_TO_SHOW = 5;
 const SAMPLE_TITLES_PER_GROUP = 8;
+/** --raw로 보여줄 행 수와 행당 최대 길이. 원문을 통째로 옮기지 않기 위한 상한이다. */
+const RAW_ROWS_TO_SHOW = 2;
+const RAW_MAX_LENGTH = 1200;
 
 function classifyGroup(anchor: HTMLElement): string {
   const anchorClass = anchor.getAttribute("class")?.trim();
@@ -66,11 +71,35 @@ function printDetail(root: HTMLElement, selector: string): void {
   });
 }
 
+/** 3단계: 행 하나의 원본 HTML을 그대로 보여준다. 어떤 anchor가 제목이고 어떤 게 댓글수/작성자인지
+ * 클래스 이름 없이 구분하려면(난독화 의심 클래스에 기대지 않으려면) 결국 원본을 봐야 한다.
+ * 실제 게시글 원문을 통째로 옮기지 않도록 앞의 몇 건만, 길이도 잘라서 출력한다. */
+function printRawRows(root: HTMLElement, selector: string, count: number): void {
+  const matches = root.querySelectorAll(selector);
+  if (matches.length === 0) {
+    console.log(`선택자 "${selector}"에 매칭되는 요소가 없다.`);
+    return;
+  }
+
+  console.log(`▶ 선택자 "${selector}" 매칭 ${matches.length}건 중 앞 ${Math.min(count, matches.length)}건의 상위 행 원본\n`);
+
+  matches.slice(0, count).forEach((anchor, index) => {
+    const row = findRowAncestor(anchor) ?? anchor;
+    const raw = row.toString().replace(/\s+/g, " ").trim();
+    console.log(`--- ${index + 1} (${raw.length}자) ---`);
+    console.log(raw.length > RAW_MAX_LENGTH ? `${raw.slice(0, RAW_MAX_LENGTH)} …(이하 생략)` : raw);
+    console.log();
+  });
+}
+
 function main(): void {
   const filePath = process.argv[2];
   const selector = process.argv[3];
+  const raw = process.argv.includes("--raw");
   if (!filePath) {
-    console.error('사용법: npx tsx scripts/communityProbe.ts <저장된 HTML 경로> ["<CSS 선택자>"]');
+    console.error(
+      '사용법: npx tsx scripts/communityProbe.ts <저장된 HTML 경로> ["<CSS 선택자>"] [--raw]'
+    );
     process.exitCode = 1;
     return;
   }
@@ -78,6 +107,10 @@ function main(): void {
   const html = readFileSync(filePath, "utf-8");
   const root = parse(html);
 
+  if (selector && raw) {
+    printRawRows(root, selector, RAW_ROWS_TO_SHOW);
+    return;
+  }
   if (selector) {
     printDetail(root, selector);
     return;
