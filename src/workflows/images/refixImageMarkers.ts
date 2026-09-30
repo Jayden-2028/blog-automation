@@ -37,7 +37,7 @@ const RULE_LABEL: Record<ImageMarkerViolation, string> = {
   news_event: "§8-3 특정 일시의 회의·발표 현장",
 };
 
-/** 한글·가나. AI 생성 프롬프트는 영어여야 한다(output-format.md §8) - 섞이면 배경이 엉뚱하게 그려진다. */
+/** 한글·가나. AI 생성 프롬프트는 영어여야 한다(images.md §8) - 섞이면 배경이 엉뚱하게 그려진다. */
 const NON_ENGLISH_IN_PROMPT = /[가-힣ぁ-んァ-ン]/;
 
 /**
@@ -215,7 +215,7 @@ export type ApplyMarkerFixesResult =
  * (심정지 원고: 줄 5 / 블록 3)에서 둘이 어긋나 **엉뚱한 자리를 바꿨다.** 파이프라인의 다른 코드
  * (생성·수집·뷰어)가 전부 블록 기준 index로 이미지를 짝지으므로 블록 기준이 정본이다.
  *
- * 줄 수와 블록 수가 다르면 그 원고는 출력 형식 계약(output-format.md §8 - 마커 앞뒤 빈 줄 2개)을
+ * 줄 수와 블록 수가 다르면 그 원고는 출력 형식 계약(images.md §8 - 마커 앞뒤 빈 줄 2개)을
  * 어긴 것이라 안전하게 짝지을 수 없다. 고치지 않고 거부한다 - 잘못 바꾸느니 그대로 두는 게 낫다.
  */
 export function applyMarkerFixes(body: string, imagePrompts: string[], fixes: MarkerFix[]): ApplyMarkerFixesResult {
@@ -229,7 +229,7 @@ export function applyMarkerFixes(body: string, imagePrompts: string[], fixes: Ma
       ok: false,
       reason:
         `마커 줄 ${markerLineCount}개와 이미지 블록 ${blockCount}개가 다릅니다 - 마커 앞뒤가 빈 줄로 ` +
-        `떨어져 있지 않아(output-format.md §8) 자리를 안전하게 짝지을 수 없습니다.`,
+        `떨어져 있지 않아(images.md §8) 자리를 안전하게 짝지을 수 없습니다.`,
     };
   }
 

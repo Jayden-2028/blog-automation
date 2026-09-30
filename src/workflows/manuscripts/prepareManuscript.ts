@@ -33,7 +33,6 @@ import { readImageDirectUrls, readImageRequirements } from "../images/applyImage
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
-import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
@@ -109,18 +108,6 @@ export type PrepareManuscriptOptions = {
         slots: FallbackImagePrompt[];
         failures: string[];
       }>);
-  /**
-   * `표 생성` 자리 렌더. 기본은 renderTableImagesForJob(본문 표·목록 → Chromium → Storage).
-   * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
-   */
-  renderTableImages?:
-    | false
-    | ((input: {
-        jobId: string;
-        body: string;
-        imagePrompts: string[];
-        filledIndexes: number[];
-      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
   /**
    * `페이지 캡처` 자리. 기본은 capturePagesForJob(리서처가 정한 URL을 Chromium으로 연다).
    * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
@@ -273,8 +260,6 @@ export async function prepareManuscript(
   if (policyNote) console.log(`· [manuscripts] ${job.keyword}: ${policyNote}`);
   const collectWebImages =
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
-  const renderTableImages =
-    options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
@@ -394,24 +379,6 @@ export async function prepareManuscript(
     }
   }
 
-  // `표 생성` 자리를 본문 데이터로 그린다(2026-09-18). 웹 검색보다 **먼저** 해야 한다 - 일정·순위표는
-  // 검색으로 못 찾는 게 실측으로 드러났고, 우리 데이터로 그리는 편이 정확하다.
-  if (renderTableImages && !job.metadata?.tableImagesReadyAt) {
-    const outcome = await renderTableImages({
-      jobId: job.id,
-      body: content,
-      imagePrompts: slotPrompts,
-      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
-    });
-    imageFailures.push(...outcome.failures);
-    if (outcome.images.length > 0) {
-      images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
-        (a, b) => a.index - b.index
-      );
-      await mergeJobMetadata(job.id, { tableImagesReadyAt: now().toISOString(), images });
-    }
-  }
-
   // `페이지 캡처` 자리(2026-09-18). 리서처가 열어본 URL을 그대로 연다 - 웹 검색으로는 못 찾고
   // AI로도 못 만드는데 주소만 알면 되는 자리다(스타벅스 프로모션 페이지, OTT 시청 화면 등).
   // 표 렌더와 웹 수집 **사이**에 둔다: 표보다 구체적이고, 웹 검색보다 확실하다.
@@ -466,7 +433,7 @@ export async function prepareManuscript(
 
     // 웹에서 못 찾은 자리를 AI 생성으로 메운다(2026-09-17 사용자 보고 대응). 지금까지는 여기서
     // 끝나 자리가 그대로 비었다 - 09-17 원고 20자리 중 18자리가 그렇게 비었다. "빈 자리보다 AI
-    // 이미지가 낫다"는 방침(rules/output-format.md §8-4)을 실행에도 반영한다.
+    // 이미지가 낫다"는 방침(rules/images.md §8-4)을 실행에도 반영한다.
     //
     // 본문 마커는 `웹 검색` 그대로 둔다: 그 자리가 원래 실제 사진을 원한다는 사실은 남아 있어야
     // 나중에 사람이 더 나은 사진으로 갈아끼울 수 있다.

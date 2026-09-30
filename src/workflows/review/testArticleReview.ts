@@ -339,7 +339,7 @@ function main(): void {
   assert(imageOk.length === 0, `웹 검색 대진표 + 장면형 AI 생성은 통과해야 한다 (실제: ${JSON.stringify(imageOk)})`);
   console.log("✅ image: 웹 검색 대진표·장면형 AI 생성 통과");
 
-  // i3) 화면 캡처는 획득 방식과 무관하게 경고(output-format.md §8-2, 2026-09-17).
+  // i3) 화면 캡처는 획득 방식과 무관하게 경고(images.md §8-2, 2026-09-17).
   const screens = checkImagePrompts(
     "[IMAGE: 국가법령정보센터의 산업안전보건법 제41조 조문 화면 — 웹 검색]\n[IMAGE PROMPT: 산업안전보건법 41조]\n\n[IMAGE: 정부24 지원금 신청 화면 — 웹 검색]\n[IMAGE PROMPT: 정부24 신청]"
   );

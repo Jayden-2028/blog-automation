@@ -103,7 +103,7 @@ const OPENAI_IMAGE_MODEL = "gpt-image-2";
 /**
  * 프롬프트가 지시한 비율 -> 실제 요청 크기.
  *
- * 왜 필요한가(2026-09-16 실측): 집필 규격(`prompts/writing/rules/output-format.md`)은 비율을
+ * 왜 필요한가(2026-09-16 실측): 집필 규격(`prompts/writing/rules/images.md`)은 비율을
  * 정하고 writer도 프롬프트 끝에 `16:9 aspect ratio`를 적어 보내는데, 여기서 `size`를
  * 하드코딩해 **그 지시를 통째로 덮어쓰고 있었다** - 실제 산출물이 전부 정사각(1024x1024)이라
  * 규격이 의도한 가로형 본문 이미지가 한 번도 나온 적이 없다. 프롬프트와 API 파라미터가 서로 다른

@@ -125,7 +125,6 @@ export function describeImageEditRequests(requests: readonly ImageEditRequest[])
 export const ACQUISITION_LABEL = {
   search: "웹 검색",
   ai: "AI 생성",
-  table: "표 생성",
   capture: "페이지 캡처",
 } as const;
 
@@ -148,8 +147,7 @@ export function inferAcquisition(requirement: string): RequestedAcquisition | nu
   if (/검색|찾아|구글|네이버/.test(text)) return "search";
   // 2) AI 생성 - 실물이 없어도 되는 그림을 원하는 경우.
   if (/AI|에이아이|일러스트|그려|그림으로|생성해/i.test(text)) return "ai";
-  // 3) 표 - 데이터 정리를 원하는 경우.
-  if (/표로|표\s*생성|도표|차트|인포그래픽/.test(text)) return "table";
+  // 3) 표·차트·인포그래픽 요청은 전환하지 않는다 - AI가 만든 표 이미지는 2026-09-30부터 쓰지 않는다(null = 현재 방식 유지).
   // 4) 페이지 캡처 - "페이지"가 함께 나올 때만. "카카오톡 캡쳐"를 여기로 보내면 안 된다.
   if (/페이지\s*캡처|사이트\s*캡처|홈페이지.*캡처/.test(text)) return "capture";
 
