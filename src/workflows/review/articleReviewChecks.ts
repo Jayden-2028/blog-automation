@@ -310,19 +310,31 @@ const COVERAGE_NARRATIVE_PATTERN =
 
 /**
  * 우리 취재·검증 과정의 확인/확정 여부를 원고 내용으로 서술하는 것. facts-and-hedging.md
- * 핵심 원칙 2번 - "아직 공개되지 않았습니다"(세상에 대한 사실)는 다른 동사라 안 걸린다.
+ * 핵심 원칙 2번. ("공개되지 않았다"류는 09-30부터 별도 패턴 UNPUBLISHED_PATTERN이 잡는다.)
  */
 const VERIFICATION_STATUS_PATTERN =
   /확인되지\s*않았|확정되지\s*않았|확인되지\s*않고|확인해\s*주는[^.!?\n]{0,20}(?:없다|없습니다|여전히)/g;
 
 /**
  * 부분 데이터 갭을 알리는 문장. facts-and-hedging.md §4-1.
- * "아직 공개되지 않았습니다"처럼 승인된 단일 서술은 안 걸리게, 이 항목은 없다는 사실 자체를
+ * 이 항목은 없다는 사실 자체를
  * 알리는 특정 동사 조합만 잡는다(오탐 축소 - 2026-09-15/16 실측 문구 기준). 대조 접속어
  * (별도로/따로/구체적으로)가 없는 단독 문장("~뿐 ~는 밝히지 않았다")도 2026-09-16부터 포함.
  */
 const PARTIAL_GAP_PATTERN =
   /(?:별도로|따로|구체적으로)\s*(?:나오지|제시되지|확인되지|언급되지)\s*않았|(?:밝히지|명시하지)\s*않았습니다/g;
+
+/**
+ * 기준 시점·확인 시점 표기(2026-09-30 핵심 원칙 3). "2026년 9월 기준입니다", "9월 18일 기준",
+ * "18일자로 확인된", "기준으로 찾아본"처럼 조사·확인 시점을 짚는 표현. 날짜 뒤에 붙은 "기준"만
+ * 잡으므로 "1인 기준", "만 12세 기준"은 안 걸린다.
+ */
+const AS_OF_PATTERN =
+  /(?:\d{4}년|\d{1,2}월|\d{1,2}일)(?:\s*\d{1,2}[월일])*\s*(?:시점\s*)?기준|\d{1,2}일자로\s*확인|기준으로\s*(?:찾아본|확인한|정리한)/g;
+
+/** 공개·확정되지 않은 값을 서술하는 문장(2026-09-30 핵심 원칙 4) - 없는 값은 쓰지 않는다. */
+const UNPUBLISHED_PATTERN =
+  /(?:공개|발표|결정|공지)되지\s*않았|(?:일정|시점|금액|요금|가격|날짜)[^.!?\n]{0,8}미정/g;
 
 /** 참고 자료 이후는 남의 글 링크 제목이라 대상이 아니다(stripReferencesSection과 같은 이유). */
 export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
@@ -365,6 +377,24 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
       category: "quality",
       severity: "warning",
       message: '자료에 없는 항목의 부재 자체를 언급한 것으로 보입니다(facts-and-hedging.md §4-1 - 없으면 그 항목을 그냥 다루지 않는다)',
+    });
+  }
+
+  AS_OF_PATTERN.lastIndex = 0;
+  if (AS_OF_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '"○월 기준/○일자로 확인" 같은 기준 시점 표기가 있습니다(facts-and-hedging.md 핵심 원칙 3 - 값은 시점 없이 단정한다)',
+    });
+  }
+
+  UNPUBLISHED_PATTERN.lastIndex = 0;
+  if (UNPUBLISHED_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '"아직 공개되지 않았습니다/일정 미정" 같은 비공개·미정 서술이 있습니다(facts-and-hedging.md 핵심 원칙 4 - 없는 값은 쓰지 않는다)',
     });
   }
 
