@@ -40,7 +40,7 @@ export type ReviewCheck = {
  * 법적 검사가 "루머"를 잡았는데, 그건 우리 원고의 추측성 표현이 아니라 남의 글 제목이다.
  * 팩트 검사도 마찬가지로 링크 제목의 숫자("2026~2027 신제품")를 우리 주장으로 오인한다.
  */
-function stripReferencesSection(body: string): string {
+export function stripReferencesSection(body: string): string {
   // 헤더가 "## 참고 자료"(구식)와 "**참고 자료**"(2026-09-06부터, writer.md §6) 둘 다 나올 수 있다.
   const match = body.match(/^(#{1,3}\s*|\*\*)참고\s*자료(\*\*)?/m);
   return match?.index === undefined ? body : body.slice(0, match.index);

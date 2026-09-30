@@ -48,7 +48,6 @@ import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
 import { reviseBriefWithResearch } from "../brief/reviseBriefWithResearch.js";
 import type { ReviseBriefInput, ReviseBriefResult } from "../brief/reviseBriefWithResearch.js";
-import { countImageMarkers } from "./generateArticleVariant.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
@@ -289,6 +288,11 @@ function fileModifiedWithin(path: string, maxAgeMs: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** 본문의 `[IMAGE: ]` 마커 개수. 프롬프트(`[IMAGE PROMPT: ]`) 개수와 짝이 맞아야 한다. */
+export function countImageMarkers(body: string): number {
+  return body.split("\n").filter((line) => /^\[IMAGE:\s*[\s\S]*?\]$/.test(line.trim())).length;
 }
 
 export async function runResearchStage(
@@ -854,6 +858,13 @@ async function runWritingStageInner(
     draftFilePath: draftPath,
     // writer가 [IMAGE PROMPT:]로 남긴 이미지 제작 지시. 사용자가 이미지를 만들 때 참고.
     imagePrompts: parsed.imagePrompts,
+    // 발행 메타 - 배리에이션 단계가 없어져 writer가 직접 남긴다(원고 준비·발행이 여기서 읽는다).
+    draftMeta: {
+      searchDescription: parsed.searchDescription,
+      slug: parsed.slug,
+      shortName: parsed.shortName,
+      tags: parsed.hashtags.map((tag) => tag.replace(/^#/, "")),
+    },
     skillUsed: parsed.skillUsed,
     verdictFromResearch: parsed.verdictFromResearch,
     // writer가 남긴 <!-- 확인 필요 --> / <!-- 사용한 출처 --> 주석. 검수·감사용.

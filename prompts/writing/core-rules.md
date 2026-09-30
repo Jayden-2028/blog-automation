@@ -2,7 +2,7 @@
 
 > 위치: `prompts/writing/core-rules.md` · 기준일: 2026-09-30 (사용자 결정으로 신설)
 > **원고를 쓰는 모든 경로가 이 파일을 제일 먼저 읽는다** — 클라우드(GitHub Actions `claude -p`),
-> 맥 로컬, 대화형 세션, 배리에이션·수정 재작성 모두 같다(`src/workflows/writing/specFiles.ts`가
+> 맥 로컬, 대화형 세션, 수정 재작성 모두 같다(배리에이션 단계는 폐지 - 이 원고가 곧 최종본)(`src/workflows/writing/specFiles.ts`가
 > 읽을 파일 목록의 유일한 출처다). 이 파일과 다른 문서가 부딪히면 **이 파일이 이긴다.**
 > 상세 사례·근거는 `rules/facts-and-hedging.md`, 어투 표는 `style/voice.md`, 서식은 `rules/output-format.md`.
 

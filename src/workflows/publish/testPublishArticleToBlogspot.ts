@@ -49,24 +49,10 @@ const baseDeps = {
   enabled: true,
   loadJob: async () => job(),
   loadArticles: async () => [article()],
-  createVariantArticle: async (i: { jobId: string; title: string; content: string }) =>
-    article({ id: 2, platform: "blogspot", title: i.title, content: i.content }),
   loadJobPublications: async () => [] as PublicationRow[],
   savePublication: async (i: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) =>
     ({ id: 99, article_id: i.articleId, platform: "blogspot", status: i.status, published_url: i.publishedUrl, published_at: null, created_at: "x" }) as PublicationRow,
   countToday: async () => 0,
-  generateVariant: async () => ({
-    status: "success" as const,
-    variant: {
-      title: "배리에이션 제목",
-      searchDescription: "설명",
-      slug: "geunro-guide",
-      shortName: "짧은이름",
-      tags: ["근로장려금"],
-      body: "## 배리에이션 섹션\n\n다시 쓴 본문입니다. ".repeat(20),
-    },
-    durationMs: 10,
-  }),
   insertPost: async () => ({ ok: true as const, postId: "p1", url: "https://b.example.com/p1.html", isDraft: true }),
 };
 
@@ -83,25 +69,32 @@ async function main(): Promise<void> {
   assert(notApproved.ok === false && notApproved.reason === "job_not_approved", "미승인 처리 실패");
   console.log("✅ approved 아님 -> job_not_approved");
 
-  // 3) 일일 상한 도달 -> deferred(재시도). 배리에이션 LLM은 호출되지 않아야 한다.
-  let variantCalls = 0;
+  // 3) 일일 상한 도달 -> daily_limit.
   const limited = await publishArticleToBlogspot("job-1", {
     ...baseDeps,
     // 설정값을 그대로 읽는다 - 상한을 조정할 때마다 테스트가 깨지면 안 된다(2026-09-21 5 -> 20).
     countToday: async () => BLOGGER_CONFIG.dailyLimit,
-    generateVariant: async () => {
-      variantCalls++;
-      return baseDeps.generateVariant();
-    },
   });
   assert(limited.ok === false && limited.reason === "daily_limit", "일일 상한 처리 실패");
-  assert(variantCalls === 0, "상한 초과 시 배리에이션 LLM을 호출하면 안 된다");
-  console.log("✅ 일일 상한 -> daily_limit, LLM 미호출");
+  console.log("✅ 일일 상한 -> daily_limit");
 
-  // 4) 정상: 배리에이션 생성 + draft 발행 + publications pending 기록
-  const ok = await publishArticleToBlogspot("job-1", baseDeps);
-  assert(ok.ok === true && ok.isDraft === true && ok.variantCreated === true, `정상 발행 실패 (${JSON.stringify(ok)})`);
-  console.log("✅ 정상 -> 배리에이션 생성 + draft 발행 + 기록");
+  // 4) 정상: 작성 단계 원고 그대로 draft 발행 + 본문 끝 해시태그 줄은 뗀다 + draftMeta의 검색 설명 전달
+  let html4 = "";
+  let desc4: string | null | undefined;
+  const ok = await publishArticleToBlogspot("job-1", {
+    ...baseDeps,
+    loadJob: async () => job({ metadata: { draftMeta: { searchDescription: "초안 검색 설명", slug: null, shortName: null, tags: [] } } }),
+    loadArticles: async () => [article({ content: "본문입니다.\n\n#태그1 #태그2" })],
+    insertPost: async (input) => {
+      html4 = input.contentHtml;
+      desc4 = input.searchDescription;
+      return baseDeps.insertPost();
+    },
+  });
+  assert(ok.ok === true && ok.isDraft === true, `정상 발행 실패 (${JSON.stringify(ok)})`);
+  assert(!html4.includes("#태그1") && html4.includes("본문입니다."), `해시태그 줄은 본문에서 빠져야 한다 (${html4})`);
+  assert(desc4 === "초안 검색 설명", `draftMeta의 검색 설명이 전달돼야 한다 (${desc4})`);
+  console.log("✅ 정상 -> 작성 단계 원고 그대로 draft 발행 + 기록");
 
   // 5) 멱등성: 배리에이션 article이 이미 있고 그 publication이 published면 재발행 안 함
   let insertCalls = 0;
@@ -146,9 +139,6 @@ async function main(): Promise<void> {
     loadJob: async () =>
       job({ metadata: { channelMeta: { blogspot: { searchDescription: "복구된 설명", slug: null, tags: [] } } } }),
     loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "재사용 본문" })],
-    generateVariant: async () => {
-      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
-    },
     insertPost: async (input) => {
       insertedSearchDescription = input.searchDescription;
       return baseDeps.insertPost();
@@ -165,9 +155,6 @@ async function main(): Promise<void> {
     ...baseDeps,
     loadJob: async () => job({ metadata: { images: [{ index: 1, description: "설명", prompt: null, url: "https://img.example.com/1.png", provider: "openai", fileName: "01.png" }] } }),
     loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "본문 시작\n\n[IMAGE: 설명]\n\n본문 끝" })],
-    generateVariant: async () => {
-      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
-    },
     insertPost: async (input) => {
       insertedHtml = input.contentHtml;
       return baseDeps.insertPost();
@@ -192,9 +179,6 @@ async function main(): Promise<void> {
         },
       }),
     loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: "본문 시작\n\n[IMAGE: 설명]\n\n본문 끝" })],
-    generateVariant: async () => {
-      throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
-    },
     insertPost: async (input) => {
       insertedHtmlAb = input.contentHtml;
       return baseDeps.insertPost();
@@ -216,9 +200,6 @@ async function main(): Promise<void> {
       await publishArticleToBlogspot("job-1", {
         ...baseDeps,
         loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", content: bodyWithWebSearchMarker })],
-        generateVariant: async () => {
-          throw new Error("재사용 경로에서는 배리에이션을 다시 만들면 안 된다");
-        },
         insertPost: async (input) => {
           html = input.contentHtml;
           return { ok: true as const, postId: "p", url: "u", isDraft: publishAsDraft };

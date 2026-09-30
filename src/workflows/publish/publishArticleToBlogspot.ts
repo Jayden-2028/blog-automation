@@ -27,7 +27,6 @@ import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
 import type { BloggerPublishResult } from "../../services/publish/blogger/BloggerClient.js";
 import { convertArticleToHtml } from "../../services/publish/convertArticleToHtml.js";
 import {
-  createArticle,
   listArticlesByJobId,
   updateArticleStatus,
 } from "../../services/supabase/repositories/articleRepository.js";
@@ -37,8 +36,8 @@ import {
   listPublicationsByArticleIds,
   updatePublicationStatus,
 } from "../../services/supabase/repositories/publicationRepository.js";
-import { generateArticleVariant } from "../writing/generateArticleVariant.js";
-import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
+import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
+import { splitTrailingHashtags } from "../manuscripts/articleContentParts.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
 import { manuscriptBodyWithoutImages, substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
 import type {
@@ -63,7 +62,6 @@ export type PublishArticleToBlogspotResult =
       publicationId: number;
       url: string;
       isDraft: boolean;
-      variantCreated: boolean;
       alreadyDone: boolean;
       /** 새 글을 올린 게 아니라 **이미 있던 글의 본문을 지금 원고로 덮어썼다**(수정 반영). */
       updatedExisting?: boolean;
@@ -71,7 +69,6 @@ export type PublishArticleToBlogspotResult =
   | { ok: false; reason: "disabled"; detail: string }
   | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found"; detail: string }
   | { ok: false; reason: "daily_limit"; detail: string }
-  | { ok: false; reason: "variant_failed"; detail: string }
   | { ok: false; reason: "blogger_failed"; detail: string; stage: string };
 
 export type PublishArticleToBlogspotOptions = {
@@ -93,12 +90,6 @@ export type PublishArticleToBlogspotOptions = {
   asDraft?: boolean;
   loadJob?: (jobId: string) => Promise<ArticleJobRow | null>;
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
-  createVariantArticle?: (input: {
-    jobId: string;
-    title: string;
-    content: string;
-    aiModel: string | null;
-  }) => Promise<ArticleRow>;
   savePublication?: (input: {
     articleId: number;
     status: PublicationRow["status"];
@@ -110,11 +101,6 @@ export type PublishArticleToBlogspotOptions = {
    * 없으면 이 함수가 Supabase를 직접 친다.
    */
   markPublished?: (input: { publicationId: number; url: string; articleId: number }) => Promise<void>;
-  generateVariant?: (input: {
-    category: string | null;
-    baseTitle: string;
-    baseBody: string;
-  }) => Promise<GenerateArticleVariantResult>;
   insertPost?: (input: BloggerInsertInput) => Promise<BloggerInsertResult>;
   /** enabled override (테스트). 생략하면 BLOGGER_CONFIG.enabled. */
   enabled?: boolean;
@@ -151,16 +137,11 @@ export async function publishArticleToBlogspot(
 
   const loadJob = options.loadJob ?? ((id) => ArticleJobRepository.findById(id));
   const loadArticles = options.loadArticles ?? listArticlesByJobId;
-  const createVariantArticle =
-    options.createVariantArticle ??
-    (({ jobId: jid, title, content, aiModel }) =>
-      createArticle({ job_id: jid, title, content, status: "approved", ai_model: aiModel, platform: BLOGSPOT_PLATFORM }));
   const savePublication =
     options.savePublication ??
     (({ articleId, status, publishedUrl }) =>
       createPublication({ article_id: articleId, platform: BLOGSPOT_PLATFORM, status, published_url: publishedUrl }));
   const countToday = options.countToday ?? countTodayPublicationsByPlatform;
-  const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const insertPost = options.insertPost ?? ((input) => new BloggerClient().insertPost(input));
   const publishPost = options.publishPost ?? ((postId: string) => new BloggerClient().publishPost(postId));
   const updatePost =
@@ -181,8 +162,8 @@ export async function publishArticleToBlogspot(
   }
 
   const articles = await loadArticles(jobId);
-  const baseArticle = [...articles].reverse().find((a) => a.platform == null);
-  if (!baseArticle) {
+  const picked = pickFinalArticle(articles);
+  if (!picked) {
     return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 기준 원고가 없습니다: ${jobId}` };
   }
 
@@ -199,13 +180,12 @@ export async function publishArticleToBlogspot(
    */
   const buildContentHtml = (article: ArticleRow, draft: boolean): string => {
     const confirmedImages = readJobManuscriptImages(job);
-    const bodyWithImages = substituteConfirmedImages(article.content ?? "", confirmedImages);
+    const bodyWithImages = substituteConfirmedImages(splitTrailingHashtags(article.content ?? "").body, confirmedImages);
     return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages));
   };
 
-  // 이미 만들어 둔 배리에이션이 있으면 재사용(LLM 재지출 방지).
-  let variantArticle = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
-  let variantCreated = false;
+  // 최종 원고 = 작성 단계 원고(2026-09-30 배리에이션 폐지). 과거 배리에이션이 더 새것이면 그것.
+  const finalArticle: ArticleRow = picked.final;
 
   // 이 job의 원고가 블로그에 이미 올라가 있는지 확인한다. **article 한 건이 아니라 job 전체**를
   // 본다(2026-09-19): 수정 반영이 들어오면 배리에이션 article row가 새로 생기는데, 그 row만 보면
@@ -221,12 +201,12 @@ export async function publishArticleToBlogspot(
     //  - 공개 요청인데 아직 초안이다  -> 공개용 본문으로 덮어쓴 뒤 공개 전환(posts.publish).
     //    초안 본문은 "초안 모드"로 만들어져 채워지지 않은 마커가 글자 그대로 남아 있다.
     //  - 이미 공개된 글이다          -> 지금 원고(수정 반영본일 수 있다)로 본문을 갱신한다.
-    const shouldRefresh = Boolean(postId) && Boolean(variantArticle) && (done.status === "published" || (wantsPublic && done.status === "pending"));
+    const shouldRefresh = Boolean(postId) && (done.status === "published" || (wantsPublic && done.status === "pending"));
 
-    if (postId && variantArticle && shouldRefresh) {
+    if (postId && shouldRefresh) {
       const refreshed = await updatePost(postId, {
-        title: variantArticle.title ?? job.keyword,
-        contentHtml: buildContentHtml(variantArticle, false),
+        title: finalArticle.title ?? job.keyword,
+        contentHtml: buildContentHtml(finalArticle, false),
         labels: label ? [label] : undefined,
       });
       if (!refreshed.ok) {
@@ -238,18 +218,17 @@ export async function publishArticleToBlogspot(
         if (!promoted.ok) {
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
         }
-        await markPublished({ publicationId: done.id, url: promoted.url, articleId: variantArticle.id });
-        return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, variantCreated: false, alreadyDone: false };
+        await markPublished({ publicationId: done.id, url: promoted.url, articleId: finalArticle.id });
+        return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, alreadyDone: false };
       }
 
       // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다.
-      await markPublished({ publicationId: done.id, url: done.published_url ?? "", articleId: variantArticle.id });
+      await markPublished({ publicationId: done.id, url: done.published_url ?? "", articleId: finalArticle.id });
       return {
         ok: true,
         publicationId: done.id,
         url: done.published_url ?? "",
         isDraft: false,
-        variantCreated: false,
         alreadyDone: false,
         updatedExisting: true,
       };
@@ -260,7 +239,6 @@ export async function publishArticleToBlogspot(
       publicationId: done.id,
       url: done.published_url ?? "",
       isDraft: done.status === "pending",
-      variantCreated: false,
       alreadyDone: true,
     };
   }
@@ -281,32 +259,17 @@ export async function publishArticleToBlogspot(
   // (job.metadata.channelMeta.blogspot)에서 복구한다. 재사용 경로(이미 배리에이션이 있음)는 여기서
   // 채워지고, 신규 생성 경로는 아래에서 방금 만든 값으로 덮어쓴다.
   const channelMeta = (job.metadata?.channelMeta as ChannelMetaMap | undefined) ?? {};
-  let searchDescription: string | null = channelMeta[BLOGSPOT_PLATFORM]?.searchDescription ?? null;
-
-  if (!variantArticle) {
-    const result = await generateVariant({
-      category: job.category,
-      baseTitle: baseArticle.title ?? job.keyword,
-      baseBody: baseArticle.content ?? "",
-    });
-    if (result.status !== "success") {
-      return { ok: false, reason: "variant_failed", detail: result.error };
-    }
-    searchDescription = result.variant.searchDescription;
-    variantArticle = await createVariantArticle({
-      jobId,
-      title: result.variant.title,
-      content: result.variant.body,
-      aiModel: baseArticle.ai_model,
-    });
-    variantCreated = true;
-  }
+  const draftSearchDescription = (job.metadata?.draftMeta as { searchDescription?: unknown } | undefined)?.searchDescription;
+  const searchDescription: string | null =
+    (typeof draftSearchDescription === "string" ? draftSearchDescription : null) ??
+    channelMeta[BLOGSPOT_PLATFORM]?.searchDescription ??
+    null;
 
   const isDraft = options.asDraft ?? BLOGGER_CONFIG.publishAsDraft;
-  const contentHtml = buildContentHtml(variantArticle, isDraft);
+  const contentHtml = buildContentHtml(finalArticle, isDraft);
 
   const inserted = await insertPost({
-    title: variantArticle.title ?? job.keyword,
+    title: finalArticle.title ?? job.keyword,
     contentHtml,
     labels: label ? [label] : undefined,
     searchDescription,
@@ -314,18 +277,18 @@ export async function publishArticleToBlogspot(
   });
 
   if (!inserted.ok) {
-    await savePublication({ articleId: variantArticle.id, status: "failed", publishedUrl: null }).catch(() => {});
+    await savePublication({ articleId: finalArticle.id, status: "failed", publishedUrl: null }).catch(() => {});
     return { ok: false, reason: "blogger_failed", detail: `[${inserted.stage}] ${inserted.error}`, stage: inserted.stage };
   }
 
   const publication = await savePublication({
-    articleId: variantArticle.id,
+    articleId: finalArticle.id,
     status: inserted.isDraft ? "pending" : "published",
     publishedUrl: inserted.url,
   });
   // 공개 발행이면 배리에이션 원고 상태도 published로 올린다(기준 원고와 별개). draft면 pending 유지.
   if (!inserted.isDraft) {
-    await updateArticleStatus(variantArticle.id, "published").catch(() => {});
+    await updateArticleStatus(finalArticle.id, "published").catch(() => {});
   }
 
   return {
@@ -333,7 +296,6 @@ export async function publishArticleToBlogspot(
     publicationId: publication.id,
     url: inserted.url,
     isDraft: inserted.isDraft,
-    variantCreated,
     alreadyDone: false,
   };
 }

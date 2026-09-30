@@ -85,6 +85,17 @@ function main(): void {
   assert(noFm.hashtags.length === 2, "frontmatter 없어도 해시태그 추출");
   console.log("✅ frontmatter 없음 -> 첫 # 헤더 title 폴백");
 
+  // 발행 메타(2026-09-30): search_description / slug / short_name. 예시의 `# 설명` 주석을 따라 써도 걷어낸다.
+  const meta = parseDraftFile(
+    "---\ntitle: 제목\nsearch_description: 밤중수유를 끊는 시기와 방법을 정리했습니다   # 155자 이내\nslug: Night Feeding Weaning-Guide!\nshort_name: \"밤중수유\"\n---\n\n본문\n\n#태그"
+  );
+  assert(meta.searchDescription === "밤중수유를 끊는 시기와 방법을 정리했습니다", `검색 설명 주석 제거 (${meta.searchDescription})`);
+  assert(meta.slug === "night-feeding-weaning-guide", `slug 정규화 (${meta.slug})`);
+  assert(meta.shortName === "밤중수유", `shortName 정규화 (${meta.shortName})`);
+  const noMeta = parseDraftFile("---\ntitle: 제목\n---\n\n본문");
+  assert(noMeta.searchDescription === null && noMeta.slug === null && noMeta.shortName === null, "메타가 없으면 null");
+  console.log("✅ 발행 메타(search_description/slug/short_name) 파싱");
+
   console.log("\n✅ parseDraftFile 테스트 완료");
 }
 

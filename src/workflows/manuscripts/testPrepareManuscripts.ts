@@ -1,5 +1,7 @@
-// prepareManuscript / prepareApprovedManuscripts 테스트. LLM(generateVariant)·이미지 생성·
+// prepareManuscript / prepareApprovedManuscripts 테스트. 이미지 생성·
 // Supabase·파일시스템을 전부 주입해 오케스트레이션과 멱등성만 검증한다. 외부 API·DB 호출 없음.
+//
+// 2026-09-30: 배리에이션 단계 폐지 - 작성 단계 원고(platform=null)가 곧 최종 원고다.
 //
 // 2026-09-15 Blogspot 단독 운영(BLOGSPOT_ONLY_DESIGN.md): 채널 배정이 사라져 job 1건 = 원고 1건이다.
 // 예전 "배정표에 없는 카테고리 -> 실패" 케이스는 더 이상 존재하지 않는다(모든 카테고리가 통과).
@@ -74,21 +76,6 @@ function variantArticle(id: number, platform = "blogspot"): ArticleRow {
   } as ArticleRow;
 }
 
-const okVariant = async () => ({
-  status: "success" as const,
-  durationMs: 1,
-  variant: {
-    title: "blogspot 제목",
-    searchDescription: "blogspot 설명",
-    slug: "blogspot-slug",
-    shortName: "짧은이름",
-    tags: ["태그1", "태그2"],
-    // 실제 파이프라인 모양: 배리에이션도 [IMAGE: 설명] 단독 줄만 남긴다(프롬프트는
-    // job.metadata.imagePrompts에 별도 보관 - parseManuscriptBlocks 테스트 참고).
-    body: "blogspot 본문\n[IMAGE: 설명 — 웹 검색]\n계속 본문",
-  },
-});
-
 const noImages = async () => ({ images: [] as ManuscriptImage[], failures: [] as string[] });
 
 async function main(): Promise<void> {
@@ -102,7 +89,6 @@ async function main(): Promise<void> {
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
   console.log("✅ 기준 원고 없음 -> 실패");
@@ -110,8 +96,6 @@ async function main(): Promise<void> {
   // 2) 예전에 채널 배정이 안 되던 카테고리(육아)도 이제 그대로 통과해야 한다.
   const parenting = await prepareManuscript(job("a", "parenting"), {
     loadArticles: async () => [baseArticle()],
-    generateVariant: okVariant,
-    createVariantArticle: async () => variantArticle(99),
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async () => {},
     generateImages: false,
@@ -119,106 +103,68 @@ async function main(): Promise<void> {
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
-  assert(parenting.status === "success", "카테고리와 무관하게 Blogspot 원고를 만들어야 한다");
+  assert(parenting.status === "success", "카테고리와 무관하게 원고를 준비해야 한다");
   console.log("✅ 모든 카테고리 -> Blogspot 원고 1건 (채널 배정 실패 경로 없음)");
 
-  // 3) 신규 생성: 배리에이션 1건 + 파일 1개 + imagePrompts 전달
-  let generateCalls = 0;
-  let createCalls = 0;
+  // 3) 기준 원고가 곧 최종본: LLM 호출 없이 파일 1개 + draftMeta + imagePrompts 전달
   const writes: Record<string, string> = {};
-  const r3 = await prepareManuscript(job("a", "living", { imagePrompts: ["이미지 프롬프트 A"] }), {
-    loadArticles: async () => [baseArticle()],
-    generateVariant: async () => {
-      generateCalls += 1;
-      return okVariant();
-    },
-    createVariantArticle: async () => {
-      createCalls += 1;
-      return variantArticle(99);
-    },
-    writeManuscriptFile: async (path, content) => {
-      writes[path] = content;
-    },
-    mergeJobMetadata: async () => {},
-    generateImages: false,
-    collectWebImages: false,
-    loadPublishedPosts: false,
-    renderTableImages: false,
-    capturePages: false,
-    generateNaverVariant: false,
-  });
-  assert(r3.status === "success", "신규 생성 실패");
+  const r3 = await prepareManuscript(
+    job("a", "living", {
+      imagePrompts: ["이미지 프롬프트 A"],
+      draftMeta: { searchDescription: "검색 설명", slug: "my-slug", shortName: "짧은이름", tags: ["태그1", "태그2"] },
+    }),
+    {
+      loadArticles: async () => [baseArticle("기준 본문\n[IMAGE: 설명 — 웹 검색]\n계속 본문\n\n#태그1 #태그2")],
+      writeManuscriptFile: async (path, content) => {
+        writes[path] = content;
+      },
+      mergeJobMetadata: async () => {},
+      generateImages: false,
+      collectWebImages: false,
+      loadPublishedPosts: false,
+      renderTableImages: false,
+      capturePages: false,
+    }
+  );
+  assert(r3.status === "success", "기준 원고 준비 실패");
   if (r3.status === "success") {
     const m = r3.topic.manuscript;
-    assert(m.title === "blogspot 제목" && m.tags.length === 2, "배리에이션 반영 실패");
-    assert(m.slug === "blogspot-slug", "slug 반영 실패");
+    assert(m.title === "기준 제목", `기준 원고 제목을 그대로 써야 한다 (${m.title})`);
+    assert(m.slug === "my-slug" && m.searchDescription === "검색 설명" && m.shortName === "짧은이름", "draftMeta가 반영돼야 한다");
+    assert(m.tags.length === 2 && m.tags[0] === "태그1", `태그는 draftMeta에서 온다 (${JSON.stringify(m.tags)})`);
+    assert(!m.body.includes("#태그1"), "본문 끝 해시태그 줄은 태그로 분리돼 본문에 남지 않아야 한다");
     assert(
       m.imagePrompts.length === 1 && m.imagePrompts[0] === "이미지 프롬프트 A",
       "job.metadata.imagePrompts가 원고에 전달돼야 한다"
     );
   }
-  assert(generateCalls === 1, `배리에이션 생성은 1회 (${generateCalls})`);
-  assert(createCalls === 1, "DB 배리에이션 저장 1회여야 한다");
   assert(Object.keys(writes).length === 1, `파일 1개 기록 (${Object.keys(writes).length})`);
-  // 경로에서 채널 단계가 빠졌는지(manuscripts/<날짜>/<주제>.md) 확인한다.
   const writtenPath = Object.keys(writes)[0];
   assert(/\/\d{4}-\d{2}-\d{2}\/[^/]+\.md$/.test(writtenPath), `경로에 채널 단계가 없어야 한다 (${writtenPath})`);
-  console.log("✅ 신규 생성 -> Blogspot 원고 1건, manuscripts/<날짜>/<주제>.md 경로");
+  console.log("✅ 기준 원고가 곧 최종본 - draftMeta·태그 반영, manuscripts/<날짜>/<주제>.md 경로");
 
-  // 4) 기존 배리에이션 재사용 -> generateVariant 재호출 안 함(LLM 비용 절약)
-  generateCalls = 0;
-  createCalls = 0;
+  // 4) 과거 배리에이션(기준 원고보다 새것)은 그대로 재사용한다 - 그 원고 기준으로 이미지가 채워져 있다.
   const r4 = await prepareManuscript(job("a", "living"), {
     loadArticles: async () => [baseArticle(), variantArticle(2)],
-    generateVariant: async () => {
-      generateCalls += 1;
-      return okVariant();
-    },
-    createVariantArticle: async () => {
-      createCalls += 1;
-      return variantArticle(99);
-    },
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
-  assert(generateCalls === 0, "이미 있는 배리에이션은 재생성하면 안 된다");
-  assert(createCalls === 0, "이미 있는 배리에이션은 DB에 다시 만들면 안 된다");
   if (r4.status === "success") {
     assert(r4.topic.manuscript.title === "blogspot 기존 제목", "재사용 시 기존 제목을 써야 한다");
   }
-  console.log("✅ 기존 배리에이션 재사용 - LLM/DB 재호출 없음");
-
-  // 5) 배리에이션 생성 실패 -> job 전체 실패로 전파
-  const r5 = await prepareManuscript(job("a", "living"), {
-    loadArticles: async () => [baseArticle()],
-    generateVariant: async () => ({ status: "failed" as const, error: "타임아웃" }),
-    createVariantArticle: async () => variantArticle(99),
-    writeManuscriptFile: async () => {},
-    generateImages: false,
-    collectWebImages: false,
-    loadPublishedPosts: false,
-    renderTableImages: false,
-    capturePages: false,
-    generateNaverVariant: false,
-  });
-  assert(r5.status === "failed" && r5.reason.includes("타임아웃"), "배리에이션 실패 전파 실패");
-  console.log("✅ 배리에이션 생성 실패 -> job 실패로 전파");
+  console.log("✅ 과거 배리에이션은 그대로 재사용");
 
   // 6) .md 파일 쓰기 직전에만 [IMAGE PROMPT:]를 마커 바로 아래 재삽입한다(entry.body/manifest는 그대로).
   const bodyWithImage = "본문 문단.\n\n[IMAGE: 설명 — 웹 검색]\n\n다음 문단.";
   const writes6: Record<string, string> = {};
   const r6 = await prepareManuscript(job("a", "living", { imagePrompts: ["재삽입될 프롬프트"] }), {
     loadArticles: async () => [baseArticle(bodyWithImage)],
-    generateVariant: okVariant,
-    createVariantArticle: async () => variantArticle(99),
     writeManuscriptFile: async (path, content) => {
       writes6[path] = content;
     },
@@ -228,7 +174,6 @@ async function main(): Promise<void> {
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
   if (r6.status === "success") {
@@ -238,13 +183,10 @@ async function main(): Promise<void> {
   }
   console.log("✅ .md 파일에만 이미지 프롬프트 재삽입, entry.body/manifest는 그대로");
 
-  // 7) 신규 생성 시 searchDescription/slug/tags를 job.metadata.channelMeta.blogspot에 저장해야 한다
-  //    (articles 테이블엔 이 컬럼들이 없어 재사용 시 복구할 곳이 여기뿐 - 2026-09-15).
+  // 7) draftMeta가 없는 job(작성 단계가 옛 버전)도 태그는 본문 끝 해시태그 줄에서 복구하고, DB를 쓰지 않는다.
   const metaPatches: Array<Record<string, unknown>> = [];
   const r7 = await prepareManuscript(job("a", "living"), {
-    loadArticles: async () => [baseArticle()],
-    generateVariant: okVariant,
-    createVariantArticle: async () => variantArticle(99),
+    loadArticles: async () => [baseArticle("본문\n\n#가 #나 #다")],
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async (_id, patch) => {
       metaPatches.push(patch);
@@ -254,16 +196,14 @@ async function main(): Promise<void> {
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
-  assert(r7.status === "success", "신규 생성(메타 저장 케이스) 실패");
-  assert(metaPatches.length === 1, `job.metadata 갱신이 1회 호출돼야 한다 (${metaPatches.length})`);
-  const savedMeta = metaPatches[0]?.channelMeta as Record<string, { tags: string[] }> | undefined;
-  assert(
-    savedMeta?.blogspot?.tags?.length === 2,
-    `channelMeta.blogspot.tags가 저장돼야 한다 (${JSON.stringify(savedMeta)})`
-  );
-  console.log("✅ 신규 생성 시 searchDescription/slug/tags를 job.metadata에 저장");
+  assert(r7.status === "success", "draftMeta 없는 케이스 실패");
+  if (r7.status === "success") {
+    assert(r7.topic.manuscript.tags.join(",") === "가,나,다", `본문 끝 해시태그에서 태그를 복구해야 한다 (${JSON.stringify(r7.topic.manuscript.tags)})`);
+    assert(r7.topic.manuscript.searchDescription === null && r7.topic.manuscript.slug === null, "메타가 없으면 null");
+  }
+  assert(metaPatches.length === 0, `기준 원고를 그대로 쓰므로 job.metadata를 쓰지 않는다 (${metaPatches.length})`);
+  console.log("✅ draftMeta 없으면 본문 해시태그로 태그 복구, 메타 저장 없음");
 
   // 8) 재사용 시 job.metadata.channelMeta에 저장된 값이 있으면 tags 등을 복구해야 한다.
   const r8 = await prepareManuscript(
@@ -272,16 +212,12 @@ async function main(): Promise<void> {
     }),
     {
       loadArticles: async () => [baseArticle(), variantArticle(2)],
-      generateVariant: async () => {
-        throw new Error("재사용 케이스는 generateVariant를 호출하면 안 된다");
-      },
       writeManuscriptFile: async () => {},
       generateImages: false,
       collectWebImages: false,
     loadPublishedPosts: false,
       renderTableImages: false,
       capturePages: false,
-      generateNaverVariant: false,
     }
   );
   assert(r8.status === "success", "재사용+메타 복구 케이스 실패");
@@ -292,16 +228,12 @@ async function main(): Promise<void> {
   }
   const r8b = await prepareManuscript(job("a", "living"), {
     loadArticles: async () => [baseArticle(), variantArticle(2)],
-    generateVariant: async () => {
-      throw new Error("재사용 케이스는 generateVariant를 호출하면 안 된다");
-    },
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
   });
   assert(
     r8b.status === "success" && r8b.topic.manuscript.tags.length === 0,
@@ -313,9 +245,7 @@ async function main(): Promise<void> {
   const imagePatches: Array<Record<string, unknown>> = [];
   let imageCalls = 0;
   const r9 = await prepareManuscript(job("a", "living", { imagePrompts: ["프롬프트 A"] }), {
-    loadArticles: async () => [baseArticle()],
-    generateVariant: okVariant,
-    createVariantArticle: async () => variantArticle(99),
+    loadArticles: async () => [baseArticle("본문\n[IMAGE: 설명 — 웹 검색]\n계속")],
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async (_id, patch) => {
       imagePatches.push(patch);
@@ -324,7 +254,6 @@ async function main(): Promise<void> {
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
     generateImages: async (input) => {
       imageCalls += 1;
       assert(input.imagePrompts[0] === "프롬프트 A", "이미지 생성에 imagePrompts가 전달돼야 한다");
@@ -357,9 +286,6 @@ async function main(): Promise<void> {
   ];
   const r10 = await prepareManuscript(job("a", "living", { imagesReadyAt: "2026-09-15T00:00:00Z", images: saved }), {
     loadArticles: async () => [baseArticle(), variantArticle(2)],
-    generateVariant: async () => {
-      throw new Error("재사용 케이스는 generateVariant를 호출하면 안 된다");
-    },
     writeManuscriptFile: async () => {},
     generateImages: async () => {
       recall += 1;
@@ -373,30 +299,23 @@ async function main(): Promise<void> {
   }
   console.log("✅ 이미 생성된 이미지는 재생성하지 않고 metadata에서 복구");
 
-  // 10-1) 수정 반영(job:revise)으로 기준 원고가 배리에이션보다 **나중에** 생기면, 그 배리에이션은
-  // 수정 전 원고에서 나온 것이다 - 재사용하면 사용자의 수정이 최종본에 영영 반영되지 않는다.
-  let regenerated = 0;
+  // 10-1) 수정 반영(job:revise)으로 기준 원고가 과거 배리에이션보다 **나중에** 생기면 기준 원고가 최종본이다.
   const revisedBase = { ...baseArticle("수정 반영된 기준 원고입니다."), id: 30 } as ArticleRow;
   const r10b = await prepareManuscript(job("a", "living"), {
     loadArticles: async () => [variantArticle(2), revisedBase],
-    generateVariant: async (input) => {
-      regenerated += 1;
-      assert(input.baseBody.includes("수정 반영된"), "수정된 기준 원고로 다시 만들어야 한다");
-      return okVariant();
-    },
-    createVariantArticle: async () => variantArticle(31),
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async () => {},
     collectWebImages: false,
     loadPublishedPosts: false,
     renderTableImages: false,
     capturePages: false,
-    generateNaverVariant: false,
     generateImages: async () => noImages(),
   });
   assert(r10b.status === "success", "수정 반영 케이스 실패");
-  assert(regenerated === 1, "기준 원고가 더 새것이면 배리에이션을 다시 만들어야 한다");
-  console.log("✅ 기준 원고가 수정되면 배리에이션을 다시 만든다");
+  if (r10b.status === "success") {
+    assert(r10b.topic.manuscript.body.includes("수정 반영된"), "수정된 기준 원고를 최종본으로 써야 한다");
+  }
+  console.log("✅ 기준 원고가 수정되면 그 원고가 최종본");
 
   // 11) prepareApprovedManuscripts - 이미 준비된 job은 건너뛴다 + 페이지 갱신 시 배포 호출
   const marks: Array<{ id: string; patch: Record<string, unknown> }> = [];
@@ -527,8 +446,6 @@ async function main(): Promise<void> {
     const merged: Record<string, unknown>[] = [];
     const webResult = await prepareManuscript(job("web", "living", { imagePrompts: ["카페 카운터 검색어"] }), {
       loadArticles: async () => [baseArticle()],
-      generateVariant: okVariant,
-      createVariantArticle: async () => variantArticle(101),
       writeManuscriptFile: async () => {},
       mergeJobMetadata: async (_id, patch) => {
         merged.push(patch);
@@ -541,7 +458,6 @@ async function main(): Promise<void> {
       }),
       renderTableImages: false,
       capturePages: false,
-      generateNaverVariant: false,
       loadPublishedPosts: false,
       collectWebImages: async (input) => {
         calls.push(input.filledIndexes);
@@ -585,29 +501,12 @@ async function main(): Promise<void> {
     console.log("✅ 웹 검색 자리 수집 - 생성분과 병합 + 출처 보존 + 재수집 게이트");
   }
 
-  // 12) 내부 링크가 배리에이션 본문과 DB 행에 함께 들어간다(2026-09-22).
+  // 12) 내부 링크가 원고 본문(.md 파일)에 들어간다(2026-09-22). 2026-09-30부터 DB 행은 건드리지 않는다.
   //     서치콘솔이 우리 글을 전부 "참조 페이지 없음"으로 보던 문제 - 본문 내부 링크가 0개였다.
-  //     본문에만 넣고 DB 행에 안 넣으면 원고 파일과 article 행이 어긋나므로 둘 다 확인한다.
   {
     let savedContent = "";
     const result = await prepareManuscript(job("a", "entertainment"), {
-      loadArticles: async () => [baseArticle()],
-      createVariantArticle: async (input) => {
-        savedContent = input.content;
-        return variantArticle(99);
-      },
-      generateVariant: async () => ({
-        status: "success" as const,
-        variant: {
-          title: "배리에이션",
-          searchDescription: "설명",
-          slug: "s",
-          shortName: "짧은이름",
-          tags: ["t"],
-          body: "본문입니다.\n\n**참고 자료**\n- [바깥](https://news.example.com/1)",
-        },
-        durationMs: 1,
-      }),
+      loadArticles: async () => [baseArticle("본문입니다.\n\n**참고 자료**\n- [출처](https://src.example.com/a)")],
       loadPublishedPosts: async () => [
         {
           jobId: "other",
@@ -622,18 +521,19 @@ async function main(): Promise<void> {
       collectWebImages: false,
       renderTableImages: false,
       capturePages: false,
-      generateNaverVariant: false,
-      writeManuscriptFile: async () => {},
+      writeManuscriptFile: async (_path, content) => {
+        savedContent = content;
+      },
       mergeJobMetadata: async () => ({}),
     });
     assert(result.status === "success", `내부 링크 경로 실패 (${JSON.stringify(result)})`);
-    assert(savedContent.includes("https://b.example.com/old.html"), "DB에 저장되는 본문에 링크가 있어야 한다");
+    assert(savedContent.includes("https://b.example.com/old.html"), "원고 파일에 링크가 있어야 한다");
     assert(savedContent.includes("관련 있는 지난 글"), "앵커 텍스트가 글 제목이어야 한다");
     assert(
       savedContent.indexOf("함께 보면 좋은 글") < savedContent.indexOf("**참고 자료**"),
       "우리 글 링크가 바깥 출처보다 앞에 와야 한다"
     );
-    console.log("✅ 내부 링크 - 배리에이션 본문과 DB 행에 함께 삽입");
+    console.log("✅ 내부 링크 - 원고 본문에 삽입, 참고 자료보다 앞");
   }
 
   console.log("\n✅ 전체 통과");

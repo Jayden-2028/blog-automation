@@ -32,6 +32,10 @@ concurrency:
   group: social-issue-keyword
   cancel-in-progress: false
 
+# 헤드리스 claude 모델 고정(2026-09-30 사용자 결정) - 맥 .env의 CLAUDE_MODEL과 같은 값이어야 같은 원고가 나온다.
+env:
+  CLAUDE_MODEL: claude-sonnet-5-5
+
 jobs:
   collect:
     runs-on: ubuntu-latest
