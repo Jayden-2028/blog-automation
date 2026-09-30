@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   );
   console.log("✅ 텍스트/이미지/소제목+문단/소제목+목록 - 블록 분할과 프롬프트 매칭");
 
-  // 1-1) 획득 방식(output-format.md §8)을 설명에서 읽는다. 이게 없으면 generateManuscriptImages가
+  // 1-1) 획득 방식(images.md §8)을 설명에서 읽는다. 이게 없으면 generateManuscriptImages가
   //      웹 검색 마커의 한국어 검색어까지 이미지 모델에 넣는다(2026-09-16 실측 사고).
   assert(blocks[1].type === "image" && blocks[1].acquisition === "search", "`— 웹 검색`은 search여야 한다");
   assert(blocks[3].type === "image" && blocks[3].acquisition === "ai", "`— AI 생성`은 ai여야 한다");
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   console.log("✅ substituteConfirmedImages - 생성 실패(url 없음)는 마커 유지");
 
   // 2026-09-17 회귀: [IMAGE PROMPT:]가 여러 줄이어도 이미지 블록으로 인식해야 한다.
-  // output-format.md §8이 AI 프롬프트를 3~6줄로 쓰라고 하므로, 규칙대로 쓴 원고일수록 이 모양이 된다.
+  // images.md §8이 AI 프롬프트를 3~6줄로 쓰라고 하므로, 규칙대로 쓴 원고일수록 이 모양이 된다.
   // 예전 구현은 정확히 2줄만 인정해서 마커가 본문 텍스트로 새어나갔다(30건 중 5건, 마커 10개).
   const multiline = [
     "도입 문단입니다.",

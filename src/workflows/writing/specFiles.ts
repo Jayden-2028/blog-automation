@@ -28,7 +28,8 @@ export function writingSpecFiles(category: string | null): SpecFile[] {
     { path: pickStyleFile(category), purpose: "이 카테고리의 제목 기법·흐름" },
     { path: "prompts/writing/rules/article-structure.md", purpose: "유형별 소제목 순서" },
     { path: "prompts/writing/rules/topic-allocation.md", purpose: "내적 60%+/외적 40%-/외적의 외적 0" },
-    { path: "prompts/writing/rules/output-format.md", purpose: "출력 서식·이미지 마커 계약(코드가 파싱)" },
+    { path: "prompts/writing/rules/output-format.md", purpose: "출력 서식·저장 형식·윤문 계약(코드가 파싱)" },
+    { path: "prompts/writing/rules/images.md", purpose: "이미지 마커·획득 방식 판정·프롬프트 쓰는 법(구 output-format §8)" },
     { path: "docs/seo-guide.md", purpose: "제목·키워드·태그 수치 규칙(충돌 시 위 문서가 이긴다)" },
   ];
   // incident는 어투 파일과 카테고리 파일이 같아 중복이 생긴다.
