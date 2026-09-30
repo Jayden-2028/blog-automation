@@ -1,7 +1,7 @@
 // formatNotificationMessage 테스트. DB 없이 payload를 직접 구성해 메시지 조립만 검증한다.
 // 2026-09-04: 원문(headline)·항목별 배점표(scoreBreakdown)를 메시지에서 뺐다 - 항목은 이제
 // 제목(rank+keyword)과 seedQuery/category 한 줄만 보여준다.
-import { formatNotificationMessage, thinSourceWarning } from "./formatNotificationMessage.js";
+import { formatNotificationMessage, thinSourceWarning, expiryRiskWarning } from "./formatNotificationMessage.js";
 import type { KeywordNotificationPayload, NotificationKeywordItem } from "../../types/keywordNotification.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -110,3 +110,38 @@ main();
   console.log("✅ 자료 부족 위험 - 뉴스 0 + 교차출처 0에서만 표시");
 }
 
+
+// --- 유효기간 위험 표시(2026-10-01) - 마감된 건으로 원고를 쓰는 사고 방지 ------------------------
+{
+  const warn = (keyword: string, headline: string | null = null) =>
+    expiryRiskWarning({ keyword, headline });
+
+  // 실제로 사고가 났던 두 건. 둘 다 점수는 높았고 freshness도 정상이었다.
+  const 견학 = warn("양주 서울우유 견학 예약 방법");
+  if (견학 === null) throw new Error("❌ 예약형 키워드(견학)에 확인 요청이 없다");
+  if (!견학.includes("확인")) throw new Error("❌ 확인 요청 문구가 아니다");
+
+  const 예매 = warn("한강 불꽃놀이 예매 오픈 시간");
+  if (예매 === null) throw new Error("❌ 예매형 키워드에 확인 요청이 없다");
+
+  // 이미 끝났다는 말이 있으면 더 강한 경고가 나가야 한다.
+  const 종료 = warn("한강 불꽃놀이 명당", "한강 불꽃놀이 예매 종료…추가 판매 없다");
+  if (종료 === null || !종료.includes("이미 끝난")) {
+    throw new Error("❌ 제목에 '종료'가 있으면 이미 끝난 건으로 경고해야 한다");
+  }
+
+  // canonical keyword가 잘려 뒷부분이 사라져도 headline으로 잡아야 한다.
+  const 잘림 = warn("서울우유 견학", "서울우유 양주공장 견학 예약 매진");
+  if (잘림 === null || !잘림.includes("이미 끝난")) {
+    throw new Error("❌ headline의 '매진'을 잡지 못했다");
+  }
+
+  // 오폭 방지: 마감과 무관한 일반 연예 키워드에는 아무것도 붙지 않아야 한다.
+  if (warn("추무빈 열애 공개", "추신수 아들 추무빈 열애 공개") !== null) {
+    throw new Error("❌ 마감과 무관한 키워드에 경고가 붙었다");
+  }
+  if (warn("영화 옵세션 결말 해석", "영화 옵세션 결말 해석 후기") !== null) {
+    throw new Error("❌ 일반 작품 키워드에 경고가 붙었다");
+  }
+  console.log("✅ 유효기간 위험 - 예약·마감형만 표시, 종료 표현은 강한 경고");
+}
