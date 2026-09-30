@@ -1,0 +1,57 @@
+<!--
+  2026-09-30 실측(communityRecon.ts + communityProbe.ts)으로 확인한 실제 DOM 구조를 그대로
+  본떴지만, 제목 텍스트는 저작권이 있는 실제 게시글 원문이 아니라 임의로 지어낸 placeholder다
+  (theqooHot.sample.html과 같은 이유 - docs/ai-handoff/community-recon/의 실제 원문은 커밋하지 않는다).
+
+  구조상 확인해야 할 것:
+  - 상위 3건은 tr.best_top_row이고 anchor 텍스트 맨 앞에 순위 숫자가 붙는다.
+  - 나머지는 tr.mode_list이고 순위 숫자가 없다 -> 제목이 숫자로 시작해도 잘리면 안 된다.
+  - 어느 행이든 끝에 댓글 수 `(n)`이 붙는다. 제목 안의 괄호는 남아야 한다.
+  - 핫딜(제휴 광고) 행이 같은 목록에 섞여 나온다 -> 제외해야 한다.
+-->
+<html>
+<body>
+<table class="board_list_table">
+  <tbody>
+    <tr class="table_body blocktarget best_top_row">
+      <td class="subject">
+        <a href="/best/board/300143/read/1001" class="subject_link deco flex center">1 예시 제목 하나 - 요즘 중고차 값이 이상하다는 글 (160)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget best_top_row">
+      <td class="subject">
+        <a href="/best/board/300143/read/1002" class="subject_link deco flex center">2 예시 제목 둘 - 어제 경기 마지막 장면 다시 보기 (94)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget best_top_row">
+      <td class="subject">
+        <a href="/ad/deal/9001" class="subject_link deco flex center">핫딜 [예시몰]예시 음료 355ml 48캔 (25,760원/무료) (7)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget mode_list">
+      <td class="subject">
+        <a href="/best/board/300143/read/1003" class="subject_link deco flex center">예시 제목 셋 - 이번 주말 날씨 물어보는 글 (12)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget mode_list">
+      <td class="subject">
+        <a href="/best/board/300143/read/1004" class="subject_link deco flex center">2026 예시 대회 일정 정리 (8)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget mode_list">
+      <td class="subject">
+        <a href="/best/board/300143/read/1005" class="subject_link deco flex center">예시 제목 다섯 - 암살자(들) 감상 후기 (3)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget mode_list">
+      <td class="subject">
+        <a href="/best/board/300143/read/1003" class="subject_link deco flex center">예시 제목 셋 - 이번 주말 날씨 물어보는 글 (12)</a>
+      </td>
+    </tr>
+    <tr class="table_body blocktarget mode_list">
+      <td class="subject"><span class="text_over">본문 없음</span></td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

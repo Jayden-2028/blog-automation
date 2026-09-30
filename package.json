@@ -137,6 +137,7 @@
     "collect:community": "tsx src/workflows/community/runCollectionCli.ts",
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
     "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
+    "test:ruliweb-parser": "tsx src/services/community/ruliweb/testParseRuliwebHtml.ts",
     "recon:community": "tsx scripts/communityRecon.ts",
     "test:robots-matcher": "tsx scripts/testRobotsMatcher.ts",
     "job:close": "tsx scripts/closeJob.ts",
