@@ -26,7 +26,27 @@ async function main(): Promise<void> {
 
   const result = await runCommunityCollection({ enabled: true, dryRun: !write });
 
-  console.log("\n결과:", result);
+  // dry-run은 "저장될 내용"을 눈으로 보는 게 목적이라 미리보기를 펼친다. 사이트별 건수를 함께
+  // 세는 이유: 한 사이트가 조용히 0건이 돼도 합계(fetchedCount)만으로는 안 드러난다.
+  const preview = result.preparedPreview;
+  if (preview && preview.length > 0) {
+    const bySite = new Map<string, number>();
+    for (const row of preview) bySite.set(row.site, (bySite.get(row.site) ?? 0) + 1);
+
+    console.log(`\n저장될 키워드 ${preview.length}건 (사이트별: ${[...bySite].map(([s, n]) => `${s} ${n}`).join(", ")})`);
+    for (const row of preview) {
+      console.log(`  ${row.keyword}  [${row.category}] ${row.site} ${row.siteRank}위 · score ${row.candidateScore}`);
+    }
+  }
+
+  const { preparedPreview: _preview, ...summary } = result;
+  console.log("\n결과:", summary);
+
+  // 글은 긁혔는데 저장될 게 하나도 없으면 LLM 추출이 빈손으로 끝난 것이다. 조용히 성공으로
+  // 넘기면 다음 사람이 "정상인데 dry-run이라 0"으로 오해한다.
+  if (result.fetchedCount > 0 && result.preparedCount === 0) {
+    console.log("\n⚠️ 글은 조회됐는데 저장될 키워드가 0건이다 - LLM 추출 결과를 확인할 것.");
+  }
   if (result.status === "failed") process.exitCode = 1;
 }
 

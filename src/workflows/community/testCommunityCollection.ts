@@ -229,7 +229,10 @@ async function testCollectionNeverThrows(): Promise<void> {
         return { items: [] };
       },
     });
-    assert(result.status === "success" && result.fetchedCount === 0 && result.upsertedCount === 0, "provider 0개 -> success + 0건");
+    assert(
+      result.status === "success" && result.fetchedCount === 0 && result.upsertedCount === 0 && result.preparedCount === 0,
+      "provider 0개 -> success + 0건"
+    );
     assert(!extractCalled, "글이 0건이면 LLM 추출을 호출하면 안 된다");
     ok("provider 0개(실측 전 현재 상태) -> 안전하게 0건 성공, LLM 미호출");
   }
@@ -278,7 +281,16 @@ async function testCollectionNeverThrows(): Promise<void> {
     });
     assert(result.status === "success" && result.upsertedCount === 0 && result.expiredCount === 0, "dry-run은 write count가 0이어야 한다");
     assert(result.fetchedCount === 1, "dry-run이어도 fetchedCount는 실제 조회 결과를 반영해야 한다");
-    ok("dry-run: 조회/추출/매핑만 수행, DB 쓰기 없음");
+    // upsertedCount가 dry-run에서 항상 0이라, 이것만으로는 "LLM이 0건 뽑음"과 "정상인데 안 씀"이
+    // 구분되지 않는다. preparedCount/preparedPreview가 그 구멍을 메운다(2026-09-30).
+    assert(result.preparedCount === 1, "dry-run에서도 저장 대상 건수는 실제 값이어야 한다");
+    assert(
+      result.preparedPreview?.[0]?.keyword === "근로장려금 반기신청" &&
+        result.preparedPreview?.[0]?.site === "site_ok" &&
+        result.preparedPreview?.[0]?.siteRank === 1,
+      "미리보기에 저장될 키워드와 출처가 그대로 담겨야 한다"
+    );
+    ok("dry-run: 조회/추출/매핑만 수행, DB 쓰기 없음 + 저장 대상 미리보기 제공");
   }
 
   // LLM 추출 실패해도 전체 status는 success (비치명적) - upsertedCount만 0
@@ -296,6 +308,7 @@ async function testCollectionNeverThrows(): Promise<void> {
     });
     assert(result.status === "success", "LLM 추출 실패는 전체 job을 failed로 만들면 안 된다(비치명적)");
     assert(result.upsertedCount === 0 && result.droppedCount === 0, "추출 결과가 없으면 upsert도 0건이어야 한다");
+    assert(result.preparedCount === 0, "추출이 빈손이면 preparedCount도 0이어야 한다 - 이게 dry-run에서 실패를 드러내는 신호다");
     assert(result.extractionError === "claude가 종료 코드 1로 끝났습니다", "추출 실패 원인이 extractionError에 보존돼야 한다");
     ok("LLM 추출 실패해도 status는 success 유지, extractionError로 원인만 보존");
   }

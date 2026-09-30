@@ -44,6 +44,22 @@ export type RunCommunityCollectionResult = {
   fetchedCount: number;
   /** 실제 upsert된 row 수. dryRun이면 0. */
   upsertedCount: number;
+  /**
+   * 필터를 다 통과해 "쓸 준비가 된" row 수. dryRun에서도 실제 값이 들어간다.
+   *
+   * upsertedCount만으로는 dry-run에서 "LLM이 0건 뽑음"과 "정상인데 안 쓴 것"을 구분할 수 없어
+   * 추가했다(2026-09-30). droppedCount/excludedCount가 둘 다 0이어도 이 값이 0이면 추출이
+   * 빈손으로 끝난 것이다 - 미리보기가 목적인 dry-run이 그걸 숨기면 안 된다.
+   */
+  preparedCount: number;
+  /** dryRun에서만 채운다. 저장될 내용을 눈으로 확인하기 위한 미리보기. */
+  preparedPreview?: readonly {
+    keyword: string;
+    category: string;
+    site: string;
+    siteRank: number;
+    candidateScore: number;
+  }[];
   /** 중복/너무 짧은 키워드로 버려진 수. */
   droppedCount: number;
   /** 제외 카테고리(육아 등)·정치 키워드로 걸러져 저장되지 않은 수(2026-09-07). */
@@ -71,6 +87,7 @@ export async function runCommunityCollection(
       reason: "disabled",
       fetchedCount: 0,
       upsertedCount: 0,
+      preparedCount: 0,
       droppedCount: 0,
       excludedCount: 0,
       expiredCount: 0,
@@ -111,6 +128,7 @@ export async function runCommunityCollection(
         status: "success",
         fetchedCount: 0,
         upsertedCount: 0,
+        preparedCount: 0,
         droppedCount: 0,
         excludedCount: 0,
         expiredCount: 0,
@@ -130,6 +148,14 @@ export async function runCommunityCollection(
         status: "success",
         fetchedCount,
         upsertedCount: 0,
+        preparedCount: rows.length,
+        preparedPreview: rows.map((row) => ({
+          keyword: row.keyword,
+          category: row.topic_normalized,
+          site: String((row.metadata as { site?: unknown } | undefined)?.site ?? "?"),
+          siteRank: Number((row.metadata as { siteRank?: unknown } | undefined)?.siteRank ?? 0),
+          candidateScore: row.candidate_score ?? 0,
+        })),
         droppedCount,
         excludedCount,
         expiredCount: 0,
@@ -150,6 +176,7 @@ export async function runCommunityCollection(
       status: "success",
       fetchedCount,
       upsertedCount: upserted.length,
+      preparedCount: rows.length,
       droppedCount,
       excludedCount,
       expiredCount,
@@ -164,6 +191,7 @@ export async function runCommunityCollection(
       status: "failed",
       fetchedCount: 0,
       upsertedCount: 0,
+      preparedCount: 0,
       droppedCount: 0,
       excludedCount: 0,
       expiredCount: 0,
