@@ -34,9 +34,18 @@ const WRITTEN_AT = "2026-08-28T00:39:15.795Z";
 function makeCleanBody(extra = ""): string {
   // 분량 목표(공백 제외 2,000~3,000자, writer.md §6-5)를 채운다 - 짧으면 별개의 '분량 미달'
   // 경고가 붙어 "깨끗한 원고" 테스트가 깨진다. checkQuality가 공백을 빼고 세므로 넉넉히 잡는다.
+  // 서로 닮지 않은 문장 76개(같은 정보 반복 검사에도 안 걸려야 한다): 어휘 풀 네 개를 소수 간격으로 조합한다.
+  const pools = [
+    ["경복궁", "창덕궁", "덕수궁", "종묘", "광화문", "북촌", "인왕산", "청계천", "서촌", "낙산", "남산", "한강"],
+    ["야간개장", "별빛야행", "전통공연", "해설투어", "등불전시", "야경명소", "포토존", "체험행사", "국악무대", "전시관람", "한복대여", "궁중음식"],
+    ["예매방법", "입장시간", "주차정보", "교통편", "운영일정", "관람요금", "동선안내", "준비물", "우천대비", "유의사항", "편의시설", "할인혜택", "접근성"],
+    ["오전부터", "해질녘에", "주말이면", "평일에는", "가을철에", "저녁무렵", "점심이후", "새벽부터", "한낮에는", "밤늦도록", "이른시간", "연휴에는", "비오는날"],
+  ];
+  const tails = ["를 먼저 살펴보시면 됩니다", "가 궁금하면 현장 안내를 보세요", "는 미리 챙겨 두면 편합니다", "에 맞춰 일정을 잡는 분이 많습니다", "부터 차례로 둘러보는 코스입니다", "를 기준으로 동선을 짜면 수월합니다", "가 가장 붐비는 시간대입니다", "까지 줄을 서서 기다리기도 합니다"];
   const filler = Array.from(
     { length: 76 },
-    (_, i) => `경복궁 별빛야행 안내 문단 가나다라마바사아자차카타파하 ${"가".repeat(i % 7)}${i} 입니다.`
+    (_, i) =>
+      `${pools[0][i % 12]}의 ${pools[1][(i * 5 + 3) % 12]}은 ${pools[3][(i * 7 + 1) % 13]} ${pools[2][(i * 3 + 2) % 13]}${tails[(i * 3 + 1) % 8]} ${i}.`
   ).join("\n");
   return `${filler}\n${extra}\n\n## 참고 자료\n\n- [국가유산진흥원](https://www.kh.or.kr/)`;
 }
@@ -282,6 +291,37 @@ function main(): void {
   const cleanText = checkAttributionHedging("지원금은 30만 원입니다. 신청은 1인 기준으로 한 번만 가능합니다. 지급일은 8월 27일입니다.");
   assert(cleanText.length === 0, `시점 표기 없는 정상 문장은 통과해야 한다 (실제: ${JSON.stringify(cleanText)})`);
   console.log("✅ 인용/헤지: 비공개·미정 서술, 기준 시점 표기 탐지 + 정상 문장 통과");
+
+  // 15-8) 2026-09-30: "○○에 따르면" 출처 표기는 경고, 기관을 주어로 쓴 단정문은 통과.
+  const according = checkAttributionHedging("우주항공청의 2026년 월력요항에 따르면 한글날은 10월 9일 금요일입니다.");
+  assert(according.some((c) => c.message.includes("따르면")), "'월력요항에 따르면'을 경고해야 한다");
+  const directInstitution = checkAttributionHedging("질병관리청은 생후 6개월부터를 기준으로 안내합니다. 한글날은 10월 9일 금요일입니다.");
+  assert(directInstitution.length === 0, `기관 주어 단정문·사실 단정문은 통과해야 한다 (${JSON.stringify(directInstitution)})`);
+  console.log("✅ 인용/헤지: '○○에 따르면' 경고, 기관 주어 단정문은 통과");
+
+  // 15-9) 자료 thin이면 분량 미달을 "자료 얇음"으로 표시, 같은 정보 반복 탐지.
+  const shortBody = "한글날 연휴는 사흘입니다. 10월 9일 금요일부터 11일 일요일까지 쉽니다.\n\n**참고 자료**\n- [a](https://a)";
+  const thin = checkQuality({ title: "한글날 연휴", body: shortBody, hashtags: Array(10).fill("#t"), isMedical: false, researchThin: true });
+  assert(thin.some((c) => c.message.includes("자료 얇음")), "thin이면 분량 미달을 자료 얇음으로 표시해야 한다");
+  const notThin = checkQuality({ title: "한글날 연휴", body: shortBody, hashtags: Array(10).fill("#t"), isMedical: false });
+  assert(notThin.some((c) => c.message.startsWith("분량")) && !notThin.some((c) => c.message.includes("자료 얇음")), "thin이 아니면 일반 분량 경고");
+
+  const repeatedBody = [
+    "한글날 연휴 2026은 10월 9일 금요일부터 11일 일요일까지 사흘입니다.",
+    "- **10월 9일 금요일**: 한글날, 공휴일",
+    "- **10월 9일 금요일**: 한글날",
+    "10월 9일 금요일부터 11일 일요일까지 사흘입니다.",
+    "10월 12일 월요일부터는 평일입니다.",
+    "10월 12일 월요일은 평일입니다.",
+    "- **10월 10일 토요일**: 주말",
+    "- **10월 10일 토요일, 11일 일요일**: 주말",
+  ].join("\n");
+  const rep = checkQuality({ title: "한글날 연휴", body: `${repeatedBody}\n\n**참고 자료**\n- [a](https://a)`, hashtags: Array(10).fill("#t"), isMedical: false });
+  assert(rep.some((c) => c.message.includes("같은 정보를 반복")), `반복을 경고해야 한다 (${JSON.stringify(rep.map((c) => c.message))})`);
+  const variedBody = "한글날은 10월 9일 금요일입니다.\n개천절은 10월 3일 토요일이라 5일 월요일이 대체공휴일입니다.\n국군의 날은 공휴일이 아니라서 평일입니다.\n연차를 6일부터 8일까지 쓰면 9일을 쉽니다.\n\n**참고 자료**\n- [a](https://a)";
+  const varied = checkQuality({ title: "한글날 연휴", body: variedBody, hashtags: Array(10).fill("#t"), isMedical: false });
+  assert(!varied.some((c) => c.message.includes("같은 정보를 반복")), "서로 다른 정보는 반복으로 보면 안 된다");
+  console.log("✅ 품질: thin 분량 표시 + 같은 정보 반복 탐지(정상 문장 통과)");
 
   // ---------- 공통 문체(voice) (2026-09-16) ----------
 

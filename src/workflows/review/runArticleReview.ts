@@ -24,6 +24,8 @@ export type ArticleReviewInput = {
   sources: ReadonlyArray<Pick<SourceRow, "content">>;
   hashtags: ReadonlyArray<string>;
   isMedical: boolean;
+  /** 자료조사 verdict(ok | thin | blocked). thin이면 분량 미달을 "자료 얇음"으로 표시한다. */
+  researchVerdict?: string | null;
 };
 
 export type ArticleReviewResult = {
@@ -44,6 +46,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
       body: input.article.content,
       hashtags: input.hashtags,
       isMedical: input.isMedical,
+      researchThin: input.researchVerdict === "thin",
     }),
     ...checkAttributionHedging(input.article.content),
     ...checkVoice(input.article.content),
