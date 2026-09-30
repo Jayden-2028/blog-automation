@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 로컬 launchd 3종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status]
-#   naver-poll(60초)  ig-capture-poll(60초)  manuscript-export(30분)
+#   naver-poll(60초)  instagram-capture-poll(60초)  export-poll(60초)  manuscript-export(30분)
 # ⚠️ 옛 맥의 같은 job을 먼저 내려야 한다 - 둘이 동시에 돌면 네이버에 같은 글이 두 번 올라갈 수 있다.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -8,6 +8,7 @@ AGENTS="$HOME/Library/LaunchAgents"; UID_="$(id -u)"; PFX="com.blogautomation"
 # 이름 -> "스크립트|주기(초)"
 JOBS=( "naver-poll|$REPO/scripts/macmini/poll-naver.sh|60"
        "instagram-capture-poll|$REPO/scripts/poll-instagram-capture.sh|60"
+       "export-poll|$REPO/scripts/poll-manuscript-export.sh|60"
        "manuscript-export|$REPO/scripts/export-manuscripts.sh|1800" )
 
 plist() { # name script interval

@@ -1,12 +1,13 @@
 # 맥미니 이전 가이드 (2026-09-29)
 
 **결론**: 자동화 대부분(키워드·조사·집필·Blogspot 발행·감시)은 이미 GitHub Actions에서 돈다.
-맥에 남은 일은 **3가지**뿐이다 - 그것만 새 맥미니로 옮기면 된다.
+맥에 남은 일은 **4가지**뿐이다 - 그것만 새 맥미니로 옮기면 된다.
 
 | 로컬 job | 주기 | 하는 일 | 필요한 것 |
 |---|---|---|---|
 | `naver-poll` | 60초 | 네이버 발행(브라우저 조작) | 네이버 로그인 세션 |
 | `instagram-capture-poll` | 60초 | 인스타 캐러셀 캡처 | 인스타 로그인 세션, `IG_CAPTURE_AUTO=true` |
+| `export-poll` | 60초 | 텔레그램 `⬇️ 맥으로 내려받기` 버튼 요청을 바로 처리 | 보관함 폴더 |
 | `manuscript-export` | 30분 | 원고·이미지를 로컬 보관함으로 내려받기 | 보관함 폴더 |
 
 ## 순서 (총 30~40분)
@@ -34,7 +35,7 @@
 10. **옛 맥에서 먼저 내린다**: `launchctl bootout gui/$(id -u)/<라벨>` + `launchctl disable ...`
     (라벨은 `launchctl list | grep -i blog`로 확인 - 옛 plist 이름은 `com.wooahpapa.blog-automation.*`)
     ⚠️ 두 맥이 동시에 돌면 **네이버에 같은 글이 두 번** 올라갈 수 있다(락은 맥 안에서만 유효).
-11. 새 맥: `bash scripts/macmini/install-launchd.sh install` → `... status`로 🟢 3개 확인
+11. 새 맥: `bash scripts/macmini/install-launchd.sh install` → `... status`로 🟢 4개 확인
 12. 텔레그램에서 원고 1건으로 `🟢 네이버 발행` 버튼을 눌러 종단 확인 → `~/Library/Logs/blog-automation-*.log`
 
 ## 되돌리기
