@@ -11,6 +11,8 @@
 //              GitHub Actions에서는 돌릴 수 없다 - 맥의 로컬 폴러가 집어 간다.
 //   images   — 이미지 재수집. 빈 자리는 자동으로, 마음에 안 드는 자리는 사용자가 번호와
 //              요구사항을 답장해서 지정한다.
+//   export   — 맥 보관함으로 지금 내려받기(2026-09-29). 30분 주기 내보내기를 기다리지 않고
+//              맥의 빠른 폴러에 끼어드는 요청이다. 네이버와 같은 "요청만 남긴다" 경로다.
 //
 // **하위 호환**: 2026-09-22 이전에 보낸 알림에는 `publish:<jobId>`(2토막)가 박혀 있고, 텔레그램
 // 메시지는 우리가 고칠 수 없다. 사용자가 옛 알림의 버튼을 눌러도 죽지 않도록 2토막은 `blogspot`으로
@@ -19,7 +21,7 @@
 const PUBLISH_PREFIX = "publish";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const PUBLISH_ACTIONS = ["blogspot", "naver", "images"] as const;
+export const PUBLISH_ACTIONS = ["blogspot", "naver", "images", "export"] as const;
 export type PublishDecisionAction = (typeof PUBLISH_ACTIONS)[number];
 
 export type PublishDecisionCallback = { action: PublishDecisionAction; jobId: string };

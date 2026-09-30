@@ -170,7 +170,7 @@ npm run ig:capture -- --first --dry-run --keep
 | | 인스타 컨버터 (이 문서) | 블로그 자동화 |
 |---|---|---|
 | 워크트리 | `ig-dev` (feat/instagram-keyword-source) | `prod` (main) |
-| launchd | `instagram-capture-poll` | `naver-poll`, `manuscript-export` |
+| launchd | `instagram-capture-poll` | `naver-poll`, `manuscript-export`, `export-poll` |
 | 수집 큐 | `data/instagram-queue.jsonl` | `article_jobs` |
 | 텔레그램 봇 | `INSTAGRAM_BOT_TOKEN` | `TELEGRAM_BOT_TOKEN` |
 | offset | `instagram-capture-bot` | GH Actions `telegram-update.yml` |
