@@ -30,8 +30,6 @@ export type RankingSource = {
   aspect: number;
   /** 컨테이너 위쪽에 겹쳐 들어오는 요소를 몇 px 건너뛸지(기본 0). CGV는 탭 줄 잔상이 남는다. */
   offsetTop?: number;
-  /** 이 자리가 이 출처인지 판정한다. 마커 설명에서 찾는다. */
-  match: RegExp;
   /** 캡션에 넣을 출처 표기. */
   attribution: string;
 };
@@ -44,7 +42,6 @@ export const RANKING_SOURCES: RankingSource[] = [
     // #main_g는 제목("TV-OTT ALL BuzzWorthiness")·탭·순위 목록을 함께 감싼다.
     containerSelector: "#main_g",
     aspect: 0.75,
-    match: /화제성|버즈\s*워디니스|buzzworthiness|펀덱스|fundex/i,
     attribution: "출처: 펀덱스(FUNdex)",
   },
   {
@@ -56,15 +53,9 @@ export const RANKING_SOURCES: RankingSource[] = [
     // 한 줄에 2편씩 들어가는 카드 배치라, 0.55면 상위 4편이 들어온다.
     aspect: 0.55,
     offsetTop: 18,
-    match: /박스\s*오피스|무비\s*차트|예매율|누적\s*관객|cgv/i,
     attribution: "출처: CGV 무비차트",
   },
 ];
-
-/** 마커 설명이 등록된 순위 출처를 가리키면 그것을 돌려준다. 아니면 null(본문 데이터로 표를 그린다). */
-export function matchRankingSource(description: string): RankingSource | null {
-  return RANKING_SOURCES.find((source) => source.match.test(description)) ?? null;
-}
 
 /**
  * 임의 URL을 열어 찍는다(2026-09-18 `페이지 캡처` 신설). 리서처가 실제로 열어본 URL만 여기로 온다

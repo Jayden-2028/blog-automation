@@ -62,7 +62,7 @@ export async function cropTallImage(input: CropTallImageInput): Promise<CropTall
     const dataUrl = `data:${input.mimeType};base64,${input.buffer.toString("base64")}`;
 
     // 브라우저 안에서 도는 코드라 문자열로 넘긴다(이 파일은 DOM 타입을 쓰지 않는 Node 모듈이다).
-    // setContent + 스크립트 방식은 renderTableImage.ts와 같은 패턴이다.
+    // setContent + 스크립트 방식으로 자른다.
     await page.setContent(
       `<!doctype html><meta charset="utf-8"><script>
         (async () => {

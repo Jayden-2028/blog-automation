@@ -87,7 +87,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
@@ -101,7 +100,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(parenting.status === "success", "카테고리와 무관하게 원고를 준비해야 한다");
@@ -123,7 +121,6 @@ async function main(): Promise<void> {
       generateImages: false,
       collectWebImages: false,
       loadPublishedPosts: false,
-      renderTableImages: false,
       capturePages: false,
     }
   );
@@ -151,7 +148,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
@@ -172,7 +168,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
@@ -194,7 +189,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(r7.status === "success", "draftMeta 없는 케이스 실패");
@@ -216,7 +210,6 @@ async function main(): Promise<void> {
       generateImages: false,
       collectWebImages: false,
     loadPublishedPosts: false,
-      renderTableImages: false,
       capturePages: false,
     }
   );
@@ -232,7 +225,6 @@ async function main(): Promise<void> {
     generateImages: false,
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
   });
   assert(
@@ -252,7 +244,6 @@ async function main(): Promise<void> {
     },
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
     generateImages: async (input) => {
       imageCalls += 1;
@@ -307,7 +298,6 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     collectWebImages: false,
     loadPublishedPosts: false,
-    renderTableImages: false,
     capturePages: false,
     generateImages: async () => noImages(),
   });
@@ -456,7 +446,6 @@ async function main(): Promise<void> {
         ],
         failures: [],
       }),
-      renderTableImages: false,
       capturePages: false,
       loadPublishedPosts: false,
       collectWebImages: async (input) => {
@@ -519,7 +508,6 @@ async function main(): Promise<void> {
       ],
       generateImages: false,
       collectWebImages: false,
-      renderTableImages: false,
       capturePages: false,
       writeManuscriptFile: async (_path, content) => {
         savedContent = content;
