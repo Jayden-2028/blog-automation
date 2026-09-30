@@ -65,5 +65,7 @@ jobs:
           # 경쟁도(블로그 포화도)를 점수에 반영할지. Phase B 게이트(config/keywordCompetition.ts).
           # repo variable로 빼둬서 코드 변경 없이 되돌릴 수 있다 - 6-factor scoring이 바뀌는 값이다.
           BLOG_COMPETITION_APPLY_TO_SCORE: ${{ vars.BLOG_COMPETITION_APPLY_TO_SCORE }}
+          # 주제어 기반 다양성 판정. 미설정이면 빈 문자열 -> false(preview만). 켤 때 repo variable로 true.
+          DIVERSITY_TOPIC_QUERY_ENABLED: ${{ vars.DIVERSITY_TOPIC_QUERY_ENABLED }}
           CREATOR_ADVISOR_ENABLED: "false"
         run: npm run job:social-issue-keyword

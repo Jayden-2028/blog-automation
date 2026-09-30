@@ -107,3 +107,21 @@ export const TOPIC_MERGE_CONFIG = {
    */
   applyToClusters: parseBooleanEnv(process.env.TOPIC_MERGE_APPLY, false),
 } as const;
+
+// 경쟁도 단계가 뽑아 둔 LLM 주제어를 다양성 선정(selectDiverseTopN)의 주제 동일성 판정에 쓸지.
+//
+// 왜 별도 게이트인가: 다양성/선정 로직 변경은 CLAUDE.md "승인 없이는 금지" 항목이다. 그래서
+// 기본은 **preview만**이다 - 켰을 때 Top N이 어떻게 달라지는지 로그로만 남기고 실제 선정은
+// 기존 규칙(topicGrouping.isSameTopic)을 그대로 쓴다. 근거와 실측은 topicQueryMatch.ts 상단.
+export const DIVERSITY_TOPIC_QUERY_CONFIG = {
+  /**
+   * 켰을 때의 Top N을 함께 계산해 로그로 남길지. 순수 함수 두 번 호출이라 비용이 사실상 없다.
+   * 끄려면 DIVERSITY_TOPIC_QUERY_PREVIEW=false.
+   */
+  previewEnabled: parseBooleanEnv(process.env.DIVERSITY_TOPIC_QUERY_PREVIEW, true),
+
+  /**
+   * 실제 선정에 적용할지. **기본 false를 유지한다.** 사용자 승인 없이 켜지 않는다.
+   */
+  enabled: parseBooleanEnv(process.env.DIVERSITY_TOPIC_QUERY_ENABLED, false),
+} as const;

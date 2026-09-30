@@ -222,6 +222,53 @@ function main(): void {
     console.log('  ✅ 분류어 seedQuery "넷플릭스" -> 서로 다른 작품 2건 유지');
   }
 
+  // ---------- 5. LLM 주제어를 넘기면 주제 판정이 그쪽을 쓴다(2026-10-01) ----------
+  {
+    // run #100 실측: 주제어가 글자까지 같은 두 후보가 각각 53점을 받고 Top N에 따로 남았다.
+    // 제목이 달라 df 기반 판정이 놓쳤던 자리다.
+    const a = makeCandidate("아빠 추신수 닮은 사랑꾼이었네 추무빈 열애 공개 죽는 날까지", "추신수", "entertainment", 53);
+    const b = makeCandidate("추신수 아들이 벌써 21살 사랑꾼 추무빈 열애 공개 야구선수로", "추무빈", "entertainment", 53);
+    const batch5 = [a, b, ...makeFillerCandidates(200)].sort((x, y) => y.totalScore - x.totalScore);
+
+    const topicQueryByKeyword = new Map([
+      [a.keyword, "추무빈 열애 공개"],
+      [b.keyword, "추무빈 열애 공개"],
+    ]);
+
+    const withQuery = selectDiverseTopN(batch5, 10, { topicQueryByKeyword });
+    const picked = withQuery.filter((item) => item.keyword === a.keyword || item.keyword === b.keyword);
+    assert(picked.length === 1, `같은 주제어를 가진 두 후보는 1건만 남아야 한다 (실제 ${picked.length}건)`);
+    console.log("  ✅ 주제어가 같은 두 후보 -> Top N에 1건만");
+
+    // 주제어를 안 넘기면 동작이 이전과 완전히 같아야 한다(회귀 방지).
+    const without = selectDiverseTopN(batch5, 10);
+    assert(
+      without.length === selectDiverseTopN(batch5, 10).length,
+      "주제어를 넘기지 않은 선정은 결정적이어야 한다"
+    );
+    console.log("  ✅ 주제어를 넘기지 않으면 기존 경로 그대로");
+
+    // 주제어가 한쪽에만 있으면 판정 불가 -> 기존 규칙으로 넘어간다.
+    const partial = selectDiverseTopN(batch5, 10, {
+      topicQueryByKeyword: new Map([[a.keyword, "추무빈 열애 공개"]]),
+    });
+    assert(partial.length > 0, "주제어가 한쪽에만 있어도 선정은 정상 동작해야 한다");
+    console.log("  ✅ 주제어가 한쪽에만 있으면 기존 판정으로 위임");
+
+    // 서로 다른 이슈는 주제어를 넘겨도 둘 다 남아야 한다(오폭 방지).
+    const c = makeCandidate("배성재 김다영 예비 부모 됐다 결혼 1년 4개월만에 전한", "배성재", "entertainment", 55);
+    const batch6 = [a, c, ...makeFillerCandidates(200)].sort((x, y) => y.totalScore - x.totalScore);
+    const distinct = selectDiverseTopN(batch6, 10, {
+      topicQueryByKeyword: new Map([
+        [a.keyword, "추무빈 열애 공개"],
+        [c.keyword, "배성재 김다영 임신"],
+      ]),
+    });
+    const bothKept = distinct.filter((item) => item.keyword === a.keyword || item.keyword === c.keyword);
+    assert(bothKept.length === 2, `서로 다른 주제어는 둘 다 남아야 한다 (실제 ${bothKept.length}건)`);
+    console.log("  ✅ 서로 다른 주제어 -> 둘 다 유지");
+  }
+
   console.log("\n✅ 전체 통과");
 }
 
