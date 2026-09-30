@@ -98,7 +98,7 @@ export async function renderTableImagesForJob(
       // 문단을 통째로 옮긴 글자 벽은 만들지 않는다(2026-09-21 사용자 결정 - 꽃게 손질 7단계가
       // 본문과 한 글자도 다르지 않은 이미지로 나왔다). 독자는 같은 내용을 두 번 읽고, 디스커버는
       // 글자 이미지를 썸네일로 잘 안 고른다. 줄 수가 많다는 건 **압축하지 않았다**는 뜻이다 -
-      // 그 자리는 실물 사진으로 돌리거나 빼는 편이 낫다(images.md §8-4 질문 3-1).
+      // 그 자리는 실물 사진으로 돌리거나 빼는 편이 낫다(images.md §8-1-3).
       if (data.rows.length > MAX_TABLE_ROWS) {
         failures.push(
           `[자리 ${imageIndex}] 본문 목록이 ${data.rows.length}줄이라 표로 그리지 않았습니다(최대 ${MAX_TABLE_ROWS}줄) - ` +
