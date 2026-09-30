@@ -1,6 +1,32 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-09-29 (Asia/Seoul)
+기준일: 2026-09-30 (Asia/Seoul)
+
+## 2026-09-30 세션 — 로컬 실행 환경을 새 맥미니로 이전
+
+**한 줄**: 맥에 남아 있던 launchd 폴러 4개를 **새 맥미니(`~/blog-automation/prod`)로 옮겼다.**
+옛 맥(`gimbeomjun-ui-MacBookAir`)의 같은 작업 4개는 `bootout` + `disable`로 영구 정지했다.
+클라우드(GitHub Actions) 쪽은 그대로다 - 이전 대상은 아래 4개뿐이다.
+
+| launchd 라벨 (`com.blogautomation.*`) | 주기 | 역할 |
+|---|---|---|
+| `naver-poll` | 60초 | 네이버 발행(로그인된 브라우저) |
+| `instagram-capture-poll` | 60초 | 인스타 캐러셀 캡처 |
+| `export-poll` | 60초 | 텔레그램 `⬇️ 맥으로 내려받기` 요청 처리 |
+| `manuscript-export` | 30분 | 보관함 전체 내보내기 |
+
+- **라벨이 바뀌었다**: 옛 맥은 `com.wooahpapa.blog-automation.*`, 새 맥은 `com.blogautomation.*`.
+  두 맥의 작업이 동시에 돌면 네이버에 같은 글이 두 번 올라갈 수 있다(락은 맥 안에서만 유효).
+  그래서 **옛 맥을 먼저 내린 뒤** 새 맥을 등록했다. 옛 맥을 다시 켜려면 새 맥을 먼저 내릴 것.
+- **도구**: `scripts/macmini/{setup,doctor,install-launchd,poll-naver}.sh`. 절차와 되돌리기는
+  `docs/ai-handoff/MACMINI_MIGRATION.md`. `export-manuscripts.sh`의 하드코딩 경로를 없앴다.
+- **네이버 세션**: 프로필 폴더가 `.env`의 `NAVER_PUBLISH_PROFILE_DIR=.local/naver-publish-profile-whyissuenow`다
+  (코드 기본값과 다르다). 브라우저 프로필은 복사해도 안 돼서 `npm run setup:naver-publish`로 새로 로그인했다.
+- **검증(사용자 실측)**: `doctor.sh` 전 항목 통과, 네이버 발행 버튼 종단 성공, `⬇️ 맥으로 내려받기` 성공.
+- **전원**: `pmset sleep 0` 적용. **FileVault는 유지**(사용자 결정) - 자동 로그인이 불가능하므로
+  **재부팅·정전 뒤에는 사람이 한 번 로그인해야 폴러가 다시 돈다**(그동안 요청은 DB에 쌓였다가 처리된다).
+- **남은 것**: ⬜ 인스타 로그인(`npm run ig:login`, 진행 중) → `IG_CAPTURE_AUTO=true`는 한 건 확인 뒤 사용자 결정.
+  ⬜ 원고 보관함의 기존 파일은 사용자가 옛 맥에서 직접 복사. ⬜ 며칠 뒤 옛 맥 launchd plist 정리.
 
 ## 2026-09-29 세션 — 원고 이미지를 기다리지 않고 받는 길 두 개
 
