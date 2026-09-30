@@ -45,6 +45,8 @@ const TARGETS = [
   { site: "mlbpark", label: "MLB파크 불펜", pageUrl: "https://mlbpark.donga.com/mp/best.php" },
 ] as const;
 
+import { isPathDisallowed } from "./robotsMatcher.js";
+
 const REQUEST_TIMEOUT_MS = 15_000;
 
 async function fetchText(url: string): Promise<{ status: number; body: string }> {
@@ -64,29 +66,6 @@ async function fetchText(url: string): Promise<{ status: number; body: string }>
  * 하나만 보수적으로 답한다 - 애매하면(파싱 실패 등) 금지 쪽으로 fail-safe하지 않고, 사람이 원본
  * robots.txt를 직접 보고 판단하도록 원문도 함께 출력한다.
  */
-function isPathDisallowed(robotsTxt: string, targetPath: string): boolean {
-  const lines = robotsTxt.split(/\r?\n/).map((line) => line.trim());
-  let inWildcardBlock = false;
-
-  for (const line of lines) {
-    const [rawKey, ...rest] = line.split(":");
-    if (!rawKey) continue;
-    const key = rawKey.trim().toLowerCase();
-    const value = rest.join(":").trim();
-
-    if (key === "user-agent") {
-      inWildcardBlock = value === "*";
-      continue;
-    }
-    if (!inWildcardBlock) continue;
-
-    if (key === "disallow" && value && targetPath.startsWith(value)) {
-      return true;
-    }
-  }
-
-  return false;
-}
 
 function looksLikeChallengePage(html: string): boolean {
   return (

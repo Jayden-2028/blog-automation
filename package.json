@@ -139,6 +139,7 @@
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
     "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
     "recon:community": "tsx scripts/communityRecon.ts",
+    "test:robots-matcher": "tsx scripts/testRobotsMatcher.ts",
     "job:close": "tsx scripts/closeJob.ts",
     "report:jobs": "tsx src/workflows/reports/runJobsReportCli.ts",
     "purge:jobs": "tsx scripts/purgeJobData.ts",
