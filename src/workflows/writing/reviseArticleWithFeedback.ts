@@ -1,9 +1,7 @@
-// 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 기준(네이버)
-// 원고를 다시 쓴다(2026-09-15 사용자 요청).
+// 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 작성 단계 원고를
+// 다시 쓴다(2026-09-15 사용자 요청). 이 원고가 곧 최종본이다(2026-09-30 배리에이션 폐지).
 //
-// generateArticleVariant.ts와 같은 헤드리스 경로(claude -p + moai-marketer:content-blog +
-// moai-writer:korean-humanize)를 쓴다 - 채널 배리에이션이 아니라 기준 원고 자체를 고치는 것만
-// 다르다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
+// 헤드리스 경로(claude -p + moai-marketer:content-blog + moai-writer:korean-humanize)를 쓴다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
 // 추적성이 깨진다(팩트는 기존 원고에서만 가져온다 - 문체·구성·분량만 피드백대로 바꾼다).
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
@@ -122,7 +120,7 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
     return { status: "failed", error: result.error };
   }
 
-  // generateArticleVariant.ts와 같은 이유(2026-09-06 실측) - 마커를 안 지킨 대화체 회신을 그대로
+  // 2026-09-06 실측 - 마커를 안 지킨 대화체 회신을 그대로
   // "성공"으로 통과시키지 않는다.
   const missingMarkers = Object.values(REVISION_OUTPUT_MARKERS).filter((marker) => !result.output.includes(marker));
   if (missingMarkers.length > 0) {

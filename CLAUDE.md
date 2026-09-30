@@ -38,7 +38,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 ## 원고 파이프라인 운영 규칙
 
 - **원고 규격은 하나다**(2026-09-30). 자율(auto) 모드는 폐기했다. 원고를 쓰는 모든 경로 - 클라우드
-  GitHub Actions(`claude -p`), 맥 로컬, 대화형 세션, 배리에이션·수정 재작성 - 가 **`prompts/writing/core-rules.md`
+  GitHub Actions(`claude -p`), 맥 로컬, 대화형 세션, 수정 재작성 - 가 **`prompts/writing/core-rules.md`
   (한 페이지)를 제일 먼저** 읽고, 나머지 목록은 `src/workflows/writing/specFiles.ts`가 정한다. 계정 레벨
   스킬(`*-blog-writer`)은 쓰지 않는다(클라우드에서 로드되지 않고 맥과 규격이 갈라진다). 대화형으로 원고를
   쓸 때는 프로젝트 스킬 `write-manuscript`를 쓴다. 저장 직전 `enforceWritingRules`가 금지 표현을 코드로
@@ -73,11 +73,12 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
   (`prompts/writing/writer.md` §8).
-- **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 Blogspot
-  배리에이션 1건을 만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 붙이고,
-  이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고 뷰어
-  페이지를 갱신한다. 작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고
-  배리에이션의 재료로만 쓰인다. 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
+- **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 작성 단계 원고
+  (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,
+  이미지를 붙이고, 이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고
+  뷰어 페이지를 갱신한다. **배리에이션(채널별 재작성) 단계는 2026-09-30에 폐지**했다 - 채널은 아래
+  버튼으로 사람이 고르므로 채널별 중복 원고가 없다. 발행 메타(검색 설명·slug·폴더 이름·태그)는 writer가
+  frontmatter로 남긴다(`rules/output-format.md` §9). 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
   (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
   (`job-publish-prepare.yml`)가 실행한다.
 - **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가). 원고 준비 완료

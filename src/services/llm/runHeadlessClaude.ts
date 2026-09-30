@@ -77,13 +77,27 @@ export type RunHeadlessClaudeResult =
  * 셸 이스케이프 문제를 일으키지 않게 하기 위해서다.
  */
 export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Promise<RunHeadlessClaudeResult> {
+  // 클라우드(GitHub Actions)와 맥이 같은 모델로 쓰도록 CLAUDE_MODEL로 고정할 수 있다(2026-09-30).
+  // 비우면 CLI 기본값이라 실행 환경마다 모델이 달라질 수 있다.
+  const pinnedModel = process.env.CLAUDE_MODEL?.trim() || undefined;
+  const first = await runHeadlessClaudeOnce(options, pinnedModel);
+  // 고정한 모델 이름을 CLI가 못 알아듣는 경우(이름 오타, 구버전 CLI)에만 기본 모델로 한 번 재시도한다 -
+  // 모델 고정이 모든 파이프라인 호출을 통째로 막아서는 안 된다. 타임아웃·한도 오류는 재시도하지 않는다.
+  if (!first.ok && pinnedModel && /model/i.test(first.error) && !/안에 끝나지 않아|한도|limit/i.test(first.error)) {
+    console.warn(`⚠️ [claude] CLAUDE_MODEL=${pinnedModel} 실행 실패 - 기본 모델로 재시도합니다: ${first.error.slice(0, 200)}`);
+    return runHeadlessClaudeOnce(options, undefined);
+  }
+  return first;
+}
+
+async function runHeadlessClaudeOnce(
+  options: RunHeadlessClaudeOptions,
+  pinnedModel: string | undefined
+): Promise<RunHeadlessClaudeResult> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_HEADLESS_TIMEOUT_MS;
   const startedAt = Date.now();
 
   const args = ["-p", "--output-format", "text"];
-  // 클라우드(GitHub Actions)와 맥이 같은 모델로 쓰도록 CLAUDE_MODEL로 고정할 수 있다(2026-09-30).
-  // 비우면 CLI 기본값이라 실행 환경마다 모델이 달라질 수 있다.
-  const pinnedModel = process.env.CLAUDE_MODEL?.trim();
   if (pinnedModel) args.push("--model", pinnedModel);
   if (options.allowedTools && options.allowedTools.length > 0) {
     args.push("--allowed-tools", options.allowedTools.join(","));

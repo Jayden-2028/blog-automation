@@ -20,6 +20,14 @@ export type ParsedDraftFile = {
   briefCoverage: { answered: number; total: number } | null;
   /** 답하지 못한 질문 번호(`unanswered: Q3, Q5`). 없으면 빈 배열. */
   unansweredQuestions: string[];
+  /**
+   * 발행 메타(2026-09-30 - 배리에이션 단계가 사라져 writer가 직접 남긴다). frontmatter의
+   * `search_description`(155자 이내), `slug`(영문 kebab), `short_name`(로컬 보관함 폴더용 짧은 한글).
+   * 못 받은 값은 null이고, 소비자가 키워드 등으로 폴백한다.
+   */
+  searchDescription: string | null;
+  slug: string | null;
+  shortName: string | null;
   /** frontmatter/해시태그 줄/HTML 주석/[IMAGE PROMPT:] 줄을 걷어낸 본문(마크다운, `##`·`[IMAGE:]` 유지). */
   body: string;
   /** 본문 끝 "#태그 #태그" 줄에서 뽑은 태그(# 포함). */
@@ -107,6 +115,34 @@ function extractImagePrompts(body: string): { stripped: string; imagePrompts: st
   return { stripped: kept.join("\n"), imagePrompts };
 }
 
+/** 예시 파일의 `값   # 설명` 주석을 그대로 따라 쓴 경우를 걷어낸다. */
+function stripInlineComment(raw: string | undefined): string {
+  return (raw ?? "").replace(/\s+#\s.*$/, "").trim();
+}
+
+/** 영문 소문자 kebab-case 퍼머링크로 정규화한다. 쓸 수 있는 값이 안 남으면 null. */
+export function normalizeSlug(raw: string | undefined): string | null {
+  const slug = (raw ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 80);
+  return slug || null;
+}
+
+/** 폴더 이름으로 쓰므로 경로에 위험한 문자와 따옴표·마크다운 장식을 걷어낸다. */
+export function normalizeShortName(raw: string | undefined): string | null {
+  const name = (raw ?? "")
+    .replace(/^[-*·"'`]+|[-*·"'`]+$/g, "")
+    .replace(/[/\\:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 20);
+  return name || null;
+}
+
 export function parseDraftFile(text: string): ParsedDraftFile {
   const { frontmatter, body: rawBody } = splitFrontmatter(text);
   const fm = parseFrontmatter(frontmatter);
@@ -134,6 +170,9 @@ export function parseDraftFile(text: string): ParsedDraftFile {
     skillUsed: fm.skill_used || null,
     verdictFromResearch: fm.verdict_from_research || null,
     briefCoverage: parseCoverage(fm.brief_coverage),
+    searchDescription: stripInlineComment(fm.search_description).slice(0, 200) || null,
+    slug: normalizeSlug(stripInlineComment(fm.slug)),
+    shortName: normalizeShortName(stripInlineComment(fm.short_name)),
     unansweredQuestions: (fm.unanswered || "")
       .split(/[,\s]+/)
       .map((q) => q.trim().toUpperCase())

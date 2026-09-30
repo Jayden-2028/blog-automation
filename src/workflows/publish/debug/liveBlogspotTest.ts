@@ -23,7 +23,7 @@ async function main(): Promise<void> {
       {
         text:
           `🧪 <b>Blogspot 실측 발행 완료</b>\n\n` +
-          `${result.isDraft ? "📝 비공개(draft)" : "✅ 공개"} · 배리에이션 ${result.variantCreated ? "신규 생성" : "재사용"}\n` +
+          `${result.isDraft ? "📝 비공개(draft)" : "✅ 공개"}\n` +
           (result.url ? `\n${result.url}` : ""),
         replyMarkup: result.url ? { inline_keyboard: [[{ text: "Blogspot에서 확인", url: result.url }]] } : undefined,
       },

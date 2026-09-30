@@ -2,6 +2,19 @@
 
 기준일: 2026-09-30 (Asia/Seoul)
 
+## 2026-09-30 세션(3) — 배리에이션 단계 폐지 + 모델 고정(claude-sonnet-5-5)
+
+**배리에이션 폐지(사용자 결정)**: 채널은 텔레그램 버튼(🔵 블로그 발행 / 🟢 네이버 발행)으로 사람이 고르므로 채널별 중복 원고가 없다. 작성 단계 원고(platform=null article)가 곧 최종 원고다.
+- `generateArticleVariant.ts`, `generateNaverVariant.ts`, 관련 테스트·샘플 스크립트 삭제. `NAVER_VARIANT_ENABLED`도 사라졌다.
+- `prepareManuscript`: LLM 재작성 없이 기준 원고에 내부 링크·이미지만 붙인다. 태그는 본문 끝 해시태그 줄, 검색 설명·slug·폴더 이름은 `job.metadata.draftMeta`에서 읽는다.
+- **writer가 frontmatter에 `search_description` / `slug` / `short_name`을 남긴다**(`output-format.md` §9, `parseDraftFile`, `runWritingStage`가 `draftMeta`로 저장). 옛 job은 draftMeta가 없어 비어 있고 폴더 이름은 키워드로 폴백한다.
+- `publishJobToNaver`: 작성 단계 원고를 그대로 올린다(참고 자료 링크아웃만 뺀다). `publishArticleToBlogspot`(BLOGGER_ENABLED 꺼짐): 같은 원고, 해시태그 줄만 뗀다. `pickFinalArticle`이 최종 원고를 고른다 - 배리에이션 시절에 만든 과거 원고가 더 새것이면 그것을 그대로 쓴다(이미 그 기준으로 이미지가 채워져 있다).
+- 부작용으로 규칙 실행 지점이 줄었다: 저장 직전 `enforceWritingRules`는 집필·수정 재작성 두 곳이다.
+
+**모델 고정**: GitHub Actions 8개 워크플로우에 `CLAUDE_MODEL: claude-sonnet-5-5`. 맥은 `.env`에 같은 값을 넣는다(`.env.example` 기본값 반영). `runHeadlessClaude`는 모델 이름 오류일 때만 기본 모델로 한 번 재시도한다. **첫 실행에서 `--model claude-sonnet-5-5`가 CI의 claude CLI에서 통하는지 확인이 필요하다**(안 통하면 로그에 `기본 모델로 재시도` 경고가 남는다).
+
+**확인 못 한 것**: 새 writer 프롬프트로 실제 원고를 생성해 `draftMeta`가 채워지는지는 다음 실행에서 봐야 한다. 실제 Supabase가 필요한 테스트(`manuscript-manifest` 등)는 샌드박스에서 못 돌렸다.
+
 ## 2026-09-30 세션(2) — 규칙 정리 3단계 + 자율(auto) 모드 폐기 + 클라우드·맥 규격 통일
 
 **자율 모드 폐기**: `writingMode.ts`, `writer-auto.md`, `researcher-auto.md`, A/B 복제 스크립트, 관련 테스트를 지웠다. 규격은 하나(spec)다.

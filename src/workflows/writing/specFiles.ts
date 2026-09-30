@@ -1,7 +1,7 @@
 // 원고를 쓰는 모든 경로가 읽을 규격 파일 목록의 **유일한 출처**(2026-09-30).
 //
-// 왜: 집필(buildWritingPrompt)·배리에이션(generateArticleVariant)·수정 재작성(reviseArticleWithFeedback)이
-// 각자 파일 목록을 하드코딩하다 보니 서로 어긋났다(배리에이션만 구조·주제배분 문서를 안 읽는 식).
+// 왜: 집필(buildWritingPrompt)·수정 재작성(reviseArticleWithFeedback)이 각자 파일 목록을 하드코딩하다
+// 보니 서로 어긋났다(배리에이션이 구조·주제배분 문서를 안 읽던 식 - 배리에이션은 2026-09-30 폐지).
 // 클라우드(GitHub Actions)와 맥 로컬이 같은 코드 경로를 타므로 이 목록만 같으면 같은 규격의 원고가 나온다.
 // 대화형 세션은 `.claude/skills/write-manuscript`가 같은 순서를 안내한다.
 
