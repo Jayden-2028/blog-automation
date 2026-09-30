@@ -1,7 +1,7 @@
 # 맥미니 이전 가이드 (2026-09-29)
 
 **결론**: 자동화 대부분(키워드·조사·집필·Blogspot 발행·감시)은 이미 GitHub Actions에서 돈다.
-맥에 남은 일은 **4가지**뿐이다 - 그것만 새 맥미니로 옮기면 된다.
+맥에 남은 일은 **5가지**뿐이다 - 그것만 새 맥미니로 옮기면 된다.
 
 | 로컬 job | 주기 | 하는 일 | 필요한 것 |
 |---|---|---|---|
@@ -9,6 +9,29 @@
 | `instagram-capture-poll` | 60초 | 인스타 캐러셀 캡처 | 인스타 로그인 세션, `IG_CAPTURE_AUTO=true` |
 | `export-poll` | 60초 | 텔레그램 `⬇️ 맥으로 내려받기` 버튼 요청을 바로 처리 | 보관함 폴더 |
 | `manuscript-export` | 30분 | 원고·이미지를 로컬 보관함으로 내려받기 | 보관함 폴더 |
+| `creator-advisor` | 매일 07:30 | 네이버 Creator Advisor 트렌드 수집 → `trend_candidates` | Creator Advisor 로그인 세션, `CREATOR_ADVISOR_BLOG_ID` |
+
+### Creator Advisor가 맥에만 있는 이유 (2026-09-30 추가)
+
+네이버 로그인 세션이 붙은 브라우저 프로필이 필요해서 GitHub Actions 러너에서는 돌릴 수 없다.
+클라우드 이전 때 `CREATOR_ADVISOR_ENABLED=false`로 꺼둔 뒤로 이 소스가 비어 있었는데, 맥미니가
+생겨서 다시 채운다.
+
+수집과 사용이 `trend_candidates` 테이블로 분리돼 있어 **코드 변경이 필요 없다**:
+
+```
+07:30 맥미니 creator-advisor  -> trend_candidates에 source="creator_advisor" 행 upsert
+08:00 클라우드 social-issue    -> buildDailyQueryPool이 그 행을 읽어 query pool에 넣는다
+```
+
+클라우드 job은 `collectionSources`에 `"creator_advisor"`를 이미 넘기고 있고,
+`buildDailyQueryPool`의 `isSourceEnabled()`가 `enabledSources`를 env보다 우선한다. 즉 클라우드의
+`CREATOR_ADVISOR_ENABLED=false`는 "크롤링하지 마라"는 뜻이지 "읽지 마라"가 아니다.
+
+**최초 1회 로그인**: `npm run debug:creator-advisor` (브라우저가 떠서 사람이 로그인한다).
+프로필은 다른 맥에서 복사해 와도 동작하지 않는다 - 네이버 발행 프로필과 같다.
+
+**수동 확인**: `WRITE=1 npm run collect:creator-advisor` (로그: `~/Library/Logs/blog-automation-creator-advisor.log`)
 
 ## 순서 (총 30~40분)
 
@@ -35,7 +58,7 @@
 10. **옛 맥에서 먼저 내린다**: `launchctl bootout gui/$(id -u)/<라벨>` + `launchctl disable ...`
     (라벨은 `launchctl list | grep -i blog`로 확인 - 옛 plist 이름은 `com.wooahpapa.blog-automation.*`)
     ⚠️ 두 맥이 동시에 돌면 **네이버에 같은 글이 두 번** 올라갈 수 있다(락은 맥 안에서만 유효).
-11. 새 맥: `bash scripts/macmini/install-launchd.sh install` → `... status`로 🟢 4개 확인
+11. 새 맥: `bash scripts/macmini/install-launchd.sh install` → `... status`로 🟢 5개 확인
 12. 텔레그램에서 원고 1건으로 `🟢 네이버 발행` 버튼을 눌러 종단 확인 → `~/Library/Logs/blog-automation-*.log`
 
 ## 되돌리기

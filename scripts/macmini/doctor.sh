@@ -34,6 +34,12 @@ fi
 N="$(grep -E '^NAVER_PUBLISH_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
 N="${N:-.local/naver-publish-profile}"; N="${N/#\~/$HOME}"
  [ -d "$N" ] && pass "네이버 세션 프로필 폴더 ($N)" || soft "네이버 세션 없음 -> npm run setup:naver-publish 로 로그인"
+# Creator Advisor는 클라우드에서 못 도는 유일한 수집 소스라 이 맥에만 있다. 프로필이 없으면
+# 매일 07:30 수집이 조용히 빈손으로 끝나고, 08:00 클라우드 job은 그 사실을 모른 채 진행한다.
+C="$(grep -E '^CREATOR_ADVISOR_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
+C="${C:-.local/creator-advisor-profile}"; C="${C/#\~/$HOME}"
+[ -d "$C" ] && pass "Creator Advisor 세션 프로필 폴더 ($C)" || soft "Creator Advisor 세션 없음 -> npm run debug:creator-advisor 로 로그인"
+grep -qE "^CREATOR_ADVISOR_BLOG_ID=.+" .env 2>/dev/null && pass "CREATOR_ADVISOR_BLOG_ID" || soft "CREATOR_ADVISOR_BLOG_ID 없음(Creator Advisor 수집에 필요)"
 pmset -g | grep -E "^\s*sleep\s+0" >/dev/null && pass "절전 꺼짐(sleep 0)" || soft "pmset sleep 0 아님 - 서버로 쓰려면 setup.sh 안내 참고"
 pass "빌드 검사는 'npm run build'로 별도 실행"
 exit $FAIL
