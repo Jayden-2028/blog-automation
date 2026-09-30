@@ -35,6 +35,64 @@ export function thinSourceWarning(
   return "⚠️ 뉴스 0건 · 단일 출처 — 자료 부족으로 원고가 안 나올 수 있습니다";
 }
 
+/**
+ * 유효기간 위험 신호(2026-10-01). **이미 마감된 일을 소개하는 글**을 쓰게 되는 사고가 실제로 두 번
+ * 있었다 - "양주 서울우유 견학"은 원고를 쓴 뒤에 예약이 매진인 것을 알았고, 불꽃놀이 건은 예매가
+ * 이미 끝난 뒤였다. 둘 다 키워드 점수는 높았다. 6-factor의 freshness는 "이슈가 얼마나 최근인가"를
+ * 재지, "지금도 참여할 수 있는가"는 재지 않기 때문이다. 화제성과 실행가능성은 다른 축이다.
+ *
+ * **차단하지 않는다**(thinSourceWarning과 같은 철학). 예약이 열려 있는 축제·전시는 좋은 키워드이고,
+ * 마감 여부는 예약 페이지를 직접 봐야 알 수 있는데 이 파이프라인에는 그 정보가 없다. 사람이 Go/Pass를
+ * 누르는 자리에서 "확인하고 누르라"고 알려 주는 것이 지금 할 수 있는 가장 정확한 일이다.
+ *
+ * 두 단계로 나눈다:
+ *   1) 제목·키워드에 이미 종료를 뜻하는 말이 있으면 강한 경고(마감/매진/종료/완판/취소).
+ *   2) 예약·접수형 키워드면 확인 요청(예매/신청/접수/모집/견학/응모/선착순...).
+ * 1)이 있으면 2)는 붙이지 않는다 - 같은 줄을 두 번 쓰지 않는다.
+ */
+
+/** 이미 끝났음을 뜻하는 말. 제목에 이게 있으면 그 이슈는 더 이상 실행 가능하지 않을 가능성이 높다. */
+export const EXPIRED_TERMS = [
+  "마감", "매진", "종료", "완판", "품절", "취소", "중단", "철회", "무산", "폐지",
+] as string[];
+
+/**
+ * 마감이 있는 일임을 뜻하는 말. 이 말이 있으면 "지금도 되는가"를 사람이 확인해야 한다.
+ * 목록을 넓게 잡는 쪽을 택했다 - 한 줄 더 보는 비용보다 마감된 건으로 원고를 쓰는 비용이 훨씬 크다.
+ */
+export const DEADLINE_TERMS = [
+  "예매", "예약", "신청", "접수", "모집", "응모", "선착순", "견학", "입장권", "티켓",
+  "사전판매", "얼리버드", "한정판매", "공모", "지원금 신청", "마감일", "추첨",
+] as string[];
+
+function includesAny(haystack: string, terms: readonly string[]): string | null {
+  for (const term of terms) {
+    if (haystack.includes(term)) return term;
+  }
+  return null;
+}
+
+export function expiryRiskWarning(item: {
+  keyword: string;
+  headline?: string | null;
+}): string | null {
+  // 제목과 키워드를 함께 본다. canonical keyword는 앞에서 잘린 축약이라 "…예매 종료"의 뒷부분이
+  // 이미 사라진 경우가 있다(selectDiverseTopN 주석과 같은 이유).
+  const haystack = `${item.keyword} ${item.headline ?? ""}`;
+
+  const expired = includesAny(haystack, EXPIRED_TERMS);
+  if (expired) {
+    return `⚠️ 제목에 '${expired}' — 이미 끝난 건일 수 있습니다. 원고 전에 확인하세요`;
+  }
+
+  const deadline = includesAny(haystack, DEADLINE_TERMS);
+  if (deadline) {
+    return `⚠️ '${deadline}' 건 — 지금도 가능한지(마감·매진) 확인 후 진행하세요`;
+  }
+
+  return null;
+}
+
 /** 주제·시드쿼리·카테고리만 보여준다 - 원문(headline)과 항목별 배점표(scoreBreakdown)는 뺀다(2026-09-04 사용자 요청, 폰 화면에서 항목당 너무 길었다). */
 function formatItemBlock(item: NotificationKeywordItem): string {
   const keyword = escapeTelegramHtml(item.keyword);
@@ -51,6 +109,11 @@ function formatItemBlock(item: NotificationKeywordItem): string {
   const warning = thinSourceWarning(item.scoreBreakdown);
   if (warning) {
     lines.push(`   ${escapeTelegramHtml(warning)}`);
+  }
+
+  const expiry = expiryRiskWarning(item);
+  if (expiry) {
+    lines.push(`   ${escapeTelegramHtml(expiry)}`);
   }
 
   return lines.join("\n");

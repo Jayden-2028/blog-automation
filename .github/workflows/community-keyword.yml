@@ -1,4 +1,5 @@
-# 클라우드 이전 Phase 2 - 커뮤니티(더쿠) 인기글 유래 키워드 수집. 순수 fetch 기반(더쿠 HTML
+# 클라우드 이전 Phase 2 - 커뮤니티(더쿠·루리웹·에펨코리아) 인기글 유래 키워드 수집.
+# KST 20:00에 Worker cron이 깨운다(2026-10-01 변경, 전에는 18:00). 순수 fetch 기반(HTML
 # 파싱, 로그인/Playwright 불필요 - src/services/community/theqoo/TheqooProvider.ts 참고)이라
 # 세 job 중 클라우드 이전이 가장 안전하다. 단, 인기글 제목 -> 키워드 변환에 LLM 1콜
 # (extractCommunityKeywords.ts, runHeadlessClaude 경유)을 쓰므로 CLAUDE_CODE_OAUTH_TOKEN이 필요하다
