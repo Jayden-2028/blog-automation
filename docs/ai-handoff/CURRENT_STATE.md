@@ -8,6 +8,14 @@
 
 **후속(같은 날)**: images.md §8 첫 문단의 "이미지는 자동 생성하지 않는다"를 고쳤다 - 기본은 웹 검색, 웹 검색으로 해결이 안 될 때만 AI 생성(폴백). "획득 방식 배분" 절도 같은 원칙으로 맞췄다(writer는 웹 검색으로 적는 것이 기본). **표 생성 모순 정리(같은 날 후속)**: AI가 만든 표·인포그래픽 이미지(`표 생성`)는 쓰지 않는다. `images.md` §8-4를 세 갈래(웹 검색 → 페이지 캡처 → AI 생성)로 줄이고, 글자가 정보의 전부인 자리는 이미지 자리를 만들지 않고 본문 목록으로 쓰게 했다(이벤트·정책의 "인포그래픽" 지침도 같이 정리). `buildWritingPrompt`·`writer.md`·`output-format.md` 포인터 동기화. **죽은 코드 삭제(같은 날 후속)**: 표 이미지 렌더 파이프라인을 지웠다 - `renderTableImagesForJob`·`extractTableData`·`tableVisuals`·`renderTableImage`와 테스트 2개(`test:table-image`, `test:table-visuals`), `prepareManuscript`의 렌더 단계·옵션(`tableImagesReadyAt` 더는 안 씀), `captureRankingImage.matchRankingSource`(+`match` 필드), 이미지 수정 요청의 "표로/차트" 전환(`inferAcquisition`은 이제 null = 현재 방식 유지). `testCaptureRanking`은 순위 출처 등록부 무결성만 본다. **남긴 것**: `removeTableMarkers`(옛 원고·AI가 그래도 쓴 마커를 지우는 방어선), `parseImageAcquisition`의 `table` 인식(그 방어선이 마커를 읽는다), 펀덱스·CGV 등록부(`페이지 캡처`가 쓴다). `job-publish-prepare.yml`의 한글 폰트+Chromium 설치는 `페이지 캡처`용으로 그대로 필요해 주석만 고쳤다.
 
+## 2026-09-30 세션(5) — 실제 원고 1건 생성 검증 + thin·반복·기관 출처 규칙
+
+**검증**: Supabase·네이버 키가 없는 샌드박스에서 실제 프롬프트 빌더로 `claude -p`(`CLAUDE_MODEL=claude-sonnet-5-5`, CLI가 정상 수락)를 돌려 "한글날 연휴 2026"(living) 자료조사→집필을 1건 생성했다(DB·baseline 없음, 자료조사 verdict `thin`). 1차 결과: 금지 표현 0건·frontmatter 발행 메타(`search_description`/`slug`/`short_name`) 정상 파싱이었지만 (1) 1,435자로 하한 미달인데 같은 일정을 문장·목록·날짜별 정리·FAQ로 4번 돌려 썼고 (2) "우주항공청의 월력요항에 따르면 한글날은 10월 9일"이라는 **틀린 출처 귀속**(한글날은 법령이 정한 날짜, 월력요항은 그것을 모아 공표하는 기준 자료. 뉴스 문구를 기관 출처로 올림)이 있었다.
+
+**규칙 반영**: ① `core-rules.md` §4 - 같은 정보는 한 번만, `thin`이면 분량 하한·소제목 수·Q&A 조건 면제(FAQ 재료 없으면 생략). ② §1 - 기관을 주어로 쓰는 것은 리서치가 **원문(`[official]`)을 직접 연 경우에만**, 뉴스가 전한 기관 발표는 출처 없이 사실만, "○○에 따르면"도 금지. ③ 검수: thin이면 분량 미달을 "자료 얇음"으로 표시(`researchVerdict` 전달), `findRepeatedInformation`(3-gram 유사도 ≥0.5인 쌍이 3개 이상이면 경고), `ACCORDING_TO_PATTERN` 경고. **재생성 결과(같은 자료)**: 반복·"에 따르면"·월력요항 귀속이 사라지고 FAQ가 빠져 872자가 됐다 - 규칙대로 동작했지만 분량은 자료조사가 얇은 탓이다.
+
+**남은 것**: thin 원고는 짧게 저장되고 사람이 "자료 얇음" 표시를 보고 자료조사 보강 여부를 정한다 - 자동 보강 단계는 없다(필요하면 thin일 때 자료조사 1회 재시도를 설계해야 한다). 네이버 baseline 없이 돌렸으므로 실운영 원고는 분량이 다를 수 있다.
+
 ## 2026-09-30 세션(3) — 배리에이션 단계 폐지 + 모델 고정(claude-sonnet-5-5)
 
 **배리에이션 폐지(사용자 결정)**: 채널은 텔레그램 버튼(🔵 블로그 발행 / 🟢 네이버 발행)으로 사람이 고르므로 채널별 중복 원고가 없다. 작성 단계 원고(platform=null article)가 곧 최종 원고다.
