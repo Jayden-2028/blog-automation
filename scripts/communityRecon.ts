@@ -25,11 +25,24 @@ const OUTPUT_DIR = join(__dirname, "..", "docs", "ai-handoff", "community-recon"
 
 // 결정 C(KEYWORD_SOURCE_EXPANSION.md §7): 네이트판 오늘의 톡 + 더쿠 핫게시판 + 다음/네이버 카페
 // 인기글. 펨코는 Cloudflare Bot Management가 강해 제외했다(§5-2) - recon 대상에도 넣지 않는다.
+// 2026-09-30 추가 후보(사용자 요청). robots.txt는 원격 세션에서 먼저 읽어 1차 선별했고,
+// 아래 두 곳만 남겼다 - 나머지는 사이트가 명시적으로 막고 있어 대상에서 뺐다:
+//   - 클리앙:      anthropic-ai / Claude-Web 차단 + `Disallow: /*?*`
+//   - 인스티즈:    anthropic-ai / ClaudeBot 차단
+//   - 디시인사이드: ClaudeBot / anthropic-ai / Claude-Web 차단
+// 에펨코리아는 40여 개 AI 크롤러를 막으면서도 기본 UA(`*`)에 대해 `/best`, `/best2`를
+// 명시적으로 Allow한다 - 사이트가 의도적으로 구분해 열어둔 경로라 대상에 넣는다. 다만
+// §5-2가 지적한 Cloudflare Bot Management가 실제로 막는지는 맥에서 확인해야 한다.
+// MLB파크는 이 환경에서 robots.txt 조회 자체가 막혀(EGRESS_BLOCKED) 확인하지 못했다 -
+// 이 스크립트가 맥에서 robots를 먼저 읽고 금지면 알아서 건너뛴다.
 const TARGETS = [
   { site: "natepann", label: "네이트판 오늘의 톡", pageUrl: "https://pann.nate.com/talk/ranking/d" },
   { site: "theqoo", label: "더쿠 핫게시판", pageUrl: "https://theqoo.net/hot" },
   { site: "daumcafe", label: "다음 카페 인기글", pageUrl: "https://cafe.daum.net/_c21_/home" },
   { site: "navercafe", label: "네이버 카페 인기글", pageUrl: "https://section.cafe.naver.com/ca-fe/home/ranking" },
+  { site: "fmkorea", label: "에펨코리아 베스트", pageUrl: "https://www.fmkorea.com/best" },
+  { site: "ruliweb", label: "루리웹 베스트", pageUrl: "https://bbs.ruliweb.com/best" },
+  { site: "mlbpark", label: "MLB파크 불펜", pageUrl: "https://mlbpark.donga.com/mp/best.php" },
 ] as const;
 
 const REQUEST_TIMEOUT_MS = 15_000;

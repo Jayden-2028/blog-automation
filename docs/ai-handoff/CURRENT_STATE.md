@@ -30,6 +30,51 @@
 
 **남은 것(승인 필요)**: ① GitHub Actions 워크플로우에 `CLAUDE_MODEL` env 추가(CI 수정) ② `output-format.md`(956줄) 이미지 규칙을 별도 파일로 분리 ③ 배리에이션 단계 자체의 필요성 재검토(채널이 Blogspot 하나라 "중복 콘텐츠 방지 재기획"의 전제가 사라졌다) ④ 계정 스킬 3개 비활성화(사용자, 앱에서).
 
+## 2026-09-30 세션 — 키워드 수집: Creator Advisor 재개 + seed 재편
+
+**1. Creator Advisor를 맥미니에서 재개** (커밋 참고)
+
+클라우드 이전 때 꺼둔 뒤 비어 있던 소스를 맥미니 launchd로 되살렸다. **코드 변경은 없었다** -
+수집과 사용이 `trend_candidates`로 이미 분리돼 있었다. 07:30 맥이 쓰고, 08:00 클라우드가 읽는다.
+`buildDailyQueryPool.isSourceEnabled()`가 `enabledSources`(job이 넘기는 `collectionSources`)를
+env보다 우선하므로, 클라우드의 `CREATOR_ADVISOR_ENABLED=false`는 "크롤링 금지"일 뿐 "읽기 금지"가
+아니다. 절차는 `MACMINI_MIGRATION.md`.
+
+**2. seed_queries 재편 (DB 직접 변경 - 코드에 안 남으므로 여기 기록)**
+
+사용자 결정으로 parenting을 프로젝트에서 빼고 3개 주제(엔터·사회이슈·커뮤니티)로 운영한다.
+
+| category | 변경 | active |
+|---|---|---|
+| entertainment | +16(연예인·컴백·논란·발매·순위·화보·실체·차트·수상·이슈·뮤직비디오·데뷔·이상형·변신·무대·미담), -2(연예인 근황·연예인 논란) | 24 |
+| ott | +13(캐스팅·오디션·리메이크·개봉·공개·공개일·출연진·대본 리딩·스틸·드라마·원작·호평·제작 확정), -1(OTT 요금) | 23 |
+| living | parenting 10건 흡수(category 변경 + 활성화), -6(오늘 날씨·전기요금·폭염·장마·교통비·태풍) | 17 |
+| parenting | **category 자체가 사라짐**(전부 living으로 이동) | - |
+
+- 삭제는 `status='paused'`다. 되돌리려면 `update seed_queries set status='active' where ...`.
+- `수상`은 엔터·OTT 양쪽 요청이었으나 query pool이 키워드로 중복 제거하므로 entertainment에만 넣었다.
+- 활성 seed 34 -> 64. **엔터 job의 seed가 21 -> 47로 늘어 collect 단계가 2배 이상 길어진다.**
+- ⚠️ 관찰 필요: 신규 seed 다수가 광의어(`논란`·`순위`·`이슈`·`공개`·`수상`)다. 후보는 seed의
+  category를 그대로 물려받으므로(`categoryByQuery`), 정치·사회 논란이 `entertainment`로 분류돼
+  엔터 알림에 섞일 수 있다. 다음 run에서 확인하고 조정한다.
+
+**3. 커뮤니티 소스 확대 - robots.txt 1차 선별**
+
+| 사이트 | 판정 |
+|---|---|
+| 에펨코리아 | `*`에 `/best`, `/best2` **명시적 Allow**(AI 크롤러 40여 개는 차단). recon 대상 추가 |
+| 루리웹 | 전면 차단 없음. 쿼리 패턴만 차단 -> 목록 URL 확인 필요. recon 대상 추가 |
+| MLB파크 | 이 환경에서 조회 불가(EGRESS_BLOCKED). recon 대상 추가(맥에서 robots부터 확인) |
+| 클리앙 | `anthropic-ai`/`Claude-Web` 차단 + `Disallow: /*?*` -> **제외** |
+| 인스티즈 | `anthropic-ai`/`ClaudeBot` 차단 -> **제외** |
+| 디시인사이드 | `ClaudeBot`/`anthropic-ai`/`Claude-Web` 차단 -> **제외** |
+
+다음 단계: 맥에서 `npm run recon:community` 실행 -> robots 재확인 + HTML 캡처 -> 그 fixture로 파서 작성.
+에펨코리아는 §5-2가 지적한 Cloudflare Bot Management가 실제로 막는지가 관건이다.
+
+**아직 안 켜진 플래그 2개**(한 달째): `BLOG_COMPETITION_APPLY_TO_SCORE`, `TOPIC_MERGE_APPLY`.
+둘 다 preview 로그만 쌓고 있다. 로그 확인 후 승인하면 켠다.
+
 ## 2026-09-30 세션 — 원고 규칙 정리: 기준 시점·미공개 값·댓글 유도 금지
 
 사용자 결정 4건을 규칙과 검수 코드에 반영했다.
