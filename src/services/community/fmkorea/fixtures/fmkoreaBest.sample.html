@@ -1,0 +1,96 @@
+<!--
+  2026-10-01 실측(communityRecon.ts + communityProbe.ts --raw)으로 확인한 실제 DOM 구조를 그대로
+  본떴지만, 제목·작성자 텍스트는 저작권이 있는 실제 게시글 원문이 아니라 임의로 지어낸
+  placeholder다(theqooHot/ruliwebBest 샘플과 같은 이유).
+
+  구조상 확인해야 할 것:
+  - 제목은 h3.title > a > span.ellipsis-target에만 들어 있다(순위·댓글수가 안 섞인다).
+  - 댓글 수는 형제 span.comment_count(`[350]`)다.
+  - 행 li의 클래스가 의미 플래그다: li_best2_hotdeal1=광고, li_best2_politics1=정치글 -> 둘 다 제외.
+  - 제목 anchor의 class(` hotdeal_var8`)는 일부러 쓰지 않는다 - 아래 마지막 행은 그 클래스가
+    아예 다른 값이어도 파싱돼야 한다.
+  - span.ellipsis-target이 없는 행은 폴백 경로(anchor 텍스트 - 댓글수)로 제목을 얻어야 한다.
+-->
+<html>
+<body>
+<ul class="fm_best_widget">
+  <li class="li li_best2_pop1 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li" style="padding-left:50px;position:relative;">
+      <a href="/index.php?mid=best2&amp;document_srl=1001" class="pc_voted_count pc_voted_count_plus pc_voted_count_long">
+        <span class="label">추천 </span> <span class="count">1237</span>
+      </a>
+      <h3 class="title" data-title-ellipsis="true">
+        <a href="/index.php?mid=best2&amp;document_srl=1001" class=" hotdeal_var8">
+          <span class="ellipsis-target">예시 제목 하나 - 어제 경기 마지막 장면 이야기</span>&nbsp;
+          <span class="comment_count">[350]</span>
+        </a>
+      </h3>
+      <div>
+        <span class="category"> <a href="/humor">유머</a> / </span>
+        <span class="regdate"> 3 시간 전 </span>
+        <span class="author"> / 작성자1</span>
+      </div>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop1 li_best2_hotdeal1 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1002" class=" hotdeal_var8">
+          <span class="ellipsis-target">[예시몰] 예시 세트 외 (5,600원) (무료)</span>&nbsp;
+          <span class="comment_count">[145]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics1 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1003" class=" hotdeal_var8">
+          <span class="ellipsis-target">예시 정치글 - 어떤 발언을 둘러싼 공방</span>&nbsp;
+          <span class="comment_count">[912]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1004" class=" hotdeal_var8">
+          <span class="ellipsis-target">예시 제목 넷 - 암살자(들) 감상 후기 [스포]</span>&nbsp;
+          <span class="comment_count">[202]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1005" class=" some_other_class_name">
+          예시 제목 다섯 - ellipsis span이 없는 행&nbsp;
+          <span class="comment_count">[63]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1001" class=" hotdeal_var8">
+          <span class="ellipsis-target">예시 제목 하나 - 어제 경기 마지막 장면 이야기</span>&nbsp;
+          <span class="comment_count">[350]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li"><span class="no_title">제목 없음</span></div>
+  </li>
+</ul>
+</body>
+</html>

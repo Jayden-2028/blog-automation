@@ -85,9 +85,21 @@ recon 도중 robots.txt 판정 버그를 찾아 고쳤다: `Allow`를 무시하�
 | 사이트 | 맥 실측 | 상태 |
 |---|---|---|
 | 루리웹 `/best` | robots 금지 없음, HTTP 200(164,812자) | ✅ **provider 구현 완료** |
-| 에펨코리아 `/best` | robots 허용, HTTP 200(70,175자). Cloudflare 차단 없음 | ⬜ 제목 anchor 클래스명이 난독화 형태(`a.hotdeal_var8`) - **날마다 바뀌는지 확인 후** 파서 작성 |
+| 에펨코리아 `/best` | robots 허용, HTTP 200(70~74KB, 2회). Cloudflare 차단 없음 | ✅ **provider 구현 완료** |
 | MLB파크 `/mp/best.php` | robots 금지 없음 | ⬜ 루리웹 다음 순서 |
 | 다음카페 `/_c21_/home` | robots는 허용하는데 HTTP 500 | ⬜ URL이 낡음. 새 URL 찾거나 드롭 |
+
+에펨코리아 파서(`src/services/community/fmkorea/`, 2026-10-01): 제목 anchor의 클래스
+`hotdeal_var8`이 난독화인지 확인하려 recon을 2회 돌렸는데 값은 같았다. 다만 간격이 몇 시간뿐이라
+"고정"의 근거로는 약해서, **그 클래스를 아예 안 쓰는 쪽으로 갔다.** `--raw`로 행 원본을 보니
+의미가 분명한 구조가 있었다 - `h3.title > a > span.ellipsis-target`에 제목만 들어 있어(순위·댓글수
+안 섞임) 정규식 후처리조차 필요 없다. span이 없으면 anchor 텍스트에서 댓글수 span을 뺀 값으로 폴백한다.
+
+**예상 밖의 수확**: 행 `li`의 클래스가 사이트가 붙인 의미 플래그다 - `li_best2_hotdeal1`(제휴 딜),
+`li_best2_politics1`(정치글). 둘 다 수집 단계에서 제외한다. 특히 정치글은 지금까지
+`excludeCandidateInserts`가 키워드 어휘로 걸러냈는데, 여기서는 사이트가 붙여준 표시로 더 앞단에서
+뺄 수 있다. ⚠️ 완전하지는 않다 - 실측에서 쿠팡 딜 게시글 1건이 `hotdeal0`으로 올라와 있었다
+(핫딜 게시판이 아닌 곳에 올라온 글로 보인다). LLM 추출과 키워드 필터가 2차 그물이다.
 
 루리웹 파서(`src/services/community/ruliweb/`): `a.subject_link` 선택(레이아웃 유틸리티 클래스
 `deco/flex/center`는 의도적으로 제외 - 디자인 변경에 같이 깨진다). 상위 3건(`tr.best_top_row`)만
