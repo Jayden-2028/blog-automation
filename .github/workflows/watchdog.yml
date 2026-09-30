@@ -12,8 +12,12 @@ name: keyword-collection-watchdog
 
 on:
   schedule:
-    # 02:00 UTC = 11:00 KST. 로컬 daily-keyword job(09:00 KST, ~90초)이 끝나고도 남을 만큼 뒤에 둔다.
-    - cron: "0 2 * * *"
+    # 12:00 UTC = 21:00 KST. **마지막 수집 job보다 뒤여야 한다** - 이 감시인은 "오늘(Seoul) 완료된
+    # run이 있는가"만 보므로, 수집보다 앞서 돌면 매일 거짓 경보가 나간다.
+    # 2026-10-01: 수집이 저녁(18/19/20시 KST)으로 옮겨가면서 11:00 KST -> 21:00 KST로 미뤘다.
+    # 마지막 job(커뮤니티 20:00, 약 3~5분)이 끝나고 55분 여유가 있다.
+    # 수집 시각을 바꿀 때는 이 값도 같이 봐야 한다(cloudflare/telegram-relay/wrangler.toml).
+    - cron: "0 12 * * *"
   workflow_dispatch: {}
 
 concurrency:

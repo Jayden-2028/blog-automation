@@ -44,6 +44,38 @@
 
 **남은 것(승인 필요)**: ① GitHub Actions 워크플로우에 `CLAUDE_MODEL` env 추가(CI 수정) ② `output-format.md`(956줄) 이미지 규칙을 별도 파일로 분리 ③ 배리에이션 단계 자체의 필요성 재검토(채널이 Blogspot 하나라 "중복 콘텐츠 방지 재기획"의 전제가 사라졌다) ④ 계정 스킬 3개 비활성화(사용자, 앱에서).
 
+## 2026-10-01 — 키워드 수집·알림 시각을 저녁으로 이동
+
+사용자 결정. **아침·낮 → 저녁 연속 3시간.**
+
+| 시각(KST) | job | UTC cron |
+|---|---|---|
+| 17:30 | Creator Advisor 수집(맥미니 launchd) | - |
+| **18:00** | social-issue-keyword | `0 9 * * *` |
+| **19:00** | entertainment-keyword | `0 10 * * *` |
+| **20:00** | community-keyword | `0 11 * * *` |
+| 21:00 | watchdog(감시인) | `0 12 * * *` |
+
+(전: Creator Advisor 07:30 / 사회 08:00 / 엔터 12:00 / 커뮤니티 18:00 / watchdog 11:00)
+
+**같이 옮겨야 했던 것 둘.** 시각만 바꾸면 조용히 깨지는 의존이 있었다.
+
+1. **watchdog**. "오늘(Seoul) 완료된 run이 있는가"만 보는데 11:00 KST에 돌면 수집(18~20시)보다
+   앞서므로 **매일 거짓 실패 알림**이 나간다. 21:00 KST로 미뤘다.
+2. **Creator Advisor**(맥미니). social-issue가 읽을 행을 30분 전에 채워야 한다는 관계를 유지해
+   07:30 → 17:30. 늦게 수집할수록 그날 데이터가 반영될 여지가 크다는 점도 이 방향에 맞는다.
+
+**스케줄이 사는 곳**: GitHub Actions의 `schedule:`이 아니라 `cloudflare/telegram-relay`의 Worker
+Cron이다(네이티브 schedule이 4~5시간씩 지연돼 2026-09-16에 걷어냈다). 그래서 **두 파일을 같이**
+고쳐야 한다 - `wrangler.toml`의 `crons` 배열과 `src/index.ts`의 `SCHEDULED_WORKFLOWS`(cron 문자열이
+map의 키다). 한쪽만 고치면 Worker가 `알 수 없는 cron 표현식`을 찍고 아무것도 깨우지 않는데,
+배포는 성공하고 에러도 없어서 **다음 날 알림이 안 온 뒤에야 안다**. 이번에 `npm run test:worker-cron`
+(두 파일의 cron 목록 대조)을 넣어 이 실패를 자동으로 잡게 했다.
+
+**배포 두 가지가 필요하다**(코드 병합만으로는 안 바뀐다):
+- 🖥️ 맥미니: `bash scripts/macmini/install-launchd.sh install` (launchd plist 재생성)
+- ☁️ Worker: `cd cloudflare/telegram-relay && npx wrangler deploy`
+
 ## 2026-10-01 세션 — 발송 전 마감 경고 + 선행 트랙 보류(공연/축제 카테고리로 이관)
 
 **마감·매진 경고 추가**: 이미 끝난 일로 원고를 쓰는 사고가 두 번 있었다("양주 서울우유 견학" 매진,
