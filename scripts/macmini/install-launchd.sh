@@ -56,7 +56,9 @@ case "${1:-status}" in
       launchctl bootout "gui/$UID_/$PFX.$n" 2>/dev/null || true
       plist "$n" "$s" "$i" > "$f"
       launchctl bootstrap "gui/$UID_" "$f"; launchctl enable "gui/$UID_/$PFX.$n"
-      echo "✅ 등록: $PFX.$n (${i}초)"
+      # 주기 표기는 형태에 맞춰 쓴다 - "07:30초" 같은 출력은 사람이 잘못 읽는다.
+      if [[ "$i" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then echo "✅ 등록: $PFX.$n (매일 $i)"
+      else echo "✅ 등록: $PFX.$n (${i}초마다)"; fi
     done ;;
   uninstall)
     for j in "${JOBS[@]}"; do IFS='|' read -r n _ _ <<<"$j"
