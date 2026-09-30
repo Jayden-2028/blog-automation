@@ -4,17 +4,15 @@
 // 예전에는 config/channelRouting.ts가 job.category로 티스토리/블로그스팟을 갈랐고, 배정표에
 // 없는 카테고리는 실패였다. 이제 모든 원고가 Blogspot으로 간다 - 실패 경로가 하나 줄었다.
 //
-// 작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고 Blogspot 배리에이션을
-// 만드는 재료로만 쓴다. Playwright/API 업로드는 여기서 하지 않는다 - 결과를 로컬 .md 파일로
-// 저장해 사람이 뷰어에서 복사해 붙여넣는다(자동 업로드는 품질 확인 후 별도 단계).
+// 작성 단계 산출물(platform=null article)이 곧 최종 원고다(2026-09-30 사용자 결정 - 배리에이션 단계
+// 폐지. 채널은 텔레그램에서 사람이 고르므로 채널별 중복 원고가 없다). 여기서는 재작성하지 않고
+// 그 원고에 내부 링크를 붙이고 이미지를 채운다. 발행 메타(searchDescription/slug/shortName/태그)는
+// writer가 frontmatter로 남긴 것을 job.metadata.draftMeta에서 읽는다. Playwright/API 업로드는 여기서
+// 하지 않는다 - 결과를 로컬 .md 파일로 저장해 사람이 뷰어에서 복사해 붙여넣는다.
 //
-// 배리에이션 article이 DB에 이미 있으면(재실행, 또는 과거 발행 시도 잔재) 재사용해 LLM 비용을
-// 아낀다 - articles 테이블 자체에는 searchDescription/slug/tags 컬럼이 없어 재사용 경로에서
-// article row만 봐서는 이 값들을 알 수 없다. 대신 최초 생성 시 job.metadata.channelMeta.blogspot에
-// 함께 적어 두고, 재사용 시 거기서 복구한다(2026-09-15 - 태그가 재사용마다 0개로 비어 원고
-// 페이지 하단 해시태그 줄이 안 나오던 문제를 사용자가 리포트해서 발견). article_jobs.metadata는
-// jsonb라 마이그레이션 없이 바로 쓴다. 키 이름 `channelMeta.blogspot`은 과거 job의 값을 그대로
-// 읽기 위해 유지한다(이름만 남은 화석 - 채널 개념은 없다).
+// 과거(배리에이션 시절) 만든 platform="blogspot" article이 기준 원고보다 새것이면 그대로 재사용한다 -
+// 이미 그 원고 기준으로 이미지가 채워져 있기 때문이다. 키 이름 `channelMeta.blogspot`은 그 과거
+// job의 값을 읽기 위해 유지한다.
 //
 // 이미지 자동 생성은 여기서 원고가 확정된 직후에 한 번 돈다(BLOGSPOT_ONLY_DESIGN.md §3-2) -
 // 승인된 원고에만 비용을 쓰기 위해서다. best-effort라 실패해도 원고 준비는 success로 끝낸다.
@@ -25,14 +23,7 @@ import { dirname, relative } from "node:path";
 import { manuscriptFilePath, PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { describeImagePolicy, instagramImageConfig } from "../instagram-capture/instagramImagePolicy.js";
-import {
-  createArticle,
-  listArticlesByJobId,
-} from "../../services/supabase/repositories/articleRepository.js";
-import { generateArticleVariant } from "../writing/generateArticleVariant.js";
-import { generateNaverVariant } from "../writing/generateNaverVariant.js";
-import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant.js";
-import type { GenerateArticleVariantResult } from "../writing/generateArticleVariant.js";
+import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
 import { generateManuscriptImages } from "../images/generateManuscriptImages.js";
 import { collectWebImagesForJob } from "../images/collectWebImagesForJob.js";
 import { readJobBrief } from "../brief/buildKeywordBrief.js";
@@ -45,6 +36,8 @@ import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
+import { pickFinalArticle } from "./pickFinalArticle.js";
+import { splitTrailingHashtags } from "./articleContentParts.js";
 import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
 import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
 import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
@@ -73,19 +66,8 @@ export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
   /** 내부 링크 후보(이미 발행된 글). 기본은 publications에서 읽는다. false면 링크를 붙이지 않는다. */
   loadPublishedPosts?: (() => Promise<PublishedPost[]>) | false;
-  createVariantArticle?: (input: {
-    jobId: string;
-    title: string;
-    content: string;
-    aiModel: string | null;
-  }) => Promise<ArticleRow>;
-  generateVariant?: (input: {
-    category: string | null;
-    baseTitle: string;
-    baseBody: string;
-  }) => Promise<GenerateArticleVariantResult>;
   writeManuscriptFile?: (path: string, content: string) => Promise<void>;
-  /** 새로 생성한 배리에이션의 searchDescription/slug/tags를 job.metadata에 보존(재사용 시 복구용). */
+  /** job.metadata 병합(이미지 진행 표시 등). 기본은 ArticleJobRepository.mergeMetadata. */
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
   /** 이미지 자동 생성. 기본은 generateManuscriptImages. false를 주면 건너뛴다(테스트/재실행). */
   generateImages?:
@@ -151,17 +133,6 @@ export type PrepareManuscriptOptions = {
         imagePrompts: string[];
         filledIndexes: number[];
       }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
-  /**
-   * 네이버용 배리에이션. 기본은 generateNaverVariant(Blogspot 원고를 가볍게 다시 씀).
-   * false를 주면 건너뛴다(테스트 - LLM을 타면 안 된다).
-   */
-  generateNaverVariant?:
-    | false
-    | ((input: {
-        category: string | null;
-        blogspotTitle: string;
-        blogspotBody: string;
-      }) => Promise<GenerateNaverVariantResult>);
   /** 테스트 주입용. 기본은 현재 시각(Asia/Seoul). */
   now?: () => Date;
 };
@@ -261,16 +232,23 @@ async function withRelatedPosts(
   }
 }
 
+type DraftMeta = { searchDescription: string | null; slug: string | null; shortName: string | null; tags: string[] };
+
+function readDraftMeta(job: ArticleJobRow): DraftMeta {
+  const raw = job.metadata?.draftMeta as Partial<DraftMeta> | undefined;
+  return {
+    searchDescription: typeof raw?.searchDescription === "string" ? raw.searchDescription : null,
+    slug: typeof raw?.slug === "string" ? raw.slug : null,
+    shortName: typeof raw?.shortName === "string" ? raw.shortName : null,
+    tags: Array.isArray(raw?.tags) ? raw.tags.filter((t): t is string => typeof t === "string") : [],
+  };
+}
+
 export async function prepareManuscript(
   job: ArticleJobRow,
   options: PrepareManuscriptOptions = {}
 ): Promise<PrepareManuscriptResult> {
   const loadArticles = options.loadArticles ?? listArticlesByJobId;
-  const createVariantArticle =
-    options.createVariantArticle ??
-    (({ jobId, title, content, aiModel }) =>
-      createArticle({ job_id: jobId, title, content, status: "approved", ai_model: aiModel, platform: BLOGSPOT_PLATFORM }));
-  const generateVariant = options.generateVariant ?? ((input) => generateArticleVariant(input));
   const writeManuscriptFile = options.writeManuscriptFile ?? defaultWriteManuscriptFile;
   const mergeJobMetadata =
     options.mergeJobMetadata ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
@@ -300,36 +278,16 @@ export async function prepareManuscript(
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
-  // 네이버 배리에이션은 **기본으로 끈다**(2026-09-21 사용자 결정). 채널이 Blogspot 하나인데
-  // (CLAUDE.md) 원고마다 LLM 호출이 한 번 더 돌아 2~5분을 먹고 있었다. 뷰어의 네이버 복사
-  // 버튼용이라 없으면 그 버튼만 숨는다(renderManuscriptPage가 naver: null을 이미 처리한다).
-  // 코드는 지우지 않는다 - 네이버를 다시 쓰게 되면 NAVER_VARIANT_ENABLED=true로 되살린다.
-  // 이미 만들어 둔 원고의 naverVariant는 metadata에 남아 있어 그대로 보인다.
-  const naverEnabled = process.env.NAVER_VARIANT_ENABLED === "true";
-  const makeNaverVariant =
-    options.generateNaverVariant === undefined
-      ? naverEnabled
-        ? generateNaverVariant
-        : false
-      : options.generateNaverVariant;
   const now = options.now ?? (() => new Date());
 
   const articles = await loadArticles(job.id);
-  const baseArticle = [...articles].reverse().find((a) => a.platform == null);
-  if (!baseArticle) return { status: "failed", reason: "기준 원고 없음" };
+  const picked = pickFinalArticle(articles);
+  if (!picked) return { status: "failed", reason: "기준 원고 없음" };
+  const { base: baseArticle, legacyVariant: existing } = picked;
 
   const date = kstDateString(now());
   const imagePrompts = readImagePrompts(job);
 
-  const latestVariant = [...articles].reverse().find((a) => a.platform === BLOGSPOT_PLATFORM) ?? null;
-  // 수정 반영(job:revise)은 새 기준 원고 row를 **배리에이션보다 나중에** 만든다. 그 경우 기존
-  // 배리에이션은 수정 전 원고에서 나온 것이라 재사용하면 사용자의 수정이 최종본에 영영 반영되지
-  // 않는다 - 기준 원고가 더 새것이면 다시 만든다(2026-09-19). 평상시에는 기준 원고가 먼저이므로
-  // 이 조건이 걸리지 않고 예전처럼 재사용된다(LLM 비용 0).
-  const existing = latestVariant && latestVariant.id > baseArticle.id ? latestVariant : null;
-  if (latestVariant && !existing) {
-    console.log(`· [manuscripts] 기준 원고가 수정됐습니다(article ${baseArticle.id} > 배리에이션 ${latestVariant.id}) - 배리에이션을 다시 만듭니다.`);
-  }
   const channelMeta = (job.metadata?.channelMeta as ChannelMetaMap | undefined) ?? {};
 
   let title: string;
@@ -353,32 +311,22 @@ export async function prepareManuscript(
       shortName = saved.shortName ?? null;
     }
   } else {
-    const result = await generateVariant({
-      category: job.category,
-      baseTitle: baseArticle.title ?? job.keyword,
-      baseBody: baseArticle.content ?? "",
-    });
-    if (result.status !== "success") {
-      return { status: "failed", reason: `Blogspot 원고 생성 실패: ${result.error}` };
-    }
-    title = result.variant.title;
-    content = result.variant.body;
-    searchDescription = result.variant.searchDescription;
-    slug = result.variant.slug;
-    tags = result.variant.tags;
-    shortName = result.variant.shortName;
+    // 기준 원고가 곧 최종본이다. 발행 메타는 writer가 남긴 draftMeta에서, 태그는 본문 끝 해시태그 줄에서 읽는다.
+    const meta = readDraftMeta(job);
+    const split = splitTrailingHashtags(baseArticle.content ?? "");
+    title = baseArticle.title ?? job.keyword;
+    content = split.body;
+    searchDescription = meta.searchDescription;
+    slug = meta.slug;
+    shortName = meta.shortName;
+    tags = meta.tags.length > 0 ? meta.tags : split.tags;
     content = await withRelatedPosts(content, job, options);
-    // `표 생성` 자리는 만들지 않는다(2026-09-24 사용자 결정 - 메인 규칙 5번: 본문 텍스트를
-    // 그대로 옮긴 표는 모든 원고에서 금지). 저장 **전에** 지워 빈 칸이 남지 않게 한다.
+    // `표 생성` 자리는 만들지 않는다(2026-09-24 사용자 결정 - 메인 규칙 5번). 저장 파일에 빈 칸이 남지 않게 뺀다.
     const cleaned = removeTableMarkers(content);
     if (cleaned.removed > 0) {
       content = cleaned.body;
       console.log(`ℹ️ [manuscripts] ${job.keyword}: 표 생성 자리 ${cleaned.removed}개를 뺐습니다.`);
     }
-    await createVariantArticle({ jobId: job.id, title, content, aiModel: baseArticle.ai_model });
-    await mergeJobMetadata(job.id, {
-      channelMeta: { ...channelMeta, [BLOGSPOT_PLATFORM]: { searchDescription, slug, tags, shortName } } satisfies ChannelMetaMap,
-    });
   }
 
   const imageFailures: string[] = [];
@@ -390,7 +338,7 @@ export async function prepareManuscript(
   const aligned = alignImagePrompts(baseArticle.content ?? "", content, imagePrompts);
   const slotPrompts = aligned ? aligned.prompts : imagePrompts;
   if (aligned?.reordered) {
-    console.log(`· [manuscripts] ${job.keyword}: 배리에이션이 마커를 재배열해 검색어를 다시 맞췄습니다.`);
+    console.log(`· [manuscripts] ${job.keyword}: 마커 순서가 기준 원고와 달라 검색어를 다시 맞췄습니다.`);
   }
   if (aligned && aligned.unmatched.length > 0) {
     imageFailures.push(
@@ -545,25 +493,9 @@ export async function prepareManuscript(
     }
   }
 
-  // 네이버용 배리에이션(2026-09-18). 이미지 생성·수집이 끝난 **뒤에** 만든다 - 본문의 [IMAGE: ]
-  // 마커를 그대로 물려받아야 같은 이미지를 쓸 수 있고, 마커는 이 시점의 content가 정본이다.
-  // job당 1회(naverReadyAt)이고, 실패해도 원고는 그대로 간다(뷰어가 네이버 버튼만 숨긴다).
-  let naver: { title: string; body: string; tags: string[] } | null =
+  // 과거에 만들어 둔 네이버 배리에이션은 뷰어가 그대로 보여준다(새로 만들지는 않는다 - 2026-09-30 폐지).
+  const naver: { title: string; body: string; tags: string[] } | null =
     (job.metadata?.naverVariant as { title: string; body: string; tags: string[] } | undefined) ?? null;
-
-  if (makeNaverVariant && !naver) {
-    const result = await makeNaverVariant({
-      category: job.category,
-      blogspotTitle: title,
-      blogspotBody: content,
-    });
-    if (result.status === "success") {
-      naver = { title: result.variant.title, body: result.variant.body, tags: result.variant.tags };
-      await mergeJobMetadata(job.id, { naverVariant: naver, naverReadyAt: now().toISOString() });
-    } else {
-      imageFailures.push(`네이버 배리에이션 실패: ${result.error}`);
-    }
-  }
 
   // 인스타그램 수동 큐레이션 job 배지(2026-09-21) - createInstagramJob.ts가 metadata.source에
   // 남겨 둔 값을 그대로 읽는다. 일반 키워드 job은 이 필드가 없어 undefined -> null.

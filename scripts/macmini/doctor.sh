@@ -29,6 +29,15 @@ if [ -f .env ]; then
 fi
 
 { command -v claude >/dev/null || [ -x "$HOME/.local/bin/claude" ]; } && pass "claude CLI" || soft "claude CLI 없음(로컬 헤드리스 사용 시 필요)"
+# 원고 규격 통일(2026-09-30): 클라우드(GitHub Actions)는 moai-marketer 플러그인을 설치해 쓴다. 맥에도 같은 것이 있어야 로컬 헤드리스가 같은 결과를 낸다.
+CLAUDE_BIN="$(command -v claude || echo "$HOME/.local/bin/claude")"
+if [ -x "$CLAUDE_BIN" ]; then
+  "$CLAUDE_BIN" plugin list 2>/dev/null | grep -q "moai-marketer" && pass "moai-marketer 플러그인(클라우드와 동일)" \
+    || soft "moai-marketer 없음 -> claude plugin marketplace add https://github.com/modu-ai/moai-cowork.git && claude plugin install moai-marketer@moai-cowork -y"
+fi
+# GITHUB_TOKEN이 있으면 인스타 등 맥에서 만든 job도 자료조사·집필을 클라우드로 보낸다(없으면 맥에서 직접 돈다).
+grep -qE '^GITHUB_TOKEN=.+' .env 2>/dev/null && pass "GITHUB_TOKEN 있음(조사·집필을 클라우드로 발화)" || soft "GITHUB_TOKEN 없음 -> 조사·집필이 맥 로컬 claude로 돈다(클라우드와 모델·플러그인이 같아야 한다)"
+grep -qE '^CLAUDE_MODEL=.+' .env 2>/dev/null && pass "CLAUDE_MODEL 고정됨" || soft "CLAUDE_MODEL 미설정 -> 환경마다 기본 모델이 다를 수 있음(.env와 GitHub Actions env에 같은 값을 넣는다)"
 [ -d "$HOME/Library/Caches/ms-playwright" ] && pass "Playwright 브라우저" || fail "npx playwright install chromium"
 # 프로필 경로는 셸 환경이 아니라 .env에 있으므로 거기서 읽는다(코드 기본값과 같은 우선순위).
 N="$(grep -E '^NAVER_PUBLISH_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"

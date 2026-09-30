@@ -1,18 +1,16 @@
 // 승인된 원고 1건을 **네이버 블로그에 실제 발행**한다(2026-09-22 네이버 운영 재개).
 //
-// 왜 services/publish/publishArticleToNaver.ts를 안 쓰고 새로 만드는가: 그 파일은 2026-08 스프린트
-// 설계라 (a) 기준 원고를 그대로 올리고 (b) 이미지를 `images` 테이블에서 읽으며 (c) 임시저장까지만
-// 한다. 지금 파이프라인은 셋 다 다르다 - 배리에이션을 올리고, 이미지는 job.metadata.images에 있고,
-// 사용자 결정으로 임시저장 없이 바로 발행한다. 옛 파일은 손대지 않고 그대로 둔다(되돌릴 여지).
+// 2026-09-30: 배리에이션 단계가 폐지됐다. 발행하는 글은 작성 단계 원고(=최종 원고) 그대로다 -
+// 채널은 텔레그램에서 사람이 고르므로 채널별로 다시 쓴 중복 원고가 없다.
 //
-// Blogspot 경로(publishArticleToBlogspot.ts)와 나란히 놓고 보면 다른 점은 셋뿐이다:
-//   1. 배리에이션이 다르다 - generateNaverVariant(참고 자료 링크아웃을 뺀 가벼운 재작성)
-//   2. HTML 변환기가 다르다 - convertArticleToNaverHtml(SmartEditor paste용)
-//   3. 발행 수단이 다르다 - 공식 API가 없어 Playwright로 로그인된 브라우저를 조작한다
-// 이미지는 **같은 것을 쓴다**(사용자 결정) - job.metadata.images를 그대로 읽는다.
+// Blogspot 경로(publishArticleToBlogspot.ts)와 다른 점은 둘뿐이다:
+//   1. HTML 변환기가 다르다 - convertArticleToNaverHtml(SmartEditor paste용)
+//   2. 발행 수단이 다르다 - 공식 API가 없어 Playwright로 로그인된 브라우저를 조작한다
+// 이미지는 **같은 것을 쓴다** - job.metadata.images를 그대로 읽는다. 네이버에는 참고 자료 링크아웃
+// 섹션을 싣지 않는다(본문 끝 해시태그 줄은 그대로 둔다 - 네이버 태그로도 읽힌다).
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
-import { createArticle, listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
+import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
 import {
   createPublication,
   listPublicationsByArticleIds,
@@ -21,14 +19,13 @@ import { convertArticleToNaverHtml } from "../../services/publish/convertArticle
 import { NaverBlogPublisher } from "../../services/publish/NaverBlogPublisher.js";
 import type { NaverDraftSaveResult, NaverVisibility } from "../../services/publish/NaverBlogPublisher.js";
 import { naverCategoryNo } from "../../config/naverCategoryMapping.js";
-import { generateNaverVariant } from "../writing/generateNaverVariant.js";
-import type { GenerateNaverVariantResult } from "../writing/generateNaverVariant.js";
 import {
   manuscriptBodyWithoutImages,
   substituteConfirmedImages,
 } from "../manuscripts/parseManuscriptBlocks.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
-import { BLOGSPOT_PLATFORM } from "../manuscripts/prepareManuscript.js";
+import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
+import { removeReferencesBlock } from "../manuscripts/articleContentParts.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 export const NAVER_PLATFORM = "naver";
@@ -37,16 +34,14 @@ export const NAVER_PLATFORM = "naver";
 const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "publishing", "published"];
 
 export type PublishJobToNaverResult =
-  | { ok: true; publicationId: number; url: string; variantCreated: boolean; alreadyDone: boolean }
-  | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found" | "variant_failed" | "naver_failed"; detail: string };
+  | { ok: true; publicationId: number; url: string; alreadyDone: boolean }
+  | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found" | "naver_failed"; detail: string };
 
 export type PublishJobToNaverOptions = {
   loadJob?: (jobId: string) => Promise<ArticleJobRow | null>;
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
   loadJobPublications?: (articleIds: number[]) => Promise<PublicationRow[]>;
-  createVariantArticle?: (input: { jobId: string; title: string; content: string; aiModel: string | null }) => Promise<ArticleRow>;
   savePublication?: (input: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) => Promise<PublicationRow>;
-  generateVariant?: (input: { category: string | null; blogspotTitle: string; blogspotBody: string }) => Promise<GenerateNaverVariantResult>;
   /** NaverBlogPublisher.publish와 같은 시그니처. 테스트에서 브라우저 대신 가짜 결과를 준다. */
   publish?: (
     input: { title: string; bodyHtml: string },
@@ -73,17 +68,6 @@ export async function publishJobToNaver(
   const loadJob = options.loadJob ?? ((id) => ArticleJobRepository.findById(id));
   const loadArticles = options.loadArticles ?? listArticlesByJobId;
   const loadJobPublications = options.loadJobPublications ?? listPublicationsByArticleIds;
-  const createVariantArticle =
-    options.createVariantArticle ??
-    ((input) =>
-      createArticle({
-        job_id: input.jobId,
-        title: input.title,
-        content: input.content,
-        status: "approved",
-        ai_model: input.aiModel,
-        platform: NAVER_PLATFORM,
-      }));
   const savePublication =
     options.savePublication ??
     ((input) =>
@@ -93,7 +77,6 @@ export async function publishJobToNaver(
         status: input.status,
         published_url: input.publishedUrl,
       }));
-  const generateVariant = options.generateVariant ?? generateNaverVariant;
   const visibility = resolveVisibility(options.visibility);
 
   const job = await loadJob(jobId);
@@ -115,45 +98,20 @@ export async function publishJobToNaver(
       ok: true,
       publicationId: done.id,
       url: done.published_url ?? "",
-      variantCreated: false,
       alreadyDone: true,
     };
   }
 
-  // 네이버 배리에이션은 **네이버 발행을 누른 순간에만** 만든다. 원고마다 미리 만들어 두면 쓰지도
-  // 않을 LLM 비용이 매번 나간다(2026-09-21에 NAVER_VARIANT_ENABLED로 꺼둔 이유가 그것이다).
-  let variant = [...articles].reverse().find((article) => article.platform === NAVER_PLATFORM) ?? null;
-  let variantCreated = false;
-  if (!variant) {
-    // 원본은 Blogspot 배리에이션이다 - 중복 판정의 상대가 바로 그 글이라 그것을 보고 달라져야 한다.
-    const source =
-      [...articles].reverse().find((article) => article.platform === BLOGSPOT_PLATFORM) ??
-      [...articles].reverse().find((article) => article.platform == null);
-    if (!source) {
-      return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 원고가 없습니다: ${jobId}` };
-    }
-
-    const result = await generateVariant({
-      category: job.category ?? null,
-      blogspotTitle: source.title ?? job.keyword,
-      blogspotBody: source.content ?? "",
-    });
-    if (result.status !== "success") {
-      return { ok: false, reason: "variant_failed", detail: `네이버 배리에이션 생성 실패: ${result.error}` };
-    }
-    variant = await createVariantArticle({
-      jobId: job.id,
-      title: result.variant.title,
-      content: result.variant.body,
-      aiModel: source.ai_model,
-    });
-    variantCreated = true;
+  const picked = pickFinalArticle(articles);
+  if (!picked) {
+    return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 원고가 없습니다: ${jobId}` };
   }
+  const article = picked.final;
 
   // 이미지는 Blogspot과 **같은 것**을 쓴다(사용자 결정). 확정된 이미지만 마커 자리에 끼워 넣고,
   // 남은 마커는 지운다 - 공개 발행이라 `[IMAGE: ... — 웹 검색]` 글자가 독자에게 보이면 안 된다.
   const confirmedImages = readJobManuscriptImages(job);
-  const bodyWithImages = substituteConfirmedImages(variant.content ?? "", confirmedImages);
+  const bodyWithImages = substituteConfirmedImages(removeReferencesBlock(article.content ?? ""), confirmedImages);
   const bodyHtml = convertArticleToNaverHtml(manuscriptBodyWithoutImages(bodyWithImages));
 
   const categoryNo = naverCategoryNo(job.category);
@@ -167,19 +125,19 @@ export async function publishJobToNaver(
         headless: false,
       }).publish(input, vis));
 
-  const result = await publish({ title: variant.title ?? job.keyword, bodyHtml }, visibility, categoryNo);
+  const result = await publish({ title: article.title ?? job.keyword, bodyHtml }, visibility, categoryNo);
 
   if (!result.ok) {
     // 실패도 기록한다 - 조용히 죽는 job을 만들지 않는다.
-    await savePublication({ articleId: variant.id, status: "failed", publishedUrl: null }).catch(() => {});
+    await savePublication({ articleId: article.id, status: "failed", publishedUrl: null }).catch(() => {});
     return { ok: false, reason: "naver_failed", detail: `[${result.stage}] ${result.error}` };
   }
 
   const publication = await savePublication({
-    articleId: variant.id,
+    articleId: article.id,
     status: "published",
     publishedUrl: result.draftUrl,
   });
 
-  return { ok: true, publicationId: publication.id, url: result.draftUrl, variantCreated, alreadyDone: false };
+  return { ok: true, publicationId: publication.id, url: result.draftUrl, alreadyDone: false };
 }

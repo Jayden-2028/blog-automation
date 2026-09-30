@@ -1,4 +1,4 @@
-# writer.md §6–10 — 출력 형식 계약
+# 출력 형식 계약 (구 writer.md §6–10)
 
 > `prompts/writing/writer.md`에서 분리된 파일이다(2026-09-15, 구조 분리 리팩터). writer.md §1이
 > 이 파일을 필수 로딩 목록에 넣어 항상 함께 읽는다.
@@ -893,6 +893,9 @@ keyword: 아기 밤중수유 끊는 시기
 research_file: research/아기-밤중수유-끊는-시기.md
 skill_used: parenting-blog-writer
 title: 아기 밤중수유 끊는 시기, 6개월설이 전부는 아니었어요
+search_description: 생후 6개월 전후로 밤중수유를 끊는 시기와 방법을 정리했습니다   # 155자 이내, 핵심 키워드 + 요점
+slug: night-feeding-weaning-age-guide      # 영문 소문자 kebab-case 4~7단어(아래 규칙)
+short_name: 밤중수유                        # 로컬 보관함 폴더 이름. 2~8자 한글
 written_at: 2026-08-31
 humanized: true
 char_count: 2140          # 공백 제외
@@ -921,6 +924,16 @@ unanswered: Q5            # 답 못한 질문 번호. 없으면 줄 자체를 �
 2. [medical] 서울아산병원 — https://...
 -->
 ```
+
+**발행 메타 3줄은 필수다**(2026-09-30 - 배리에이션 단계가 없어져 이 원고가 곧 최종본이다).
+
+- `search_description`: 155자 이내 한 줄, 핵심 키워드 + 요점. **본문 첫 문단을 같은 요지로 쓴다** —
+  Blogger는 검색 설명을 API로 못 받아 비어 있으면 검색엔진이 본문 앞부분으로 스니펫을 만든다.
+- `slug`: 영문 소문자 kebab-case 4~7단어. **한글 발음을 로마자로 옮기지 말고 뜻을 영어로 번역한다.**
+  인명·지명·브랜드 같은 고유명사만 통용 표기를 쓴다. 연도·회차 숫자는 넣어도 된다.
+  `(X) neo-malgo-dareun-yeonae-sicheongnyul` → `(O) not-you-another-romance-ratings`
+- `short_name`: 폴더 이름으로 쓴다. 제목을 그대로 넣지 말고 사람이 부를 법한 말로 줄인다.
+  `"청년미래적금 2차 신청기간 확정｜가입조건" → 청년지원금`
 
 본문에는 출처 URL을 노출하지 않는다(블로그 원고이므로). 대신 기관명은 본문에 쓰고, URL은 하단 주석에 남겨 검수 단계가 대조할 수 있게 한다.
 

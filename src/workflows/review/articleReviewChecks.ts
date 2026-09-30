@@ -11,6 +11,16 @@
 import { TARGET_ARTICLE_LENGTH, HASHTAG_COUNT } from "../writing/buildArticlePrompt.js";
 import { buildFactCorpus, extractFactTokens } from "./normalizeFactTokens.js";
 import type { ArticleRow, SourceRow } from "../../types/database.js";
+import {
+  MEDIA_ATTRIBUTION_PATTERN,
+  COVERAGE_NARRATIVE_PATTERN,
+  VERIFICATION_STATUS_PATTERN,
+  PARTIAL_GAP_PATTERN,
+  AS_OF_PATTERN,
+  UNPUBLISHED_PATTERN,
+  COMMENT_INVITE_PATTERN,
+  BANNED_COLLOQUIAL_ENDINGS,
+} from "../writing/bannedPatterns.js";
 
 export type ReviewSeverity = "error" | "warning";
 export type ReviewCategory = "fact" | "legal" | "ad" | "quality";
@@ -30,7 +40,7 @@ export type ReviewCheck = {
  * 법적 검사가 "루머"를 잡았는데, 그건 우리 원고의 추측성 표현이 아니라 남의 글 제목이다.
  * 팩트 검사도 마찬가지로 링크 제목의 숫자("2026~2027 신제품")를 우리 주장으로 오인한다.
  */
-function stripReferencesSection(body: string): string {
+export function stripReferencesSection(body: string): string {
   // 헤더가 "## 참고 자료"(구식)와 "**참고 자료**"(2026-09-06부터, writer.md §6) 둘 다 나올 수 있다.
   const match = body.match(/^(#{1,3}\s*|\*\*)참고\s*자료(\*\*)?/m);
   return match?.index === undefined ? body : body.slice(0, match.index);
@@ -296,45 +306,11 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
 // 그 구멍으로 계속 나왔다). 그래서 09-16부터는 **횟수와 무관하게 1건이라도 걸리면 경고한다.**
 // 여기 걸려도 차단은 아니고 다른 검사와 같이 참고용이다(설계 6절과 동일한 원칙).
 
-/**
- * 보도·매체에 소식의 출처를 돌리는 모든 표현. 2026-09-16부터 횟수 무관 - 1건만 있어도 경고.
- * 예외(의도적으로 안 잡음): 실제 인물·기관을 문장의 주어로 쓴 직접 인용("OOO는 ~라고
- * 밝혔습니다") - "보도/전해지다/매체" 단어 자체가 없으면 이 패턴에 안 걸린다.
- */
-const MEDIA_ATTRIBUTION_PATTERN =
-  /라고\s*보도(?:됐|했|되었|하였)|것으로\s*보도(?:됐|했)|보도에\s*따르면|라고\s*전(?:해졌|했)|것으로\s*전(?:해졌|했)|라는\s*소식(?:입니다|이다)|매체(?:가|들이|마다)[^.!?\n]{0,20}(?:전했|보도)|보도마다/g;
 
-/** 보도 경위(누가 언제·몇 곳이 보도했는지) 서술. facts-and-hedging.md §4-2. */
-const COVERAGE_NARRATIVE_PATTERN =
-  /인용해\s*전(?:한|했)|취재진이\s*확보|함께\s*보도(?:했|됐)|보도로\s*확산|이어\s*[^.!?\n]{0,12}보도(?:했|됐)/g;
 
-/**
- * 우리 취재·검증 과정의 확인/확정 여부를 원고 내용으로 서술하는 것. facts-and-hedging.md
- * 핵심 원칙 2번. ("공개되지 않았다"류는 09-30부터 별도 패턴 UNPUBLISHED_PATTERN이 잡는다.)
- */
-const VERIFICATION_STATUS_PATTERN =
-  /확인되지\s*않았|확정되지\s*않았|확인되지\s*않고|확인해\s*주는[^.!?\n]{0,20}(?:없다|없습니다|여전히)/g;
 
-/**
- * 부분 데이터 갭을 알리는 문장. facts-and-hedging.md §4-1.
- * 이 항목은 없다는 사실 자체를
- * 알리는 특정 동사 조합만 잡는다(오탐 축소 - 2026-09-15/16 실측 문구 기준). 대조 접속어
- * (별도로/따로/구체적으로)가 없는 단독 문장("~뿐 ~는 밝히지 않았다")도 2026-09-16부터 포함.
- */
-const PARTIAL_GAP_PATTERN =
-  /(?:별도로|따로|구체적으로)\s*(?:나오지|제시되지|확인되지|언급되지)\s*않았|(?:밝히지|명시하지)\s*않았습니다/g;
 
-/**
- * 기준 시점·확인 시점 표기(2026-09-30 핵심 원칙 3). "2026년 9월 기준입니다", "9월 18일 기준",
- * "18일자로 확인된", "기준으로 찾아본"처럼 조사·확인 시점을 짚는 표현. 날짜 뒤에 붙은 "기준"만
- * 잡으므로 "1인 기준", "만 12세 기준"은 안 걸린다.
- */
-const AS_OF_PATTERN =
-  /(?:\d{4}년|\d{1,2}월|\d{1,2}일)(?:\s*\d{1,2}[월일])*\s*(?:시점\s*)?기준|\d{1,2}일자로\s*확인|기준으로\s*(?:찾아본|확인한|정리한)/g;
 
-/** 공개·확정되지 않은 값을 서술하는 문장(2026-09-30 핵심 원칙 4) - 없는 값은 쓰지 않는다. */
-const UNPUBLISHED_PATTERN =
-  /(?:공개|발표|결정|공지)되지\s*않았|(?:일정|시점|금액|요금|가격|날짜)[^.!?\n]{0,8}미정/g;
 
 /** 참고 자료 이후는 남의 글 링크 제목이라 대상이 아니다(stripReferencesSection과 같은 이유). */
 export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
@@ -398,6 +374,15 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
     });
   }
 
+  COMMENT_INVITE_PATTERN.lastIndex = 0;
+  if (COMMENT_INVITE_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '"여러분은 어떻게 생각하시나요?/댓글로 남겨주세요" 같은 댓글·의견 유도 문장이 있습니다(core-rules.md - 마무리는 진술문으로 끝낸다)',
+    });
+  }
+
   return checks;
 }
 
@@ -409,11 +394,6 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
 // "문단을 한 장으로 요약"하라고 정했고, 그중 코드로 잡을 수 있는 "데이터형 이미지를 AI 생성으로
 // 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
 
-/**
- * style/voice.md §2가 금지한 구어 어미. 어미 뒤에 문장부호·공백·줄끝이 와야 종결로 본다
- * ("고요한 밤"의 "고요"는 뒤에 "한"이 붙어 안 걸린다).
- */
-const BANNED_COLLOQUIAL_ENDINGS = /(더라고요|거든요|잖아요|답니다|네요|고요)(?=[.!?)"'”’\s]|$)/gm;
 
 export function checkVoice(rawBody: string | null): ReviewCheck[] {
   if (!rawBody) return [];

@@ -1,7 +1,7 @@
 // publishJobToNaver 테스트. 브라우저·LLM·DB를 전부 주입해 오케스트레이션만 본다.
 //
-// 지켜야 할 것: ① 기본이 비공개다 ② 같은 job을 두 번 올리지 않는다 ③ 배리에이션은 네이버 발행을
-// 누른 순간에만 만든다(LLM 비용) ④ 이미지는 Blogspot과 같은 것을 쓴다 ⑤ 실패도 기록한다.
+// 지켜야 할 것: ① 기본이 비공개다 ② 같은 job을 두 번 올리지 않는다 ③ 작성 단계 원고를 그대로 올린다
+// (2026-09-30 배리에이션 폐지 - LLM 호출 없음) ④ 이미지는 Blogspot과 같은 것을 쓴다 ⑤ 실패도 기록한다.
 import { publishJobToNaver } from "./publishJobToNaver.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
@@ -30,7 +30,7 @@ function article(over: Partial<ArticleRow> = {}): ArticleRow {
     content: "본문입니다. ".repeat(20),
     status: "approved",
     ai_model: "claude",
-    platform: "blogspot",
+    platform: null,
     created_at: "x",
     updated_at: "x",
     ...over,
@@ -43,15 +43,8 @@ const baseDeps = {
   loadJob: async () => job(),
   loadArticles: async () => [article()],
   loadJobPublications: async () => [] as PublicationRow[],
-  createVariantArticle: async (i: { content: string; title: string }) =>
-    article({ id: 2, platform: "naver", title: i.title, content: i.content }),
   savePublication: async (i: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) =>
     ({ id: 9, article_id: i.articleId, platform: "naver", status: i.status, published_url: i.publishedUrl, published_at: null, created_at: "x" }) as PublicationRow,
-  generateVariant: async () => ({
-    status: "success" as const,
-    variant: { title: "네이버 제목", body: "네이버 본문입니다. ".repeat(20), tags: ["t"] },
-    durationMs: 1,
-  }),
   publish: okPublish,
 };
 
@@ -121,20 +114,26 @@ async function main(): Promise<void> {
     console.log("✅ 채널이 다르면 막지 않는다");
   }
 
-  // 3) 배리에이션이 이미 있으면 LLM을 부르지 않는다(재실행 비용).
+  // 3) 작성 단계 원고 그대로 올린다: 참고 자료 링크아웃만 빼고 해시태그·고지는 남긴다.
   {
-    let variantCalls = 0;
+    let html = "";
+    let titleSeen = "";
     const out = await publishJobToNaver("job-1", {
       ...baseDeps,
-      loadArticles: async () => [article(), article({ id: 2, platform: "naver", title: "기존 네이버 제목" })],
-      generateVariant: async () => {
-        variantCalls += 1;
-        return baseDeps.generateVariant();
+      loadArticles: async () => [
+        article({ title: "최종 제목", content: "본문 문단입니다.\n\n**참고 자료**\n- [출처 하나](https://src.example.com/1)\n- [출처 둘](https://src.example.com/2)\n\n#태그1 #태그2" }),
+      ],
+      publish: async (input) => {
+        html = input.bodyHtml;
+        titleSeen = input.title;
+        return okPublish();
       },
     });
-    assert(out.ok && !out.variantCreated, `기존 배리에이션을 재사용해야 한다 (${JSON.stringify(out)})`);
-    assert(variantCalls === 0, "이미 있으면 LLM을 부르면 안 된다");
-    console.log("✅ 배리에이션 재사용 - LLM 미호출");
+    assert(out.ok, `발행이 성공해야 한다 (${JSON.stringify(out)})`);
+    assert(titleSeen === "최종 제목", "작성 단계 원고의 제목을 그대로 써야 한다");
+    assert(!html.includes("src.example.com") && !html.includes("참고 자료"), "참고 자료 링크아웃은 네이버에 싣지 않는다");
+    assert(html.includes("#태그1"), "해시태그 줄은 남겨야 한다");
+    console.log("✅ 작성 단계 원고 그대로 발행 - 참고 자료만 제외");
   }
 
   // 4) 이미지는 Blogspot과 같은 것(job.metadata.images)을 쓰고, 남은 마커는 지운다.
@@ -151,8 +150,7 @@ async function main(): Promise<void> {
           },
         }),
       loadArticles: async () => [
-        article(),
-        article({ id: 2, platform: "naver", content: "앞 문단입니다.\n\n[IMAGE: 확정된 사진]\n\n[IMAGE: 못 채운 자리 — 웹 검색]\n\n뒤 문단입니다." }),
+        article({ content: "앞 문단입니다.\n\n[IMAGE: 확정된 사진]\n\n[IMAGE: 못 채운 자리 — 웹 검색]\n\n뒤 문단입니다." }),
       ],
       publish: async (input) => {
         html = input.bodyHtml;

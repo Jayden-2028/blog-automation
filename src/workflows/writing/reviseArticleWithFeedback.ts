@@ -1,14 +1,14 @@
-// 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 기준(네이버)
-// 원고를 다시 쓴다(2026-09-15 사용자 요청).
+// 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 작성 단계 원고를
+// 다시 쓴다(2026-09-15 사용자 요청). 이 원고가 곧 최종본이다(2026-09-30 배리에이션 폐지).
 //
-// generateArticleVariant.ts와 같은 헤드리스 경로(claude -p + moai-marketer:content-blog +
-// moai-writer:korean-humanize)를 쓴다 - 채널 배리에이션이 아니라 기준 원고 자체를 고치는 것만
-// 다르다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
+// 헤드리스 경로(claude -p + moai-marketer:content-blog + moai-writer:korean-humanize)를 쓴다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
 // 추적성이 깨진다(팩트는 기존 원고에서만 가져온다 - 문체·구성·분량만 피드백대로 바꾼다).
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
+import { enforceWritingRules } from "./enforceWritingRules.js";
+import { formatSpecList, writingSpecFiles } from "./specFiles.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
 // 배리에이션과 같은 부하(writer.md 500줄+ 재독 + skill 2개) - 같은 타임아웃을 쓴다.
@@ -38,6 +38,10 @@ export type ReviseArticleInput = {
   feedback: string;
   /** 테스트 주입 지점. 기본은 runHeadlessClaude(claude -p). */
   generate?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
+  /** false면 저장 직전 규칙 집행(enforceWritingRules)을 건너뛴다. 기본은 실행. */
+  enforceRules?: boolean;
+  /** 규칙 집행의 에이전트 교정 주입 지점(테스트용). */
+  runRuleFixer?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
 };
 
 function buildPrompt(input: ReviseArticleInput): string {
@@ -48,13 +52,9 @@ function buildPrompt(input: ReviseArticleInput): string {
     `당신은 이미 쓴 블로그 원고를, 편집자(사람)의 수정 지시에 맞춰 다시 쓴다.`,
     `moai-marketer:content-blog 스킬로 다듬고 moai-writer:korean-humanize로 마무리한다.`,
     ``,
-    `먼저 prompts/writing/writer.md, prompts/writing/rules/facts-and-hedging.md(사실 태도·헤지`,
-    `금지 - 2026-09-15부터 writer.md §4가 이 파일로 옮겨졌다), prompts/writing/rules/output-format.md`,
-    `(서식 규칙 - 구 §6~10: 소제목은 "**볼드**" 한 줄, [IMAGE: ...] 마커 등)를 Read해 그 원칙을 따른다.`,
-    category === "incident"
-      ? `어투는 prompts/writing/style/incident.md(습니다체 통일·1인칭 금지)를 Read해 그대로 유지한다.`
-      : `어투·어미·인칭은 prompts/writing/style/voice.md(공통 문체, 2026-09-16)를 Read해 따른다 - 원문이`,
-    category === "incident" ? `` : `그 규칙에 어긋나는 어미(~더라고요/~네요/~거든요 등)를 쓰고 있었다면 이번 재작성에서 함께 바로잡는다.`,
+    `먼저 아래 규격 문서를 번호 순서대로 전부 Read해 그 원칙을 따른다. 부딪히면 1번(core-rules.md)이 이긴다.`,
+    `원문이 그 규칙(금지 표현·구어 어미·댓글 유도 등)에 어긋나 있었다면 이번 재작성에서 함께 바로잡는다.`,
+    ...formatSpecList(writingSpecFiles(category)),
     `단, 출력은 output-format.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 한다.`,
     ``,
     `## 절대 규칙 - 사실 보존`,
@@ -120,7 +120,7 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
     return { status: "failed", error: result.error };
   }
 
-  // generateArticleVariant.ts와 같은 이유(2026-09-06 실측) - 마커를 안 지킨 대화체 회신을 그대로
+  // 2026-09-06 실측 - 마커를 안 지킨 대화체 회신을 그대로
   // "성공"으로 통과시키지 않는다.
   const missingMarkers = Object.values(REVISION_OUTPUT_MARKERS).filter((marker) => !result.output.includes(marker));
   if (missingMarkers.length > 0) {
@@ -133,6 +133,11 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
   const revised = parseRevisionOutput(result.output, input.originalTitle);
   if (!revised.body || revised.body.length < 300) {
     return { status: "failed", error: `수정된 본문이 너무 짧습니다 (${revised.body.length}자)` };
+  }
+
+  if (input.enforceRules !== false) {
+    const enforced = await enforceWritingRules({ body: revised.body, category: input.category, runFixer: input.runRuleFixer });
+    revised.body = enforced.body;
   }
 
   return { status: "success", revised, durationMs: Date.now() - startedAt };

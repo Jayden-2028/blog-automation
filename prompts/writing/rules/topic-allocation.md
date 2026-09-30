@@ -1,8 +1,7 @@
 # 주제 배분 — 내적 60% 이상, 외적 40% 이하
 
 > 위치: `prompts/writing/rules/topic-allocation.md` · 기준일: 2026-09-23 (사용자 결정)
-> **두 모드 공통이다.** spec(`writer.md`)도 auto(`writer-auto.md`)도 이 규칙을 따른다.
-> 자료조사도 이 배분대로 찾는다(`researcher.md` / `researcher-auto.md`).
+> 집필과 자료조사 모두 이 배분을 따른다(`writer.md` / `researcher.md`). 자율(auto) 모드는 2026-09-30 폐기했다.
 
 ---
 

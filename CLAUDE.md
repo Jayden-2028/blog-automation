@@ -37,15 +37,14 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 
 ## 원고 파이프라인 운영 규칙
 
-- **규격 모드가 둘이다**(2026-09-23 검증, `src/config/writingMode.ts`). 기본은 `spec`(아래 규격
-  그대로). `WRITING_MODE=auto` 또는 `job.metadata.writingMode="auto"`면 자율 모드로 돌아
-  `researcher-auto.md` / `writer-auto.md` **하나씩만** 읽고, 기획 브리프·수집 카테고리·소제목
-  뼈대·분량·이미지 개수를 **AI가 정한다**. 규격 2,549줄/체크박스 115개가 주제별 핵심을 덮는지
-  보려는 것이다(실측: 고윤정 티저는 영상을 안 열어봤고, 영등포 박람회는 못 찾은 것이 주제가 됐다).
-  metadata가 환경변수를 이긴다 - 한 런에서 키워드별로 갈라야 A/B가 된다. A/B용 job 복제는
-  `npx tsx scripts/cloneJobForWritingModeAB.ts <jobId> --confirm`. 검증이 끝나면 한쪽을 지운다.
-- 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/writer.md`가
-  규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
+- **원고 규격은 하나다**(2026-09-30). 자율(auto) 모드는 폐기했다. 원고를 쓰는 모든 경로 - 클라우드
+  GitHub Actions(`claude -p`), 맥 로컬, 대화형 세션, 수정 재작성 - 가 **`prompts/writing/core-rules.md`
+  (한 페이지)를 제일 먼저** 읽고, 나머지 목록은 `src/workflows/writing/specFiles.ts`가 정한다. 계정 레벨
+  스킬(`*-blog-writer`)은 쓰지 않는다(클라우드에서 로드되지 않고 맥과 규격이 갈라진다). 대화형으로 원고를
+  쓸 때는 프로젝트 스킬 `write-manuscript`를 쓴다. 저장 직전 `enforceWritingRules`가 금지 표현을 코드로
+  집행한다.
+- 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/core-rules.md` +
+  `writer.md`가 규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
   헤드리스 실행(`claude -p`)도 이 스펙과 `docs/seo-guide.md`를 로드해 따른다. 산출물은 파일이다
   (`research/[키워드].md`, `drafts/[키워드].md`).
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
@@ -74,11 +73,12 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
   (`prompts/writing/writer.md` §8).
-- **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 Blogspot
-  배리에이션 1건을 만들어 `manuscripts/<날짜>/<주제>.md`에 저장하고, 이미지를 붙이고,
-  이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고 뷰어
-  페이지를 갱신한다. 작성 단계 산출물(platform=null article)은 그 자체로 발행되지 않고
-  배리에이션의 재료로만 쓰인다. 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
+- **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 작성 단계 원고
+  (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,
+  이미지를 붙이고, 이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고
+  뷰어 페이지를 갱신한다. **배리에이션(채널별 재작성) 단계는 2026-09-30에 폐지**했다 - 채널은 아래
+  버튼으로 사람이 고르므로 채널별 중복 원고가 없다. 발행 메타(검색 설명·slug·폴더 이름·태그)는 writer가
+  frontmatter로 남긴다(`rules/output-format.md` §9). 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
   (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
   (`job-publish-prepare.yml`)가 실행한다.
 - **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가). 원고 준비 완료
@@ -123,7 +123,8 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 - 폴더·브랜치·배포 흐름: `docs/ai-handoff/WORKFLOW.md`
 - 자료조사 규격: `prompts/research/researcher.md`
 - 집필 규격(라우팅·입력계약·체크리스트): `prompts/writing/writer.md`
-  - 사실·헤지 규칙(항상 최우선, 구 writer.md §4): `prompts/writing/rules/facts-and-hedging.md`
+  - **한 페이지 핵심 규칙(가장 먼저, 충돌 시 최우선)**: `prompts/writing/core-rules.md`
+  - 사실·헤지 상세 사례: `prompts/writing/rules/facts-and-hedging.md`
   - 출력 형식 계약(코드와 직결, 구 writer.md §6~10): `prompts/writing/rules/output-format.md`
   - 카테고리별 문체: `prompts/writing/style/{parenting,entertainment,trend,incident}.md`
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md` (2026-09-22에 근거 없는 규칙 7가지를 걷어냈다 -
