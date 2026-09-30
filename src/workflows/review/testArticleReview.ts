@@ -270,11 +270,18 @@ function main(): void {
   assert(partialGapSingle.some((c) => c.message.includes("부재")), "대조 접속어 없는 단독 누락 문장도 경고해야 한다");
   console.log("✅ 인용/헤지: 부분 데이터 갭(대조+단독) 탐지");
 
-  // 15-7) writer.md가 승인한 "아직 공개되지 않았습니다" 단일 서술은 오탐이 아니어야 한다 -
-  // "공개"는 세상에 대한 사실 동사라 "확인/확정" 패턴에도, "밝히지 않았다" 패턴에도 안 걸린다.
-  const approvedAbsence = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다. 2024년 기준으로는 1만 5,000원 안팎이었습니다.");
-  assert(approvedAbsence.length === 0, `승인된 미확정 서술은 통과해야 한다 (실제: ${JSON.stringify(approvedAbsence)})`);
-  console.log("✅ 인용/헤지: 승인된 '아직 공개되지 않았습니다' 단일 서술은 오탐 아님");
+  // 15-7) 2026-09-30: 비공개·미정 서술과 기준 시점 표기는 이제 경고 대상이다.
+  const unpublished = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다.");
+  assert(unpublished.some((c) => c.message.includes("비공개")), "'아직 공개되지 않았습니다'를 경고해야 한다");
+  const schedTbd = checkAttributionHedging("개막 일정은 아직 미정입니다.");
+  assert(schedTbd.some((c) => c.message.includes("비공개")), "'일정 미정'을 경고해야 한다");
+  const asOf1 = checkAttributionHedging("2026년 8월 기준 지원금은 30만 원입니다.");
+  const asOf2 = checkAttributionHedging("이 정리는 9월 18일 기준입니다. 또 9월 18일자로 확인된 내용입니다.");
+  assert(asOf1.some((c) => c.message.includes("기준 시점")), "값에 붙인 '8월 기준'도 경고해야 한다");
+  assert(asOf2.some((c) => c.message.includes("기준 시점")), "고지형 기준 시점도 경고해야 한다");
+  const cleanText = checkAttributionHedging("지원금은 30만 원입니다. 신청은 1인 기준으로 한 번만 가능합니다. 지급일은 8월 27일입니다.");
+  assert(cleanText.length === 0, `시점 표기 없는 정상 문장은 통과해야 한다 (실제: ${JSON.stringify(cleanText)})`);
+  console.log("✅ 인용/헤지: 비공개·미정 서술, 기준 시점 표기 탐지 + 정상 문장 통과");
 
   // ---------- 공통 문체(voice) (2026-09-16) ----------
 
