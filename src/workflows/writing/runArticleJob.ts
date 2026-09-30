@@ -836,6 +836,7 @@ async function runWritingStageInner(
     sources: reviewSources,
     hashtags: parsed.hashtags,
     isMedical,
+    researchVerdict: parsed.verdictFromResearch,
   });
 
   // Telegraph 발행은 "더 잘 읽히게" 하는 부가 단계다 - 실패해도 원고 생성 자체는 성공으로
