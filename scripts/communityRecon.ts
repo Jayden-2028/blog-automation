@@ -1,7 +1,11 @@
 // 커뮤니티 수집기(§5, KEYWORD_SOURCE_EXPANSION.md) 대상 사이트의 robots.txt 확인 + 원본 HTML
 // 캡처. **이 스크립트는 이 저장소의 원격 세션에서 실행할 수 없다** - 이 환경의 egress 프록시가
 // 아래 사이트로 나가는 요청을 전부 EGRESS_BLOCKED로 거부한다(2026-08-30 확인, theqoo.net 기준).
-// 반드시 사용자 맥에서 실행해야 한다: `npx tsx scripts/communityRecon.ts`
+// 반드시 사용자 맥에서 실행해야 한다:
+//   npx tsx scripts/communityRecon.ts                # 전체
+//   npx tsx scripts/communityRecon.ts fmkorea        # 한 사이트만(재확인용)
+// 같은 사이트를 다시 찍으면 직전 캡처가 <site>.prev.html로 남는다 - 클래스명이 날마다 바뀌는지
+// diff로 바로 볼 수 있다.
 //
 // 이 스크립트가 하는 일과 하지 않는 일:
 // - 목록 페이지 1개만 가져온다(§5-3 "하루 1회만, 목록 페이지 1~2개만"과 같은 절제 원칙).
@@ -16,7 +20,7 @@
 //
 // 이 스크립트는 daily job의 일부가 아니다. 1회성 실측 도구다.
 
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,6 +80,19 @@ function looksLikeChallengePage(html: string): boolean {
   );
 }
 
+/**
+ * 직전 캡처를 <site>.prev.html로 옮긴다. 같은 사이트를 다시 찍을 때 "클래스명이 날마다 바뀌는가"
+ * (에펨코리아의 `a.hotdeal_var8` 같은 난독화 의심)를 diff로 바로 확인하기 위해서다 - 덮어써
+ * 버리면 비교 대상이 사라진다. 직전 캡처가 없으면 조용히 넘어간다.
+ */
+async function keepPreviousCapture(outPath: string): Promise<void> {
+  try {
+    await rename(outPath, outPath.replace(/\.html$/, ".prev.html"));
+  } catch {
+    // 첫 실행이라 파일이 없는 경우가 대부분이다. recon 자체를 막을 이유는 없다.
+  }
+}
+
 async function reconOne(target: (typeof TARGETS)[number]): Promise<void> {
   console.log(`\n▶ ${target.label} (${target.site})`);
 
@@ -105,8 +122,9 @@ async function reconOne(target: (typeof TARGETS)[number]): Promise<void> {
     }
 
     const outPath = join(OUTPUT_DIR, `${target.site}.html`);
+    await keepPreviousCapture(outPath);
     await writeFile(outPath, page.body, "utf-8");
-    console.log(`  저장: ${outPath}`);
+    console.log(`  저장: ${outPath} (직전 캡처가 있었으면 ${target.site}.prev.html로 남겨 둠)`);
   } catch (error) {
     console.log(`  ❌ 페이지 조회 실패: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -116,9 +134,25 @@ async function main(): Promise<void> {
   console.log("▶ 커뮤니티 수집 대상 사이트 실측(robots.txt 확인 + HTML 캡처)");
   console.log("  이 스크립트는 맥에서 실행해야 한다(원격 세션은 egress가 막혀 있음).");
 
+  // 사이트 이름을 인자로 주면 그 사이트만 찍는다. 한 사이트를 다시 확인할 때(구조가 바뀌었나,
+  // 클래스명이 도는가) 나머지 6곳까지 긁을 이유가 없다 - §5-3의 절제 원칙이 그대로 적용된다.
+  const requested = process.argv.slice(2).filter((arg) => !arg.startsWith("-"));
+  const targets =
+    requested.length > 0 ? TARGETS.filter((target) => requested.includes(target.site)) : TARGETS;
+
+  if (targets.length === 0) {
+    console.log(
+      `\n대상 없음. 쓸 수 있는 이름: ${TARGETS.map((t) => t.site).join(", ")}\n` +
+        "예: npx tsx scripts/communityRecon.ts fmkorea"
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (requested.length > 0) console.log(`  대상 한정: ${targets.map((t) => t.site).join(", ")}`);
+
   await mkdir(OUTPUT_DIR, { recursive: true });
 
-  for (const target of TARGETS) {
+  for (const target of targets) {
     await reconOne(target);
   }
 
