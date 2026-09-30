@@ -3,10 +3,9 @@
 // 알린다.** daily job을 죽이면 안 되기 때문이다(buildDailyQueryPool.ts fallback 원칙).
 //
 // 사이트별 provider 실패는 여기서 격리한다(buildDailyQueryPool.ts의 소스별 try/catch와 같은 원칙) -
-// 사이트 하나가 죽어도(로그인 필요/차단/timeout 등) 나머지 사이트로 계속 진행한다. 지금은
-// COMMUNITY_SOURCE_PROVIDERS가 비어 있어(CommunitySource.ts 주석 참고) 이 워크플로우는 실제로는
-// 항상 "0건 수집 + 성공"을 반환하지만, provider가 하나씩 붙어도 이 파일은 손댈 필요가 없도록
-// 설계했다.
+// 사이트 하나가 죽어도(로그인 필요/차단/timeout 등) 나머지 사이트로 계속 진행한다. 그래서
+// COMMUNITY_SOURCE_PROVIDERS에 사이트를 넣고 빼도 이 파일은 손댈 필요가 없다 - provider 0개면
+// "0건 수집 + 성공"으로 조용히 끝난다.
 
 import { TREND_SOURCE_CONFIGS } from "../../config/trendSources.js";
 import { describeError } from "../../services/describeError.js";
