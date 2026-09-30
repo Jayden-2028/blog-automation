@@ -39,7 +39,7 @@ import type { ManuscriptImage } from "./manuscriptManifest.js";
  */
 /**
  * 이미지를 어떻게 구하는가. 2026-09-18에 `capture`가 추가돼 넷이 됐다(사용자 결정).
- * 우선순위는 `웹 검색` > `페이지 캡처` > `표 생성` > `AI 생성`이고, AI는 앞의 셋이 전부 불가능할
+ * 우선순위는 `웹 검색` > `페이지 캡처` > `AI 생성`이고(`표 생성`은 2026-09-30 폐지 - 마커가 와도 removeTableMarkers가 지운다), AI는 앞의 둘이 전부 불가능할
  * 때만 쓰는 **폴백**이다(rules/images.md §8-4).
  */
 export type ImageAcquisition = "ai" | "search" | "table" | "capture" | "unknown";
