@@ -15,6 +15,8 @@
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
+import { enforceWritingRules } from "./enforceWritingRules.js";
+import { formatSpecList, writingSpecFiles } from "./specFiles.js";
 import { parseImageAcquisition } from "../manuscripts/parseManuscriptBlocks.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
@@ -57,6 +59,10 @@ export type GenerateArticleVariantInput = {
   baseBody: string;
   /** 테스트 주입 지점. 기본은 runHeadlessClaude(claude -p). */
   generate?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
+  /** false면 저장 직전 규칙 집행(enforceWritingRules)을 건너뛴다. 기본은 실행. */
+  enforceRules?: boolean;
+  /** 규칙 집행의 에이전트 교정 주입 지점(테스트용). */
+  runRuleFixer?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
 };
 
 function buildPrompt(input: GenerateArticleVariantInput): string {
@@ -86,13 +92,8 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `아래 "기준 원고"를 소스로, ${CHANNEL_LABEL} 독자와 구글 검색에 맞춘`,
     `배리에이션 글을 만든다. moai-marketer:content-blog 스킬로 작성하고 moai-writer:korean-humanize로 마무리한다.`,
     ``,
-    `먼저 prompts/writing/writer.md와 prompts/writing/rules/facts-and-hedging.md를 Read해`,
-    `구조·사실 태도(확인/헤지 금지 - 2026-09-15부터 writer.md §4가 이 파일로 옮겨졌다) 원칙을`,
-    `따른다. prompts/writing/rules/output-format.md(구 §6~10)의 소제목·이미지 마커 서식도 그대로 따른다.`,
-    category === "incident"
-      ? `어투는 prompts/writing/style/incident.md(습니다체 통일·1인칭 금지)를 Read해 그대로 따른다.`
-      : `어투·어미·인칭은 prompts/writing/style/voice.md(공통 문체, 2026-09-16)를 Read해 그대로 따른다 -`,
-    category === "incident" ? `` : `카테고리와 무관하게 이 한 목소리다.`,
+    `먼저 아래 규격 문서를 번호 순서대로 전부 Read해 그대로 따른다. 부딪히면 1번(core-rules.md)이 이긴다.`,
+    ...formatSpecList(writingSpecFiles(category)),
     `단, 출력은 output-format.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 하고, 사실은 기준`,
     `원고에서만 가져온다(자료조사 파일·웹 검색 없음).`,
     ``,
@@ -105,8 +106,8 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `- 각 소제목의 내용을 새 각도에서 서술한다: 정보 제시 순서를 바꾸고, 진입점을 바꾸고`,
     `  (기준이 "무엇인가" 설명이면 배리에이션은 "독자가 겪는 상황 → 해결"), 나열형을 문답형·비교형·`,
     `  시나리오형으로 바꾼다.`,
-    `- **"## 요약"은 기준 원고의 결론/정리 문장을 절대 재사용하지 않는다.** 이 배리에이션 글에서`,
-    `  실제로 다룬 소제목들을 1~2문장으로 새로 압축한다.`,
+    `- **마무리 문단은 기준 원고의 결론/정리 문장을 절대 재사용하지 않는다.** 이 배리에이션 글에서`,
+    `  실제로 다룬 내용을 1~2문장으로 새로 압축한 뒤 응원·기대 진술문 한 문장으로 끝낸다(소제목 없음, 댓글 유도 질문 금지 - core-rules §3).`,
     `- 절차(번호 목록)와 고유명사 목록은 내용을 바꿀 수 없다 - 대신 그 앞뒤 설명 문장을 새로 쓰고,`,
     `  설명형 목록(절차가 아닌 것)은 항목을 묶거나 나눠 개수를 다르게 한다.`,
     `- (스스로 확인만 할 것, 글에는 쓰지 않는다) 배리에이션의 어떤 부분도 기준 원고와 연속 3어절 이상`,
@@ -117,7 +118,7 @@ function buildPrompt(input: GenerateArticleVariantInput): string {
     `- 첫 문단 100자 안에 핵심 키워드를 넣는다.`,
     `- 소제목은 output-format.md §6 규격대로 "**소제목**" 볼드 한 줄이다(# 안 씀). 질문형/How-to형으로 짓는다.`,
     `  소제목 앞에는 빈 줄 1개, 소제목 바로 다음 줄에는 빈 줄 없이 그 소제목의 첫 문단이 붙는다.`,
-    `  본문 끝에 "**자주 묻는 질문**"(3~5문답)과 "**요약**" 문단을 둔다.`,
+    `  본문 끝에 "**자주 묻는 질문**"(3~5문답)을 두고, 그 뒤에 소제목 없는 마무리 문단을 둔다.`,
     `- [IMAGE: ...]/[IMAGE PROMPT: ...] 마커 쌍의 앞뒤는 다른 블록 사이(빈 줄 1개)보다 넓게 빈 줄 2개로 띄운다.`,
     `- 본문 안에서 개별 출처를 부르지 않는다("(출처: ...)", "한 블로그에 따르면" 금지). 참고 링크는`,
     `  기준 원고의 '참고 자료'를 그대로 옮긴다.`,
@@ -241,6 +242,12 @@ function buildMarkerFixPrompt(input: GenerateArticleVariantInput, expected: stri
   ].join("\n");
 }
 
+async function applyRules(variant: ArticleVariant, input: GenerateArticleVariantInput): Promise<ArticleVariant> {
+  if (input.enforceRules === false) return variant;
+  const enforced = await enforceWritingRules({ body: variant.body, category: input.category, runFixer: input.runRuleFixer });
+  return { ...variant, body: enforced.body };
+}
+
 export async function generateArticleVariant(
   input: GenerateArticleVariantInput
 ): Promise<GenerateArticleVariantResult> {
@@ -296,7 +303,7 @@ export async function generateArticleVariant(
     if (retry.ok) {
       const retried = parseVariantOutput(retry.output, input.baseTitle);
       if (retried.body.length >= 300 && imageAcquisitionSequence(retried.body) === baseSeq) {
-        return { status: "success", variant: retried, durationMs: Date.now() - startedAt };
+        return { status: "success", variant: await applyRules(retried, input), durationMs: Date.now() - startedAt };
       }
     }
     console.warn(
@@ -304,5 +311,5 @@ export async function generateArticleVariant(
     );
   }
 
-  return { status: "success", variant, durationMs: Date.now() - startedAt };
+  return { status: "success", variant: await applyRules(variant, input), durationMs: Date.now() - startedAt };
 }

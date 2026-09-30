@@ -81,6 +81,10 @@ export async function runHeadlessClaude(options: RunHeadlessClaudeOptions): Prom
   const startedAt = Date.now();
 
   const args = ["-p", "--output-format", "text"];
+  // 클라우드(GitHub Actions)와 맥이 같은 모델로 쓰도록 CLAUDE_MODEL로 고정할 수 있다(2026-09-30).
+  // 비우면 CLI 기본값이라 실행 환경마다 모델이 달라질 수 있다.
+  const pinnedModel = process.env.CLAUDE_MODEL?.trim();
+  if (pinnedModel) args.push("--model", pinnedModel);
   if (options.allowedTools && options.allowedTools.length > 0) {
     args.push("--allowed-tools", options.allowedTools.join(","));
   }
