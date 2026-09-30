@@ -2,6 +2,21 @@
 
 기준일: 2026-09-30 (Asia/Seoul)
 
+## 2026-09-30 세션(2) — 규칙 정리 3단계 + 자율(auto) 모드 폐기 + 클라우드·맥 규격 통일
+
+**자율 모드 폐기**: `writingMode.ts`, `writer-auto.md`, `researcher-auto.md`, A/B 복제 스크립트, 관련 테스트를 지웠다. 규격은 하나(spec)다.
+
+**규칙 정리 3단계**
+1. **한 페이지 핵심 규칙** `prompts/writing/core-rules.md` 신설. 모든 경로가 제일 먼저 읽고, 충돌 시 최우선.
+2. **중복 제거**: `writer.md` 304→156줄(체크리스트 65개→이미지 5개 + core-rules §6), 스타일 파일의 "사실 태도" 절을 카테고리 고유분만 남김, 계정 스킬 사본 머리말 제거, `seo-guide.md`의 충돌 항목(표·기준 시점·댓글 유도) 정리, `facts-and-hedging.md`의 핵심 원칙을 4줄로 축약.
+3. **코드 집행**: `enforceWritingRules.ts` - 저장 직전에 댓글 유도·"○월 기준"을 코드가 지우고, 보도 인용·확인 여부·비공개 서술·구어 어미가 남으면 헤드리스로 **한 번만** 고친다(결과가 위반을 줄이지 못하거나 이미지 마커가 달라지면 원본 유지). 집필(`runWritingStage`)·배리에이션·수정 재작성 세 곳에 연결. 패턴은 `bannedPatterns.ts` 한 곳(검수 경고와 공유).
+
+**클라우드·맥 통일**: 읽을 규격 파일 목록의 유일한 출처는 `specFiles.ts`(집필·배리에이션·수정 프롬프트가 공유. 배리에이션은 예전에 구조·주제배분 문서를 안 읽었다). 대화형 세션용 프로젝트 스킬 `.claude/skills/write-manuscript`. `runHeadlessClaude`가 `CLAUDE_MODEL` 환경변수로 모델을 고정할 수 있다. `scripts/macmini/doctor.sh`가 moai-marketer 플러그인·GITHUB_TOKEN·CLAUDE_MODEL을 점검한다.
+
+**원고를 쓰는 곳**: 키워드·인스타 모두 `runResearchStage/runWritingStage`(같은 코드). `GITHUB_TOKEN`이 있으면 GitHub Actions(`job-research.yml`→`job-write.yml`), 없으면 맥의 detached `claude -p`. 인스타는 **캡처만** 맥(로그인 세션 필요), 조사·집필은 위 분기를 그대로 탄다. 계정 스킬은 파이프라인에서 어디에도 로드되지 않는다.
+
+**남은 것(승인 필요)**: ① GitHub Actions 워크플로우에 `CLAUDE_MODEL` env 추가(CI 수정) ② `output-format.md`(956줄) 이미지 규칙을 별도 파일로 분리 ③ 배리에이션 단계 자체의 필요성 재검토(채널이 Blogspot 하나라 "중복 콘텐츠 방지 재기획"의 전제가 사라졌다) ④ 계정 스킬 3개 비활성화(사용자, 앱에서).
+
 ## 2026-09-30 세션 — 원고 규칙 정리: 기준 시점·미공개 값·댓글 유도 금지
 
 사용자 결정 4건을 규칙과 검수 코드에 반영했다.

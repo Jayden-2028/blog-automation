@@ -1,4 +1,4 @@
-# writer.md §6–10 — 출력 형식 계약
+# 출력 형식 계약 (구 writer.md §6–10)
 
 > `prompts/writing/writer.md`에서 분리된 파일이다(2026-09-15, 구조 분리 리팩터). writer.md §1이
 > 이 파일을 필수 로딩 목록에 넣어 항상 함께 읽는다.
