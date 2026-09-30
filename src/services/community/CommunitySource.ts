@@ -25,7 +25,10 @@
 //   제목 anchor의 클래스(`hotdeal_var8`)는 뜻을 알 수 없어 난독화가 의심됐다. 2회 실측에서 값은
 //   같았지만 간격이 몇 시간뿐이라 "고정"의 근거로는 약하다 - 그래서 **그 클래스를 아예 쓰지 않고**
 //   의미가 분명한 `h3.title` + `span.ellipsis-target`으로 파싱한다(parseFmkoreaHtml.ts 상단 주석).
-// - **MLB파크(/mp/best.php)**: robots.txt 금지 없음. 루리웹 다음 순서.
+// - **MLB파크**: robots.txt가 `User-agent: *`에 `Disallow: /`만 두고, Googlebot·Naverbot·Yeti·
+//   Daumoa 등 검색엔진 봇만 이름으로 지정해 연다 -> **제외**(2026-10-01 실측). 특정 경로가 아니라
+//   사이트 전체다. UA를 위장하면 열리지만 §5-3이 금지한다 - 사이트가 검색엔진과 그 외를 구분해
+//   막아둔 의사를 뒤집는 일이다. 다른 목록 URL을 찾아도 결과는 같다.
 // - **다음카페**: robots.txt는 /_c21_/home을 허용하지만 그 URL이 HTTP 500을 반환한다(URL이 낡음).
 //
 // 이전 주석에 "펨코는 Cloudflare 때문에 제외"라고 적혀 있었지만, 그건 robots.txt 판정 버그가
