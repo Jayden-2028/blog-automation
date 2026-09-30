@@ -133,7 +133,7 @@ export async function collectWebImagesForJob(
         return uploaded.ok ? { ok: true as const, url: uploaded.url } : { ok: false as const, error: uploaded.error };
       });
 
-    // 원고 하나에 하나만 만든다(2026-09-23, output-format §8-8). 사용자가 직접 지정한 자리와
+    // 원고 하나에 하나만 만든다(2026-09-23, images.md §8-8). 사용자가 직접 지정한 자리와
     // 검색으로 채운 자리가 **같은 저장소를 공유해야** 서로 간의 중복도 잡힌다.
     ownedDeduper = options.deduper ? null : new ImageDeduper({ askSameCut: defaultAskSameCut });
     const deduper = options.deduper ?? ownedDeduper!;

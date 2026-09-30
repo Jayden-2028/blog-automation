@@ -390,7 +390,7 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
 //
 // 사용자 지적 두 건을 규칙으로 잡는다. (1) 원고마다 어투가 달라 블로그 톤이 흔들린다 -
 // style/voice.md로 어미를 통일했고, 그 파일이 금지한 구어 어미를 여기서 1건이라도 경고한다.
-// (2) 이미지가 본문과 따로 논다(아시안게임 대진표 이미지에 팀이 없음) - output-format.md §8-1이
+// (2) 이미지가 본문과 따로 논다(아시안게임 대진표 이미지에 팀이 없음) - images.md §8-1이
 // "문단을 한 장으로 요약"하라고 정했고, 그중 코드로 잡을 수 있는 "데이터형 이미지를 AI 생성으로
 // 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
 
@@ -412,11 +412,11 @@ export function checkVoice(rawBody: string | null): ReviewCheck[] {
   ];
 }
 
-/** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(output-format.md §8-1). */
+/** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(images.md §8-1). */
 const DATA_IMAGE_HINT = /대진표|일정표|순위표|시간표|비교표|금액표|요금표|차트|그래프|도표|지역별\s*(?:금액|지원금|요금|현황)/;
 
 /**
- * 웹사이트·앱 화면 캡처(output-format.md §8-2, 2026-09-17 사용자 결정). 획득 방식과 무관하게 금지다 -
+ * 웹사이트·앱 화면 캡처(images.md §8-2, 2026-09-17 사용자 결정). 획득 방식과 무관하게 금지다 -
  * 웹에 이미지 파일로 존재하지 않아 자동 수집이 못 채우고, 글자 이미지라 디스커버 썸네일에도 불리하다.
  * 트리거 낱말 없이 "~ 화면"만 쓴 경우는 일부러 안 잡는다(공식 배포 안내 그래픽과 구분이 안 된다).
  */
@@ -424,7 +424,7 @@ const SCREEN_CAPTURE_HINT =
   /(?:법령|조문|포털|홈페이지|웹사이트|사이트|정부24|국가법령정보센터|누리집|앱)[^.\n\]]{0,15}(?:화면|캡처)|화면\s*캡처|캡처\s*화면|스크린샷/;
 
 /**
- * 특정 날짜의 회의·발표·의회 현장(output-format.md §8-3, 2026-09-17). 그런 사진은 거의 항상 언론사
+ * 특정 날짜의 회의·발표·의회 현장(images.md §8-3, 2026-09-17). 그런 사진은 거의 항상 언론사
  * 저작물이라 광고가 붙는 블로그에서 못 쓴다 - 실측에서 정책 기사 7자리가 이 이유로 전멸했다.
  * 제작발표회·기자간담회는 배급사·방송사 배포 사진이 있어 일부러 뺐다(§8-2가 권하는 대안이기도 하다).
  */
@@ -435,7 +435,7 @@ const IMAGE_DESCRIPTION_PATTERN = /\[IMAGE:\s*([^\]]*)\]/gi;
 /** 설명 + 바로 뒤 인라인 프롬프트를 한 쌍으로 잡는다(프롬프트는 여러 줄일 수 있다). */
 const IMAGE_PAIR_PATTERN = /\[IMAGE:\s*([^\]]*)\]\s*\n\s*\[IMAGE PROMPT:\s*([\s\S]*?)\]/gi;
 
-/** 일러스트 계열 지시어. 실사가 기본이라(output-format.md §8) 쓰려면 설명에 밝혀야 한다. */
+/** 일러스트 계열 지시어. 실사가 기본이라(images.md §8) 쓰려면 설명에 밝혀야 한다. */
 const ILLUSTRATION_STYLE = /\b(illustration|illustrated|flat design|vector art|cartoon|clipart|clip art|drawing)\b/i;
 /** 설명에서 "일러스트를 쓰겠다"고 밝힌 표기. */
 const ILLUSTRATION_DECLARED = /일러스트|도식|다이어그램|인포그래픽|아이콘|카드뉴스/;
@@ -453,7 +453,7 @@ export function classifyImageMarker(description: string): ImageMarkerViolation |
   return null;
 }
 
-/** 엔터·연예·OTT는 웹 검색만 쓴다(2026-09-22 사용자 결정, output-format.md §8-1-2). */
+/** 엔터·연예·OTT는 웹 검색만 쓴다(2026-09-22 사용자 결정, images.md §8-1-2). */
 const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott"]);
 
 export function checkImagePrompts(rawBody: string | null, category?: string | null): ReviewCheck[] {
@@ -469,7 +469,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
       severity: "warning",
       message:
         `글자·데이터가 핵심인 이미지를 AI 생성으로 지정한 마커 ${dataAsAi.length}개: "${dataAsAi[0].slice(0, 30)}…"` +
-        " (output-format.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
+        " (images.md §8-1 - 대진표·일정표·표·그래프는 글자를 못 넣어 정보가 사라진다, 웹 검색으로)",
     });
   }
 
@@ -483,7 +483,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
         severity: "warning",
         message:
           `연예·OTT 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
-          " (output-format.md §8-1-2 - 실사가 있는데 그리거나 표로 만들 이유가 없다, 웹 검색으로)",
+          " (images.md §8-1-2 - 실사가 있는데 그리거나 표로 만들 이유가 없다, 웹 검색으로)",
       });
     }
   }
@@ -495,7 +495,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
       severity: "warning",
       message:
         `화면 캡처를 이미지 자리로 만든 마커 ${screens.length}개: "${screens[0].slice(0, 30)}…"` +
-        " (output-format.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
+        " (images.md §8-2 - 그 제도가 적용되는 현장 실사로 바꾸고, 조문·수치는 본문 표로)",
     });
   }
 
@@ -513,7 +513,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
       severity: "warning",
       message:
         `실사로 밝히지 않고 일러스트로 생성하는 마커 ${undeclaredIllustrations.length}개: "${undeclaredIllustrations[0].slice(0, 30)}…"` +
-        " (output-format.md §8 - 기본은 photorealistic, 개념·절차 도식만 예외이고 그때는 설명에 '일러스트'라고 밝힌다)",
+        " (images.md §8 - 기본은 photorealistic, 개념·절차 도식만 예외이고 그때는 설명에 '일러스트'라고 밝힌다)",
     });
   }
 
@@ -524,7 +524,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
       severity: "warning",
       message:
         `특정 날짜의 회의·발표 현장을 이미지 자리로 만든 마커 ${newsEvents.length}개: "${newsEvents[0].slice(0, 30)}…"` +
-        " (output-format.md §8-3 - 언론사 사진이라 쓸 수 없다, 제도가 적용되는 일반적 현장으로)",
+        " (images.md §8-3 - 언론사 사진이라 쓸 수 없다, 제도가 적용되는 일반적 현장으로)",
     });
   }
 

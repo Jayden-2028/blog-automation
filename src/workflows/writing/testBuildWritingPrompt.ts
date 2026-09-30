@@ -20,6 +20,7 @@ function main(): void {
   assert(prompt.includes("1. prompts/writing/core-rules.md"), "core-rules.md가 1번으로 먼저 읽혀야 한다(2026-09-30)");
   assert(prompt.includes("prompts/writing/writer.md"), "writer.md를 Read하라는 지시");
   assert(prompt.includes("prompts/writing/rules/facts-and-hedging.md"), "구조 분리된 사실·헤지 규칙 파일을 Read하라는 지시(2026-09-15)");
+  assert(prompt.includes("prompts/writing/rules/images.md"), "이미지 규칙 파일(2026-09-30 분리)을 Read하라는 지시");
   assert(prompt.includes("prompts/writing/rules/output-format.md"), "구조 분리된 출력 형식 계약 파일을 Read하라는 지시(2026-09-15)");
   assert(prompt.includes("docs/seo-guide.md"), "seo-guide.md 참조");
   assert(prompt.includes("/repo/research/한강-불꽃축제-2026.md"), "자료조사 파일 경로가 사실 출처로 명시");
@@ -33,7 +34,7 @@ function main(): void {
   assert(prompt.includes("WebSearch를 쓰지 않는다"), "writer는 웹 검색 없음");
   assert(prompt.includes("prompts/writing/style/trend.md"), "living은 trend 문체 참고 파일을 Read하라는 지시가 있어야 한다");
   assert(prompt.includes("prompts/writing/style/voice.md"), "공통 어투 파일 voice.md를 Read하라는 지시(2026-09-16)");
-  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "이미지 프롬프트는 문단 요약이라는 지시(output-format.md §8-1, 2026-09-16)");
+  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "이미지 프롬프트는 문단 요약이라는 지시(images.md §8-1, 2026-09-16)");
   console.log("✅ 규격 참조 + 자료조사 경로 + 정확한 출력 경로 + 파이프라인 오버라이드 + 카테고리별 문체 파일 + 공통 voice");
 
   const entertainmentPrompt = buildWritingPrompt({

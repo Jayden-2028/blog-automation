@@ -72,7 +72,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   (`ARTICLE_IMAGE_GENERATION` + `workflows/writing/generateArticleImages.ts`, 자체 브리프 생성 후
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
-  (`prompts/writing/writer.md` §8).
+  (`prompts/writing/rules/images.md` §8).
 - **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 작성 단계 원고
   (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,
   이미지를 붙이고, 이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고
@@ -125,7 +125,8 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
 - 집필 규격(라우팅·입력계약·체크리스트): `prompts/writing/writer.md`
   - **한 페이지 핵심 규칙(가장 먼저, 충돌 시 최우선)**: `prompts/writing/core-rules.md`
   - 사실·헤지 상세 사례: `prompts/writing/rules/facts-and-hedging.md`
-  - 출력 형식 계약(코드와 직결, 구 writer.md §6~10): `prompts/writing/rules/output-format.md`
+  - 출력 형식 계약(코드와 직결, 구 writer.md §6~7·9~10): `prompts/writing/rules/output-format.md`
+  - 이미지 규칙(마커·획득 방식·프롬프트, 구 output-format §8, 2026-09-30 분리): `prompts/writing/rules/images.md`
   - 카테고리별 문체: `prompts/writing/style/{parenting,entertainment,trend,incident}.md`
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md` (2026-09-22에 근거 없는 규칙 7가지를 걷어냈다 -
   취소선 항목은 "이미 확인해서 뺀 통설"이니 다시 가져오지 않는다. 문서 제목은 네이버 기준이지만

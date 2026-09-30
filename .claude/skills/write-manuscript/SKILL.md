@@ -12,7 +12,7 @@ description: 블로그 원고를 대화형으로 직접 쓰거나 고칠 때 쓴
    요약하면: `prompts/writing/core-rules.md`(가장 먼저, 충돌 시 최우선) → `writer.md` →
    `rules/facts-and-hedging.md` → `style/voice.md`(incident는 `style/incident.md`) →
    카테고리 `style/*.md` → `rules/article-structure.md` → `rules/topic-allocation.md` →
-   `rules/output-format.md` → `docs/seo-guide.md`.
+   `rules/output-format.md` → `rules/images.md` → `docs/seo-guide.md`.
 3. 전부 읽은 뒤에 쓴다. 산출물은 `drafts/<키워드>.md`(형식은 `output-format.md` §9).
 4. 저장 전 `core-rules.md` §6 체크리스트를 통과시킨다.
 5. 검증: `npx tsx -e "import('./src/workflows/writing/enforceWritingRules.js').then(m=>console.log(m.findRuleViolations(require('fs').readFileSync('drafts/<키워드>.md','utf8'))))"`

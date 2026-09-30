@@ -26,12 +26,12 @@
 import type { ManuscriptImage } from "./manuscriptManifest.js";
 
 /**
- * 이미지 자리를 무엇으로 채우는가(output-format.md §8 "획득 방식"). 설명 끝의 `— AI 생성` /
+ * 이미지 자리를 무엇으로 채우는가(images.md §8 "획득 방식"). 설명 끝의 `— AI 생성` /
  * `— 웹 검색`에서 읽는다.
  *
  * 왜 필요한가(2026-09-16 실측 사고): 이 구분이 없어서 generateManuscriptImages가 마커를 가리지 않고
  * 전부 생성했다. `웹 검색` 마커의 "프롬프트"는 한국어 검색어 한 줄인데(예: "2026 아시안게임 야구
- * 대진표 조 편성 공식"), 그게 그대로 gpt-image-2에 이미지 생성 프롬프트로 들어갔다 - output-format.md
+ * 대진표 조 편성 공식"), 그게 그대로 gpt-image-2에 이미지 생성 프롬프트로 들어갔다 - images.md
  * §8이 AI 생성 프롬프트에 요구하는 영어·`no text, no letters`·3~6줄 규격이 하나도 안 실린 채로다.
  * 09-16 남양주 카페 원고는 마커 5개 중 3개가 웹 검색이었고 그 3장이 전부 이 경로로 나왔다.
  *
@@ -40,7 +40,7 @@ import type { ManuscriptImage } from "./manuscriptManifest.js";
 /**
  * 이미지를 어떻게 구하는가. 2026-09-18에 `capture`가 추가돼 넷이 됐다(사용자 결정).
  * 우선순위는 `웹 검색` > `페이지 캡처` > `표 생성` > `AI 생성`이고, AI는 앞의 셋이 전부 불가능할
- * 때만 쓰는 **폴백**이다(rules/output-format.md §8-4).
+ * 때만 쓰는 **폴백**이다(rules/images.md §8-4).
  */
 export type ImageAcquisition = "ai" | "search" | "table" | "capture" | "unknown";
 
@@ -75,7 +75,7 @@ export function parseImageAcquisition(description: string): ImageAcquisition {
 /**
  * raw 블록이 이미지 마커(단독, 또는 뒤에 IMAGE PROMPT가 붙은 형태)인지 판정한다.
  *
- * IMAGE PROMPT가 **여러 줄**일 수 있다(2026-09-17 실측 사고): rules/output-format.md §8은 AI 생성
+ * IMAGE PROMPT가 **여러 줄**일 수 있다(2026-09-17 실측 사고): rules/images.md §8은 AI 생성
  * 프롬프트를 "3~6줄로 쓴다"고 요구하는데, 예전 구현은 정확히 2줄짜리 블록만 이미지로 인정했다.
  * 그래서 규칙대로 쓴 원고일수록 마커가 이미지로 인식되지 않고 **본문 텍스트로 새어나갔다** -
  * 뷰어에 이미지 자리로 안 뜨고, 생성·수집 대상에서도 빠지고, 발행 본문에 `[IMAGE: ...]`가 글자
