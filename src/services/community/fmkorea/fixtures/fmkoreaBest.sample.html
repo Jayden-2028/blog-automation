@@ -10,6 +10,10 @@
   - 제목 anchor의 class(` hotdeal_var8`)는 일부러 쓰지 않는다 - 아래 마지막 행은 그 클래스가
     아예 다른 값이어도 파싱돼야 한다.
   - span.ellipsis-target이 없는 행은 폴백 경로(anchor 텍스트 - 댓글수)로 제목을 얻어야 한다.
+  - 같은 광고가 두 번 나오는데 한쪽에만 hotdeal1이 붙는 경우가 실제로 있다 -> 제외한 제목도
+    기억해야 플래그 없는 사본이 통과하지 않는다.
+  - 핫딜 게시판 밖에 올라온 딜 글은 hotdeal0으로 나온다 -> 대괄호 쇼핑몰 표기 + 괄호 안 가격을
+    둘 다 가진 제목은 제외한다. 대괄호만 있는 기사 제목은 남아야 한다(오폭 방지).
 -->
 <html>
 <body>
@@ -83,6 +87,39 @@
         <a href="/index.php?mid=best2&amp;document_srl=1001" class=" hotdeal_var8">
           <span class="ellipsis-target">예시 제목 하나 - 어제 경기 마지막 장면 이야기</span>&nbsp;
           <span class="comment_count">[350]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1002" class=" hotdeal_var8">
+          <span class="ellipsis-target">[예시몰] 예시 세트 외 (5,600원) (무료)</span>&nbsp;
+          <span class="comment_count">[145]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1006" class=" hotdeal_var8">
+          <span class="ellipsis-target">[예시프레시] 예시 만두 (냉동), 490g, 6개 (16,140원) (예시배송)</span>&nbsp;
+          <span class="comment_count">[63]</span>
+        </a>
+      </h3>
+    </div>
+  </li>
+
+  <li class="li li_best2_pop0 li_best2_hotdeal0 li_best2_politics0 " style="">
+    <div class="li">
+      <h3 class="title">
+        <a href="/index.php?mid=best2&amp;document_srl=1007" class=" hotdeal_var8">
+          <span class="ellipsis-target">[예시통신] 예시 국가 1부 구단주 피살 소식</span>&nbsp;
+          <span class="comment_count">[55]</span>
         </a>
       </h3>
     </div>

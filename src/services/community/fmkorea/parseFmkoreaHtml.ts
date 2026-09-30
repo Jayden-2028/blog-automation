@@ -49,6 +49,22 @@ export const FMKOREA_BEST_SELECTORS = {
 /** 사이트가 행에 붙이는 제외 플래그. 값이 1이면 해당 분류라는 뜻이다. */
 export const FMKOREA_SKIP_ROW_CLASSES = ["li_best2_hotdeal1", "li_best2_politics1"] as const;
 
+/**
+ * 플래그가 놓치는 제휴 딜을 잡는 2차 그물(2026-10-01 실측에서 확인).
+ * `[쿠팡로켓프레시] 풀무원 평양왕만두 (냉동), 490g, 6개 (16,140원) (로켓프레시)` 같은 글이
+ * 핫딜 게시판 밖에 올라오면 `li_best2_hotdeal0`으로 나온다.
+ *
+ * **대괄호 쇼핑몰 표기와 괄호 안 가격을 둘 다** 요구한다. 둘 중 하나만 보면 오폭한다 -
+ * `[BNT] 불가리아 1부 구단주 피살`처럼 대괄호로 시작하는 기사 제목이 실제로 있고, 가격만 보면
+ * `월세 (50만원) 실화냐` 같은 일반 글이 걸린다. 딜 글은 거의 항상 둘 다 갖는다.
+ */
+const PROMO_SHOP_PREFIX = /^\[[^\]]+\]/;
+const PROMO_PRICE = /\([\d,]+\s*원/;
+
+function looksLikeDealPost(title: string): boolean {
+  return PROMO_SHOP_PREFIX.test(title) && PROMO_PRICE.test(title);
+}
+
 /** 폴백 경로에서만 쓴다. 제목 끝의 `[350]` 형태 댓글 수. */
 const TRAILING_COMMENT_COUNT = /\s*\[\d[\d,]*\]\s*$/;
 
@@ -96,22 +112,28 @@ export function parseFmkoreaBestHtml(html: string): CommunityPost[] {
   }
 
   const posts: CommunityPost[] = [];
+  // 같은 글이 상단 인기 블록과 일반 목록에 함께 나오는 경우가 있다(광고가 특히 그렇다).
+  // **제외한 제목도 여기 담는다.** 실측에서 같은 광고가 두 번 나오는데 한쪽에만 hotdeal1이
+  // 붙어 있었다 - 제외한 쪽을 기억하지 않으면 플래그 없는 사본이 그대로 통과한다.
   const seen = new Set<string>();
   let siteRank = 0;
 
   for (const row of root.querySelectorAll(FMKOREA_BEST_SELECTORS.row)) {
-    const classes = rowClasses(row);
-    if (FMKOREA_SKIP_ROW_CLASSES.some((skip) => classes.includes(skip))) continue;
-
     const heading = row.querySelector(FMKOREA_BEST_SELECTORS.titleHeading);
     if (!heading) continue;
 
     const title = extractFmkoreaTitle(heading);
     if (!title) continue;
-    // 같은 글이 상단 인기 블록과 일반 목록에 함께 나오는 경우가 있다(광고가 특히 그렇다).
     if (seen.has(title)) continue;
 
+    // 제목을 먼저 뽑고 나서 제외를 판단한다 - 순서가 바뀌면 제외한 제목을 기억할 수 없다.
+    const classes = rowClasses(row);
+    const excluded =
+      FMKOREA_SKIP_ROW_CLASSES.some((skip) => classes.includes(skip)) || looksLikeDealPost(title);
+
     seen.add(title);
+    if (excluded) continue;
+
     siteRank += 1;
     posts.push({ title, siteRank });
   }

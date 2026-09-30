@@ -24,9 +24,10 @@ function testParser(): void {
   const posts = parseFmkoreaBestHtml(html);
   const titles = posts.map((post) => post.title);
 
-  // fixture 7행 = 일반 3 + 광고 1 + 정치 1 + 중복 1 + 제목 없음 1.
-  assert(posts.length === 3, `광고·정치·중복·빈 행을 뺀 3건이어야 한다 (실제: ${posts.length}건)`);
-  ok("광고(hotdeal1)·정치글(politics1)·중복 제목·제목 없는 행 제외");
+  // fixture 10행 = 일반 4 + 광고 1 + 정치 1 + 광고 사본(플래그 없음) 1 + 딜 글(플래그 없음) 1
+  //              + 제목 중복 1 + 제목 없음 1.
+  assert(posts.length === 4, `광고·정치·딜·중복·빈 행을 뺀 4건이어야 한다 (실제: ${posts.length}건)`);
+  ok("광고(hotdeal1)·정치글(politics1)·딜 글·중복 제목·제목 없는 행 제외");
 
   assert(
     !titles.some((title) => title.includes("예시몰")),
@@ -37,6 +38,21 @@ function testParser(): void {
     "li_best2_politics1 행은 제외돼야 한다 - 이 프로젝트는 정치 키워드를 수집하지 않는다"
   );
   ok("사이트가 붙인 의미 플래그로 광고·정치글을 수집 단계에서 차단");
+
+  // 실측에서 걸린 두 가지 누수. 플래그만 믿으면 둘 다 통과한다.
+  assert(
+    !titles.some((title) => title.includes("예시 세트")),
+    "같은 광고가 플래그 없이 한 번 더 나와도 통과하면 안 된다 - 제외한 제목도 기억해야 한다"
+  );
+  assert(
+    !titles.some((title) => title.includes("예시 만두")),
+    "핫딜 게시판 밖에 올라와 hotdeal0으로 표시된 딜 글도 제외돼야 한다"
+  );
+  assert(
+    titles.some((title) => title.includes("구단주 피살")),
+    "대괄호로 시작하지만 가격이 없는 기사 제목은 남아야 한다 - 딜 판정이 오폭하면 안 된다"
+  );
+  ok("플래그가 놓치는 딜 글 차단 + 대괄호 기사 제목 오폭 없음");
 
   assert(
     titles[0] === "예시 제목 하나 - 어제 경기 마지막 장면 이야기",
