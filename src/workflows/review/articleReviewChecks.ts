@@ -19,6 +19,7 @@ import {
   AS_OF_PATTERN,
   UNPUBLISHED_PATTERN,
   COMMENT_INVITE_PATTERN,
+  ACCORDING_TO_PATTERN,
   BANNED_COLLOQUIAL_ENDINGS,
 } from "../writing/bannedPatterns.js";
 
@@ -194,6 +195,8 @@ export type CheckQualityInput = {
   body: string | null;
   hashtags: ReadonlyArray<string>;
   isMedical: boolean;
+  /** 자료조사 verdict가 thin이면 분량 하한 미달은 예상된 결과다(2026-09-30). */
+  researchThin?: boolean;
 };
 
 /** 문장 단위로 나눈다. 중복 문장 검사에 쓴다. */
@@ -210,6 +213,41 @@ function titleKeywords(title: string): string[] {
     .split(/[\s·,|:：\-–—()[\]]+/)
     .map((w) => w.replace(/[^가-힣a-zA-Z0-9]/g, ""))
     .filter((w) => w.length >= 2);
+}
+
+const REPEAT_SIMILARITY = 0.5;
+/** 템플릿 목록(예: 날짜별 "○일 ○요일: 주말")이 우연히 닮는 것을 피하려고 이 쌍 수 이상일 때만 경고한다. */
+const REPEAT_PAIR_LIMIT = 3;
+
+function charTrigrams(text: string): Set<string> {
+  const compact = text.replace(/[^가-힣0-9]/g, "");
+  const grams = new Set<string>();
+  for (let i = 0; i + 3 <= compact.length; i += 1) grams.add(compact.slice(i, i + 3));
+  return grams;
+}
+
+/** 본문 문장·목록 항목 중 거의 같은 정보를 담은 쌍을 찾는다. 소제목·이미지 마커·해시태그·참고 자료는 제외한다. */
+export function findRepeatedInformation(rawBody: string): Array<{ a: string; b: string; similarity: number }> {
+  const units: string[] = [];
+  for (const line of stripReferencesSection(rawBody).split("\n")) {
+    let text = line.trim();
+    if (!text || text.startsWith("[IMAGE") || /^#/.test(text) || /^\*\*[^*]+\*\*$/.test(text)) continue;
+    text = text.replace(/^[-*]\s+/, "").replace(/^[QA]\.\s*/, "").replace(/\*\*/g, "");
+    for (const sentence of text.split(/(?<=[.!?。])\s+/)) if (sentence.length >= 14) units.push(sentence);
+  }
+  const grams = units.map(charTrigrams);
+  const pairs: Array<{ a: string; b: string; similarity: number }> = [];
+  for (let i = 0; i < units.length; i += 1) {
+    for (let j = i + 1; j < units.length; j += 1) {
+      const small = Math.min(grams[i].size, grams[j].size);
+      if (small === 0) continue;
+      let shared = 0;
+      for (const g of grams[i]) if (grams[j].has(g)) shared += 1;
+      const similarity = shared / (grams[i].size + grams[j].size - shared);
+      if (similarity >= REPEAT_SIMILARITY) pairs.push({ a: units[i], b: units[j], similarity });
+    }
+  }
+  return pairs.sort((x, y) => y.similarity - x.similarity);
 }
 
 export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
@@ -229,7 +267,13 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
     .replace(/\[IMAGE[^\]]*\]/gi, "") // [IMAGE: ...] 마커
     .replace(/\s+/g, "");
   const length = prose.length;
-  if (length < TARGET_ARTICLE_LENGTH.min || length > TARGET_ARTICLE_LENGTH.max) {
+  if (length < TARGET_ARTICLE_LENGTH.min && input.researchThin) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `자료 얇음(thin): 분량 ${length.toLocaleString()}자 - 하한 미달은 예상된 결과입니다. 늘려 쓰지 않았는지 확인하고, 자료조사를 보강할지 판단하세요`,
+    });
+  } else if (length < TARGET_ARTICLE_LENGTH.min || length > TARGET_ARTICLE_LENGTH.max) {
     checks.push({
       category: "quality",
       severity: "warning",
@@ -272,6 +316,16 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
       category: "quality",
       severity: "warning",
       message: `중복 문장 ${duplicated.length}건: "${duplicated[0][0].slice(0, 30)}…"`,
+    });
+  }
+
+  // 같은 정보 반복(2026-09-30). 일정·수치를 문장, 목록, 날짜별 정리, FAQ에서 돌려 쓰면 분량만 늘고 독자에게는 손해다.
+  const repeated = findRepeatedInformation(body);
+  if (repeated.length >= REPEAT_PAIR_LIMIT) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `같은 정보를 반복한 문장 ${repeated.length}쌍: "${repeated[0].a.slice(0, 24)}…" ≈ "${repeated[0].b.slice(0, 24)}…" (core-rules.md §4 - 같은 정보는 한 번만)`,
     });
   }
 
@@ -371,6 +425,15 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
       category: "quality",
       severity: "warning",
       message: '"아직 공개되지 않았습니다/일정 미정" 같은 비공개·미정 서술이 있습니다(facts-and-hedging.md 핵심 원칙 4 - 없는 값은 쓰지 않는다)',
+    });
+  }
+
+  ACCORDING_TO_PATTERN.lastIndex = 0;
+  if (ACCORDING_TO_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '"○○에 따르면/에 의하면" 출처 표기가 있습니다(core-rules.md §1 - 기관을 주어로 직접 쓰거나 사실을 단정한다. 원문을 열지 않은 기관 출처는 붙이지 않는다)',
     });
   }
 
