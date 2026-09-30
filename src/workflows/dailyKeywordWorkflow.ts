@@ -28,7 +28,7 @@ import { CompositeSimilarityClusterer } from "./keyword-ranking/clustering/Compo
 import type { KeywordCluster, KeywordClusterer } from "./keyword-ranking/clustering/KeywordClusterer.js";
 import { computeBatchPercentiles } from "./keyword-ranking/computeBatchPercentiles.js";
 import { fetchTrendMomentumByQuery } from "./keyword-ranking/fetchTrendMomentum.js";
-import { BLOG_COMPETITION_CONFIG, TOPIC_MERGE_CONFIG } from "../config/keywordCompetition.js";
+import { BLOG_COMPETITION_CONFIG, DIVERSITY_TOPIC_QUERY_CONFIG, TOPIC_MERGE_CONFIG } from "../config/keywordCompetition.js";
 import { computeSaturation, describeSaturation } from "./keyword-ranking/computeCompetitionScore.js";
 import { extractTopicQueries } from "./keyword-ranking/extractTopicQueries.js";
 import { mergeSameTopicClusters } from "./keyword-ranking/mergeSameTopicClusters.js";
@@ -168,6 +168,18 @@ export type RankKeywordsResult = {
   trendError?: string;
   /** 경쟁도 측정 결과. options.competition을 넘기지 않았으면 null. */
   competition: RankCompetitionInfo | null;
+  /**
+   * LLM 주제어를 주제 동일성 판정에 쓰면 Top N이 어떻게 달라지는지. preview가 꺼져 있거나
+   * 주제어가 없으면 null. applied=true면 rankings가 이미 그 결과다.
+   */
+  diversityTopicQuery: {
+    applied: boolean;
+    /** 주제어 판정을 쓴 Top N(적용 여부와 무관하게 계산한 값). */
+    rankings: RankedKeyword[];
+    /** 현재 규칙 대비 빠지는/들어오는 키워드. 양쪽 다 비면 결과가 같다는 뜻이다. */
+    removed: string[];
+    added: string[];
+  } | null;
 };
 
 export async function rankKeywords(
@@ -276,17 +288,52 @@ export async function rankKeywords(
     .slice(0, topN)
     .map((item, index) => ({ rank: index + 1, ...item.ranked }));
 
+  const diversityCandidates = scoredSortedDesc.map((item) => item.ranked);
+
+  // 경쟁도 단계가 뽑아 둔 LLM 주제어. 프로브 범위(상위 60건) 안의 후보만 값이 있다.
+  const topicQueryByKeyword = new Map<string, string>();
+  for (const entry of competition?.entries ?? []) {
+    if (entry.query) topicQueryByKeyword.set(entry.keyword, entry.query);
+  }
+
+  const runSelection = (useTopicQuery: boolean): RankedKeyword[] =>
+    selectDiverseTopN(diversityCandidates, topN, {
+      categoryTerms: options.categoryTerms,
+      ...(useTopicQuery ? { topicQueryByKeyword } : {}),
+    }).map((item, index) => ({ rank: index + 1, ...item }));
+
   // diversity 정책(동일 seedQuery/canonical topic 편중 방지 + category backfill)을 적용해 최종 Top N을 뽑는다.
-  const diverseSelection = selectDiverseTopN(
-    scoredSortedDesc.map((item) => item.ranked),
-    topN,
-    { categoryTerms: options.categoryTerms }
-  );
-  const rankings: RankedKeyword[] = diverseSelection.map((item, index) => ({ rank: index + 1, ...item }));
+  const applyTopicQuery = DIVERSITY_TOPIC_QUERY_CONFIG.enabled && topicQueryByKeyword.size > 0;
+  const rankings = runSelection(applyTopicQuery);
+
+  // 주제어 판정을 쓰면 Top N이 어떻게 달라지는지 계산해 둔다(승인 전 관측용). 적용 중이면 이미
+  // rankings가 그 결과이므로 다시 계산하지 않는다.
+  let diversityTopicQuery: RankKeywordsResult["diversityTopicQuery"] = null;
+  if (topicQueryByKeyword.size > 0 && (applyTopicQuery || DIVERSITY_TOPIC_QUERY_CONFIG.previewEnabled)) {
+    const withQuery = applyTopicQuery ? rankings : runSelection(true);
+    const baseline = applyTopicQuery ? runSelection(false) : rankings;
+    const withQueryKeywords = new Set(withQuery.map((item) => item.keyword));
+    const baselineKeywords = new Set(baseline.map((item) => item.keyword));
+
+    diversityTopicQuery = {
+      applied: applyTopicQuery,
+      rankings: withQuery,
+      removed: baseline.filter((item) => !withQueryKeywords.has(item.keyword)).map((item) => item.keyword),
+      added: withQuery.filter((item) => !baselineKeywords.has(item.keyword)).map((item) => item.keyword),
+    };
+  }
 
   const mergedClusterCount = clusters.filter((cluster) => cluster.items.length > 1).length;
 
-  return { rankings, preDiversityRankings, scoreRange, mergedClusterCount, trendError, competition };
+  return {
+    rankings,
+    preDiversityRankings,
+    scoreRange,
+    mergedClusterCount,
+    trendError,
+    competition,
+    diversityTopicQuery,
+  };
 }
 
 // ---------- 4) saveRankingHistory ----------
@@ -712,6 +759,22 @@ export async function runDailyKeywordWorkflow(
       status: "success",
       durationMs: Date.now() - competitionStartedAt,
     });
+  }
+
+  // ---------- 주제어 기반 다양성 판정 로그 ----------
+  // 경쟁도가 뽑아 둔 LLM 주제어로 주제 동일성을 판정하면 Top N이 어떻게 달라지는지.
+  // 기본은 preview다 - 실제 선정은 기존 규칙을 그대로 쓴다(선정 로직 변경은 승인 필요 항목).
+  if (ranked.diversityTopicQuery) {
+    const { applied, removed, added } = ranked.diversityTopicQuery;
+    const mode = applied ? "적용" : "preview";
+
+    if (removed.length === 0 && added.length === 0) {
+      console.log(`ℹ️ [주제어다양성/${mode}] Top ${ranked.rankings.length} 변화 없음`);
+    } else {
+      console.log(`ℹ️ [주제어다양성/${mode}] 빠짐 ${removed.length}건, 들어옴 ${added.length}건`);
+      for (const keyword of removed) console.log(`   − ${keyword}`);
+      for (const keyword of added) console.log(`   + ${keyword}`);
+    }
   } else {
     stageLog.push({ stage: "competition", status: "skipped", durationMs: 0 });
   }

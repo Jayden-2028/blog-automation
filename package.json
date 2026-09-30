@@ -137,6 +137,7 @@
     "collect:community": "tsx src/workflows/community/runCollectionCli.ts",
     "test:community": "tsx src/workflows/community/testCommunityCollection.ts",
     "test:theqoo-parser": "tsx src/services/community/theqoo/testParseTheqooHtml.ts",
+    "test:topic-query-match": "tsx src/workflows/keyword-ranking/testTopicQueryMatch.ts",
     "test:ruliweb-parser": "tsx src/services/community/ruliweb/testParseRuliwebHtml.ts",
     "test:fmkorea-parser": "tsx src/services/community/fmkorea/testParseFmkoreaHtml.ts",
     "recon:community": "tsx scripts/communityRecon.ts",

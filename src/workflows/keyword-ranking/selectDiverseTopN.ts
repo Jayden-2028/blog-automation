@@ -19,9 +19,15 @@
 //
 // topic 판정에는 headline(원문 제목)이 있으면 그쪽을 쓴다. canonical keyword는 앞에서부터 잘라낸
 // 축약이라 뒤쪽 고유명사가 이미 사라진 경우가 있어, 주제 판정 근거로는 원문이 더 안전하다.
+//
+// 2026-10-01: options.topicQueryByKeyword를 넘기면 그 판정보다 **경쟁도 단계가 LLM으로 뽑아 둔
+// 주제어**를 먼저 쓴다. 뉴스 제목 원문은 수식어가 많아 df 기반 희소성 판정이 `여행`·`시청률` 같은
+// 일반 명사를 고유명사로 오인하는데, 주제어는 그 수식어를 이미 걷어낸 결과이기 때문이다. 근거는
+// topicQueryMatch.ts 상단(run #100 실측).
 
 import { DIVERSITY_CONFIG, TOPIC_GROUPING_CONFIG } from "../../config/keywordScoring.js";
 import { buildTopicIndex } from "./topicGrouping.js";
+import { isSameTopicQuery } from "./topicQueryMatch.js";
 
 export type DiversityCandidate = {
   keyword: string;
@@ -39,6 +45,14 @@ export type SelectDiverseTopNOptions = {
    * topicGrouping.ts의 BuildTopicIndexOptions.extraCategoryTerms 참고.
    */
   categoryTerms?: readonly string[];
+
+  /**
+   * 경쟁도 단계가 LLM으로 뽑아 둔 주제어(keyword -> 주제어). 넘기면 **두 후보 모두** 주제어가 있는
+   * 쌍에 한해 주제 동일성을 그 주제어로 판정한다 - 뉴스 제목 원문보다 훨씬 나은 근거다(근거와
+   * 실측은 topicQueryMatch.ts 상단). 한쪽이라도 없으면(프로브 범위 밖) 기존 isSameTopic으로 돌아간다.
+   * 넘기지 않으면 동작이 이전과 완전히 같다.
+   */
+  topicQueryByKeyword?: ReadonlyMap<string, string>;
 };
 
 export function selectDiverseTopN<T extends DiversityCandidate>(
@@ -62,13 +76,33 @@ export function selectDiverseTopN<T extends DiversityCandidate>(
   );
   const isClassifierSeed = (seedQuery: string): boolean => classifierSeedTerms.has(seedQuery.trim().toLowerCase());
 
+  // 주제어 판정에서 걷어낼 분류어·범용 수식어. topicGrouping이 쓰는 것과 같은 목록이어야 두
+  // 경로의 판정 기준이 어긋나지 않는다.
+  const topicQueryExcluded = new Set(
+    [
+      ...TOPIC_GROUPING_CONFIG.genericTokens,
+      ...TOPIC_GROUPING_CONFIG.categoryTerms,
+      ...(options.categoryTerms ?? []),
+    ].map((term) => term.trim().toLowerCase())
+  );
+  const topicQueryOf = (item: T): string | undefined =>
+    options.topicQueryByKeyword?.get(item.keyword);
+
+  const isSameTopic = (a: T, b: T): boolean => {
+    // 둘 다 주제어가 있으면 그것으로 판정한다. null은 "다르다"가 아니라 "판정 불가"이므로
+    // 아래 기존 규칙으로 넘긴다.
+    const byQuery = isSameTopicQuery(topicQueryOf(a), topicQueryOf(b), topicQueryExcluded);
+    if (byQuery !== null) return byQuery;
+
+    return DIVERSITY_CONFIG.enableTopicGrouping
+      ? topicIndex.isSameTopic(a, b)
+      : a.keyword === b.keyword;
+  };
+
   const sameTopicCount = (item: T): number => {
     let count = 0;
     for (const other of selected) {
-      const isSame = DIVERSITY_CONFIG.enableTopicGrouping
-        ? topicIndex.isSameTopic(item, other)
-        : item.keyword === other.keyword;
-      if (isSame) count++;
+      if (isSameTopic(item, other)) count++;
     }
     return count;
   };
