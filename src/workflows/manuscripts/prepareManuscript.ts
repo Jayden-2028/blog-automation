@@ -33,7 +33,6 @@ import { readImageDirectUrls, readImageRequirements } from "../images/applyImage
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
-import { renderTableImagesForJob } from "../images/renderTableImagesForJob.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
@@ -109,18 +108,6 @@ export type PrepareManuscriptOptions = {
         slots: FallbackImagePrompt[];
         failures: string[];
       }>);
-  /**
-   * `표 생성` 자리 렌더. 기본은 renderTableImagesForJob(본문 표·목록 → Chromium → Storage).
-   * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
-   */
-  renderTableImages?:
-    | false
-    | ((input: {
-        jobId: string;
-        body: string;
-        imagePrompts: string[];
-        filledIndexes: number[];
-      }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
   /**
    * `페이지 캡처` 자리. 기본은 capturePagesForJob(리서처가 정한 URL을 Chromium으로 연다).
    * false를 주면 건너뛴다(테스트 - 브라우저를 띄우면 안 된다).
@@ -273,8 +260,6 @@ export async function prepareManuscript(
   if (policyNote) console.log(`· [manuscripts] ${job.keyword}: ${policyNote}`);
   const collectWebImages =
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
-  const renderTableImages =
-    options.renderTableImages === undefined ? renderTableImagesForJob : options.renderTableImages;
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
@@ -391,24 +376,6 @@ export async function prepareManuscript(
     imageFailures.push(...outcome.failures);
     if (images.length > 0) {
       await mergeJobMetadata(job.id, { imagesReadyAt: now().toISOString(), images });
-    }
-  }
-
-  // `표 생성` 자리를 본문 데이터로 그린다(2026-09-18). 웹 검색보다 **먼저** 해야 한다 - 일정·순위표는
-  // 검색으로 못 찾는 게 실측으로 드러났고, 우리 데이터로 그리는 편이 정확하다.
-  if (renderTableImages && !job.metadata?.tableImagesReadyAt) {
-    const outcome = await renderTableImages({
-      jobId: job.id,
-      body: content,
-      imagePrompts: slotPrompts,
-      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
-    });
-    imageFailures.push(...outcome.failures);
-    if (outcome.images.length > 0) {
-      images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
-        (a, b) => a.index - b.index
-      );
-      await mergeJobMetadata(job.id, { tableImagesReadyAt: now().toISOString(), images });
     }
   }
 

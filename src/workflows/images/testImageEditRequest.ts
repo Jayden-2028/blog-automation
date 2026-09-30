@@ -87,7 +87,7 @@ const eq = (text: string, expected: Array<[number, string]>) => {
   assert(inferAcquisition("주현영 김원훈 우연히 보자 검색해서 나오는 카카오톡 캡쳐") === "search", "검색이 캡처를 이긴다");
   assert(inferAcquisition("AI로 그려주세요") === "ai", "AI 지시");
   assert(inferAcquisition("일러스트로 넣어주세요") === "ai", "일러스트도 AI");
-  assert(inferAcquisition("표로 정리해주세요") === "table", "표 지시");
+  assert(inferAcquisition("표로 정리해주세요") === null, "표 지시는 전환하지 않는다(표 이미지 폐지, 현재 방식 유지)");
   assert(inferAcquisition("공식 홈페이지 페이지 캡처로") === "capture", "페이지 캡처 지시");
 
   // 애매하면 바꾸지 않는다 - 잘못 바꾸면 멀쩡한 자리를 망친다.
