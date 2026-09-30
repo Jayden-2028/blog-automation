@@ -69,8 +69,31 @@ env보다 우선하므로, 클라우드의 `CREATOR_ADVISOR_ENABLED=false`는 "�
 | 인스티즈 | `anthropic-ai`/`ClaudeBot` 차단 -> **제외** |
 | 디시인사이드 | `ClaudeBot`/`anthropic-ai`/`Claude-Web` 차단 -> **제외** |
 
-다음 단계: 맥에서 `npm run recon:community` 실행 -> robots 재확인 + HTML 캡처 -> 그 fixture로 파서 작성.
-에펨코리아는 §5-2가 지적한 Cloudflare Bot Management가 실제로 막는지가 관건이다.
+**3-1. 맥 실측 결과 + 루리웹 provider 구현 완료**
+
+recon 도중 robots.txt 판정 버그를 찾아 고쳤다: `Allow`를 무시하고 `Disallow`만 봐서 에펨코리아
+(`Disallow: /` + `Allow: /best`)를 잘못 제외하고 있었다. longest-match + 동률 시 Allow 우선 +
+`$`/`*` 지원으로 수정(`scripts/robotsMatcher.ts`로 분리, `scripts/testRobotsMatcher.ts` 테스트 추가).
+**이 버그는 "허용된 소스를 놓친다"쪽으로만 틀렸다 - 금지된 곳을 긁은 적은 없다.**
+
+| 사이트 | 맥 실측 | 상태 |
+|---|---|---|
+| 루리웹 `/best` | robots 금지 없음, HTTP 200(164,812자) | ✅ **provider 구현 완료** |
+| 에펨코리아 `/best` | robots 허용, HTTP 200(70,175자). Cloudflare 차단 없음 | ⬜ 제목 anchor 클래스명이 난독화 형태(`a.hotdeal_var8`) - **날마다 바뀌는지 확인 후** 파서 작성 |
+| MLB파크 `/mp/best.php` | robots 금지 없음 | ⬜ 루리웹 다음 순서 |
+| 다음카페 `/_c21_/home` | robots는 허용하는데 HTTP 500 | ⬜ URL이 낡음. 새 URL 찾거나 드롭 |
+
+루리웹 파서(`src/services/community/ruliweb/`): `a.subject_link` 선택(레이아웃 유틸리티 클래스
+`deco/flex/center`는 의도적으로 제외 - 디자인 변경에 같이 깨진다). 상위 3건(`tr.best_top_row`)만
+앞의 순위 숫자를 떼고, 일반 행(`tr.mode_list`)은 떼지 않는다 - `2026 월드컵 예선` 같은 제목이
+잘리는 걸 막기 위해서다. 끝의 댓글 수 `(160)` 제거, 핫딜(제휴 광고) 행 제외, 제목 기준 중복 제거.
+fixture는 실제 구조를 본뜨되 제목은 placeholder다(저작권 - 더쿠와 같은 원칙).
+검증: `npm run test:ruliweb-parser`(15케이스) + `npm run test:theqoo-parser` 회귀 + `npm run build`.
+
+여러 사이트를 붙여도 하위 배선은 그대로다. `mapCommunityItemsToInserts`의 중복 제거 키가
+`keyword|category`라, 같은 이슈가 더쿠와 루리웹에 동시에 올라오면 한 행으로 합쳐지고 먼저 온
+쪽의 siteRank 점수를 쓴다. ⬜ 나중에 볼 것: **여러 사이트에 동시 등장하는 것이 오히려 강한
+신호인데 지금은 그냥 버린다** - cross-site 가점으로 바꿀 여지가 있다.
 
 **아직 안 켜진 플래그 2개**(한 달째): `BLOG_COMPETITION_APPLY_TO_SCORE`, `TOPIC_MERGE_APPLY`.
 둘 다 preview 로그만 쌓고 있다. 로그 확인 후 승인하면 켠다.
