@@ -483,6 +483,9 @@ export async function prepareManuscript(
     // 어긋나 보인다(2026-09-21 사용자 리포트: 캡션 "톰포드 화보"에 프롬프트 "제작발표회").
     imagePrompts: slotPrompts,
     images,
+    // 수집 기록을 원고에 함께 싣는다(2026-10-01). 전까지 이 문장들은 console.warn으로만 나가
+    // 아무도 보지 못했다 - 뷰어가 "채울 자리"는 보여줘도 **왜 비었는지**는 말하지 않았다.
+    imageNotes: imageFailures,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,
     sourceTag,

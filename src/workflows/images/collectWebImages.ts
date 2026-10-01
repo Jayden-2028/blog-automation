@@ -924,11 +924,19 @@ export async function collectWebImages(
     search: true,
   });
 
-  if (!run.ok) return { found: [], failures: [`웹 검색 에이전트 실행 실패: ${run.error}`], unfilled: allUnfilled(input.slots) };
+  // 여기서 끝나더라도 **그때까지 쌓인 기록을 버리지 않는다**(2026-10-01). 전에는 새 배열을 만들어
+  // 돌려줘서, 공식 스틸·예고편 프레임을 몇 장 넣었는지 같은 단서가 통째로 사라졌다 - 사람이
+  // "왜 비었는지" 보려고 뷰어를 열었을 때 제일 필요한 정보가 그것이다.
+  if (!run.ok) {
+    failures.push(`웹 검색 에이전트 실행 실패: ${run.error}`);
+    return { found: [], failures, unfilled: allUnfilled(input.slots) };
+  }
 
   const results = parseCodexSlots(run.data);
-  if (results.length === 0)
-    return { found: [], failures: ["Codex가 자리 정보를 돌려주지 않았습니다."], unfilled: allUnfilled(input.slots) };
+  if (results.length === 0) {
+    failures.push("웹 검색 에이전트가 자리 정보를 돌려주지 않았습니다.");
+    return { found: [], failures, unfilled: allUnfilled(input.slots) };
+  }
 
   const found: WebImageRecord[] = [];
 

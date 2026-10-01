@@ -46,6 +46,8 @@ type PageTopic = {
   tags: string[];
   blocks: ManuscriptBlock[];
   images: ManuscriptImage[];
+  /** 이미지 수집 기록(2026-10-01). `[자리 N]`으로 시작하면 그 자리 것이다. */
+  imageNotes: string[];
   /** 공백 제외 본문 글자수(참조 파일의 "본문 N자(공백 제외)"와 같은 기준). */
   charCount: number;
   /**
@@ -85,6 +87,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     tags: m.tags,
     blocks: parseManuscriptBlocks(m.body, m.imagePrompts),
     images: m.images,
+    imageNotes: m.imageNotes ?? [],
     charCount: m.body.replace(/\s/g, "").length,
     // 네이버 본문도 같은 파서를 태운다 - 뷰어의 복사 로직(이미지 자리를 [[이미지 N]]으로 남김)을
     // 그대로 재사용하려면 블록 모양이 같아야 한다.
@@ -427,6 +430,21 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return null;
     }
 
+    /**
+     * 그 자리에 대한 수집 기록. 파이프라인이 "[자리 N] …" 꼴로 남긴다.
+     * 왜 보여주는가: 전까지 이 문장들은 러너 로그에만 있어 **왜 비었는지 아무도 몰랐다**.
+     */
+    function notesFor(topic, n) {
+      var prefix = "[자리 " + n + "]";
+      return (topic.imageNotes || []).filter(function (line) { return line.indexOf(prefix) === 0; })
+        .map(function (line) { return line.slice(prefix.length).trim(); });
+    }
+
+    /** 자리에 매이지 않은 기록(원고 전체). 검색 엔진 장애·공식 스틸 수집 같은 것들이다. */
+    function generalNotes(topic) {
+      return (topic.imageNotes || []).filter(function (line) { return line.indexOf("[자리 ") !== 0; });
+    }
+
     /** 본문 마커 index(1부터)에 해당하는 이미지들. A/B 비교면 provider별로 2장이 나온다. */
     function imagesFor(topic, n) {
       return (topic.images || []).filter(function (img) { return img.index === n; });
@@ -588,7 +606,10 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         || "캡션 없음";
 
       if (shots.length === 0) {
-        var body = '<div class="missing">이미지 미생성 — 아래 프롬프트로 직접 만들어 이 자리에 넣으세요.</div>';
+        var why = notesFor(topic, n);
+        var body = why.length > 0
+          ? '<div class="missing">비어 있는 이유 — ' + esc(why.join(" / ")) + '</div>'
+          : '<div class="missing">이미지 미생성 — 아래 프롬프트로 직접 만들어 이 자리에 넣으세요.</div>';
         if (block.prompt) body += '<div class="prompt-inline">' + esc(block.prompt) + '</div>';
         return '<figure class="cut">' + body + '<figcaption>' + lab + esc(caption) + '</figcaption></figure>';
       }
@@ -676,11 +697,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
           h += '<button class="mini" data-copy="' + esc(item.value) + '">복사</button>';
         });
         unfilled.forEach(function (item) {
+          var why = notesFor(topic, item.n);
           h += '<div class="k">이미지 ' + item.n + '</div>';
           h += '<div class="v">' + esc(item.description)
              + '<br><span style="color:#8A7F72;font-size:12px">'
              + (item.prompt ? '검색어: ' + esc(item.prompt) : '검색어 미상 - 본문 마커 참고')
-             + '</span></div>';
+             + '</span>'
+             + (why.length > 0 ? '<br><span style="color:var(--warn);font-size:12px">' + esc(why.join(" / ")) + '</span>' : '')
+             + '</div>';
           h += item.prompt
             ? '<button class="mini" data-copy="' + esc(item.prompt) + '">검색어</button>'
             : '<span></span>';

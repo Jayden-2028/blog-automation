@@ -37,9 +37,14 @@ export function buildManuscriptReadyMessage(
   }
 
   const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
+  // 빈 자리 수를 함께 알린다(2026-10-01). 전까지는 "이미지 N장"만 보여서, 자리 6개 중 2개가 빈
+  // 원고와 6개가 다 찬 원고가 알림에서 구분되지 않았다 - 뷰어를 열어야만 알 수 있었다.
+  const markerCount = (outcome.topic.manuscript.body.match(/\[IMAGE:/g) ?? []).length;
+  const emptyCount = Math.max(0, markerCount - imageCount);
   const summary = imageCount > 0 ? `🔵 Blogspot · 이미지 ${imageCount}장` : "🔵 Blogspot";
+  const lines0 = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
 
-  const lines = ["📄 <b>원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, summary];
+  const lines = ["📄 <b>원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, lines0];
   let buttons: TelegramInlineKeyboardButton[][] | undefined;
 
   // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤**

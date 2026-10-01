@@ -64,6 +64,16 @@ export type ManuscriptEntry = {
   imagePrompts: string[];
   /** 자동 생성된 이미지. 아직 생성 전이거나 과거 행이면 빈 배열. */
   images: ManuscriptImage[];
+  /**
+   * 이미지 수집 기록(2026-10-01). **왜 그 자리가 비었는지**를 사람이 보게 하려고 싣는다.
+   *
+   * 그 전까지 이 문장들은 `console.warn`으로만 나갔다 - GitHub Actions 로그를 열어 보지 않는 한
+   * 아무도 못 봤고, 뷰어는 "채울 자리"만 보여줄 뿐 이유를 말하지 않았다. 사용자가 규칙을 고쳐
+   * 가며 품질을 올리려면 **무엇이 왜 실패했는지**가 눈에 보여야 한다.
+   *
+   * `[자리 N] …`으로 시작하는 줄은 그 자리의 기록이고, 나머지는 원고 전체에 대한 기록이다.
+   */
+  imageNotes?: string[];
   /** PIPELINE_ROOT 기준 상대 경로(표시용). 본문 자체는 body에 인라인으로 들어 있다. */
   filePath: string;
   /**
@@ -107,6 +117,7 @@ const EMPTY_ENTRY: ManuscriptEntry = {
   body: "",
   imagePrompts: [],
   images: [],
+  imageNotes: [],
   filePath: "",
   naver: null,
 };
@@ -130,6 +141,7 @@ function rowToTopic(row: ManuscriptManifestTopicRow): ManuscriptTopicEntry {
           tags: raw.tags ?? [],
           imagePrompts: raw.imagePrompts ?? [],
           images: raw.images ?? [],
+          imageNotes: raw.imageNotes ?? [],
         }
       : { ...EMPTY_ENTRY },
   };
