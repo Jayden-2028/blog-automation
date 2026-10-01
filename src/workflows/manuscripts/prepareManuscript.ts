@@ -410,6 +410,9 @@ export async function prepareManuscript(
       keyword: job.keyword,
       category: job.category ?? null,
       briefType: readJobBrief(job.metadata as Record<string, unknown> | null)?.type ?? null,
+      // 리서치 파일 전문(2026-10-01). 작품 자리에서 공식 스틸이 없을 때 여기 적힌 유튜브 공식
+      // 영상 링크로 자동 프레임을 후보에 넣는다(youtubeTrailerFrames.ts).
+      researchText: typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
       // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
       // 같은 사진이 다시 들어오는 것을 막는다.
       existingImageUrls: Object.fromEntries(

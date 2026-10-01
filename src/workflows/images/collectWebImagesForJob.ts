@@ -30,6 +30,11 @@ export type CollectWebImagesForJobInput = {
   category?: string | null;
   /** 기획 브리프 유형(2026-09-24). 서치풀 선택에서 category보다 우선한다. */
   briefType?: string | null;
+  /**
+   * 리서치 파일 전문(2026-10-01). 작품 자리에서 공식 스틸을 못 찾았을 때, 여기 적힌 유튜브 공식
+   * 영상 링크로 자동 프레임을 후보에 넣는다.
+   */
+  researchText?: string | null;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -205,6 +210,7 @@ export async function collectWebImagesForJob(
         deduper,
         category: input.category ?? null,
         briefType: input.briefType ?? null,
+        researchText: input.researchText ?? null,
       }
     );
 

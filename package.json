@@ -195,6 +195,7 @@
     "test:naver-content-url": "tsx src/config/testNaverContentUrl.ts",
     "test:image-search-pools": "tsx src/workflows/images/testImageSearchPools.ts",
     "test:kinolights": "tsx src/workflows/images/testKinolightsStills.ts",
+    "test:youtube-frames": "tsx src/workflows/images/testYoutubeTrailerFrames.ts",
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
     "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts",
     "test:remove-table-markers": "tsx src/workflows/manuscripts/testRemoveTableMarkers.ts",

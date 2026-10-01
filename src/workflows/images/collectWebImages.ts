@@ -21,6 +21,7 @@ import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
 import { imageMakerSpecLines } from "./imageMakerSpec.js";
+import { extractYoutubeVideoIds, fetchTrailerFrameCandidates } from "./youtubeTrailerFrames.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
@@ -255,6 +256,14 @@ export type CollectWebImagesOptions = {
    * 인물 중심 원고가 living으로 분류돼 행사 서치풀을 타던 문제(오상욱 실측).
    */
   briefType?: string | null;
+  /**
+   * 리서치 파일 전문(2026-10-01). 여기서 **유튜브 공식 영상 링크**를 긁어 자동 프레임을 후보에
+   * 넣는다 - 작품 자리에서 공식 스틸을 못 찾았을 때의 폴백이다(youtubeTrailerFrames.ts).
+   * 없으면 이 경로는 조용히 비활성이고 기존 흐름 그대로다.
+   */
+  researchText?: string | null;
+  /** 테스트 주입 지점. 기본은 실제 HEAD 요청. */
+  fetchTrailerFrames?: typeof fetchTrailerFrameCandidates;
   /**
    * 작품 공식 스틸 직접 수집(2026-09-24). 작품·연예 카테고리에서만 부른다.
    * false면 건너뛴다(테스트 - 외부 HTTP를 타면 안 된다).
@@ -825,6 +834,24 @@ export async function collectWebImages(
     }
   }
 
+  // 공식 스틸을 못 찾았을 때의 폴백: 유튜브 공식 영상의 자동 생성 프레임(2026-10-01).
+  //
+  // **스틸이 있으면 쓰지 않는다.** 스틸은 3000x2000 원본이고 프레임은 1280x720이다 - 더 나은
+  // 것이 손에 있는데 굳이 섞으면 §8-7의 "공식 스틸이 있으면 공식 스틸을 고른다"와 부딪힌다.
+  let trailerFrames: ImageCandidate[] = [];
+  if (ARTWORK_CATEGORIES.has(options.category ?? "") && officialStills.length === 0 && options.researchText) {
+    const videoIds = extractYoutubeVideoIds(options.researchText);
+    if (videoIds.length > 0) {
+      const fetchFrames = options.fetchTrailerFrames ?? fetchTrailerFrameCandidates;
+      trailerFrames = await fetchFrames(videoIds).catch(() => []);
+      failures.push(
+        trailerFrames.length > 0
+          ? `ℹ️ 유튜브 공식 영상 자동 프레임 ${trailerFrames.length}장을 후보에 넣었습니다(영상 ${videoIds.length}편).`
+          : `ℹ️ 리서치의 유튜브 링크 ${videoIds.length}편에서 쓸 수 있는 자동 프레임을 찾지 못했습니다.`
+      );
+    }
+  }
+
   if (searchImages) {
     await Promise.all(
       input.slots.map(async (slot) => {
@@ -870,7 +897,7 @@ export async function collectWebImages(
         const quality = preferred.length > 0 ? preferred : isArtwork ? atLeast(ARTWORK_FALLBACK_MIN_WIDTH) : list;
 
         // 공식 스틸을 **맨 앞에** 둔다 - 이게 이 카테고리의 1순위 서치풀이다(§8-7).
-        const withOfficial = [...officialStills, ...quality];
+        const withOfficial = [...officialStills, ...trailerFrames, ...quality];
         if (withOfficial.length > 0) {
           prefetched.set(slot.index, withOfficial);
           return;
