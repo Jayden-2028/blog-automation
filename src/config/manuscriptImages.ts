@@ -33,10 +33,27 @@ export type ManuscriptImageConfig = {
    * 비용 상한이라는 취지는 유지하되 실제 마커 수(5~7)를 덮도록 한 칸 올린다.
    */
   maxPerArticle: number;
+  /**
+   * 인포그래픽 자리의 생성 화질(2026-10-01). 사진 자리는 비용 때문에 `low`로 두는데, 인포그래픽은
+   * **글자가 읽혀야 쓸모가 있어** 같은 화질로 뽑으면 라벨이 뭉개진다.
+   *
+   * 기본은 `low`로 둔다 - 올리면 장당 비용이 오르고, 유료 상향은 사용자 승인 사항이다.
+   * 올릴 때는 `IMAGE_INFOGRAPHIC_QUALITY=medium`(또는 high) 한 줄이면 된다.
+   */
+  infographicQuality: ImageQuality;
 };
+
+/** OpenAI 이미지 화질 등급. 올릴수록 글자가 또렷해지고 장당 비용이 오른다. */
+export type ImageQuality = "low" | "medium" | "high";
+
+function parseQualityEnv(raw: string | undefined, fallback: ImageQuality): ImageQuality {
+  const value = (raw ?? "").trim().toLowerCase();
+  return value === "low" || value === "medium" || value === "high" ? value : fallback;
+}
 
 export const MANUSCRIPT_IMAGE_CONFIG: ManuscriptImageConfig = {
   enabled: parseBooleanEnv(process.env.MANUSCRIPT_IMAGE_GENERATION, false),
   abCompare: parseBooleanEnv(process.env.IMAGE_AB_COMPARE, true),
   maxPerArticle: parseIntEnv(process.env.IMAGE_MAX_PER_ARTICLE, 8),
+  infographicQuality: parseQualityEnv(process.env.IMAGE_INFOGRAPHIC_QUALITY, "low"),
 };

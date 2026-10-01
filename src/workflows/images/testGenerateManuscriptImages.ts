@@ -16,6 +16,7 @@ const cfg = (over: Partial<ManuscriptImageConfig> = {}): ManuscriptImageConfig =
   enabled: true,
   abCompare: false,
   maxPerArticle: 6,
+  infographicQuality: "low",
   ...over,
 });
 
@@ -246,6 +247,62 @@ async function main(): Promise<void> {
   });
   assert(recorded.length === 0, `실패 호출은 기록하지 않는다 (실제: ${recorded.length})`);
   console.log("✅ 실패 호출은 원장에 남기지 않음");
+
+  // --- 인포그래픽(2026-10-01 사용자 결정) ---------------------------------------------------
+  // 금지 대상은 "본문 텍스트를 그대로 옮긴 표"지 픽토그램·그래프 인포그래픽이 아니다.
+  // `인포그래픽 생성`은 AI가 만들고, `표 생성`은 여전히 만들지 않는다.
+  {
+    const body = [
+      "도입 문단입니다.",
+      "[IMAGE: 신청 절차 4단계 — 인포그래픽 생성]\n[IMAGE PROMPT: 아이콘 4개로 신청 절차를 그린 가로형 인포그래픽, 16:9]",
+      "다음 문단입니다.",
+      "[IMAGE: 일정표 — 표 생성]\n[IMAGE PROMPT: 일정 표]",
+    ].join("\n\n");
+
+    const qualities: (string | undefined)[] = [];
+    const prompts: string[] = [];
+    const outcome = await generateManuscriptImages(
+      { jobId: "job-1", keyword: "청년미래적금", date: "2026-10-01", body, imagePrompts: [] },
+      {
+        config: cfg({ infographicQuality: "medium" }),
+        generate: async (i: { prompt: string; quality?: string }) => {
+          qualities.push(i.quality);
+          prompts.push(i.prompt);
+          return okGenerate(i);
+        },
+        upload: okUpload,
+        record: recordStub,
+      } as never
+    );
+
+    assert(prompts.length === 1, `인포그래픽 자리 하나만 생성해야 한다 (실제: ${prompts.length})`);
+    assert(prompts[0].includes("아이콘 4개"), "인포그래픽 자리의 프롬프트를 그대로 써야 한다");
+    assert(qualities[0] === "medium", `인포그래픽은 설정한 화질로 불러야 한다 (실제: ${qualities[0]})`);
+    assert(
+      outcome.images.every((i) => i.index === 1),
+      `표 생성 자리는 만들지 않아야 한다 (실제: ${JSON.stringify(outcome.images.map((i) => i.index))})`
+    );
+    console.log("✅ 인포그래픽은 생성(화질 상향), 표 생성은 그대로 제외");
+  }
+
+  // 사진 자리는 화질을 올리지 않는다 - 비용이 오른다.
+  {
+    const qualities: (string | undefined)[] = [];
+    await generateManuscriptImages(input, {
+      config: cfg({ infographicQuality: "high" }),
+      generate: async (i: { prompt: string; quality?: string }) => {
+        qualities.push(i.quality);
+        return okGenerate(i);
+      },
+      upload: okUpload,
+      record: recordStub,
+    } as never);
+    assert(
+      qualities.every((q) => q === undefined),
+      `사진 자리는 화질을 지정하지 않아야 한다 (실제: ${JSON.stringify(qualities)})`
+    );
+    console.log("✅ 사진 자리는 기본 화질 그대로(비용 유지)");
+  }
 
   console.log("\n✅ 전체 통과");
 }

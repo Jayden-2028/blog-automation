@@ -119,7 +119,12 @@ export async function generateManuscriptImages(
   // `unknown`은 획득 방식 접미사가 없던 옛 원고라 종전대로 AI로 둔다.
   const aiSlots = imageBlocks
     .map((block, i) => ({ block, index: i + 1 }))
-    .filter(({ block }) => block.acquisition === "ai" || block.acquisition === "unknown")
+    // `infographic`도 AI가 만든다(2026-10-01). `table`은 여전히 제외 - 본문 표를 그대로 옮긴
+    // 이미지는 만들지 않는다(image-maker.md §9).
+    .filter(
+      ({ block }) =>
+        block.acquisition === "ai" || block.acquisition === "unknown" || block.acquisition === "infographic"
+    )
     .filter(({ index }) => !onlyIndexes || onlyIndexes.has(index));
 
   // 웹 수집이 실패해 AI로 돌려받은 자리를 같은 대상 목록에 합친다. 본문 마커의 acquisition은
@@ -160,7 +165,9 @@ export async function generateManuscriptImages(
     for (const provider of providers) {
       // 순차 호출이다. 병렬로 돌리면 같은 API 키에 동시 요청이 몰려 rate limit에 걸리고,
       // 어차피 GH Actions의 heavy-pipeline 큐가 실행을 하나로 직렬화하고 있어 얻을 게 없다.
-      const result: GenerateImageResult = await generate({ prompt: block.prompt }, provider);
+      // 인포그래픽은 **글자가 읽혀야** 쓸모가 있다. 사진 자리와 같은 화질로 뽑으면 라벨이 뭉개진다.
+      const quality = block.acquisition === "infographic" ? config.infographicQuality : undefined;
+      const result: GenerateImageResult = await generate({ prompt: block.prompt, quality }, provider);
       const variant = providers.length > 1 ? provider : undefined;
       const stem = fileStem(index, block.description);
 

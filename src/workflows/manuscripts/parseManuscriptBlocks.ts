@@ -42,7 +42,7 @@ import type { ManuscriptImage } from "./manuscriptManifest.js";
  * 우선순위는 `웹 검색` > `페이지 캡처` > `AI 생성`이고(`표 생성`은 2026-09-30 폐지 - 마커가 와도 removeTableMarkers가 지운다), AI는 앞의 둘이 전부 불가능할
  * 때만 쓰는 **폴백**이다(rules/images.md §8-4).
  */
-export type ImageAcquisition = "ai" | "search" | "table" | "capture" | "unknown";
+export type ImageAcquisition = "ai" | "search" | "table" | "infographic" | "capture" | "unknown";
 
 export type ManuscriptBlock =
   | { type: "text"; content: string }
@@ -66,7 +66,11 @@ export function parseImageAcquisition(description: string): ImageAcquisition {
   // 문구를 정확히 이것만 본다 - "화면 캡처" 같은 일반어까지 잡으면 §8-2가 금지한 행정 화면이
   // 실수로 이 경로를 타게 된다.
   if (/페이지\s*캡처/.test(description)) return "capture";
-  if (/표\s*생성|인포그래픽\s*생성/.test(description)) return "table";
+  // `인포그래픽 생성`과 `표 생성`을 가른다(2026-10-01 사용자 결정). 전에는 둘 다 `table`이었고,
+  // 표 렌더 경로를 지우면서 인포그래픽 자리까지 같이 죽어 **빈 자리로 끝났다**.
+  // 금지 대상은 "본문 텍스트를 그대로 옮긴 표"지 픽토그램·그래프 인포그래픽이 아니다.
+  if (/인포그래픽\s*생성/.test(description)) return "infographic";
+  if (/표\s*생성/.test(description)) return "table";
   if (/웹\s*검색/.test(description)) return "search";
   if (/AI\s*생성/i.test(description)) return "ai";
   return "unknown";

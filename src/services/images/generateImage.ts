@@ -13,6 +13,11 @@ export type ImageProvider = "openai" | "gemini";
 export type GenerateImageInput = {
   /** 영어 생성 프롬프트. 실존 인물·브랜드 로고·실제 제품 사진을 요청하지 않아야 한다(호출자 책임). */
   prompt: string;
+  /**
+   * 화질(2026-10-01). 생략하면 `low` - 비용 통제를 위한 기본값이다.
+   * 글자가 읽혀야 하는 자리(인포그래픽)만 올려 부른다. Gemini는 이 값을 받지 않는다.
+   */
+  quality?: "low" | "medium" | "high";
 };
 
 /**
@@ -160,9 +165,9 @@ async function generateWithOpenAI(input: GenerateImageInput): Promise<GenerateIm
         model: OPENAI_IMAGE_MODEL,
         prompt: input.prompt,
         size: resolveOpenAIImageSize(input.prompt),
-        // 비용 통제를 위해 low로 시작한다(사용자 요청 - 실측 전 정확한 단가를 몰라 보수적으로 잡음).
-        // 실측 후 품질이 부족하면 medium/high로 올리는 걸 검토한다.
-        quality: "low",
+        // 비용 통제를 위해 low가 기본이다(사용자 요청 - 실측 전 정확한 단가를 몰라 보수적으로 잡음).
+        // 인포그래픽처럼 **글자가 읽혀야 하는 자리**만 호출자가 올려 부른다(2026-10-01).
+        quality: input.quality ?? "low",
         n: 1,
       }),
       signal: controller.signal,
