@@ -20,11 +20,13 @@ const cfg = (over: Partial<ManuscriptImageConfig> = {}): ManuscriptImageConfig =
   ...over,
 });
 
+// 꼬리(`— AI 생성`)를 명시한다(2026-10-01). 꼬리가 없는 마커는 이제 **웹 검색**으로 가고
+// AI 생성 대상이 아니다 - 아래 별도 블록에서 그걸 검사한다.
 const BODY = [
   "도입 문단입니다.",
-  "[IMAGE: 광안리 밤바다 드론쇼]",
+  "[IMAGE: 광안리 밤바다 드론쇼 — AI 생성]",
   "**첫 소제목**\n소제목 문단입니다.",
-  "[IMAGE: 관람객으로 붐비는 해변]",
+  "[IMAGE: 관람객으로 붐비는 해변 — AI 생성]",
   "마무리 문단입니다.",
 ].join("\n\n");
 
@@ -88,7 +90,8 @@ async function main(): Promise<void> {
   assert(single.images.length === 2, `마커 2개 -> 이미지 2장 (${single.images.length})`);
   assert(prompts[0] === PROMPTS[0] && prompts[1] === PROMPTS[1], `프롬프트 순서가 어긋났다 (${JSON.stringify(prompts)})`);
   assert(single.images[0].index === 1 && single.images[1].index === 2, "index는 본문 마커 순서(1부터)여야 한다");
-  assert(single.images[0].description === "광안리 밤바다 드론쇼", "설명이 캡션으로 넘어와야 한다");
+  // 마커 설명을 그대로 싣는다. 꼬리는 발행 직전 publishCaption이 뗀다(2026-10-01).
+  assert(single.images[0].description.startsWith("광안리 밤바다 드론쇼"), "설명이 캡션으로 넘어와야 한다");
   assert(single.images[0].url?.endsWith("/1.png"), `단일 provider면 파일명에 꼬리표가 없어야 한다 (${single.images[0].url})`);
   assert(single.failures.length === 0, "정상 경로에 실패가 없어야 한다");
   console.log("✅ 단일 provider - 마커 수만큼 생성, 프롬프트 순서 유지");
@@ -302,6 +305,25 @@ async function main(): Promise<void> {
       `사진 자리는 화질을 지정하지 않아야 한다 (실제: ${JSON.stringify(qualities)})`
     );
     console.log("✅ 사진 자리는 기본 화질 그대로(비용 유지)");
+  }
+
+  // 꼬리가 없는 마커는 AI로 가지 않는다(2026-10-01). 집필자가 꼬리를 쓰지 않는 방향(A안)으로
+  // 가는 중인데, 예전 기본값대로면 **전 자리가 AI 생성으로 쏟아진다**.
+  {
+    const body = ["도입 문단입니다.", "[IMAGE: 꼬리가 없는 자리]", "마무리 문단입니다."].join("\n\n");
+    let called = 0;
+    const outcome = await generateManuscriptImages(
+      { jobId: "job-1", keyword: "k", date: "2026-10-01", body, imagePrompts: ["프롬프트"] },
+      {
+        config: cfg(),
+        generate: async (i: { prompt: string }) => { called += 1; return okGenerate(i); },
+        upload: okUpload,
+        record: recordStub,
+      } as never
+    );
+    assert(called === 0, "꼬리 없는 마커를 AI로 만들면 안 된다(웹 검색이 기본이다)");
+    assert(outcome.images.length === 0, `AI 이미지가 생기면 안 된다 (${outcome.images.length}장)`);
+    console.log("✅ 꼬리 없는 마커는 AI 대상이 아니다 - 웹 검색으로 간다");
   }
 
   console.log("\n✅ 전체 통과");
