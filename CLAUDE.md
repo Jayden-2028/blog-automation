@@ -63,16 +63,26 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
     다시 쓰고(이미지는 두 채널이 **같은 것**을 쓴다), 네이버 원고에서는 `참고 자료` 링크아웃을
     뺀다. 발행 간격은 코드가 강제하지 않는다 - 사용자가 그때그때 판단한다(2026-09-22 결정).
 - 원고 내 이미지: writer가 남긴 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍으로 **승인 이후**
-  자동 생성한다(`workflows/images/generateManuscriptImages.ts`). 기본은 꺼져 있다 -
-  `MANUSCRIPT_IMAGE_GENERATION=true` + `OPENAI_API_KEY`/`GEMINI_API_KEY`가 있어야 실제로 호출한다
-  (유료 API라 켜는 것은 사용자 결정). A/B 비교는 끝났다 - `IMAGE_AB_COMPARE=false`,
-  `IMAGE_PROVIDER=openai`로 고정됐다. 웹 검색으로 채우는 자리는 네이버 + 구글 두 색인을 쓴다
+  자동 생성한다(`workflows/images/generateManuscriptImages.ts`). **코드 기본값은 꺼짐이지만 운영에서는
+  켜져 있다**(2026-10-01 실측 - 저장소 variables의 `MANUSCRIPT_IMAGE_GENERATION=true`. 최근 일주일
+  AI 생성 이미지가 사건사고·생활정보에서 실제로 나왔다). 코드만 보고 "안 돈다"고 판단하지 말 것.
+  A/B 비교는 끝났다 - **코드 기본값은 `IMAGE_AB_COMPARE=true`이고 운영 variables에서 꺼 둔 상태**다
+  (실측 데이터에 A/B 흔적이 없다). `IMAGE_PROVIDER=openai`. 웹 검색으로 채우는 자리는 네이버 + 구글 두 색인을 쓴다
   (구글은 공식 API가 신규 발급 차단이라 Serper 중계, `SERPER_API_KEY`). 생성 이미지는 Supabase
   Storage(`article-images`)가 원본이고 `npm run sync:images`가 맥으로 내려받는다. 옛 경로
   (`ARTICLE_IMAGE_GENERATION` + `workflows/writing/generateArticleImages.ts`, 자체 브리프 생성 후
   본문에 마크다운 삽입)는 계속 false이고 호출하지 않는다 - 지우지는 않았다.
   `IMAGE PROMPT`는 지시문이 아니라 그대로 붙여넣을 수 있는 완성된 문자열이어야 한다
   (`prompts/writing/rules/images.md` §8).
+- **이미지 규격이 둘이다**(2026-10-01 분업). 집필자는 "이 자리에 무엇을 보여줄지"만 정하고, 어디서
+  어떻게 구할지는 이미지 메이커가 정한다.
+  - 집필자용(자리 설계): `prompts/writing/rules/images.md`
+  - **실행자용(수집·선택·생성)**: `prompts/images/image-maker.md` - 수집·선택 에이전트가 프롬프트
+    맨 앞에 읽는다(`images/imageMakerSpec.ts`). **구하는 방법에 관해서는 이쪽이 최신이고 이긴다.**
+  - 발행 캡션은 **사진을 보고 다시 쓴 수집 캡션**을 쓰고 획득 방식 꼬리(`— 웹 검색`)를 떼어 낸다.
+  - 저작권은 1순위 기준이 아니다 - **유료 스톡만 거부**한다(2026-10-01 사용자 결정).
+  - 인포그래픽은 행사·정책에 한해 쓴다(`— 인포그래픽 생성`). **본문 표를 그대로 옮긴 이미지는 계속
+    금지**다(`— 표 생성`은 코드가 본문에서 지운다).
 - **원고 준비**: 텔레그램에서 초안을 승인(✅)하면 `prepareApprovedManuscripts()`가 작성 단계 원고
   (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,
   이미지를 붙이고, 이미 발행된 관련 글로 **내부 링크**를 넣은 뒤(2026-09-22 - 고아 페이지 방지) 원고
@@ -128,6 +138,7 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
   - 출력 형식 계약(코드와 직결, 구 writer.md §6~7·9~10): `prompts/writing/rules/output-format.md`
   - 이미지 규칙(마커·획득 방식·프롬프트, 구 output-format §8, 2026-09-30 분리): `prompts/writing/rules/images.md`
   - 카테고리별 문체: `prompts/writing/style/{parenting,entertainment,trend,incident}.md`
+- 이미지 메이커 규격(수집·선택·생성 실행자, 2026-10-01 신설): `prompts/images/image-maker.md`
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md` (2026-09-22에 근거 없는 규칙 7가지를 걷어냈다 -
   취소선 항목은 "이미 확인해서 뺀 통설"이니 다시 가져오지 않는다. 문서 제목은 네이버 기준이지만
   구글 기준이 먼저다)
