@@ -20,6 +20,7 @@ import { keywordSlug } from "../../config/pipelinePaths.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
+import { imageMakerSpecLines } from "./imageMakerSpec.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
@@ -98,20 +99,26 @@ const REUSE_PERMISSIONS = [
   "personal_sns", // 개인 SNS 게시물 - C안에서 허용, 캡션 출처 필수
   "cc_nc", // CC NC(비영리) - 허용(C안). 캡션 출처 필수
   "unclear", // 확인 불가 - 허용(C안). 캡션 출처 필수
-  "cc_nd", // 변경금지 - 거부(크롭·리사이즈를 하므로)
-  "paid_stock", // 게티·연합·셔터스톡 등 유료 스톡, 워터마크 - 거부
+  "cc_nd", // 변경금지 - 2026-10-01부터 허용(분류는 계속 받는다)
+  "paid_stock", // 게티·연합·셔터스톡 등 유료 스톡, 워터마크 - 유일한 거부 대상
 ] as const;
 
 type ReusePermission = (typeof REUSE_PERMISSIONS)[number];
 
 /**
- * 2026-09-17 저녁 사용자 결정(C안): **유료 스톡과 변경금지(ND)만 거부한다.** 나머지는 전부 쓰되
+ * 2026-10-01 사용자 결정: **유료 스톡만 거부한다.** 저작권을 1순위 판단 기준으로 삼지 않는다
+ * (`prompts/images/image-maker.md` §5) - 우리가 다루는 키워드는 이미 대중에게 퍼진 내용이고,
+ * 공개된 이미지를 비상업 개인 블로그에 쓰는 위험 수위가 낮다는 사용자 판단이다. 그래서 변경금지(ND)
+ * 거부도 풀었다. 유료 스톡만 남긴 이유는 저작권이 아니라 **품질과 실제 청구 가능성**이다 -
+ * 워터마크가 박혀 쓸 수 없고, 금전 청구가 실제로 오는 유일한 경로다.
+ *
+ * (이전) 2026-09-17 저녁 사용자 결정(C안): **유료 스톡과 변경금지(ND)만 거부한다.** 나머지는 전부 쓰되
  * 캡션에 출처를 반드시 표기한다. 그 전까지는 공공누리·CC BY·공식 배포물만 허용했는데, 그 기준으로
  * 실측 9자리 중 8자리를 "찾았는데 버렸다" - 소속사 프로필·영화 스틸·보도사진이 전부 탈락했고 그게
  * 정확히 사용자가 원하는 이미지였다. 리스크(언론사 사진의 이론상 청구 가능성)는 사용자가 인지하고
  * 결정했다. 분류 자체는 계속 받는다 - 메타데이터·캡션 출처 표기에 쓴다.
  */
-const REJECTED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>(["cc_nd", "paid_stock"]);
+const REJECTED_PERMISSIONS: ReadonlySet<string> = new Set<ReusePermission>(["paid_stock"]);
 
 export type WebImageSlot = {
   index: number;
@@ -197,6 +204,8 @@ export type ChooseImageInput = {
   markerDescription: string;
   context: string;
   keyword: string;
+  /** 이미지 메이커 규격. 없으면 파일에서 읽는다(테스트는 null로 끈다). */
+  spec?: string | null;
 };
 
 /** `picked`가 null이면 "쓸 만한 것이 없다"는 뜻이다. */
@@ -372,9 +381,15 @@ export function buildPrompt(
   /** 카테고리별 서치풀을 정하려고 받는다(2026-09-24). 없으면 예전과 같은 일반 검색이다. */
   category: string | null = null,
   /** 브리프 유형. category보다 먼저 본다. */
-  briefType: string | null = null
+  briefType: string | null = null,
+  /**
+   * 이미지 메이커 규격 본문(prompts/images/image-maker.md). 넘기지 않으면 파일에서 읽는다.
+   * 테스트는 null을 넘겨 규격 없이 예전 프롬프트만 검사한다.
+   */
+  spec: string | null | undefined = undefined
 ): string {
   const lines = [
+    ...imageMakerSpecLines(spec === undefined ? undefined : spec),
     "너는 한국어 블로그 원고에 넣을 **실제 이미지**를 웹에서 찾는다. 이미지를 만들지 않는다.",
     "web_search 도구로 찾고, 각 자리마다 바로 쓸 수 있는 이미지 파일 URL 하나를 고른다.",
     "",
@@ -400,9 +415,9 @@ export function buildPrompt(
     "   - `unclear` — 어디서 온 건지 확인 못 함",
     "   **위 분류는 전부 쓸 수 있다**(2026-09-17 사용자 결정). 캡션에 출처가 붙으므로 `license`에",
     "   \"사진=SM C&C\", \"출처: 뉴시스\", \"@instagram_id\"처럼 **캡션에 그대로 쓸 출처 표기**를 적는다.",
-    "   아래 둘만 **건너뛴다**(`skipped: true`):",
+    "   아래 하나만 **건너뛴다**(`skipped: true`):",
     "   - `paid_stock` — 게티이미지·연합뉴스·셔터스톡 등 유료 스톡, 워터마크가 찍힌 이미지",
-    "   - `cc_nd` — 변경금지(ND)가 명시된 것(크롭·리사이즈를 하므로)",
+    "   변경금지(ND)도 2026-10-01부터 쓴다 - 저작권을 1순위 기준으로 삼지 않는다는 사용자 결정이다.",
     "   라이선스가 불확실하다는 이유로 건너뛰지 않는다. 불확실하면 `unclear`로 두고 **쓴다**.",
     "5. **크기는 긴 변 600px 이상이면 된다.** 가로 16:9가 있으면 좋지만 **세로 포스터·인물 프로필을",
     "   세로라는 이유로 버리지 않는다** - 내용이 맞는 세로 사진이 조건 맞는 빈 자리보다 낫다.",
@@ -419,13 +434,20 @@ export function buildPrompt(
     "그대로 찾지 말고 **같은 주체의 다른 공연·행사 사진**(예: 안동탈놀이단의 지난 공연)으로 대체한다 -",
     "실측에서 '결선 오프닝'을 문자 그대로 찾다 빈 자리로 끝났다.",
     "",
-    "**한국 공공저작물을 먼저 뒤진다.** 정부·공공기관 자료는 아래에 공공누리로 풀려 있어 상업적 이용과",
-    "변형이 허용된다 - 일반 웹 검색보다 여기를 먼저 본다:",
-    "- 정책브리핑 korea.kr (부처 정책 사진·인포그래픽, 대부분 공공누리 제1유형)",
-    "- 공공누리 포털 kogl.or.kr (기관 통합 검색)",
-    "- 각 부처·지자체 보도자료에 첨부된 사진",
-    "검색어에 `공공누리`, `보도자료`, `정책브리핑`을 붙여 보는 것이 효과적이다.",
-    "",
+    // 공공누리는 **정책·행정 주제에서만** 1순위다(2026-10-01). 전에는 카테고리와 무관하게 "먼저
+    // 뒤진다"고 지시했는데, 연예·작품 자리에서는 거기에 있을 리 없는 사진을 먼저 찾게 만든다 -
+    // 그 자리의 1순위는 공식 스틸이다(image-maker.md §4-1). 저작권으로 서치풀을 정하지 않는다.
+    ...(category === "entertainment" || category === "ott"
+      ? []
+      : [
+          "**정책·행정 주제라면 한국 공공저작물을 먼저 뒤진다.** 정부·공공기관 자료는 아래에 공공누리로",
+          "풀려 있어 상업적 이용과 변형이 허용된다:",
+          "- 정책브리핑 korea.kr (부처 정책 사진·인포그래픽, 대부분 공공누리 제1유형)",
+          "- 공공누리 포털 kogl.or.kr (기관 통합 검색)",
+          "- 각 부처·지자체 보도자료에 첨부된 사진",
+          "검색어에 `공공누리`, `보도자료`, `정책브리핑`을 붙여 보는 것이 효과적이다.",
+          "",
+        ]),
     ...describeSearchPools(keyword, category, briefType),
     "",
     "## 자리별 지시",
@@ -623,6 +645,7 @@ export async function defaultAskSameCut(input: {
 
 export async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
   const prompt = [
+    ...imageMakerSpecLines(input.spec === undefined ? undefined : input.spec),
     "블로그 원고의 이미지 자리 하나에 넣을 후보 사진을 내려받았다. Read 도구로 **후보를 전부 열어 보고**",
     "그 자리에 가장 맞는 것 하나를 고른다. 맞는 것이 하나도 없으면 고르지 않는다.",
     "",

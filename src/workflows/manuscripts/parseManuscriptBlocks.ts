@@ -164,7 +164,32 @@ export function substituteConfirmedImages(body: string, images: ManuscriptImage[
       const confirmed = images.filter((image) => image.index === markerIndex && image.url);
       if (confirmed.length !== 1) return raw;
 
-      return `![${match.description}](${confirmed[0].url})`;
+      return `![${publishCaption(confirmed[0], match.description)}](${confirmed[0].url})`;
     })
     .join("\n\n");
+}
+
+/**
+ * 마커 설명 끝의 획득 방식 꼬리를 뗀다. 이건 집필자가 파이프라인에 주는 지시지 독자에게 보일
+ * 글자가 아니다. 뷰어(renderManuscriptPage.ts)도 같은 정규식을 쓴다 - 한쪽만 고치면 화면과 발행본의
+ * 캡션이 갈라진다.
+ */
+export function stripAcquisitionSuffix(description: string): string {
+  return description.replace(/\s*—\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\s*$/, "").trim();
+}
+
+/**
+ * 발행본에 실릴 캡션(= alt + figcaption).
+ *
+ * **수집 단계에서 사진을 실제로 열어 보고 다시 쓴 캡션을 쓴다**(2026-10-01). 마커 설명은 사진을
+ * 보기 **전에** 쓰인 것이라 실제로 고른 사진과 어긋날 수 있다 - 공식 스틸은 문단이 안 맞아도
+ * 채택하므로(images.md §8-7) 특히 그렇다. 사진을 본 쪽이 쓴 문장이 정확하다.
+ *
+ * 그 전까지는 마커 설명이 그대로 나갔고, 꼬리까지 붙어 `… — 웹 검색`이 독자에게 보였다
+ * (실측 2026-10-01: 최근 원고 50건 중 48건에 꼬리 붙은 마커가 있었다).
+ *
+ * 수집 캡션이 없는 옛 데이터는 마커 설명에서 꼬리만 떼어 쓴다.
+ */
+export function publishCaption(image: ManuscriptImage, markerDescription: string): string {
+  return stripAcquisitionSuffix(image.description || "") || stripAcquisitionSuffix(markerDescription);
 }

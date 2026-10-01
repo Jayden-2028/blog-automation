@@ -137,13 +137,28 @@ async function main(): Promise<void> {
     "[IMAGE: 골목 일러스트 — AI 생성]",
   ].join("\n");
 
+  // 캡션은 **수집 단계에서 사진을 보고 다시 쓴 것**을 쓴다(2026-10-01). 마커 설명은 사진을 보기
+  // 전에 쓰인 것이라 실제로 고른 사진과 어긋날 수 있다.
   const oneConfirmed: ManuscriptImage[] = [
-    { index: 1, description: "카페 사진 — 웹 검색", prompt: null, url: "https://x/1.png", provider: "openai", fileName: "01.png" },
+    { index: 1, description: "창가에 앉은 손님과 라떼. 사진=언스플래시", prompt: null, url: "https://x/1.png", provider: "web", fileName: "01.png" },
   ];
   const substituted1 = substituteConfirmedImages(imageBody, oneConfirmed);
-  assert(substituted1.includes("![카페 사진 — 웹 검색](https://x/1.png)"), "확정 이미지 1장은 마크다운 이미지로 치환돼야 한다");
+  assert(
+    substituted1.includes("![창가에 앉은 손님과 라떼. 사진=언스플래시](https://x/1.png)"),
+    "확정 이미지는 수집 캡션으로 치환돼야 한다"
+  );
   assert(substituted1.includes("[IMAGE: 골목 일러스트"), "확정 안 된(0장) 마커는 그대로 남아야 한다");
-  console.log("✅ substituteConfirmedImages - 확정 1장만 치환, 미확정 마커는 유지");
+  console.log("✅ substituteConfirmedImages - 수집 캡션으로 치환, 미확정 마커는 유지");
+
+  // 9-1) 수집 캡션이 없는 옛 데이터는 마커 설명을 쓰되 **획득 방식 꼬리를 뗀다**.
+  //      그 전에는 `— 웹 검색`이 독자에게 그대로 보였다(실측 2026-10-01: 원고 50건 중 48건).
+  const legacyConfirmed: ManuscriptImage[] = [
+    { index: 1, description: "", prompt: null, url: "https://x/1.png", provider: "web", fileName: "01.png" },
+  ];
+  const substitutedLegacy = substituteConfirmedImages(imageBody, legacyConfirmed);
+  assert(substitutedLegacy.includes("![카페 사진](https://x/1.png)"), `꼬리를 떼고 치환해야 한다 (${substitutedLegacy})`);
+  assert(!substitutedLegacy.includes("웹 검색]("), "획득 방식 꼬리가 발행본에 남으면 안 된다");
+  console.log("✅ substituteConfirmedImages - 수집 캡션이 없으면 마커에서 꼬리만 떼어 쓴다");
 
   // 10) A/B 비교로 같은 인덱스에 후보가 2장(둘 다 url 있음) -> 아직 사람이 안 골랐으니 치환 안 함.
   const abCandidates: ManuscriptImage[] = [

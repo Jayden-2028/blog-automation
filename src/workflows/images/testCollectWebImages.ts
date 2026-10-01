@@ -163,12 +163,14 @@ async function main(): Promise<void> {
 
     // 5-1) 출처 분류 게이트(2026-09-17 저녁, 사용자 결정 C안): 유료 스톡·ND만 거부한다. 그 전 기준
     //      (공공누리·CC BY·공식 배포물만)은 실측 9자리 중 8자리를 "찾았는데 버렸다".
+    //      2026-10-01에 변경금지(cc_nd)도 풀었다 - 저작권을 1순위 기준으로 삼지 않는다는 사용자
+    //      결정이다. 유료 스톡만 남은 이유는 저작권이 아니라 워터마크·실제 청구 가능성이다.
     let fetched = 0;
     const countingFetch = async () => {
       fetched += 1;
       return { ok: true as const, buffer: PNG_1200, contentType: "image/png" };
     };
-    for (const bad of ["cc_nd", "paid_stock"]) {
+    for (const bad of ["paid_stock"]) {
       const rejected = await collectWebImages(
         { keyword: "k", dir, slots: [slots[0]] },
         { searchImages: false, chooseImage: okVerify, runCodex: codexReply([slotReply({ reusePermission: bad, license: "게티이미지 워터마크" })]), fetchImage: countingFetch }
