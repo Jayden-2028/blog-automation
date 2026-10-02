@@ -575,9 +575,9 @@ async function main(): Promise<void> {
 
   const RESEARCH_JOB_ID = "0d35cd81-94e6-49b9-b6d2-4917b548f971";
 
-  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number; onWriteStart: number };
+  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number; onWriteStart: number; mergeJobMetadata: number };
   function newResearchCalls(): ResearchCalls {
-    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0, onWriteStart: 0 };
+    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0, onWriteStart: 0, mergeJobMetadata: 0 };
   }
 
   function makeResearchJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
@@ -593,6 +593,10 @@ async function main(): Promise<void> {
         return opts.job;
       },
       updateJobStatus: async (_id, status) => ({ ...(opts.job ?? makeResearchJob()), status }),
+      mergeJobMetadata: async (_id, _patch) => {
+        opts.calls.mergeJobMetadata++;
+        return opts.job;
+      },
       triggerWriting: () => {
         opts.calls.triggerWriting++;
       },
@@ -750,6 +754,88 @@ async function main(): Promise<void> {
     assert(alreadyMoved.outcome.status === "retry_rejected", "writing이 아닌 job의 retry는 거부해야 한다");
     assert(calls3.triggerWriting === 0, "이미 다른 상태로 넘어간 job은 재실행하지 않아야 한다");
     console.log("✅ research:retry -> writing이 아닌 job(이미 진행됨)은 거부");
+  }
+
+  // 8-8a) 실패가 기록된 job(metadata.lastError)은 25분 기다리지 않고 바로 재시도한다 -
+  //       실패 알림의 [다시 시도] 버튼이 곧바로 먹어야 한다(2026-10-02). 기록은 지워서 두 번 눌러도
+  //       집필이 두 번 뜨지 않게 한다.
+  {
+    const calls = newResearchCalls();
+    const failedJob = makeResearchJob({
+      status: "writing",
+      updated_at: new Date().toISOString(),
+      metadata: { lastError: "[writing] 헤드리스 실행이 1200000ms 안에 끝나지 않아 중단했습니다." },
+    });
+    const bot = makeResearchBot({ job: failedJob, calls });
+    const retried = await bot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(retried.outcome.status === "retry_started", `실패 직후 retry는 바로 시작돼야 한다 (실제: ${retried.outcome.status})`);
+    assert(calls.triggerWriting === 1, "실패 직후 retry는 집필을 1회 다시 띄워야 한다");
+    assert(calls.mergeJobMetadata === 1, "재시도 시작 때 실패 기록(lastError)을 지워야 한다");
+    console.log("✅ research:retry -> 실패가 기록된 job은 기다리지 않고 바로 재시도");
+  }
+
+  // 8-8b) research:rerun - 자료 부족으로 실패한 job의 자료조사를 새로 돌린다(2026-10-02).
+  //       조사 재실행 1회 + 실패 기록 지움/강제 새 조사 표시를 한 번의 metadata 갱신으로, 두 번 눌러도
+  //       조사가 두 번 뜨지 않아야 한다. 실패한 적 없는 job·이미 다른 단계로 간 job은 거부한다.
+  {
+    const calls = newResearchCalls();
+    let patched: Record<string, unknown> | null = null;
+    let researchTriggered = 0;
+    const failedJob = makeResearchJob({
+      status: "writing",
+      metadata: { lastError: "[writing] writer가 draft 파일을 만들지 않았습니다 - verdict가 blocked" },
+    });
+    const bot = new TelegramBot({
+      botToken: "test-token",
+      chatId: CHAT_ID,
+      loadJobById: async () => failedJob,
+      mergeJobMetadata: async (_id, patch) => {
+        calls.mergeJobMetadata++;
+        patched = patch;
+        return failedJob;
+      },
+      triggerResearch: () => {
+        researchTriggered++;
+      },
+    });
+    const result = await bot.handleResearchDecisionCallback(researchQuery(`research:rerun:${RESEARCH_JOB_ID}`));
+    assert(result.outcome.status === "rerun_started", `실패한 job의 rerun은 시작돼야 한다 (실제: ${result.outcome.status})`);
+    assert(researchTriggered === 1, "자료조사를 1회 띄워야 한다");
+    assert(calls.triggerWriting === 0, "글쓰기를 바로 띄우면 안 된다 - 조사 CLI가 끝난 뒤 이어서 부른다");
+    assert(
+      patched !== null &&
+        (patched as Record<string, unknown>).lastError === null &&
+        (patched as Record<string, unknown>).forceFreshResearch === true,
+      "실패 기록을 지우고 강제 새 조사를 켜야 한다"
+    );
+    assert(result.message.includes("자료조사를 다시 시작"), "시작 안내");
+    console.log("✅ research:rerun -> 실패한 job의 자료조사를 새로 시작");
+
+    const calls2 = newResearchCalls();
+    const cleanBot = makeResearchBot({ job: makeResearchJob({ status: "writing", metadata: {} }), calls: calls2 });
+    const rejected = await cleanBot.handleResearchDecisionCallback(researchQuery(`research:rerun:${RESEARCH_JOB_ID}`));
+    assert(rejected.outcome.status === "rerun_rejected", "실패 기록이 없으면(이미 다시 도는 중) 거부해야 한다");
+    const doneBot = makeResearchBot({ job: makeResearchJob({ status: "review" }), calls: newResearchCalls() });
+    const moved = await doneBot.handleResearchDecisionCallback(researchQuery(`research:rerun:${RESEARCH_JOB_ID}`));
+    assert(moved.outcome.status === "rerun_rejected", "이미 다른 단계로 간 job은 거부해야 한다");
+    console.log("✅ research:rerun -> 실패한 적 없거나 이미 지나간 job은 거부");
+  }
+
+  // 8-8c) research:reject - 작성이 실패해 writing에 남은 job도 [반려]로 접을 수 있어야 한다(2026-10-02).
+  //       실패한 적 없는 writing job(지금 정말 돌고 있는 중)은 그대로 막는다.
+  {
+    const calls = newResearchCalls();
+    const failedJob = makeResearchJob({ status: "writing", metadata: { lastError: "[writing] verdict가 blocked" } });
+    const bot = makeResearchBot({ job: failedJob, calls });
+    const rejected = await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(rejected.outcome.status === "rejected", `실패한 writing job은 반려돼야 한다 (실제: ${rejected.outcome.status})`);
+    assert(calls.rejectJob === 1, "rejectJob을 1회 불러야 한다");
+
+    const calls2 = newResearchCalls();
+    const runningBot = makeResearchBot({ job: makeResearchJob({ status: "writing", metadata: {} }), calls: calls2 });
+    const blocked = await runningBot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(blocked.outcome.status === "already_final" && calls2.rejectJob === 0, "정말 돌고 있는 writing job은 반려하면 안 된다");
+    console.log("✅ research:reject -> 실패한 writing job은 반려, 돌고 있는 job은 거부");
   }
 
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.

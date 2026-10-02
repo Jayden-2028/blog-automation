@@ -28,6 +28,12 @@ export type BuildResearchPromptInput = {
    * 이 원문이 없으면 무엇을 다루는 글인지 절반만 아는 셈이다.
    */
   sourceContext?: string | null;
+  /**
+   * 재조사 안내(2026-10-02). 직전 조사가 자료 부족(verdict blocked)으로 글쓰기를 막았을 때, 사람이
+   * [자료조사 다시 하기]를 눌러 다시 돌리는 경우다. 무엇이 모자랐는지 알려 줘야 같은 조사를 반복하지
+   * 않는다. 없으면 일반 조사.
+   */
+  retryHint?: string | null;
 };
 
 function formatBaseline(baselineSources: SourceInsert[]): string[] {
@@ -77,6 +83,15 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
           "위 원본 자료를 §2(확인된 사실)의 뼈대로 삼고, WebSearch/WebFetch는 이 내용의 사실관계 검증·",
           "배경 보강(왜 이 일이 생겼는지, 관련 인물·수치·이전 사례)에 집중한다. 원본에 없는 내용을",
           "지어내지 않는다 - 확인 안 되면 §7 확인 실패에 남긴다.",
+          "",
+        ]
+      : []),
+    ...(input.retryHint
+      ? [
+          "이번은 재조사다. 직전 조사가 자료 부족으로 글쓰기를 막았다:",
+          `- ${input.retryHint}`,
+          "같은 검색을 되풀이하지 말고 이 부족분을 먼저 채울 출처(공식 사이트·원문 문서·언론 기사)를 새로 찾는다.",
+          "그래도 못 찾으면 억지로 채우지 말고 verdict를 사실대로 적는다.",
           "",
         ]
       : []),
