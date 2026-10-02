@@ -197,6 +197,7 @@
     "test:image-search-pools": "tsx src/workflows/images/testImageSearchPools.ts",
     "test:kinolights": "tsx src/workflows/images/testKinolightsStills.ts",
     "test:youtube-frames": "tsx src/workflows/images/testYoutubeTrailerFrames.ts",
+    "test:image-plan": "tsx src/workflows/images/testPlanImageSlots.ts",
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
     "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts",
     "test:remove-table-markers": "tsx src/workflows/manuscripts/testRemoveTableMarkers.ts",
