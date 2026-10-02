@@ -111,6 +111,7 @@
     "blogspot:schedule": "tsx src/workflows/publish/scheduleBlogspotPostCli.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
+    "test:notify-write-failed": "tsx src/workflows/writing/testNotifyWriteFailed.ts",
     "analytics:index-health": "tsx src/workflows/analytics/checkIndexHealthCli.ts",
     "analytics:search": "tsx src/workflows/analytics/collectSearchPerformanceCli.ts",
     "test:serper-outage": "tsx src/workflows/images/testNotifySerperOutage.ts",

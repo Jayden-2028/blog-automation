@@ -777,6 +777,12 @@ export class TelegramBot {
     return elapsedMs >= WRITE_STUCK_THRESHOLD_MS;
   }
 
+  /** 작성/조사 실패가 기록돼 있는지(runArticleJob이 실패 때 metadata.lastError에 "[writing] ..."/"[research] ..."를 남긴다). */
+  private hasKnownWriteFailure(job: ArticleJobRow): boolean {
+    const lastError = (job.metadata as Record<string, unknown> | null)?.lastError;
+    return typeof lastError === "string" && (lastError.startsWith("[writing]") || lastError.startsWith("[research]"));
+  }
+
   private buildRetryKeyboard(jobId: string): TelegramInlineKeyboard {
     return [[{ text: "🔄 다시 시도", callback_data: buildResearchDecisionCallbackData("retry", jobId) }]];
   }
@@ -793,13 +799,18 @@ export class TelegramBot {
         message: `⏭ 이미 다른 상태로 진행됐습니다 (상태: ${job.status})`,
       };
     }
-    if (!this.isWriteStuck(job)) {
+    // 작성이 "실패했다고 알려진" job은 기다릴 필요 없이 바로 재시도한다(2026-10-02) - 실패 알림의
+    // [다시 시도] 버튼이 25분 뒤에야 먹으면 쓸모가 없다. 판정은 metadata.lastError(실패 시 기록)다.
+    const failedKnown = this.hasKnownWriteFailure(job);
+    if (!failedKnown && !this.isWriteStuck(job)) {
       // 두 번째 탭 등 경합 - 아직 임계값 전이면 실제로 도는 중일 수 있어 재시도를 거부한다.
       return {
         outcome: { status: "retry_rejected", job },
         message: `⏳ 아직 진행 중일 수 있습니다. 조금 더 기다린 뒤에도 안 오면 다시 시도해주세요.`,
       };
     }
+    // 실패 기록을 먼저 지워 같은 버튼을 한 번 더 눌러도 집필이 두 번 뜨지 않게 한다.
+    if (failedKnown) await this.mergeJobMetadata(job.id, { lastError: null });
     this.triggerWriting(job.id);
     return {
       outcome: { status: "retry_started", job },

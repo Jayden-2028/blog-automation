@@ -575,9 +575,9 @@ async function main(): Promise<void> {
 
   const RESEARCH_JOB_ID = "0d35cd81-94e6-49b9-b6d2-4917b548f971";
 
-  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number; onWriteStart: number };
+  type ResearchCalls = { loadJobById: number; triggerWriting: number; rejectJob: number; onWriteStart: number; mergeJobMetadata: number };
   function newResearchCalls(): ResearchCalls {
-    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0, onWriteStart: 0 };
+    return { loadJobById: 0, triggerWriting: 0, rejectJob: 0, onWriteStart: 0, mergeJobMetadata: 0 };
   }
 
   function makeResearchJob(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
@@ -593,6 +593,10 @@ async function main(): Promise<void> {
         return opts.job;
       },
       updateJobStatus: async (_id, status) => ({ ...(opts.job ?? makeResearchJob()), status }),
+      mergeJobMetadata: async (_id, _patch) => {
+        opts.calls.mergeJobMetadata++;
+        return opts.job;
+      },
       triggerWriting: () => {
         opts.calls.triggerWriting++;
       },
@@ -750,6 +754,24 @@ async function main(): Promise<void> {
     assert(alreadyMoved.outcome.status === "retry_rejected", "writing이 아닌 job의 retry는 거부해야 한다");
     assert(calls3.triggerWriting === 0, "이미 다른 상태로 넘어간 job은 재실행하지 않아야 한다");
     console.log("✅ research:retry -> writing이 아닌 job(이미 진행됨)은 거부");
+  }
+
+  // 8-8a) 실패가 기록된 job(metadata.lastError)은 25분 기다리지 않고 바로 재시도한다 -
+  //       실패 알림의 [다시 시도] 버튼이 곧바로 먹어야 한다(2026-10-02). 기록은 지워서 두 번 눌러도
+  //       집필이 두 번 뜨지 않게 한다.
+  {
+    const calls = newResearchCalls();
+    const failedJob = makeResearchJob({
+      status: "writing",
+      updated_at: new Date().toISOString(),
+      metadata: { lastError: "[writing] 헤드리스 실행이 1200000ms 안에 끝나지 않아 중단했습니다." },
+    });
+    const bot = makeResearchBot({ job: failedJob, calls });
+    const retried = await bot.handleResearchDecisionCallback(researchQuery(`research:retry:${RESEARCH_JOB_ID}`));
+    assert(retried.outcome.status === "retry_started", `실패 직후 retry는 바로 시작돼야 한다 (실제: ${retried.outcome.status})`);
+    assert(calls.triggerWriting === 1, "실패 직후 retry는 집필을 1회 다시 띄워야 한다");
+    assert(calls.mergeJobMetadata === 1, "재시도 시작 때 실패 기록(lastError)을 지워야 한다");
+    console.log("✅ research:retry -> 실패가 기록된 job은 기다리지 않고 바로 재시도");
   }
 
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.
