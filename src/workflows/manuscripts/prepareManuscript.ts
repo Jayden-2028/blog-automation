@@ -34,6 +34,9 @@ import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.j
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
+import { planImageSlots } from "../images/planImageSlots.js";
+import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
+import type { ImagePlan } from "../images/planImageSlots.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
 import { splitTrailingHashtags } from "./articleContentParts.js";
@@ -119,7 +122,13 @@ export type PrepareManuscriptOptions = {
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
+        planUrls?: Record<number, string>;
       }) => Promise<{ images: ManuscriptImage[]; failures: string[] }>);
+  /**
+   * 이미지 기획 단계(2026-10-02, A안). 기본은 `IMAGE_PLANNING=true`일 때만 돈다.
+   * false를 주면 건너뛴다(테스트).
+   */
+  planSlots?: false | typeof planImageSlots;
   /** 테스트 주입용. 기본은 현재 시각(Asia/Seoul). */
   now?: () => Date;
 };
@@ -261,6 +270,9 @@ export async function prepareManuscript(
   const collectWebImages =
     options.collectWebImages === undefined ? collectWebImagesForJob : options.collectWebImages;
   const capturePages = options.capturePages === undefined ? capturePagesForJob : options.capturePages;
+  // 기획 단계는 스위치가 켜졌을 때만 돈다(기본 꺼짐). 꺼져 있으면 집필자 마커 그대로다.
+  const planSlots =
+    options.planSlots === undefined ? (IMAGE_PLANNING_CONFIG.enabled ? planImageSlots : false) : options.planSlots;
   const buildFallbacks =
     options.buildFallbackPrompts === undefined ? buildFallbackImagePrompts : options.buildFallbackPrompts;
   const now = options.now ?? (() => new Date());
@@ -364,6 +376,46 @@ export async function prepareManuscript(
   }
 
 
+  // ---- 이미지 기획(2026-10-02, A안) ------------------------------------------------------
+  // 집필자 마커를 **힌트로만** 보고, 자리마다 "무엇을 찾을지와 검색어"를 문단을 읽고 다시 정한다.
+  // 실측 근거: 기안장2는 방영 전 장면을 지시해 자리가 비었고 원고 주인공이 한 장도 없었다.
+  //
+  // 이미 기획한 원고는 다시 기획하지 않는다 - 재수집할 때 검색어가 매번 달라지면 사람이 보고
+  // 고친 것이 덮인다.
+  let plan: ImagePlan | null =
+    ((job.metadata as Record<string, unknown> | null)?.imagePlan as ImagePlan | undefined) ?? null;
+  if (planSlots && !plan && !job.metadata?.imagePlanReadyAt) {
+    const planned = await planSlots({
+      keyword: job.keyword,
+      category: job.category ?? null,
+      body: content,
+      imagePrompts: slotPrompts,
+      today: date,
+      researchText:
+        typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
+    });
+    imageFailures.push(...planned.notes);
+    plan = planned.plan;
+    if (plan) {
+      await mergeJobMetadata(job.id, { imagePlanReadyAt: now().toISOString(), imagePlan: plan });
+    }
+  }
+
+  // 기획이 있으면 자리 배분을 기획이 정한다. 없으면 전부 undefined라 예전 경로 그대로다.
+  const planSearchIndexes = plan
+    ? plan.slots.filter((s) => s.acquisition === "search" && s.queries.length > 0).map((s) => s.index)
+    : undefined;
+  const planQueries = plan
+    ? Object.fromEntries(plan.slots.filter((s) => s.queries.length > 0).map((s) => [s.index, s.queries]))
+    : undefined;
+  const planCaptureUrls = plan
+    ? Object.fromEntries(
+        plan.slots
+          .filter((s) => s.acquisition === "capture" && /^https?:\/\//i.test(s.queries[0] ?? ""))
+          .map((s) => [s.index, s.queries[0]])
+      )
+    : undefined;
+
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
       jobId: job.id,
@@ -388,6 +440,7 @@ export async function prepareManuscript(
       body: content,
       imagePrompts: slotPrompts,
       filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+      planUrls: planCaptureUrls,
     });
     imageFailures.push(...outcome.failures);
     if (outcome.images.length > 0) {
@@ -413,6 +466,8 @@ export async function prepareManuscript(
       // 리서치 파일 전문(2026-10-01). 작품 자리에서 공식 스틸이 없을 때 여기 적힌 유튜브 공식
       // 영상 링크로 자동 프레임을 후보에 넣는다(youtubeTrailerFrames.ts).
       researchText: typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
+      planSearchIndexes,
+      planQueries,
       // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
       // 같은 사진이 다시 들어오는 것을 막는다.
       existingImageUrls: Object.fromEntries(

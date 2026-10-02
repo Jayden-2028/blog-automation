@@ -29,6 +29,12 @@ export type CapturePagesForJobInput = {
   imagePrompts: string[];
   /** 이미 채워진 자리 번호. 여기 있는 자리는 건너뛴다. */
   filledIndexes?: number[];
+  /**
+   * 기획 단계가 정한 캡처 자리와 URL(2026-10-02, A안). 주면 **이것만** 캡처한다 - 마커의
+   * `— 페이지 캡처`는 보지 않는다. 획득 방식을 정하는 주체가 기획으로 넘어갔기 때문이다
+   * (`planImageSlots.ts`). 없으면 예전처럼 마커를 읽는다.
+   */
+  planUrls?: Record<number, string>;
 };
 
 export type CapturePagesForJobOptions = {
@@ -66,9 +72,17 @@ export async function capturePagesForJob(
         continue;
       }
       imageIndex += 1;
-      if (block.acquisition !== "capture" || filled.has(imageIndex)) continue;
+      if (filled.has(imageIndex)) continue;
 
-      const url = (block.prompt ?? "").trim();
+      // 기획이 있으면 기획이 정한 자리만, 없으면 마커의 획득 방식을 본다.
+      const planned = input.planUrls ? input.planUrls[imageIndex] : undefined;
+      if (input.planUrls) {
+        if (!planned) continue;
+      } else if (block.acquisition !== "capture") {
+        continue;
+      }
+
+      const url = (planned ?? block.prompt ?? "").trim();
       if (!/^https?:\/\//i.test(url)) {
         failures.push(
           `[자리 ${imageIndex}] 캡처할 URL이 없습니다(둘째 줄에 리서치 §11의 주소를 그대로 넣어야 합니다): ${url.slice(0, 60) || "(빈 값)"}`

@@ -195,8 +195,16 @@ A안:   [IMAGE: 수술복 차림의 김지원]
 **2.5단계 — 기획안 사람 확인**
 기획 결과를 텔레그램으로 보여주고 OK를 받는다. 수정 횟수가 줄면 이 단계를 자동으로 넘긴다.
 
-**3단계 — 수집 배선**
-`collectWebImagesForJob`이 기획의 `queries`·`acquisition`을 쓴다. 기록을 뷰어에 남긴다.
+**3단계 — 수집 배선** ✅ 2026-10-02 완료
+- `prepareManuscript`가 기획을 돌리고(게이트 `imagePlanReadyAt`, 결과는 `metadata.imagePlan`),
+  자리 배분을 세 갈래로 나눠 넘긴다 - `planSearchIndexes`(수집), `planQueries`(검색어),
+  `planUrls`(캡처).
+- `buildWebImageSlots`에 `onlyIndexes`가 생겼다. 기획이 있으면 **마커의 획득 방식을 보지 않는다.**
+- `planQueries`가 있으면 **서치풀 확장을 건너뛴다**. 기획이 이미 중의성·서치풀을 판단했는데 또
+  붙이면 검색어가 길어져 영상 썸네일이 올라온다(R8).
+- `capturePagesForJob`도 기획이 있으면 그 자리만 캡처한다.
+- 기획 기록은 `imageFailures`(=뷰어의 수집 기록)로 들어간다 - 2단계에서 만든 자리다.
+- **한 번 기획한 원고는 다시 기획하지 않는다.** 재수집마다 검색어가 달라지면 사람이 고친 것이 덮인다.
 
 **4단계 — 켜기**
 `IMAGE_PLANNING=true`. 원고 몇 건을 눈으로 보고 충족률·주인공 커버리지를 비교한다.
