@@ -524,6 +524,76 @@ async function main(): Promise<void> {
     console.log("✅ 내부 링크 - 원고 본문에 삽입, 참고 자료보다 앞");
   }
 
+  // --- 이미지 기획 배선(2026-10-02, A안 3단계) -----------------------------------------------
+  // 기획이 자리 배분과 검색어를 정하면 수집·캡처가 **그걸 쓴다**. 마커의 획득 방식은 보지 않는다.
+  {
+    const body = [
+      "도입 문단입니다.",
+      "[IMAGE: 공식 포스터 — 웹 검색]\n[IMAGE PROMPT: 집필자 검색어]",
+      "둘째 문단입니다.",
+      "[IMAGE: 기사 화면 — 웹 검색]\n[IMAGE PROMPT: 집필자 검색어 2]",
+    ].join("\n\n");
+
+    let collectInput: Record<string, unknown> | null = null;
+    let captureInput: Record<string, unknown> | null = null;
+    const merged: Record<string, unknown>[] = [];
+
+    await prepareManuscript(job("a", "entertainment"), {
+      loadArticles: async () => [baseArticle(body)],
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
+      generateImages: false,
+      loadPublishedPosts: false,
+      planSlots: async () => ({
+        plan: {
+          summary: "예고편 공개",
+          protagonist: "김윤석",
+          slots: [
+            { index: 1, subject: "예고편 장면", queries: ["영화 폭설 김윤석 구교환 예고편"], acquisition: "search" as const, changed: true, reason: "한 줄 요약이 예고편 공개다", caution: "" },
+            { index: 2, subject: "기사 화면", queries: ["https://example.com/news/1"], acquisition: "capture" as const, changed: true, reason: "그 페이지가 답이다", caution: "" },
+          ],
+        },
+        notes: ["ℹ️ 이미지 기획: 이 원고의 한 줄은 \"예고편 공개\"입니다."],
+      }),
+      capturePages: async (input) => { captureInput = input as never; return { images: [], failures: [] }; },
+      collectWebImages: async (input) => { collectInput = input as never; return { images: [], failures: [], unfilled: [] }; },
+    });
+
+    assert(collectInput, "수집기가 불려야 한다");
+    assert(
+      JSON.stringify((collectInput as never as { planSearchIndexes: number[] }).planSearchIndexes) === "[1]",
+      `기획이 웹 검색으로 정한 자리만 넘겨야 한다 (${JSON.stringify((collectInput as never as Record<string, unknown>).planSearchIndexes)})`
+    );
+    const queries = (collectInput as never as { planQueries: Record<number, string[]> }).planQueries;
+    assert(queries[1][0] === "영화 폭설 김윤석 구교환 예고편", "기획 검색어를 넘겨야 한다(집필자 검색어가 아니다)");
+    assert(
+      (captureInput as never as { planUrls: Record<number, string> }).planUrls[2] === "https://example.com/news/1",
+      "기획이 캡처로 정한 자리의 URL을 넘겨야 한다"
+    );
+    assert(merged.some((m) => m.imagePlan && m.imagePlanReadyAt), "기획 결과를 metadata에 남겨야 한다");
+    console.log("✅ 기획 배선 - 자리 배분·검색어·캡처 URL이 기획을 따른다");
+  }
+
+  // 기획을 끄면 예전 경로 그대로다. 운영 영향 없이 병합하려면 이게 보장돼야 한다.
+  {
+    const body = "도입입니다.\n\n[IMAGE: 사진 — 웹 검색]\n[IMAGE PROMPT: 집필자 검색어]";
+    let collectInput: Record<string, unknown> | null = null;
+    await prepareManuscript(job("a", "entertainment"), {
+      loadArticles: async () => [baseArticle(body)],
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async () => {},
+      generateImages: false,
+      loadPublishedPosts: false,
+      capturePages: false,
+      planSlots: false,
+      collectWebImages: async (input) => { collectInput = input as never; return { images: [], failures: [], unfilled: [] }; },
+    });
+    const withoutPlan = collectInput as never as Record<string, unknown>;
+    assert(withoutPlan.planSearchIndexes === undefined, "기획이 꺼지면 자리 배분을 넘기지 않아야 한다");
+    assert(withoutPlan.planQueries === undefined, "기획이 꺼지면 검색어도 넘기지 않아야 한다");
+    console.log("✅ 기획 off - 예전 경로 그대로");
+  }
+
   console.log("\n✅ 전체 통과");
 }
 

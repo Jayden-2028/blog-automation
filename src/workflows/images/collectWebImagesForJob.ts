@@ -35,6 +35,10 @@ export type CollectWebImagesForJobInput = {
    * 영상 링크로 자동 프레임을 후보에 넣는다.
    */
   researchText?: string | null;
+  /** 기획이 "웹 검색"으로 정한 자리(2026-10-02, A안). 주면 이 자리만 수집한다. */
+  planSearchIndexes?: number[];
+  /** 기획이 자리마다 정한 검색어. 주면 서치풀 확장 없이 그대로 쓴다. */
+  planQueries?: Record<number, string[]>;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -76,7 +80,12 @@ export async function collectWebImagesForJob(
   // 실측 사고: `페이지 캡처` 자리에 쓸 수 있는 주소를 줬는데 웹 검색 자리만 뽑는 바람에
   // 그 주소를 아무도 읽지 않았다. 사람이 고른 것이 마커 표기보다 우선한다.
   const directIndexes = new Set(Object.keys(input.directUrls ?? {}).map(Number).filter(Number.isInteger));
-  const slots = buildWebImageSlots(input.body, input.imagePrompts, directIndexes)
+  const slots = buildWebImageSlots(
+    input.body,
+    input.imagePrompts,
+    directIndexes,
+    input.planSearchIndexes ? new Set(input.planSearchIndexes) : undefined
+  )
     .filter((s) => !filled.has(s.index))
     // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
     //
@@ -211,6 +220,7 @@ export async function collectWebImagesForJob(
         category: input.category ?? null,
         briefType: input.briefType ?? null,
         researchText: input.researchText ?? null,
+        planQueries: input.planQueries,
       }
     );
 
