@@ -1,4 +1,5 @@
-// 외부 감시인(watchdog). "오늘 성공한 키워드 수집 run이 있는가"만 확인하고, 없으면 Telegram으로 알린다.
+// 외부 감시인(watchdog). "이번 수집일에 성공한 키워드 수집 run이 있는가"만 확인하고, 없으면 Telegram으로 알린다.
+// 수집일은 KST 정오에 바뀐다 - collectionDayString 주석 참고.
 //
 // 왜 필요한가(CURRENT_STATE.md "운영 노트: 잠자기로 인한 조용한 실패"):
 // 매일 09:00 job이 caffeinate 보호를 받지만, 전원 차단·강제 재부팅·launchd 미발화 같은 경우엔
@@ -18,10 +19,30 @@ import type { DiscoveryRunRow } from "../types/database.js";
 
 const SEOUL_TZ = "Asia/Seoul";
 
-/** Date를 Asia/Seoul 기준 YYYY-MM-DD 문자열로. run이 "오늘" 것인지 판정하는 데 쓴다. */
+/** Date를 Asia/Seoul 기준 YYYY-MM-DD 문자열로. */
 export function seoulDateString(date: Date): string {
   // en-CA 로케일은 YYYY-MM-DD 형식을 준다.
   return date.toLocaleDateString("en-CA", { timeZone: SEOUL_TZ });
+}
+
+/**
+ * "수집일"의 경계를 KST 자정이 아니라 **정오(12:00)**로 본다(2026-10-02).
+ *
+ * 왜 자정이면 안 되는가: 수집이 저녁(18/19/20시 KST)으로 옮겨가면서 이 감시인을 21:00 KST에
+ * 예약했는데, GitHub Actions 네이티브 schedule은 4~6시간 밀린다(이 저장소가 키워드 수집을
+ * Cloudflare Worker cron으로 옮긴 바로 그 이유다). 실제로 10-01 21:00 예약이 **10-02 02:42 KST**에
+ * 돌았고, 그 시각의 "오늘(10-02)"에는 아직 수집이 없으니 매일 밤 거짓 실패 알림이 나갔다.
+ *
+ * 정오 경계는 "수집이 전부 저녁에 있다"는 현재 운영을 그대로 옮긴 것이다. 21:00 예약이 자정을
+ * 넘겨 돌아도(02:42 KST -> 14:42 전날) 같은 수집일에 속하고, 15시간 넘게 밀리지 않는 한
+ * 거짓 경보가 없다. 진짜 누락은 여전히 잡는다 - 그날 저녁 run이 없으면 수집일이 어긋난다.
+ *
+ * 수집 시각을 오전으로 되돌리면 이 값도 같이 봐야 한다.
+ */
+const COLLECTION_DAY_OFFSET_MS = 12 * 60 * 60 * 1000;
+
+export function collectionDayString(date: Date): string {
+  return seoulDateString(new Date(date.getTime() - COLLECTION_DAY_OFFSET_MS));
 }
 
 export type WatchdogVerdict =
@@ -29,19 +50,19 @@ export type WatchdogVerdict =
   | { ok: false; reason: "no_completed_run"; lastRun: null }
   | { ok: false; reason: "stale_run"; lastRun: DiscoveryRunRow; lastRunDate: string };
 
-/** 최신 completed run이 "오늘(Seoul)" 것인지 판정한다. DB 조회 결과만 받는 순수 함수. */
+/** 최신 completed run이 "이번 수집일" 것인지 판정한다. DB 조회 결과만 받는 순수 함수. */
 export function evaluateWatchdog(
   latest: DiscoveryRunRow | null,
   now: Date
 ): WatchdogVerdict {
-  const today = seoulDateString(now);
+  const today = collectionDayString(now);
 
   if (!latest) {
     return { ok: false, reason: "no_completed_run", lastRun: null };
   }
 
   // started_at을 기준으로 본다(completed_at이 null인 채로 completed 표시된 과거 데이터 방어).
-  const runDate = seoulDateString(new Date(latest.started_at));
+  const runDate = collectionDayString(new Date(latest.started_at));
   if (runDate === today) {
     return { ok: true, run: latest, runDate };
   }

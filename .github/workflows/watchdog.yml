@@ -12,10 +12,14 @@ name: keyword-collection-watchdog
 
 on:
   schedule:
-    # 12:00 UTC = 21:00 KST. **마지막 수집 job보다 뒤여야 한다** - 이 감시인은 "오늘(Seoul) 완료된
-    # run이 있는가"만 보므로, 수집보다 앞서 돌면 매일 거짓 경보가 나간다.
+    # 12:00 UTC = 21:00 KST. **마지막 수집 job보다 뒤여야 한다.**
     # 2026-10-01: 수집이 저녁(18/19/20시 KST)으로 옮겨가면서 11:00 KST -> 21:00 KST로 미뤘다.
-    # 마지막 job(커뮤니티 20:00, 약 3~5분)이 끝나고 55분 여유가 있다.
+    #
+    # ⚠️ 이 예약은 **몇 시간씩 밀린다**(GitHub 네이티브 schedule의 알려진 지연 - 수집을 Cloudflare
+    # Worker cron으로 옮긴 이유와 같다). 10-01 21:00 예약이 10-02 02:42 KST에 돌았다. 그래서 감시인은
+    # "오늘" 대신 **수집일(KST 정오에 바뀐다)**로 판정한다(src/jobs/watchdogJob.ts collectionDayString).
+    # 지연에 기대는 시각 계산을 하지 말 것 - 처음엔 "마지막 job 뒤 55분 여유"라고 적었다가
+    # 자정을 넘겨 도는 바람에 거짓 경보가 났다.
     # 수집 시각을 바꿀 때는 이 값도 같이 봐야 한다(cloudflare/telegram-relay/wrangler.toml).
     - cron: "0 12 * * *"
   workflow_dispatch: {}
