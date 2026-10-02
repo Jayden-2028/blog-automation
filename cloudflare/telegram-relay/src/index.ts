@@ -112,25 +112,43 @@ const SCHEDULED_WORKFLOWS: Record<string, string> = {
   "0 1 * * 1": "analytics-index-health.yml", // 월요일 10:00 KST - 색인 건강 점검(주 1회)
 };
 
+/**
+ * cron이 깨울 워크플로우를 GitHub API로 dispatch한다.
+ *
+ * **실패하면 던진다**(2026-10-02). 전에는 console.error만 하고 조용히 끝났다. 그러면 Cloudflare
+ * 쪽에서도 "성공한 호출"로 기록돼, 엔터·커뮤니티가 이틀 동안 안 돌았는데도 어디에도 실패 흔적이
+ * 남지 않았다. 던지면 이 호출이 대시보드 Metrics의 오류로 잡히고 로그에 사유가 남는다.
+ * 성공도 한 줄 남긴다 - "호출은 됐다"는 사실이 있어야 "호출이 안 됐다"와 구분된다.
+ */
 async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {
-  const res = await fetch(
-    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
-        Accept: "application/vnd.github+json",
-        "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "blog-automation-telegram-relay",
-      },
-      body: JSON.stringify({ ref: "main" }),
-    }
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "blog-automation-telegram-relay",
+        },
+        body: JSON.stringify({ ref: "main" }),
+      }
+    );
+  } catch (error) {
+    console.error(`workflow_dispatch 네트워크 오류(${workflowFile}):`, error);
+    throw error;
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     console.error(`workflow_dispatch 실패(${workflowFile}):`, res.status, text.slice(0, 300));
+    throw new Error(`workflow_dispatch 실패(${workflowFile}): HTTP ${res.status}`);
   }
+
+  console.log(`workflow_dispatch 성공(${workflowFile}): HTTP ${res.status}`);
 }
 
 export default {
@@ -208,9 +226,14 @@ export default {
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const workflowFile = SCHEDULED_WORKFLOWS[event.cron];
+    // 깨어났다는 사실부터 남긴다. 이게 없으면 "cron이 안 울렸다"와 "울렸는데 아무것도 못 했다"를
+    // 로그로 구분할 수 없다(2026-10-02 엔터·커뮤니티 미실행 때 실제로 구분이 안 됐다).
+    console.log(
+      `[cron] ${event.cron} (예정 ${new Date(event.scheduledTime).toISOString()}) -> ${workflowFile ?? "매핑 없음"}`
+    );
     if (!workflowFile) {
       console.error(`알 수 없는 cron 표현식: ${event.cron}`);
-      return;
+      throw new Error(`알 수 없는 cron 표현식: ${event.cron}`);
     }
     ctx.waitUntil(dispatchWorkflow(env, workflowFile));
   },
