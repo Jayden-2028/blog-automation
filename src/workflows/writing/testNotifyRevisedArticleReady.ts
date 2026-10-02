@@ -53,6 +53,7 @@ function main(): void {
     const msg = buildRevisedHeaderMessage(makeJob(), makeArticle(), "제목을 더 짧게", "https://telegra.ph/x");
     assert(msg.text.includes("수정된 초안 준비됨"), "헤더 문구가 있어야 한다");
     assert(msg.text.includes("제목을 더 짧게"), "반영한 피드백이 표시돼야 한다");
+    assert(!msg.text.includes("아래 버튼으로"), "결정 안내 문구는 뺐다(2026-10-02, 초안 준비됨 메시지와 동일)");
     assert(msg.replyMarkup?.inline_keyboard.length === 2, "원고 보기 + 결정 버튼 2행이어야 한다");
     assert(
       msg.replyMarkup?.inline_keyboard[1]?.some((b) => "callback_data" in b && b.callback_data?.startsWith("review:confirm:")),

@@ -26,7 +26,6 @@ export function buildRevisedHeaderMessage(
     return { text: lines.join("\n") };
   }
 
-  lines.push("", "아래 버튼으로 수정된 원고 전문을 열어본 뒤 다시 결정해주세요.");
   return {
     text: lines.join("\n"),
     replyMarkup: {
