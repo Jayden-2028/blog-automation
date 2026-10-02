@@ -52,6 +52,7 @@ import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
 import { enforceGeminiGroundingUrls } from "../research/enforceGeminiGroundingUrls.js";
+import { describeShortage } from "../research/describeResearchShortage.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
@@ -157,6 +158,8 @@ type DefaultResearcherInput = {
   brief: KeywordBrief | null;
   /** 인스타그램 수동 큐레이션 job의 원본 자료(2026-09-21). 아니면 null. */
   sourceContext: string | null;
+  /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
+  retryHint?: string | null;
 };
 
 /**
@@ -252,6 +255,7 @@ async function runDefaultResearcher(
     today: input.today,
     brief: input.brief,
     sourceContext: input.sourceContext,
+    retryHint: input.retryHint,
   });
   return defaultRunResearcher(prompt);
 }
@@ -374,7 +378,14 @@ async function runResearchStageInner(
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
 
-  const freshFile = fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
+  // [자료조사 다시 하기](2026-10-02): 봇이 metadata.forceFreshResearch를 켜 두면 2시간 내 파일이 있어도
+  // 재사용하지 않고 새로 조사한다 - 안 그러면 자료 부족으로 막힌 그 파일이 그대로 다시 쓰인다.
+  const jobMeta = job.metadata as Record<string, unknown> | null;
+  const forceFresh = jobMeta?.forceFreshResearch === true;
+  const retryHint = forceFresh
+    ? describeShortage(typeof jobMeta?.researchFileContent === "string" ? jobMeta.researchFileContent : null)
+    : null;
+  const freshFile = !forceFresh && fileModifiedWithin(outputPath, 2 * 60 * 60 * 1000);
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
   } else {
@@ -384,7 +395,7 @@ async function runResearchStageInner(
       const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

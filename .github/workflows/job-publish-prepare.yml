@@ -89,6 +89,8 @@ jobs:
           # 이미지 기획 단계(2026-10-02). **기본이 켜짐**이라 변수를 안 넣어도 돈다.
           # 끄려면 variables에 IMAGE_PLANNING=false를 넣는다.
           IMAGE_PLANNING: ${{ vars.IMAGE_PLANNING }}
+          # 단체 사진·2샷·합성컷 허용(2026-10-02, 기본 허용). 옛 규칙으로 되돌리려면 IMAGE_GROUP_SHOTS=false.
+          IMAGE_GROUP_SHOTS: ${{ vars.IMAGE_GROUP_SHOTS }}
           IMAGE_PROVIDER: ${{ vars.IMAGE_PROVIDER }}
           IMAGE_MAX_PER_ARTICLE: ${{ vars.IMAGE_MAX_PER_ARTICLE }}
           # Blogspot 자동 발행(2026-09-16 배선). prepareApprovedManuscripts가 원고 준비 직후

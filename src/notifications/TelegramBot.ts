@@ -159,7 +159,11 @@ export type HandleResearchDecisionOutcome =
   /** 오래 writing에 멈춰 있던 job을 재시도로 다시 detached 띄웠다. */
   | { status: "retry_started"; job: ArticleJobRow }
   /** retry 버튼을 눌렀지만 이미 정상 진행 중(임계값 미만)이거나 writing이 아니게 됐다 - 재시도 거부. */
-  | { status: "retry_rejected"; job: ArticleJobRow };
+  | { status: "retry_rejected"; job: ArticleJobRow }
+  /** 자료 부족으로 막힌 job의 자료조사를 새로 돌렸다(2026-10-02). 끝나면 조사 CLI가 글쓰기까지 이어 부른다. */
+  | { status: "rerun_started"; job: ArticleJobRow }
+  /** rerun 버튼을 눌렀지만 실패한 job이 아니다(이미 다시 돌고 있거나 끝났다) - 거부. */
+  | { status: "rerun_rejected"; job: ArticleJobRow };
 
 export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
@@ -777,6 +781,35 @@ export class TelegramBot {
     return elapsedMs >= WRITE_STUCK_THRESHOLD_MS;
   }
 
+  /** 작성/조사 실패가 기록돼 있는지(runArticleJob이 실패 때 metadata.lastError에 "[writing] ..."/"[research] ..."를 남긴다). */
+  private hasKnownWriteFailure(job: ArticleJobRow): boolean {
+    const lastError = (job.metadata as Record<string, unknown> | null)?.lastError;
+    return typeof lastError === "string" && (lastError.startsWith("[writing]") || lastError.startsWith("[research]"));
+  }
+
+  /**
+   * "research:rerun:<jobId>" - 자료 부족으로 글을 못 쓴 job의 자료조사를 처음부터 다시 돌린다(2026-10-02).
+   * 실패가 기록된 job만 받는다. 기록(lastError)을 먼저 지워 같은 버튼을 한 번 더 눌러도 조사가 두 번 뜨지
+   * 않게 하고, forceFreshResearch로 "2시간 내 조사 파일 재사용"을 끈다(안 끄면 막힌 파일이 그대로 쓰인다).
+   */
+  private async handleResearchRerun(job: ArticleJobRow): Promise<HandleResearchDecisionResult> {
+    const inFlow = job.status === "writing" || job.status === "researching";
+    if (!inFlow || !this.hasKnownWriteFailure(job)) {
+      return {
+        outcome: { status: "rerun_rejected", job },
+        message: inFlow ? `⏳ 이미 다시 진행 중이에요.` : `⏭ 이미 다른 단계로 넘어간 작업이에요.`,
+      };
+    }
+    await this.mergeJobMetadata(job.id, { lastError: null, forceFreshResearch: true });
+    this.triggerResearch(job.id);
+    return {
+      outcome: { status: "rerun_started", job },
+      message:
+        `🔍 <b>자료조사를 다시 시작합니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+        `조사가 끝나면 이어서 원고 작성까지 진행해요.`,
+    };
+  }
+
   private buildRetryKeyboard(jobId: string): TelegramInlineKeyboard {
     return [[{ text: "🔄 다시 시도", callback_data: buildResearchDecisionCallbackData("retry", jobId) }]];
   }
@@ -793,13 +826,18 @@ export class TelegramBot {
         message: `⏭ 이미 다른 상태로 진행됐습니다 (상태: ${job.status})`,
       };
     }
-    if (!this.isWriteStuck(job)) {
+    // 작성이 "실패했다고 알려진" job은 기다릴 필요 없이 바로 재시도한다(2026-10-02) - 실패 알림의
+    // [다시 시도] 버튼이 25분 뒤에야 먹으면 쓸모가 없다. 판정은 metadata.lastError(실패 시 기록)다.
+    const failedKnown = this.hasKnownWriteFailure(job);
+    if (!failedKnown && !this.isWriteStuck(job)) {
       // 두 번째 탭 등 경합 - 아직 임계값 전이면 실제로 도는 중일 수 있어 재시도를 거부한다.
       return {
         outcome: { status: "retry_rejected", job },
         message: `⏳ 아직 진행 중일 수 있습니다. 조금 더 기다린 뒤에도 안 오면 다시 시도해주세요.`,
       };
     }
+    // 실패 기록을 먼저 지워 같은 버튼을 한 번 더 눌러도 집필이 두 번 뜨지 않게 한다.
+    if (failedKnown) await this.mergeJobMetadata(job.id, { lastError: null });
     this.triggerWriting(job.id);
     return {
       outcome: { status: "retry_started", job },
@@ -984,8 +1022,13 @@ export class TelegramBot {
     if (parsed.action === "retry") {
       return this.handleWriteRetry(job);
     }
+    if (parsed.action === "rerun") {
+      return this.handleResearchRerun(job);
+    }
 
-    if (!this.isStillAtResearchCheckpoint(job)) {
+    // 작성이 실패한 job(자료 부족 등)은 status가 writing에 남는다 - 실패 알림의 [반려]가 먹어야 한다(2026-10-02).
+    const rejectableFailure = parsed.action === "reject" && job.status === "writing" && this.hasKnownWriteFailure(job);
+    if (!this.isStillAtResearchCheckpoint(job) && !rejectableFailure) {
       // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
       // 집필은 수 분 걸려 사용자가 여러 번 누르기 쉬우므로, 두 번째 탭에도 "지금 진행 중"이라고
       // 분명히 알려준다(무음으로 넘기면 오히려 더 누른다). writing에 임계값 넘게 멈춰 있으면
@@ -1078,19 +1121,16 @@ export class TelegramBot {
     const messageId = query.message?.message_id;
     if (!keyboard || messageId === undefined) return;
 
-    const LABELS: Record<ResearchDecisionAction, string> = {
-      write: "원고 작성",
-      reject: "중단",
-      retry: "다시 시도",
-    };
-
+    // 라벨은 버튼이 원래 달고 있던 문구를 쓴다(앞의 이모지만 뗀다) - 같은 reject라도 조사 확인 메시지는
+    // "중단", 작성 실패 알림은 "반려"라고 부르므로 동작 이름으로 고정하면 문구가 바뀐다.
+    const plain = (text: string) => text.replace(/^[^\p{L}\p{N}]+/u, "");
     const updated = keyboard.map((row) =>
       row.map((button) => {
         const parsedButton = parseResearchDecisionCallbackData(button.callback_data);
         if (!parsedButton) return button;
 
         const selected = parsedButton.action === action;
-        return { ...button, text: selected ? `✅ ${LABELS[parsedButton.action]}` : LABELS[parsedButton.action] };
+        return { ...button, text: selected ? `✅ ${plain(button.text)}` : plain(button.text) };
       })
     );
 

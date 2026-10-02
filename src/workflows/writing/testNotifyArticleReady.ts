@@ -132,22 +132,21 @@ function main(): void {
   assert(withoutReviewIssue.text.includes("검수 통과"), "통과 시 '검수 통과' 문구가 있어야 한다");
   console.log("✅ 검수 결과가 헤더에 표시됨(통과/실패 모두)");
 
-  // 2-2) 이미지 자동생성 보류(2026-09-01): held면 "직접 제작·삽입" 안내가 뜨고, 생성 장수 문구는
-  // 뜨지 않는다.
+  // 2-2) 이미지 상태 줄은 헤더에 없다(2026-10-02 - 제목/카테고리/검수 결과만).
   const heldHeader = buildHeaderMessage(makeResult({ images: { succeeded: 0, failed: 0, held: true } }));
-  assert(heldHeader.text.includes("이미지 자동생성 보류"), "held면 보류 안내가 있어야 한다");
-  assert(!heldHeader.text.includes("장 생성됨"), "held면 생성 장수 문구가 없어야 한다");
-  const generatedHeader = buildHeaderMessage(makeResult({ images: { succeeded: 2, failed: 0, held: false } }));
-  assert(generatedHeader.text.includes("이미지 2장 생성됨"), "생성 완료 시 장수가 표시돼야 한다");
-  console.log("✅ 이미지 보류/생성 상태가 헤더에 반영됨");
+  const generatedHeader = buildHeaderMessage(makeResult({ images: { succeeded: 2, failed: 1, held: false } }));
+  for (const h of [heldHeader, generatedHeader]) {
+    assert(!h.text.includes("이미지 자동생성") && !h.text.includes("장 생성됨"), "이미지 상태 줄이 없어야 한다");
+  }
+  console.log("✅ 이미지 보류/생성 상태 줄 제거");
 
   // 3) 의학 원고 + telegraphUrl 있음: 헤더에 경고 + 버튼 안내가 있어야 한다.
   const medicalHeader = buildHeaderMessage(
     makeResult({ requiresMedicalReview: true, isMedical: true, telegraphUrl: "https://telegra.ph/test-08-27" })
   );
   assert(medicalHeader.text.includes("의학 주제"), "의학 원고 헤더에는 경고가 있어야 한다");
-  assert(medicalHeader.text.includes("아래 버튼으로"), "결정 안내가 있어야 한다");
-  console.log("✅ 의학 원고 헤더: 경고 + 안내 포함");
+  assert(!medicalHeader.text.includes("아래 버튼으로"), "결정 안내 문구는 뺐다(2026-10-02)");
+  console.log("✅ 의학 원고 헤더: 경고 포함, 안내 문구 없음");
 
   // 3-1) 회귀: telegraphUrl이 있으면 일반 원고에도 승인 버튼이 붙어야 한다(2026-08-28, 공통 승인 흐름).
   // 이전에는 requiresMedicalReview일 때만 붙었다 - 비의학 원고는 "원고 보기" 링크만 가고 승인
@@ -242,15 +241,11 @@ try {
   process.exit(1);
 }
 
-// --- 기획 브리프 커버리지 줄(2026-09-17) - 있을 때만, 미답 번호와 함께 -----------------------
+// --- 기획 브리프 커버리지 줄은 헤더에서 뺐다(2026-10-02) -------------------------------------
 {
   const withCoverage = buildHeaderMessage(makeResult({ briefCoverage: { answered: 3, total: 5 }, unansweredQuestions: ["Q4", "Q5"] }));
-  if (!withCoverage.text.includes("🎯 독자 질문 3/5 답함 (미답: Q4, Q5)")) {
-    throw new Error(`❌ 커버리지 줄이 없습니다: ${withCoverage.text}`);
-  }
-  const without = buildHeaderMessage(makeResult());
-  if (without.text.includes("독자 질문")) throw new Error("❌ 브리프 없는 원고에 커버리지 줄이 붙었습니다");
-  console.log("✅ 브리프 커버리지 줄 - 있을 때만, 미답 번호 표시");
+  if (withCoverage.text.includes("독자 질문")) throw new Error(`❌ 커버리지 줄이 남아 있습니다: ${withCoverage.text}`);
+  console.log("✅ 브리프 커버리지 줄 제거");
 }
 
 // --- 마커/프롬프트 짝 불일치 경고(2026-09-18) - 승인 전에 보여야 한다 --------------------------

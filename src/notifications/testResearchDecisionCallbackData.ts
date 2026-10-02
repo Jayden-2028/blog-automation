@@ -21,12 +21,12 @@ function main(): void {
   console.log("✅ 형식 고정: research:<action>:<jobId>");
 
   // 2) 왕복.
-  for (const action of ["write", "reject"] as const) {
+  for (const action of ["write", "reject", "retry", "rerun"] as const) {
     const data = buildResearchDecisionCallbackData(action, JOB_ID);
     const parsed = parseResearchDecisionCallbackData(data);
     assert(parsed?.action === action && parsed.jobId === JOB_ID, `왕복 실패: ${action} -> ${JSON.stringify(parsed)}`);
   }
-  console.log("✅ build -> parse 왕복 일치 (write/reject)");
+  console.log("✅ build -> parse 왕복 일치 (write/reject/retry/rerun)");
 
   // 3) 잘못된 입력은 예외 없이 null.
   const rejected = [
