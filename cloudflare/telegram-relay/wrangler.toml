@@ -25,3 +25,9 @@ GITHUB_REPO = "blog-automation"
 # 09:30 KST(00:30 UTC)에 Search Console 성과 수집을 하나 더 돌린다(2026-09-21). 키워드 수집과
 # 겹치지 않는 시간대로 뒀다 - 읽기만 하는 가벼운 작업이라 순서 의존도 없다.
 crons = ["0 9 * * *", "0 10 * * *", "0 11 * * *", "30 0 * * *", "0 1 * * 1"]
+
+# 2026-10-02: 로그를 보관한다. 이게 꺼져 있어서 엔터·커뮤니티 cron이 이틀 동안 안 돌았는데도
+# "Worker가 깨어났는지, dispatch가 실패했는지"를 사후에 볼 방법이 없었다(대시보드의 Live logs는
+# 보고 있는 동안만 보인다). src/index.ts의 scheduled()가 매 호출을 [cron] 한 줄로 남긴다.
+[observability]
+enabled = true
