@@ -15,6 +15,8 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 import {
   AS_OF_PATTERN,
+  currentYearInDatePattern,
+  kstYear,
   BANNED_COLLOQUIAL_ENDINGS,
   COMMENT_INVITE_PATTERN,
   COVERAGE_NARRATIVE_PATTERN,
@@ -68,7 +70,7 @@ export type DeterministicFixResult = { body: string; removed: string[] };
  *  - 댓글·의견 유도 문장 -> 문장 삭제
  *  - "2026년 8월 기준", "9월 18일 기준" 같은 시점 표기 -> 표기만 삭제(값 문장은 남긴다)
  */
-export function applyDeterministicFixes(body: string): DeterministicFixResult {
+export function applyDeterministicFixes(body: string, now: Date = new Date()): DeterministicFixResult {
   const { main, rest } = splitAtReferences(body);
   const removed: string[] = [];
 
@@ -91,6 +93,13 @@ export function applyDeterministicFixes(body: string): DeterministicFixResult {
     if (stripped !== out) {
       removed.push(out.match(/(?:\d{4}년\s*)?\d{1,2}월(?:\s*\d{1,2}일)?\s*(?:시점\s*)?기준(?:으로)?/)?.[0] ?? "기준 시점");
       out = stripped;
+    }
+    // 올해 날짜의 연도만 뗀다(2026-10-02). 다른 연도는 정보라 그대로 둔다.
+    const year = kstYear(now);
+    const withoutYear = out.replace(currentYearInDatePattern(year), "");
+    if (withoutYear !== out) {
+      removed.push(`${year}년(올해 연도 표기)`);
+      out = withoutYear;
     }
     return out;
   });
@@ -150,6 +159,8 @@ function buildFixPrompt(body: string, violations: RuleViolation[], category: str
 export type EnforceWritingRulesInput = {
   body: string;
   category: string | null;
+  /** "올해"를 정하는 기준 시각(테스트 주입용). 생략하면 현재 시각. */
+  now?: Date;
   /** 테스트 주입 지점. 기본은 runHeadlessClaude(claude -p, Read만 허용). */
   runFixer?: (prompt: string) => Promise<RunHeadlessClaudeResult>;
 };
@@ -165,7 +176,7 @@ export type EnforceWritingRulesResult = {
 const FIXER_TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function enforceWritingRules(input: EnforceWritingRulesInput): Promise<EnforceWritingRulesResult> {
-  const det = applyDeterministicFixes(input.body);
+  const det = applyDeterministicFixes(input.body, input.now);
   let body = det.body;
   const violations = findRuleViolations(body);
   const result: EnforceWritingRulesResult = {

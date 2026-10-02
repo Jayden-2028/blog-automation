@@ -26,6 +26,24 @@ function assert(cond: boolean, msg: string): void {
   console.log("✅ 결정적 교정: 댓글 유도·기준 시점 삭제, 나머지 보존");
 }
 
+// 1-1) 올해 날짜의 연도만 뗀다(2026-10-02). 다른 연도·연도 단독 표기는 그대로 둔다.
+{
+  const now = new Date("2026-10-02T09:00:00+09:00");
+  const body = [
+    "2026년 10월 1일에 SNS에서 퍼졌습니다. 2026년 10월 9일은 한글날입니다.",
+    "한글날은 1990년 공휴일에서 빠졌고 2012년 12월 28일에 복원됐습니다.",
+    "2026년 공휴일은 70일입니다.",
+  ].join("\n");
+  const fixed = applyDeterministicFixes(body, now);
+  assert(fixed.body.includes("10월 1일에 SNS에서 퍼졌습니다."), `올해 연도를 떼야 한다 (${fixed.body})`);
+  assert(fixed.body.includes("10월 9일은 한글날입니다."), "한 줄에 두 번 나와도 둘 다 뗀다");
+  assert(!fixed.body.includes("2026년 10월"), "올해 연도+월 표기가 남으면 안 된다");
+  assert(fixed.body.includes("1990년 공휴일에서 빠졌고 2012년 12월 28일에 복원"), "다른 연도는 그대로 둔다");
+  assert(fixed.body.includes("2026년 공휴일은 70일입니다."), "연도 단독 표기는 날짜가 아니라 그대로 둔다");
+  assert(fixed.removed.some((r) => r.includes("올해 연도")), "무엇을 뗐는지 남겨야 한다");
+  console.log("✅ 결정적 교정: 올해 날짜의 연도만 제거, 다른 연도·연도 단독 보존");
+}
+
 // 2) 정상 원고는 손대지 않는다
 {
   const clean = "지원금은 30만 원입니다. 지급일은 8월 27일입니다.\n\n**신청 방법**\n정부24에서 신청합니다.";
