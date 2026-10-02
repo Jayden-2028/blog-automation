@@ -502,12 +502,15 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     function isListLine(line) { return /^\\s*[-*]\\s+/.test(line); }
     function stripListMarker(line) { return line.replace(/^\\s*[-*]\\s+/, ""); }
 
-    // 굵게/이탤릭/링크 표기를 실제 태그로 - convertArticleToHtml.ts와 같은 규칙.
+    // 굵게/이탤릭/링크 표기를 실제 태그로 - renderPublishBlocks.ts와 같은 규칙.
+    // URL 안의 짝 맞는 괄호는 URL의 일부다(위키백과 "..._(2026년_영화)"). 짝 없는 ")"가 링크의 끝이다
+    // - 발행 변환기와 같은 패턴이어야 한다(2026-10-03, 거기서 404 링크로 실측된 버그).
+    // 이 블록은 템플릿 문자열 안이라 역따옴표를 쓸 수 없다.
     function inlineHtml(text) {
       return esc(text)
         .replace(/\\*\\*(.+?)\\*\\*/g, "<b>$1</b>")
         .replace(/\\*(.+?)\\*/g, "<i>$1</i>")
-        .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, '<a href="$2">$1</a>');
+        .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/(?:[^\\s()]|\\([^\\s()]*\\))+)\\)/g, '<a href="$2">$1</a>');
     }
 
     var BODY_PX = 15, HEADING_PX = 19, SPACER = "<p>&nbsp;</p>";
