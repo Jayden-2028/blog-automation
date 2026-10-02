@@ -89,7 +89,7 @@ async function main(): Promise<void> {
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.error}`);
     const job = await ArticleJobRepository.findById(jobId).catch(() => null);
-    await notifyWriteFailed({ id: jobId, keyword: job?.keyword ?? "(키워드를 찾지 못했습니다)" }, result.error).catch(() => {});
+    await notifyWriteFailed({ id: jobId, keyword: job?.keyword ?? "(키워드를 찾지 못했습니다)", metadata: job?.metadata }, result.error).catch(() => {});
     process.exitCode = 1;
     return;
   }
