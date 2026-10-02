@@ -37,6 +37,7 @@ import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
 import type { ImagePlan } from "../images/planImageSlots.js";
+import { routeImagePlan } from "../images/routeImagePlan.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
 import { splitTrailingHashtags } from "./articleContentParts.js";
@@ -81,7 +82,7 @@ export type PrepareManuscriptOptions = {
         body: string;
         imagePrompts: string[];
       },
-      options?: { onlyIndexes?: number[]; fallbackSlots?: FallbackImagePrompt[] }) => Promise<{
+      options?: { onlyIndexes?: number[]; fallbackSlots?: (FallbackImagePrompt & { acquisition?: "ai" | "infographic" })[] }) => Promise<{
         images: ManuscriptImage[];
         failures: string[];
       }>);
@@ -402,26 +403,13 @@ export async function prepareManuscript(
   }
 
   // 기획이 있으면 자리 배분을 기획이 정한다. 없으면 전부 undefined라 예전 경로 그대로다.
-  const planSearchIndexes = plan
-    ? plan.slots.filter((s) => s.acquisition === "search" && s.queries.length > 0).map((s) => s.index)
-    : undefined;
-  const planQueries = plan
-    ? Object.fromEntries(plan.slots.filter((s) => s.queries.length > 0).map((s) => [s.index, s.queries]))
-    : undefined;
-  const planSubjects = plan
-    ? Object.fromEntries(
-        plan.slots
-          .filter((s) => s.subject.trim().length > 0)
-          .map((s) => [s.index, { subject: s.subject, caution: s.caution || undefined }])
-      )
-    : undefined;
-  const planCaptureUrls = plan
-    ? Object.fromEntries(
-        plan.slots
-          .filter((s) => s.acquisition === "capture" && /^https?:\/\//i.test(s.queries[0] ?? ""))
-          .map((s) => [s.index, s.queries[0]])
-      )
-    : undefined;
+  // 배정은 routeImagePlan 한곳에서 한다 - 경로마다 따로 걸렀더니 생성 자리와 기획 밖 자리가 빠졌다.
+  const route = plan ? routeImagePlan(plan, content, slotPrompts) : null;
+  if (route) imageFailures.push(...route.notes);
+  const planSearchIndexes = route?.searchIndexes;
+  const planQueries = route?.queries;
+  const planSubjects = route?.subjects;
+  const planCaptureUrls = route?.captureUrls;
 
   if (generateImages && images.length === 0 && !job.metadata?.imagesReadyAt) {
     const outcome = await generateImages({
@@ -436,6 +424,23 @@ export async function prepareManuscript(
     if (images.length > 0) {
       await mergeJobMetadata(job.id, { imagesReadyAt: now().toISOString(), images });
     }
+  }
+
+  // 기획이 AI·인포그래픽으로 정한 자리(2026-10-02). 첫 생성 단계는 집필자 마커만 보므로 여기서
+  // 따로 만든다. 경로는 폴백과 같은 generateImages를 공유한다(생성·업로드·원장 기록이 한 벌).
+  // 유료 생성이라 한 번만 돈다(planImagesGeneratedAt).
+  const planGenerate = (route?.generate ?? []).filter((g) => !images.some((i) => i.index === g.index && i.url));
+  if (generateImages && planGenerate.length > 0 && !job.metadata?.planImagesGeneratedAt) {
+    const made = await generateImages(
+      { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts: slotPrompts },
+      { onlyIndexes: [], fallbackSlots: planGenerate }
+    );
+    imageFailures.push(...made.failures);
+    const usable = made.images.filter((i) => i.url);
+    images = [...images.filter((e) => !usable.some((n) => n.index === e.index)), ...usable].sort(
+      (a, b) => a.index - b.index
+    );
+    await mergeJobMetadata(job.id, { planImagesGeneratedAt: now().toISOString(), images });
   }
 
   // `페이지 캡처` 자리(2026-09-18). 리서처가 열어본 URL을 그대로 연다 - 웹 검색으로는 못 찾고

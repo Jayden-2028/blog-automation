@@ -81,7 +81,8 @@ async function main(): Promise<void> {
 
   // 2) 프롬프트에 판단 기준과 자리별 맥락이 실린다.
   const prompt = buildPrompt("남양주 카페 갑질", slots);
-  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "§8-1 판단 기준이 실려야 한다");
+  assert(prompt.includes("바로 위 문단이 무엇에 관한 것인지"), "§8-1 판단 기준이 실려야 한다(2026-10-02 개정)");
+  assert(!prompt.includes("한 장으로 요약"), "옛 기준(문단 요약)이 남으면 안 된다 - 건물 외관·일반 장면으로 몰았다");
   assert(prompt.includes("이미지를 만들지 않는다"), "생성이 아니라 검색이라는 점을 못박아야 한다");
   assert(prompt.includes("픽업대 앞에 줄이"), "자리별 문단 원문이 실려야 한다");
   assert(prompt.includes("자리 1") && prompt.includes("자리 2"), "자리 번호가 실려야 한다");

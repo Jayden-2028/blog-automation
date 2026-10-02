@@ -47,7 +47,7 @@ export type CollectWebImagesForJobInput = {
    * 기획이 원한 오세훈 사진 4장을 "청사가 없다"며 전량 탈락시켰다. 2026-09-22에 사용자 요구로
    * 고친 "검색은 A, 판정은 B"를 기획 배선에서 그대로 다시 만든 것이었다.
    */
-  planSubjects?: Record<number, { subject: string; caution?: string }>;
+  planSubjects?: Record<number, { subject: string; caution?: string; recency?: "today" | "recent" | "any" }>;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -101,11 +101,19 @@ export async function collectWebImagesForJob(
     .map((slot) => {
       const planned = input.planSubjects?.[slot.index];
       if (!planned?.subject || directIndexes.has(slot.index)) return slot;
+      // 최신성은 판정자에게도 한 줄로 알린다 - 검색만 최신순으로 해도 판정이 옛 사진을 고르면 그만이다.
+      const recencyNote =
+        planned.recency === "today"
+          ? "오늘 일어난 일이다 - 오늘 찍힌 사진을 먼저 고른다."
+          : planned.recency === "recent"
+            ? "최근 사진을 먼저 고른다."
+            : "";
+      const caution = [planned.caution, recencyNote].filter(Boolean).join(" ");
       return {
         ...slot,
         description: planned.subject,
         query: input.planQueries?.[slot.index]?.[0] ?? slot.query,
-        ...(planned.caution ? { caution: planned.caution } : {}),
+        ...(caution ? { caution } : {}),
       };
     })
     // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
@@ -242,6 +250,9 @@ export async function collectWebImagesForJob(
         briefType: input.briefType ?? null,
         researchText: input.researchText ?? null,
         planQueries: input.planQueries,
+        planRecency: input.planSubjects
+          ? Object.fromEntries(Object.entries(input.planSubjects).map(([k, v]) => [Number(k), v.recency]))
+          : undefined,
       }
     );
 

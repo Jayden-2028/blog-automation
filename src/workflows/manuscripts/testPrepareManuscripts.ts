@@ -577,6 +577,55 @@ async function main(): Promise<void> {
     console.log("✅ 기획 배선 - 자리 배분·검색어·캡처 URL이 기획을 따른다");
   }
 
+  // 기획이 인포그래픽으로 정한 자리는 **실제로 생성된다**(2026-10-02). 전에는 어느 경로에도 안 실려
+  // "기획이 바꿨습니다 → AI"라고 적힌 자리가 그냥 비었다(오세훈 2심 3번). 기획에 없는 자리는 마커대로.
+  {
+    const body = [
+      "벌금 100만 원 이상이 확정되면 시장직을 잃습니다.",
+      "[IMAGE: 시장직 상실 기준 — 웹 검색]\n[IMAGE PROMPT: 시장직 상실]",
+      "기획에 없는 자리입니다.",
+      "[IMAGE: 오세훈 시장 활동 — 웹 검색]\n[IMAGE PROMPT: 오세훈 시장 활동]",
+    ].join("\n\n");
+    const INFO = '"벌금 100만 원 이상 확정" → "피선거권 상실" → "시장직 상실" 아이콘 흐름. 위에 적은 글자 외에는 넣지 마. 16:9';
+    const genCalls: { fallbackSlots?: { index: number; acquisition?: string }[] }[] = [];
+    let collectInput: Record<string, unknown> | null = null;
+    const merged: Record<string, unknown>[] = [];
+
+    await prepareManuscript(job("a", "incident"), {
+      loadArticles: async () => [baseArticle(body)],
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
+      loadPublishedPosts: false,
+      capturePages: false,
+      buildFallbackPrompts: false,
+      generateImages: async (_input, options) => {
+        genCalls.push(options ?? {});
+        const slots = options?.fallbackSlots ?? [];
+        return {
+          images: slots.map((s) => ({ index: s.index, description: "인포그래픽", prompt: "p", url: `https://s/${s.index}.png`, provider: "openai", fileName: "x.png" })) as never,
+          failures: [],
+        };
+      },
+      planSlots: async () => ({
+        plan: {
+          summary: "구형",
+          protagonist: "오세훈",
+          slots: [{ index: 1, subject: "정치자금법 처벌 흐름", queries: [INFO], acquisition: "infographic" as const, changed: true, reason: "법률 기준", caution: "" }],
+        },
+        notes: [],
+      }),
+      collectWebImages: async (input) => { collectInput = input as never; return { images: [], failures: [], unfilled: [] }; },
+    });
+
+    const planGen = genCalls.find((c) => c.fallbackSlots?.some((s) => s.index === 1));
+    assert(planGen, `기획 인포그래픽 자리가 생성으로 가야 한다 (${JSON.stringify(genCalls)})`);
+    assert(planGen!.fallbackSlots![0].acquisition === "infographic", "인포그래픽 화질로 뽑도록 방식을 넘겨야 한다");
+    assert(merged.some((m) => m.planImagesGeneratedAt), "유료 생성 1회 게이트를 남겨야 한다");
+    const idx = (collectInput as never as { planSearchIndexes: number[] }).planSearchIndexes;
+    assert(JSON.stringify(idx) === "[2]", `기획에 없는 웹 검색 자리는 마커대로 수집해야 한다 (${JSON.stringify(idx)})`);
+    console.log("✅ 기획 인포그래픽 → 생성, 기획 밖 자리 → 마커대로 수집");
+  }
+
   // 기획을 끄면 예전 경로 그대로다. 운영 영향 없이 병합하려면 이게 보장돼야 한다.
   {
     const body = "도입입니다.\n\n[IMAGE: 사진 — 웹 검색]\n[IMAGE PROMPT: 집필자 검색어]";

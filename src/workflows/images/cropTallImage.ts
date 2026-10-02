@@ -112,7 +112,7 @@ export async function pickCropFocus(input: {
     "",
     `파일: ${input.filePath}`,
     `이 자리에 필요한 것: ${input.alt}`,
-    "이 이미지가 요약해야 할 문단:",
+    "이 이미지가 속한 문단:",
     `"""${input.context.slice(0, 400)}"""`,
     "",
     "Read 도구로 이미지를 열어 보고, 위 설명에 해당하는 핵심 내용(제목·주요 사진·핵심 그림)이",

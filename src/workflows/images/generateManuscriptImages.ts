@@ -57,7 +57,7 @@ export type GenerateManuscriptImagesOptions = {
    * 왜 별도 루프를 만들지 않는가: 생성·업로드·원장 기록·실패 기록이 이미 한 벌 있는데 폴백용으로
    * 한 벌 더 만들면 둘이 갈라진다(이번 세션에만 같은 실수를 세 번 했다). 입력만 얹고 경로는 공유한다.
    */
-  fallbackSlots?: { index: number; description: string; prompt: string }[];
+  fallbackSlots?: { index: number; description: string; prompt: string; acquisition?: "ai" | "infographic" }[];
 };
 
 export type GenerateManuscriptImagesResult = {
@@ -135,7 +135,8 @@ export async function generateManuscriptImages(
   for (const slot of options.fallbackSlots ?? []) {
     if (aiSlots.some(({ index }) => index === slot.index)) continue;
     aiSlots.push({
-      block: { type: "image", description: slot.description, prompt: slot.prompt, acquisition: "search" },
+      // 기획이 `infographic`으로 정한 자리(2026-10-02)는 인포그래픽 화질로 뽑아야 한다 - 방식을 넘겨받는다.
+      block: { type: "image", description: slot.description, prompt: slot.prompt, acquisition: slot.acquisition ?? "search" },
       index: slot.index,
     });
   }

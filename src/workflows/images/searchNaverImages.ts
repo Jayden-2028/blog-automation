@@ -41,10 +41,18 @@ type NaverImageSearchResponse = {
  * 실패하면 빈 배열이다. 후보가 없어도 에이전트는 web_search로 직접 찾을 수 있으므로 이 단계가
  * 수집 전체를 막아서는 안 된다.
  */
-export async function searchNaverImages(query: string, display: number = DEFAULT_DISPLAY): Promise<ImageCandidate[]> {
+export async function searchNaverImages(
+  query: string,
+  display: number = DEFAULT_DISPLAY,
+  /**
+   * `date`는 최신순(2026-10-02). 당일 사건 자리에서 "오늘 찍힌 사진"을 후보에 올리려고 연다
+   * (오세훈 2심 피드백 - "10/2일자 이미지들이 후보가 되어야 합니다").
+   */
+  sort: "sim" | "date" = "sim"
+): Promise<ImageCandidate[]> {
   try {
     const body = await naverGetJson<NaverImageSearchResponse>(NAVER_IMAGE_SEARCH_URL, {
-      params: { query, display, sort: "sim", filter: "large" },
+      params: { query, display, sort, filter: "large" },
     });
     return (body.items ?? [])
       .filter((item) => typeof item.link === "string" && /^https?:\/\//.test(item.link))

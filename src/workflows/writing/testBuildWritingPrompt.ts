@@ -34,7 +34,7 @@ function main(): void {
   assert(prompt.includes("WebSearch를 쓰지 않는다"), "writer는 웹 검색 없음");
   assert(prompt.includes("prompts/writing/style/trend.md"), "living은 trend 문체 참고 파일을 Read하라는 지시가 있어야 한다");
   assert(prompt.includes("prompts/writing/style/voice.md"), "공통 어투 파일 voice.md를 Read하라는 지시(2026-09-16)");
-  assert(prompt.includes("바로 위 문단을 한 장으로 요약"), "이미지 프롬프트는 문단 요약이라는 지시(images.md §8-1, 2026-09-16)");
+  assert(prompt.includes("바로 위 문단이 무엇에 관한 것인지"), "이미지는 문단의 대상을 보여준다는 지시(images.md §8-1, 2026-10-02 개정)");
   console.log("✅ 규격 참조 + 자료조사 경로 + 정확한 출력 경로 + 파이프라인 오버라이드 + 카테고리별 문체 파일 + 공통 voice");
 
   const entertainmentPrompt = buildWritingPrompt({
