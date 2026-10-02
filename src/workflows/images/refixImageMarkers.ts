@@ -20,7 +20,7 @@ export type MarkerViolation = {
   rule: ImageMarkerViolation;
   description: string;
   prompt: string | null;
-  /** 바로 위 문단. 새 마커가 이 문단을 한 장으로 요약해야 한다(§8-1). */
+  /** 바로 위 문단. 새 마커가 이 문단이 무엇에 관한 것인지 보여줘야 한다(§8-1). */
   context: string;
 };
 
@@ -106,7 +106,8 @@ export function buildFixPrompt(keyword: string, violations: MarkerViolation[]): 
     "    한국 이야기면 `in Korea`, `Korean` 같은 국가 맥락을 반드시 넣는다(안 넣으면 서구권으로 그려진다).",
     "    실존 인물·브랜드·로고를 그리게 하지 않는다.",
     "  - `웹 검색`이면 **한국어 검색어** 한 줄, 8단어 안쪽, 고유명사 포함.",
-    "- 바로 위 문단을 한 장으로 요약해야 한다(§8-1) - 그 문단의 구체 요소가 2개 이상 담기게 쓴다.",
+    "- 바로 위 문단이 **무엇에 관한 것인지** 알아볼 수 있어야 한다(§8-1) - 대상(누구·무엇)이 드러나게 쓴다.",
+    "  문단의 세부(수치·날짜·절차)를 다 담을 필요는 없다. 어느 문단에 붙여도 되는 분위기 컷은 안 된다.",
     "",
     "## 바꿀 자리",
   ];
@@ -116,7 +117,7 @@ export function buildFixPrompt(keyword: string, violations: MarkerViolation[]): 
     lines.push(`### 자리 ${v.index} (${RULE_LABEL[v.rule]} 위반)`);
     lines.push(`- 지금 설명: ${v.description}`);
     if (v.prompt) lines.push(`- 지금 프롬프트: ${v.prompt}`);
-    lines.push("- 이 이미지가 요약해야 할 문단:");
+    lines.push("- 이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):");
     lines.push(`  """${v.context.slice(0, 600)}"""`);
   }
 

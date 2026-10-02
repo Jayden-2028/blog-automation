@@ -203,6 +203,26 @@ async function main(): Promise<void> {
     console.log("✅ 언론사 판별 - 포털·하위 도메인 차단, 공공·공식 페이지 통과");
   }
 
+  // 12) 오세훈 2심 규칙(R9~R11)과 사용자 원칙이 프롬프트에 실린다. 인포그래픽은 법률까지.
+  {
+    const prompt = buildPlanPrompt(INPUT, null);
+    for (const must of ["무엇에 관한 것인지", "R9", "R10", "R11", "건물·청사 외관", "보호 대상은 예외", "법률·혐의·처벌 기준", "recency"]) {
+      assert(prompt.includes(must), `프롬프트에 "${must}"가 있어야 한다`);
+    }
+    console.log("✅ 프롬프트 - 원칙 + R9~R11 + 인포그래픽 법률 + 최신성");
+  }
+
+  // 13) 최신성 파싱 - 모르는 값은 any.
+  {
+    const { plan } = parsePlan(
+      { slots: [{ index: 1, subject: "a", queries: ["a"], recency: "today" }, { index: 2, subject: "b", queries: ["b"], recency: "어제" }] },
+      2
+    );
+    assert(plan!.slots[0].recency === "today", "today는 그대로");
+    assert(plan!.slots[1].recency === "any", "모르는 값은 any");
+    console.log("✅ 최신성 파싱");
+  }
+
   console.log("\n✅ 이미지 기획 단계 테스트 전부 통과");
 }
 

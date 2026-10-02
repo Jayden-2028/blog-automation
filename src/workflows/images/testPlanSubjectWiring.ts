@@ -23,13 +23,18 @@ const PNG = Buffer.from(
   "base64"
 );
 
-async function run(extra: Record<string, unknown>, caption = "") {
+async function run(
+  extra: Record<string, unknown>,
+  caption = "",
+  search?: { searchImages: (q: string) => Promise<never[] | { title: string; link: string; thumbnail: string; width: number; height: number }[]>; searchRecentImages: (q: string) => Promise<{ title: string; link: string; thumbnail: string; width: number; height: number }[]> }
+) {
   let seen: ChooseImageInput | null = null;
   let agentPrompt = "";
   const result = await collectWebImagesForJob(
     { jobId: "test-job", keyword: "오세훈 2심 구형", category: "incident", body: BODY, imagePrompts: [], ...extra },
     {
-      searchImages: false,
+      searchImages: search ? search.searchImages : false,
+      searchRecentImages: search ? search.searchRecentImages : false,
       searchKinolights: false,
       cropTall: false,
       deduper: undefined,
@@ -114,6 +119,37 @@ async function main(): Promise<void> {
     assert(seen && seen.markerDescription.includes("청사 외관"), "기획이 없으면 마커가 기준이어야 한다");
     assert(seen!.caution === undefined, "기획이 없으면 주의사항도 없어야 한다");
     console.log("✅ 기획 없음 - 마커 그대로");
+  }
+
+  // 5) 최신성 today - 최신순 결과가 후보 맨 앞에 오고, 판정에도 "오늘 사진"이 전달된다.
+  {
+    const hit = (link: string) => ({ title: link, link, thumbnail: link, width: 1600, height: 900 });
+    let recentQuery = "";
+    const { seen, agentPrompt } = await run(
+      { ...PLAN, planSubjects: { 1: { ...PLAN.planSubjects[1], recency: "today" } } },
+      "",
+      {
+        searchImages: async () => [hit("https://old.example.com/2023.jpg")],
+        searchRecentImages: async (q) => { recentQuery = q; return [hit("https://new.example.com/today.jpg")]; },
+      }
+    );
+    assert(recentQuery === "오세훈 서울시장", `최신순 검색은 기획 첫 검색어로 (${recentQuery})`);
+    const iNew = agentPrompt.indexOf("new.example.com");
+    const iOld = agentPrompt.indexOf("old.example.com");
+    assert(iNew > 0 && iOld > 0 && iNew < iOld, "최신순 결과가 관련도순보다 앞에 와야 한다");
+    assert(seen?.caution?.includes("오늘 찍힌 사진"), `판정에 최신성이 전달돼야 한다 (${seen?.caution})`);
+    console.log("✅ today - 최신순 후보가 맨 앞, 판정에도 전달");
+  }
+
+  // 6) 최신성 any면 최신순 검색을 돌리지 않는다(호출 낭비).
+  {
+    let called = false;
+    await run(PLAN, "", {
+      searchImages: async () => [],
+      searchRecentImages: async () => { called = true; return []; },
+    });
+    assert(!called, "any면 최신순 검색을 하지 않는다");
+    console.log("✅ any - 최신순 검색 생략");
   }
 
   console.log("\n✅ 기획 대상 배선 테스트 전부 통과");

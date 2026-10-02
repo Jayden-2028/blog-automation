@@ -5,12 +5,12 @@
 // 예상보다 컸다(09-16 남양주 카페 원고는 5자리 중 3자리).
 //
 // 역할 분담:
-//   Codex - 검색과 판단만 한다. "이 문단을 한 장으로 요약하는 이미지"를 찾아 URL과 출처를 돌려준다.
+//   Codex - 검색과 판단만 한다. "이 문단이 무엇에 관한 것인지 보여주는 이미지"를 찾아 URL과 출처를 돌려준다.
 //   Node  - 내려받기·형식/해상도 검증·파일 배치·메타데이터 기록을 한다.
 // 이렇게 가르면 Codex에 파일 쓰기 권한을 줄 필요가 없어(read-only 샌드박스) delegate-codex의
 // "저장소 밖에 쓰지 않는다" 규칙을 손대지 않아도 되고, 결과를 코드로 검증할 수 있다.
 //
-// 판단 기준은 rules/images.md §8-1("바로 위 문단을 한 장으로 요약")을 그대로 쓴다 -
+// 판단 기준은 rules/images.md §8-1("바로 위 문단이 무엇에 관한 것인지", 2026-10-02 개정)을 그대로 쓴다 -
 // 그래서 슬롯마다 바로 위 문단 원문을 함께 넘긴다.
 
 import { rm, writeFile } from "node:fs/promises";
@@ -34,6 +34,7 @@ import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 import { ImageDeduper } from "./imageFingerprint.js";
 import { describeSearchPools, expandQueriesForPools } from "./imageSearchPools.js";
 import { searchKinolightsStills } from "./searchKinolightsStills.js";
+import { searchNaverImages } from "./searchNaverImages.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
@@ -126,7 +127,7 @@ export type WebImageSlot = {
   description: string;
   /** writer가 남긴 한국어 검색어. */
   query: string | null;
-  /** 바로 위 문단(또는 소제목+문단) 원문. 이 문단을 한 장으로 요약하는 것이 판단 기준이다. */
+  /** 바로 위 문단(또는 소제목+문단) 원문. 이 문단이 무엇에 관한 것인지 보여주는 것이 판단 기준이다. */
   context: string;
   /**
    * 기획 단계가 이 자리에 붙인 주의사항(2026-10-02). 판정할 때 한 줄로 보여 준다.
@@ -149,7 +150,7 @@ export type UnfilledSlot = {
   index: number;
   /** 마커 설명(획득 방식 접미사 제거 전 원문). */
   description: string;
-  /** 이 이미지가 요약해야 할 문단. AI 프롬프트를 지을 때 근거가 된다. */
+  /** 이 자리가 속한 문단. AI 프롬프트를 지을 때 근거가 된다. */
   context: string;
   /** 수집기가 적은 대안 제안 또는 실패 사유. 비어 있을 수 있다. */
   suggestion: string;
@@ -184,7 +185,7 @@ export type VerifyImageInput = {
   markerDescription: string;
   /** 수집기가 적은 설명(alt). **추측이라 틀릴 수 있어** 참고로만 쓴다. */
   alt: string;
-  /** 이 이미지가 요약해야 할 문단. */
+  /** 이 자리가 속한 문단. */
   context: string;
   keyword: string;
 };
@@ -244,6 +245,13 @@ export type CollectWebImagesOptions = {
    * "검색창에 친 결과 중 고르기"를 하고, 없으면 예전처럼 web_search로 직접 찾는다. false면 생략.
    */
   searchImages?: false | SearchImages;
+  /**
+   * 최신순 이미지 검색(2026-10-02). 기획이 `recency: today|recent`로 정한 자리에서만 한 번 더 돌려
+   * **맨 앞에** 섞는다. 기본은 네이버 `sort=date`. false면 생략(테스트).
+   */
+  searchRecentImages?: false | SearchImages;
+  /** 기획이 자리마다 정한 최신성(2026-10-02). 없으면 `any`로 본다. */
+  planRecency?: Record<number, "today" | "recent" | "any" | undefined>;
   /**
    * 1:2보다 긴 세로 이미지를 주요 부분만 잘라낸다(2026-09-18). 기본은 Chromium canvas + Claude 초점 판단.
    * false면 자르지 않는다(테스트 - 브라우저를 띄우면 안 된다).
@@ -430,8 +438,9 @@ export function buildPrompt(
     `## 원고 주제: ${keyword}`,
     "",
     "## 고르는 기준",
-    "1. **바로 위 문단을 한 장으로 요약**하는 이미지여야 한다. 문단의 구체 요소(누가·무엇·몇 개·어떤 구조)가",
-    "   보이지 않고 분위기만 맞는 사진은 고르지 않는다.",
+    "1. **바로 위 문단이 무엇에 관한 것인지**(누구·무엇) 보여주는 이미지여야 한다. 문단의 모든 내용(형량·",
+    "   날짜·절차·쟁점)을 한 장에 담을 필요는 없다 - 그걸 담으려다 건물 외관·일반 장면으로 빠진다",
+    "   (2026-10-02 사용자 원칙). 다만 대상이 드러나지 않고 분위기만 맞는 사진은 고르지 않는다.",
     "2. **출처 페이지가 이 원고 주제와 실제로 관련이 있어야 한다.** 생김새만 비슷한 이미지를 무관한",
     "   페이지에서 가져오지 않는다 - 그건 스톡 사진을 붙인 것과 같고, 출처를 밝혀도 독자에게 거짓이 된다.",
     "   (실패 예: 한국 카페 사건 기사에 캐나다 공항 스타벅스 매장 소개 페이지의 사진을 고른 경우.)",
@@ -500,7 +509,7 @@ export function buildPrompt(
         lines.push(`  "장면" 같은 수식을 뺀 쪽이 실제로 더 많이 나온다 - 2022년이 아니어도 맥락이 맞으면 쓴다.)`);
       }
     }
-    lines.push("- 이 이미지가 요약해야 할 문단:");
+    lines.push("- 이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):");
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
     const found = candidates.get(slot.index) ?? [];
     if (found.length > 0) {
@@ -687,7 +696,7 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     `원고 주제: ${input.keyword}`,
     `이 자리에 필요한 것: ${input.markerDescription}`,
     ...(input.caution ? [`주의: ${input.caution}`] : []),
-    "이 이미지가 요약해야 할 문단:",
+    "이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):",
     `"""${input.context.slice(0, 600)}"""`,
     "",
     "## 후보",
@@ -833,6 +842,10 @@ export async function collectWebImages(
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
   const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
+  const searchRecent =
+    options.searchRecentImages === undefined
+      ? (q: string) => searchNaverImages(q, undefined, "date")
+      : options.searchRecentImages;
   // 검색창에서 미리 받아둔 후보(자리별). 에이전트가 고른 URL이 전부 막히면 여기서 건진다.
   const prefetched = new Map<number, ImageCandidate[]>();
 
@@ -894,6 +907,14 @@ export async function collectWebImages(
             ? planned
             : expandQueriesForPools(query, input.keyword, options.category ?? null, options.briefType ?? null);
         const results = await Promise.all(queries.map((q) => searchImages(q).catch(() => [])));
+
+        // 당일·최근 자리는 최신순 결과를 **맨 앞에** 둔다(2026-10-02). 관련도순만 쓰면 몇 년 전
+        // 대표 사진이 위를 차지한다 - 구형 당일 원고에 3년 전 취임식 사진이 붙는다.
+        const recency = options.planRecency?.[slot.index];
+        if (searchRecent && (recency === "today" || recency === "recent") && queries[0]) {
+          const recent = await searchRecent(queries[0]).catch(() => []);
+          if (recent.length > 0) results.unshift(recent);
+        }
 
         // 질의별 결과를 **번갈아** 섞는다(2026-09-24). 이어 붙이면 원고 검색어 결과가 앞을 다
         // 차지해, 후보를 4장만 내려받는 지금 구조에서는 서치풀 결과가 에이전트에게 보이지도

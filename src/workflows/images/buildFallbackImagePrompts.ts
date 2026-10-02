@@ -143,7 +143,7 @@ export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): 
     lines.push(`### 자리 ${slot.index}`);
     lines.push(`- 원래 필요했던 이미지: ${slot.description}`);
     if (slot.suggestion) lines.push(`- 수집기가 적은 실패 사유와 대안: ${slot.suggestion}`);
-    lines.push("- 이 이미지가 요약해야 할 문단:");
+    lines.push("- 이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):");
     lines.push(`  """${slot.context.slice(0, 600)}"""`);
   }
 

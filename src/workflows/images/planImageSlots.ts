@@ -43,7 +43,16 @@ export type ImageSlotPlan = {
   reason: string;
   /** 주의할 점(중의성·시점 등). 없으면 빈 문자열. */
   caution: string;
+  /**
+   * 사진이 얼마나 최근 것이어야 하나(2026-10-02, 오세훈 2심 피드백 "10/2일자 이미지들이 후보").
+   * `today`·`recent`면 수집이 날짜순 검색을 한 번 더 돌려 후보에 섞는다. 모르면 `any`.
+   * 선택값인 이유: 이 필드 이전에 저장된 기획(job.metadata.imagePlan)에는 없다.
+   */
+  recency?: Recency;
 };
+
+export const RECENCIES = ["today", "recent", "any"] as const;
+export type Recency = (typeof RECENCIES)[number];
 
 export type ImagePlan = {
   /** 원고를 한 줄로 요약한 것. 1번 자리가 이걸 보여줘야 한다(R1). */
@@ -77,7 +86,7 @@ export type PlanImageSlotsResult = {
   notes: string[];
 };
 
-const PLAN_SCHEMA_HINT = `{"summary":"한 줄 요약","protagonist":"주인공","slots":[{"index":1,"subject":"찾을 대상","queries":["검색어"],"acquisition":"search","changed":true,"reason":"왜 바꿨는지","caution":""}]}`;
+const PLAN_SCHEMA_HINT = `{"summary":"한 줄 요약","protagonist":"주인공","slots":[{"index":1,"subject":"찾을 대상","queries":["검색어"],"acquisition":"search","recency":"any","changed":true,"reason":"왜 바꿨는지","caution":""}]}`;
 
 /** 자리별 입력(마커 설명 + 바로 위 문단). 프롬프트에 그대로 들어간다. */
 export function collectPlanSlots(
@@ -121,7 +130,27 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "1. 원고를 읽고 **한 줄로 요약**한다(`summary`). 예: \"영화 폭설 1차 예고편 공개\".",
     "2. 이 글의 **주인공**을 한 명(또는 한 작품) 고른다(`protagonist`).",
     "",
+    "## 가장 먼저 — 이미지는 문단이 **무엇에 관한 것인지**만 보여주면 된다",
+    "문단의 모든 내용(형량·날짜·쟁점·절차)을 한 장에 담으려 하지 않는다(2026-10-02 사용자 원칙).",
+    "그렇게 하면 건물 외관·콜센터 일반 장면·기사 화면처럼 **내용은 다 담았는데 아무것도 안 보이는** 그림이 된다.",
+    "",
     "## 자리마다 지킬 것",
+    "",
+    "**R9. 문단을 키워드 하나로 줄이고, 그 키워드가 대상이다.** 키워드에 사람이 있으면 **사람이 대상**이다.",
+    "  문단: \"특검은 서울고법 항소심에서 오세훈 서울시장에게 징역 1년 6개월을 구형했다\"",
+    "  (X) `서울고등법원 청사 외관`  →  문단의 키워드가 아니다",
+    "  (O) `오세훈 서울시장`        →  이 문단은 오세훈 시장에 관한 것이다",
+    "",
+    "**R10. 건물·청사 외관으로 대역하지 않는다.** 법원·검찰·시청 청사는 **건물 자체가 쟁점일 때만** 쓴다.",
+    "\"어디서 열렸다\"는 사진이 필요한 정보가 아니다.",
+    "",
+    "**R11. 공인 사건에서는 당사자를 보여준다.** 정치인·고위공직자·기업인·연예인의 **공적 활동과 사건**은",
+    "실명과 얼굴이 이미 보도된 사람들이라 **당사자 실사진**을 쓴다. AI 일반 장면(콜센터·법정 일러스트)으로",
+    "바꾸지 않는다 - 그건 보호가 아니라 내용과 무관한 장식이다. 당사자가 여럿이면 **이름을 묶어** 먼저 찾는다.",
+    "  (X) `전화 여론조사 콜센터` (AI)   (O) `명태균 오세훈 김한정`",
+    "  R7(두 인물 동시 요구 금지)은 함께 찍힌 사진이 **없을 때** 쪼개라는 것이고, 한 사건으로 함께 보도된",
+    "  당사자는 같은 기사 사진에 함께 나오는 경우가 많다. 그래도 `queries` 둘째에는 한 명짜리를 넣어 둔다.",
+    "  **보호 대상은 예외다** - 피해자·미성년자·일반인 피의자·신원 비공개 인물은 실사진을 쓰지 않는다.",
     "",
     "**R1. 1번 자리는 한 줄 요약을 보여준다.** 요약이 \"예고편 공개\"면 1번은 예고편 장면이다 -",
     "포스터도 배우 프로필도 아니다.",
@@ -156,7 +185,22 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "  공공기관·공식 홈페이지·예매·순위 페이지만 해당한다. **언론사 기사 화면·헤드라인은 캡처하지 않는다**",
     "  (2026-10-02 사용자 결정 - 남발돼서 폐지). 기사 화면을 떠올렸다면 그 문단의 인물·대상을 `search`로 찾는다.",
     "- `ai` — 위 둘이 전부 불가능할 때만. 실존 인물·작품·제품은 AI로 만들지 않는다.",
-    "- `infographic` — 행사·정책에서 절차·조건·금액을 아이콘·그래프로 요약할 때만",
+    "  `queries[0]`에 **바로 생성에 넣을 영어 프롬프트**를 쓴다: `photorealistic photograph`로 시작,",
+    "  한국 배경(`in Korea`), `no text, no letters`, 끝에 `16:9`. 한글을 섞지 않는다.",
+    "- `infographic` — 행사·정책의 절차·조건·금액, 그리고 **법률·혐의·처벌 기준**(혐의 구조, 형량 구간,",
+    "  \"벌금 100만 원 이상 → 직 상실\" 같은 흐름)을 아이콘·그래프로 보여줄 때. 본문 표를 옮기지 않는다.",
+    "  `queries[0]`에 **바로 생성에 넣을 프롬프트 전체**를 쓴다(규격 §9):",
+    "  · 들어갈 글자를 **전부 따옴표로** 적고 \"위에 적은 글자 외에는 넣지 마\"로 닫는다",
+    "  · 글자는 라벨과 숫자까지만. 숫자는 **본문과 한 글자도 다르면 안 된다**",
+    "  · 한글 라벨은 한글로. 픽토그램·화살표·막대 그래프. 끝에 `16:9`",
+    "  예: `\"정치자금법 위반\" 처벌 흐름 인포그래픽. 왼쪽부터 아이콘 3개와 화살표: \"벌금 100만 원 이상 확정\" →",
+    "  \"피선거권 상실\" → \"시장직 상실\". 아래 작은 라벨 \"5년간 피선거권 제한\". 위에 적은 글자 외에는 넣지 마.",
+    "  흰 배경, 남색·회색 픽토그램, 16:9`",
+    "",
+    "## 최신성 (`recency`)",
+    "- `today` — 오늘 일어난 일(구형·선고·발표·공개)의 당사자 자리. 오늘 찍힌 사진이 가장 좋다",
+    "- `recent` — 최근 활동이 맞는 자리(현직 인물의 근황)",
+    "- `any` — 프로필·작품 스틸처럼 시점이 상관없는 자리. 모르면 이것",
     "",
     "## 자리 목록",
   ];
@@ -246,6 +290,9 @@ export function parsePlan(raw: unknown, slotCount: number): { plan: ImagePlan | 
       changed: slot.changed === true || finalAcquisition !== acquisition,
       reason: asString(slot.reason),
       caution: asString(slot.caution),
+      recency: (RECENCIES as readonly string[]).includes(asString(slot.recency))
+        ? (asString(slot.recency) as Recency)
+        : "any",
     });
   }
 

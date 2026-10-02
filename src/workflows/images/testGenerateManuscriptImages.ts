@@ -288,6 +288,26 @@ async function main(): Promise<void> {
     console.log("✅ 인포그래픽은 생성(화질 상향), 표 생성은 그대로 제외");
   }
 
+  // 기획이 인포그래픽으로 정한 자리(fallbackSlots + acquisition)도 인포그래픽 화질로 뽑는다(2026-10-02).
+  // 마커는 `웹 검색`인데 기획이 바꾼 자리라, 방식을 넘겨받지 않으면 사진 화질로 나가 라벨이 뭉개진다.
+  {
+    const body = ["도입 문단입니다.", "[IMAGE: 처벌 기준 — 웹 검색]\n[IMAGE PROMPT: 처벌 기준]"].join("\n\n");
+    const qualities: (string | undefined)[] = [];
+    await generateManuscriptImages(
+      { jobId: "job-1", keyword: "k", date: "2026-10-02", body, imagePrompts: [] },
+      {
+        config: cfg({ infographicQuality: "medium" }),
+        generate: async (i: { prompt: string; quality?: string }) => { qualities.push(i.quality); return okGenerate(i); },
+        upload: okUpload,
+        record: recordStub,
+        onlyIndexes: [],
+        fallbackSlots: [{ index: 1, description: "처벌 흐름", prompt: '"벌금" → "상실". 16:9', acquisition: "infographic" }],
+      } as never
+    );
+    assert(qualities.length === 1 && qualities[0] === "medium", `기획 인포그래픽도 인포그래픽 화질 (${JSON.stringify(qualities)})`);
+    console.log("✅ 기획 인포그래픽 - 인포그래픽 화질");
+  }
+
   // 사진 자리는 화질을 올리지 않는다 - 비용이 오른다.
   {
     const qualities: (string | undefined)[] = [];
