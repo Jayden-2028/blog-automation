@@ -35,6 +35,7 @@ import { ImageDeduper } from "./imageFingerprint.js";
 import { describeSearchPools, expandQueriesForPools } from "./imageSearchPools.js";
 import { searchKinolightsStills } from "./searchKinolightsStills.js";
 import { searchNaverImages } from "./searchNaverImages.js";
+import { groupShotsAllowed } from "../../config/imageGroupShots.js";
 
 /** 구글 디스커버는 너비 1200px 이상을 큰 썸네일 조건으로 본다(docs/seo-guide.md). 그 아래는 경고만 한다. */
 const PREFERRED_MIN_WIDTH = 1200;
@@ -687,6 +688,43 @@ export async function defaultAskSameCut(input: {
   return input.against[same - 1]?.key ?? null;
 }
 
+/**
+ * 판정 기준 5번(단체 사진)과 8번(합성컷). 2026-10-02 사용자 결정으로 **기본은 허용**이다 -
+ * 영상물은 배우 2샷·단체샷이 많아 옛 규칙 때문에 자리가 비는 것이 더 손해였다.
+ * `IMAGE_GROUP_SHOTS=false`면 옛 문구를 그대로 싣는다(config/imageGroupShots.ts).
+ */
+export function groupShotRules(allowed: boolean): { group: string[]; composite: string[] } {
+  if (allowed) {
+    return {
+      group: [
+        "5. **여러 명이 나온 사진·2샷·단체샷도 합격이다**(2026-10-02 사용자 결정 - 옛 '단독 인물 자리에",
+        "   단체 사진 제외' 규칙 폐지). 드라마·영화·OTT·예능·방송은 배우 2샷·단체샷이 공식 스틸의 대부분이다.",
+        "   그 자리의 인물이 사진에 나오면 된다. **단체 사진이라는 이유로 자리를 비우지 않는다** - 빈 자리가 더 손해다.",
+      ],
+      composite: [
+        "8. **합성컷(사진 여러 장을 이어 붙인 것)이라는 이유로 떨어뜨리지 않는다**(2026-10-02 폐지).",
+        "   고르면 캡션에 누가 나오는지 적는다. 같은 컷 중복 금지는 그대로다 - 다른 자리에 이미 쓴 조합이면 다음 후보.",
+      ],
+    };
+  }
+  return {
+    group: [
+      "5. **단독 인물 자리인데 여러 명이 나온 단체·그룹 사진이면 제외한다** - '~의 모습', '~만' 같은",
+      "   표현으로 그 자리가 한 사람만 보여줘야 하는 자리인데, 후보에 그 사람이 다른 여러 사람과",
+      "   나란히 나와 있고 그 사람만 알아보기 어려우면 떨어뜨린다. 그 사람이 화면 중심에 크게 혼자",
+      "   나온 사진(다른 사람이 배경에 살짝 스쳐도 무방)만 합격이다. 설명 자체가 '둘이 함께', '멤버들과'",
+      "   처럼 여러 인물을 요구하면 이 규칙은 적용하지 않는다.",
+    ],
+    composite: [
+      "8. **나란히 붙인 합성컷을 피한다**(2026-09-24 사용자 지적, images.md §8-8). 사진 두세 장을",
+      "   좌우로 이어 붙인 이미지는 **단독 사진이 하나라도 있으면 고르지 않는다.** 썸네일에서 전부",
+      "   작게 보이고, 같은 조합이 다른 자리에도 들어와 중복이 된다.",
+      "   실측 반려: \"방영 정보\" 자리에 배우·감독·배우를 이어 붙인 3분할 이미지가 들어갔다.",
+      "   단독 사진이 하나도 없을 때만 합성컷을 쓰고, 그때는 캡션에 누가 있는지 적는다.",
+    ],
+  };
+}
+
 export async function defaultChooseImage(input: ChooseImageInput): Promise<ChooseImageResult> {
   const prompt = [
     ...imageMakerSpecLines(input.spec === undefined ? undefined : input.spec),
@@ -742,21 +780,13 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "   출처가 그 인물과 무관하거나 알 수 없으면 '맞다'고 단정하지 말고 근거에 그렇게 적는다.",
     "3. 한국 이야기인데 외국 간판·차량·지폐 등 다른 나라 맥락이 드러나면 제외.",
     "4. 워터마크, 다른 사이트 로고, 검색 결과 화면, 깨진 이미지, 광고가 섞였으면 제외.",
-    "5. **단독 인물 자리인데 여러 명이 나온 단체·그룹 사진이면 제외한다** - '~의 모습', '~만' 같은",
-    "   표현으로 그 자리가 한 사람만 보여줘야 하는 자리인데, 후보에 그 사람이 다른 여러 사람과",
-    "   나란히 나와 있고 그 사람만 알아보기 어려우면 떨어뜨린다. 그 사람이 화면 중심에 크게 혼자",
-    "   나온 사진(다른 사람이 배경에 살짝 스쳐도 무방)만 합격이다. 설명 자체가 '둘이 함께', '멤버들과'",
-    "   처럼 여러 인물을 요구하면 이 규칙은 적용하지 않는다.",
+    ...groupShotRules(groupShotsAllowed()).group,
     "6. 둘 이상이 맞으면 **문단을 더 구체적으로 보여주는 쪽**을, 그래도 비슷하면 큰 쪽을 고른다.",
     "",
     "7. **번인·저화질을 뒤로 민다**(2026-09-24). 매체 로고·자막·워터마크가 찍힌 재가공 이미지와",
     "   같은 장면의 깨끗한 원본이 함께 있으면 **깨끗하고 큰 쪽**을 고른다. 작품 스틸은 공식 배포본이",
     "   보통 1500px 이상이라, 700px짜리 기사 캡처가 유일한 후보가 아니라면 그것을 고르지 않는다.",
-    "8. **나란히 붙인 합성컷을 피한다**(2026-09-24 사용자 지적, images.md §8-8). 사진 두세 장을",
-    "   좌우로 이어 붙인 이미지는 **단독 사진이 하나라도 있으면 고르지 않는다.** 썸네일에서 전부",
-    "   작게 보이고, 같은 조합이 다른 자리에도 들어와 중복이 된다.",
-    "   실측 반려: \"방영 정보\" 자리에 배우·감독·배우를 이어 붙인 3분할 이미지가 들어갔다.",
-    "   단독 사진이 하나도 없을 때만 합성컷을 쓰고, 그때는 캡션에 누가 있는지 적는다.",
+    ...groupShotRules(groupShotsAllowed()).composite,
     "",
     "## 캡션 다시 쓰기 (2026-09-24 사용자 지적)",
     "고른 사진을 **실제로 보고** 캡션을 쓴다. 마커 설명은 *무엇을 찾아야 했는지*일 뿐이고, 실제로",
