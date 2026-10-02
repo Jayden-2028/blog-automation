@@ -355,6 +355,13 @@ function main(): void {
     assert(unbacked.some((c) => c.message.includes("근거에 없는 기관")), `news-only 기관은 경고 (${JSON.stringify(unbacked)})`);
     assert(unbacked.some((c) => c.message.includes("우주항공청")), "어느 기관인지 보여줘야 한다");
 
+    // 기관을 주어로 직접 쓴 문장(출처 신호어가 없는 올바른 형태)도 확인 대상이다 - 실측 누락 사례
+    const subjectForm = checkInstitutionAttribution("보건복지부는 2025년 5월 2일부터 21일까지 약 4만 명을 모집했습니다.", "| 3 | official | 청년내일저축계좌 모집 (보건복지부) | https://www.mohw.go.kr/... | 2025-05-02 |");
+    assert(
+      subjectForm.some((c) => c.message.includes("기관 귀속 확인 필요") && c.message.includes("보건복지부")),
+      `기관 주어 + 행위 동사 문장도 확인 요청해야 한다 (${JSON.stringify(subjectForm)})`
+    );
+
     // 기관을 출처로 내세우지 않은 문장은 걸리지 않는다
     const noCue = checkInstitutionAttribution("국립중앙박물관에서 12일 학술대회가 열립니다. 광화문광장 행사는 6~8일입니다.", research);
     assert(noCue.length === 0, `출처로 내세우지 않은 기관 언급은 통과 (${JSON.stringify(noCue)})`);

@@ -480,10 +480,6 @@ const NOT_INSTITUTION = new Set([
   "전반부", "후반부", "상반부", "회사", "본사",
 ]);
 
-/** 그 문장이 기관을 출처로 내세우고 있다는 신호. */
-const ATTRIBUTION_CUE =
-  /발표|자료|요항|기준|지침|고시|공고|안내|밝혔|밝힌|정했|정한|집계|통계|권고|발간|적고|명시|규정|따르면/;
-
 function institutionNames(text: string): string[] {
   INSTITUTION_NAME.lastIndex = 0;
   return [...text.matchAll(INSTITUTION_NAME)]
@@ -517,9 +513,13 @@ export function checkInstitutionAttribution(
   const unbacked = new Set<string>();
 
   for (const sentence of body.split(/(?<=[.!?。])\s+|\n/)) {
-    if (!ATTRIBUTION_CUE.test(sentence)) continue;
     for (const name of institutionNames(sentence)) {
-      // 기관명 바로 뒤에 조사가 붙어 있을 때만 "주어·출처로 썼다"고 본다("박물관에서 열린다"는 제외).
+      // 기관명 바로 뒤에 **주격·소유격 조사**가 붙은 자리만 귀속으로 본다("박물관에서 열린다"는 제외).
+      //
+      // 2026-10-02: 처음에는 출처 신호어(발표·자료·따르면 등)가 같은 문장에 있어야 걸리게 했는데,
+      // **규칙을 지킨 문장일수록 그 신호어가 없다**는 것이 실측으로 드러났다 - "보건복지부는 약
+      // 4만 명을 모집했습니다"는 기관을 주어로 직접 쓴 올바른 형태이고, 발표 주체를 확인해야 하는
+      // 바로 그 문장인데 신호어가 없어 통째로 빠졌다. 조사 조건만 남긴다.
       if (!new RegExp(`${name}(?:의|은|는|이|가|도)`).test(sentence)) continue;
       cited.add(name);
       if (!backed.has(name)) unbacked.add(name);
