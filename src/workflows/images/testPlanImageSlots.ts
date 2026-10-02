@@ -223,6 +223,15 @@ async function main(): Promise<void> {
     console.log("✅ 최신성 파싱");
   }
 
+  // 14) 이혼숙려캠프(2026-10-02) - 방송 출연자는 보호 대상이 아니고, MC는 주인공이 아니다.
+  {
+    const prompt = buildPlanPrompt(INPUT, null);
+    for (const must of ["방송에 얼굴을 공개하고 출연한 사람은 보호 대상이 아니다", "R12", "MC·진행자·패널", "이혼숙려캠프 자극부부"]) {
+      assert(prompt.includes(must), `프롬프트에 "${must}"가 있어야 한다`);
+    }
+    console.log("✅ 프롬프트 - 방송 출연자 비보호 + R12(주인공은 키워드 대상, MC 아님)");
+  }
+
   console.log("\n✅ 이미지 기획 단계 테스트 전부 통과");
 }
 

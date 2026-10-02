@@ -48,6 +48,8 @@ type PageTopic = {
   images: ManuscriptImage[];
   /** 이미지 수집 기록(2026-10-01). `[자리 N]`으로 시작하면 그 자리 것이다. */
   imageNotes: string[];
+  /** 자리별로 판정자가 열어 본 후보(2026-10-02). 키는 자리 번호 문자열. */
+  imageCandidates: Record<string, { number: number; url: string; sourcePage: string; width?: number | null; height?: number | null; picked?: boolean }[]>;
   /** 공백 제외 본문 글자수(참조 파일의 "본문 N자(공백 제외)"와 같은 기준). */
   charCount: number;
   /**
@@ -88,6 +90,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     blocks: parseManuscriptBlocks(m.body, m.imagePrompts),
     images: m.images,
     imageNotes: m.imageNotes ?? [],
+    imageCandidates: m.imageCandidates ?? {},
     charCount: m.body.replace(/\s/g, "").length,
     // 네이버 본문도 같은 파서를 태운다 - 뷰어의 복사 로직(이미지 자리를 [[이미지 N]]으로 남김)을
     // 그대로 재사용하려면 블록 모양이 같아야 한다.
@@ -224,6 +227,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .cutpair .one{min-width:0}
   .cutpair .who{font-size:11px;font-weight:700;color:var(--pen);margin-bottom:4px;
                 font-family:ui-monospace,Menlo,monospace}
+  .cands{margin-top:8px;font-size:12px}
+  .cands summary{cursor:pointer;color:var(--muted,#666)}
+  .candgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:8px}
+  .cand img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid #ddd;background:#f3f3f3}
+  .cand.picked img{border:2px solid #2e7d32}
+  .candlab{margin-top:2px;line-height:1.4}
   .missing{border:1px dashed var(--pen);border-radius:8px;background:var(--pen-soft);
            padding:11px 14px;font-size:12.5px;color:var(--pen)}
   .prompt-inline{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.6;
@@ -594,8 +603,34 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return parts.join("\\n\\n");
     }
 
+    /**
+     * 판정자가 열어 본 후보(2026-10-02 사용자 요청). 접어 두고, 펼치면 썸네일과 번호가 나온다.
+     * 이미지 수정에서 "N번 후보M"으로 고르면 그 주소를 그대로 쓴다. 외부 주소를 그대로 띄우므로
+     * 핫링크를 막는 사이트는 안 보일 수 있다 - 그때를 위해 출처 링크를 함께 둔다.
+     */
+    function candidatesHtml(topic, n) {
+      var list = (topic.imageCandidates || {})[String(n)] || [];
+      if (list.length === 0) return "";
+      var items = list.map(function (c) {
+        var size = c.width && c.height ? c.width + "×" + c.height : "";
+        return '<div class="cand' + (c.picked ? ' picked' : '') + '">'
+          + '<a href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">'
+          + '<img src="' + esc(c.url) + '" alt="후보 ' + c.number + '" loading="lazy" referrerpolicy="no-referrer"></a>'
+          + '<div class="candlab">후보 ' + c.number + (c.picked ? ' ✅ 채택' : '') + (size ? ' · ' + esc(size) : '')
+          + ' · <a href="' + esc(c.sourcePage) + '" target="_blank" rel="noopener noreferrer">출처</a></div></div>';
+      }).join("");
+      return '<details class="cands"><summary>후보 ' + list.length + '장 보기 — 바꾸려면 이미지 수정에서 <code>'
+        + n + '번 후보N</code></summary><div class="candgrid">' + items + '</div></details>';
+    }
+
     /** 이미지 한 장(또는 A/B 두 장)을 figure로. url이 없으면 사유와 프롬프트를 대신 보여준다. */
     function figureHtml(topic, n, block) {
+      var html = figureCore(topic, n, block);
+      var at = html.lastIndexOf("</figure>");
+      return at < 0 ? html : html.slice(0, at) + candidatesHtml(topic, n) + html.slice(at);
+    }
+
+    function figureCore(topic, n, block) {
       var shots = imagesFor(topic, n);
       var lab = '<span class="cutlab">' + n + '</span>';
       // 캡션은 **수집된 이미지의 것**을 먼저 쓴다(2026-09-24). 검증자가 실제 사진을 보고 다시 쓴

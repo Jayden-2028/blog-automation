@@ -27,6 +27,7 @@ import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/exportManuscript.js";
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
+import type { ImageCandidateRecord } from "../manuscripts/manuscriptManifest.js";
 import { broadenQuery } from "./broadenQuery.js";
 import { searchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
@@ -136,6 +137,11 @@ export type WebImageSlot = {
    * 같은 지시가 발행 캡션에 새어 나간다.
    */
   caution?: string;
+  /**
+   * 방송 화면 캡처(자막 포함)를 원하는 자리(2026-10-02). 공식 스틸을 후보에 끼우지 않고, 판정에서
+   * "공식 스틸 우선·강제"와 "자막 번인 감점"을 끈다. 예능 사연 자리는 자막 박힌 캡처가 곧 내용이다.
+   */
+  broadcastCapture?: boolean;
 };
 
 /**
@@ -160,6 +166,8 @@ export type UnfilledSlot = {
 export type CollectWebImagesResult = {
   found: WebImageRecord[];
   failures: string[];
+  /** 자리별로 판정자가 열어 본 후보(2026-10-02). 뷰어 "후보 보기"와 `N번 후보M` 선택에 쓴다. */
+  candidates?: Record<number, ImageCandidateRecord[]>;
   /** 웹에서 못 채운 자리. 호출부가 AI 생성으로 넘긴다. */
   unfilled: UnfilledSlot[];
 };
@@ -214,6 +222,8 @@ export type ChooseImageInput = {
   context: string;
   /** 기획의 주의사항(2026-10-02). 없으면 생략. */
   caution?: string;
+  /** 방송 화면 캡처를 원하는 자리(2026-10-02). 공식 스틸 강제·자막 감점을 끈다. */
+  broadcastCapture?: boolean;
   keyword: string;
   /** 이미지 메이커 규격. 없으면 파일에서 읽는다(테스트는 null로 끈다). */
   spec?: string | null;
@@ -502,6 +512,9 @@ export function buildPrompt(
     lines.push(`### 자리 ${slot.index}`);
     lines.push(`- 필요한 이미지: ${slot.description}`);
     if (slot.caution) lines.push(`- 주의: ${slot.caution}`);
+    if (slot.broadcastCapture) {
+      lines.push("- **그 회차 방송 화면 캡처**를 찾는다(자막이 박혀 있어도 된다 - 자막이 곧 내용이다). 공식 포스터·스틸은 답이 아니다.");
+    }
     if (slot.query) {
       lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
       const broader = broadenQuery(slot.query);
@@ -662,6 +675,8 @@ export async function defaultAskSameCut(input: {
     "",
     "## 같은 컷이란",
     "- **같은 사진**이다. 크기·화질·자른 범위·매체 워터마크가 달라도 같은 컷이다.",
+    "- 같은 사진을 **다르게 자르거나 비율을 바꾸거나, 로고·글자·배경을 얹어 포스터로 가공한 것**도 같은 컷이다",
+    "  (실측: 공식 스틸과 그 스틸로 만든 공식 포스터가 1번·6번에 함께 들어갔다).",
     "- 두 사진을 나란히 붙인 **합성컷**이라면, 붙인 순서가 좌우 반대여도 같은 컷이다",
     "  (실측: 한 원고의 1번과 2번이 같은 두 장을 순서만 바꿔 붙인 것이었다).",
     "- 같은 인물의 **다른 순간·다른 포즈·다른 옷**은 같은 컷이 아니다. 이건 통과시켜야 한다.",
@@ -734,6 +749,13 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     `원고 주제: ${input.keyword}`,
     `이 자리에 필요한 것: ${input.markerDescription}`,
     ...(input.caution ? [`주의: ${input.caution}`] : []),
+    ...(input.broadcastCapture
+      ? [
+          "**이 자리는 방송 화면 캡처를 원한다**(사용자 요청 또는 예능 사연 자리). 아래 기준 2-0·2-0-1(공식 스틸",
+          "우선·강제)과 7(자막·번인 뒤로 밀기)을 **적용하지 않는다.** 그 회차 방송 화면이면 자막이 박혀 있어도",
+          "정답이다 - 자막이 곧 내용이다. 공식 포스터·스틸은 이 자리의 답이 아니다.",
+        ]
+      : []),
     "이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):",
     `"""${input.context.slice(0, 600)}"""`,
     "",
@@ -979,17 +1001,21 @@ export async function collectWebImages(
         const quality = preferred.length > 0 ? preferred : isArtwork ? atLeast(ARTWORK_FALLBACK_MIN_WIDTH) : list;
 
         // 공식 스틸을 **맨 앞에** 둔다 - 이게 이 카테고리의 1순위 서치풀이다(§8-7).
-        const withOfficial = [...officialStills, ...trailerFrames, ...quality];
+        // 단 방송 화면 캡처를 원하는 자리는 빼 둔다(2026-10-02) - 공식 스틸이 끼면 "공식 스틸이 이긴다"
+        // 규칙과 무관하게도 판정자가 그쪽으로 끌린다(이혼숙려캠프 1번 자리가 그렇게 포스터와 같은 스틸이 됐다).
+        const slotStills = slot.broadcastCapture ? [] : officialStills;
+        const slotFrames = slot.broadcastCapture ? [] : trailerFrames;
+        const withOfficial = [...slotStills, ...slotFrames, ...quality];
         if (withOfficial.length > 0) {
           prefetched.set(slot.index, withOfficial);
           return;
         }
         if (list.length > 0) {
-          prefetched.set(slot.index, [...officialStills, ...list]);
+          prefetched.set(slot.index, [...slotStills, ...list]);
           return;
         }
-        if (officialStills.length > 0) {
-          prefetched.set(slot.index, officialStills);
+        if (slotStills.length > 0) {
+          prefetched.set(slot.index, slotStills);
           return;
         }
         const broader = broadenQuery(query);
@@ -1026,6 +1052,7 @@ export async function collectWebImages(
   // 순차로 돌면 자리 4개짜리 원고에서만 10분 넘게 쓴다(2026-09-21 실측 - 원고 1건 40~50분의
   // 큰 축이었다). 자리끼리는 완전히 독립이고 파일명도 자리 번호로 갈려 충돌하지 않는다.
   // 무제한 병렬이 아니라 상한을 두는 이유는 mapWithConcurrency 주석 참고(429·일시 차단 회피).
+  const candidateLog = new Map<number, ImageCandidateRecord[]>();
   const processSlot = async (slot: WebImageSlot): Promise<WebImageRecord | null> => {
     const result = results.find((r) => r.index === slot.index);
     if (!result) {
@@ -1153,6 +1180,13 @@ export async function collectWebImages(
       return null;
     }
 
+    // 판정자가 볼 후보를 기록한다(2026-10-02 사용자 요청 - "후보를 사용자가 볼 수 있게").
+    // 주소만 남긴다 - 파일은 이미 러너에 있지만 저장소에 올리면 원고당 수 MB씩 쌓인다.
+    candidateLog.set(
+      slot.index,
+      candidates.map((c) => ({ number: c.number, url: c.imageUrl, sourcePage: c.sourcePage, width: c.size?.width ?? null, height: c.size?.height ?? null }))
+    );
+
     // avif는 검증자(Claude Read)가 열지 못해 "내용을 확인하지 못했다"로 오탈락한다(실측: 너말고 자리 6).
     // 그 형식은 판정 대상에서 빼고, 열 수 있는 후보가 하나도 없으면 1순위를 그대로 쓴다.
     const openable = candidates.filter((c) => c.extension !== "avif");
@@ -1175,6 +1209,7 @@ export async function collectWebImages(
         markerDescription: slot.description,
         context: slot.context,
         caution: slot.caution,
+        broadcastCapture: slot.broadcastCapture,
         keyword: input.keyword,
       });
       if (verdict.picked === null) {
@@ -1224,6 +1259,7 @@ export async function collectWebImages(
     }
 
     for (const c of candidates) if (c !== chosen) await rm(c.filePath, { force: true });
+    for (const logged of candidateLog.get(slot.index) ?? []) logged.picked = logged.number === chosen.number;
 
     let { buffer, contentType, extension, size } = chosen;
     const rawExtension = extension;
@@ -1342,5 +1378,5 @@ export async function collectWebImages(
     await writeFile(resolve(input.dir, WEB_IMAGES_FILE), `${JSON.stringify({ images: merged }, null, 2)}\n`);
   }
 
-  return { found, failures, unfilled };
+  return { found, failures, unfilled, candidates: Object.fromEntries(candidateLog) };
 }

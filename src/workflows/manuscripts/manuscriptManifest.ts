@@ -74,6 +74,11 @@ export type ManuscriptEntry = {
    * `[자리 N] …`으로 시작하는 줄은 그 자리의 기록이고, 나머지는 원고 전체에 대한 기록이다.
    */
   imageNotes?: string[];
+  /**
+   * 자리별로 판정자가 실제로 열어 본 후보(2026-10-02 사용자 요청). 뷰어가 "후보 보기"로 띄우고,
+   * 사용자가 이미지 수정에서 `1번 후보3`처럼 고르면 그 주소를 그대로 쓴다. 키는 자리 번호 문자열.
+   */
+  imageCandidates?: Record<string, ImageCandidateRecord[]>;
   /** PIPELINE_ROOT 기준 상대 경로(표시용). 본문 자체는 body에 인라인으로 들어 있다. */
   filePath: string;
   /**
@@ -90,6 +95,17 @@ export type ManuscriptEntry = {
   sourceTag?: "instagram" | null;
   /** sourceTag가 있을 때만 의미 있다. 배지 클릭/표시에 쓸 원본 링크. */
   sourceUrl?: string | null;
+};
+
+/** 판정자가 열어 본 후보 한 장. 주소만 남긴다 - 파일은 저장하지 않는다(저장소 용량). */
+export type ImageCandidateRecord = {
+  number: number;
+  url: string;
+  sourcePage: string;
+  width?: number | null;
+  height?: number | null;
+  /** 이 자리에 채택된 후보인가. */
+  picked?: boolean;
 };
 
 export type ManuscriptTopicEntry = {

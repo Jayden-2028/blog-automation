@@ -45,7 +45,8 @@ import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
 import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
 import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
-import type { ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
+import type { ImageCandidateRecord, ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
+import { readImageCandidates } from "../images/applyImageEditRequest.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 
 /** platform 컬럼 값이자 metadata.channelMeta의 키. 채널 개념은 없지만 과거 행 호환으로 유지한다. */
@@ -101,7 +102,12 @@ export type PrepareManuscriptOptions = {
         body: string;
         imagePrompts: string[];
         filledIndexes: number[];
-      }) => Promise<{ images: ManuscriptImage[]; failures: string[]; unfilled: UnfilledSlot[] }>);
+      }) => Promise<{
+        images: ManuscriptImage[];
+        failures: string[];
+        unfilled: UnfilledSlot[];
+        candidates?: Record<number, ImageCandidateRecord[]>;
+      }>);
   /**
    * 웹에서 못 찾은 자리를 AI 생성 프롬프트로 바꾼다. 기본은 buildFallbackImagePrompts.
    * false를 주면 빈 자리를 그대로 둔다(테스트 - 헤드리스 Claude를 띄우면 안 된다).
@@ -405,6 +411,10 @@ export async function prepareManuscript(
   // 기획이 있으면 자리 배분을 기획이 정한다. 없으면 전부 undefined라 예전 경로 그대로다.
   // 배정은 routeImagePlan 한곳에서 한다 - 경로마다 따로 걸렀더니 생성 자리와 기획 밖 자리가 빠졌다.
   const route = plan ? routeImagePlan(plan, content, slotPrompts) : null;
+  // 자리별 후보(2026-10-02). 지난 실행 것을 이어받는다 - 재수집하지 않은 자리의 후보도 뷰어에 남는다.
+  let imageCandidates: Record<string, ImageCandidateRecord[]> = readImageCandidates(
+    job.metadata as Record<string, unknown> | null
+  );
   if (route) imageFailures.push(...route.notes);
   const planSearchIndexes = route?.searchIndexes;
   const planQueries = route?.queries;
@@ -495,6 +505,12 @@ export async function prepareManuscript(
       directUrls: readImageDirectUrls(job.metadata as Record<string, unknown> | null),
     });
     imageFailures.push(...outcome.failures);
+    // 판정자가 열어 본 후보를 남긴다(2026-10-02). 이번에 다시 찾은 자리만 갈아 끼우고 나머지는 둔다.
+    const freshCandidates = outcome.candidates ?? {};
+    if (Object.keys(freshCandidates).length > 0) {
+      imageCandidates = { ...imageCandidates, ...Object.fromEntries(Object.entries(freshCandidates)) };
+      await mergeJobMetadata(job.id, { imageCandidates });
+    }
     if (outcome.images.length > 0) {
       images = [...images.filter((e) => !outcome.images.some((n) => n.index === e.index)), ...outcome.images].sort(
         (a, b) => a.index - b.index
@@ -554,6 +570,7 @@ export async function prepareManuscript(
     // 수집 기록을 원고에 함께 싣는다(2026-10-01). 전까지 이 문장들은 console.warn으로만 나가
     // 아무도 보지 못했다 - 뷰어가 "채울 자리"는 보여줘도 **왜 비었는지**는 말하지 않았다.
     imageNotes: imageFailures,
+    imageCandidates,
     filePath: relative(PIPELINE_ROOT, manuscriptFilePath(date, job.keyword)),
     naver,
     sourceTag,

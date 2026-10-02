@@ -156,7 +156,12 @@ export type DuplicateCheck =
  * 이미지를 동시에 통과시킨다.
  */
 export class ImageDeduper {
-  private readonly registered: { key: string; filePath: string; fingerprint: ImageFingerprint }[] = [];
+  /**
+   * `alwaysCompare` - 거리와 상관없이 비전에 묻는 항목(2026-10-02). 이미 원고에 들어가 있던 이미지가
+   * 여기 해당한다. 같은 사진을 **다르게 자르거나 포스터로 가공한 것**(이혼숙려캠프: 1번 공식 스틸 ↔
+   * 6번 공식 포스터)은 dHash 거리가 "확실히 다르다" 구간으로 나와 비전에 한 번도 안 물었다.
+   */
+  private readonly registered: { key: string; filePath: string; fingerprint: ImageFingerprint; alwaysCompare?: boolean }[] = [];
   /**
    * 바이트가 똑같은 파일을 **Chromium 없이** 잡는다(2026-09-24 실측 사고).
    *
@@ -256,7 +261,11 @@ export class ImageDeduper {
     key: string,
     buffer: Buffer,
     mimeType: string,
-    slot?: { index: number; filePath: string }
+    /**
+     * index - 자리 순서 게이트용. 이미 원고에 있던 이미지를 등록할 때는 비운다(게이트를 타지 않는다).
+     * alwaysCompare - 이 항목은 이후 후보와 거리에 상관없이 비전으로 비교한다(위 registered 주석).
+     */
+    slot?: { index?: number; filePath: string; alwaysCompare?: boolean }
   ): Promise<DuplicateCheck> {
     // **뮤텍스 밖에서** 차례를 기다린다. 안에서 기다리면 뒤 자리가 뮤텍스를 쥔 채 앞 자리를
     // 기다리고, 앞 자리는 뮤텍스를 못 잡아 서로 막힌다(데드락).
@@ -288,7 +297,7 @@ export class ImageDeduper {
             hammingDistance(fingerprint.swapped, entry.fingerprint.hash),
             hammingDistance(fingerprint.hash, entry.fingerprint.swapped)
           );
-          if (nearest < CLEARLY_DIFFERENT_DISTANCE && entry.filePath) ambiguous.push(entry);
+          if (entry.filePath && (nearest < CLEARLY_DIFFERENT_DISTANCE || entry.alwaysCompare)) ambiguous.push(entry);
         }
 
         // 3) 애매하면 사람 눈에 준하는 판정을 받는다(사용자 결정 A안). dHash로는 합성컷의
@@ -299,7 +308,7 @@ export class ImageDeduper {
         }
 
         this.exactHashes.set(exact, key);
-        this.registered.push({ key, filePath: slot?.filePath ?? "", fingerprint });
+        this.registered.push({ key, filePath: slot?.filePath ?? "", fingerprint, alwaysCompare: slot?.alwaysCompare });
         return { duplicate: false };
       } finally {
         // 이 자리의 판정이 끝났으니 다음 자리를 연다. 예외가 나도 반드시 연다.

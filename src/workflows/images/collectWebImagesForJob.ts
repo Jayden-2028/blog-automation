@@ -9,7 +9,7 @@
 // 실행 자체가 불가능했다 - 결과적으로 **한 번도 자동 실행되지 않았고** 웹 검색 자리가 전부 빈 채로
 // 발행 대기에 올라갔다. 실행기를 Claude(WebSearch)로 바꾸면서 이 경로가 열렸다.
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -18,7 +18,7 @@ import { buildWebImageSlots, collectWebImages, defaultAskSameCut } from "./colle
 import { ImageDeduper } from "./imageFingerprint.js";
 import { splitSearchInstruction } from "./imageEditRequest.js";
 import type { CollectWebImagesOptions, UnfilledSlot } from "./collectWebImages.js";
-import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import type { ImageCandidateRecord, ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 
 export type CollectWebImagesForJobInput = {
   jobId: string;
@@ -77,6 +77,8 @@ export type CollectWebImagesForJobResult = {
   failures: string[];
   /** 웹에서 못 채운 자리. prepareManuscript가 AI 생성 폴백으로 넘긴다(2026-09-17). */
   unfilled: UnfilledSlot[];
+  /** 자리별 후보(2026-10-02). 뷰어 "후보 보기"와 `N번 후보M` 선택에 쓴다. */
+  candidates?: Record<number, ImageCandidateRecord[]>;
 };
 
 export async function collectWebImagesForJob(
@@ -85,6 +87,8 @@ export async function collectWebImagesForJob(
 ): Promise<CollectWebImagesForJobResult> {
   const filled = new Set(input.filledIndexes ?? []);
   const requirements = input.requirements ?? {};
+  /** 사용자 요구가 있는 자리의 검색어. 기획 검색어를 덮는다. */
+  const requirementQueries: Record<number, string[]> = {};
   // 사람이 이미지 주소를 찍어 준 자리는 **획득 방식과 무관하게** 다룬다(2026-09-24).
   // 실측 사고: `페이지 캡처` 자리에 쓸 수 있는 주소를 줬는데 웹 검색 자리만 뽑는 바람에
   // 그 주소를 아무도 읽지 않았다. 사람이 고른 것이 마커 표기보다 우선한다.
@@ -138,17 +142,33 @@ export async function collectWebImagesForJob(
       // 사용자는 "<검색어> 로 검색해서 나오는 <어떤 그림>"으로 쓴다. 문장을 통째로 검색창에
       // 넣으면 아무것도 안 나온다(2026-09-22 실측 - 1·5번 자리가 그래서 비었다).
       const { query, want } = splitSearchInstruction(requirement);
+      // 사용자 요구가 오면 **기획이 남긴 것을 전부 버린다**(2026-10-02 이혼숙려캠프 실측 사고).
+      //   - 주의사항: 기획은 "자극부부 당사자 얼굴 사진은 쓰지 않는다"를 남겼는데, 사용자가 바로 그
+      //     부부의 방송 캡처를 요청한 뒤에도 그 문장이 판정에 그대로 실려 원하는 사진을 막았다.
+      //   - 검색어: 아래 requirementQueries가 기획 검색어를 덮는다. 안 덮으면 수집은 기획 검색어
+      //     (`이혼숙려캠프 박하선`)로 하고 판정만 사용자 기준이 돼 후보가 전부 탈락한다.
+      // 검색어를 못 뽑았으면(대부분 "~로 바꿔줘"로 끝난다) **원고 키워드의 핵심**으로 찾는다 -
+      // 기획이 잘못 잡은 대상을 사용자가 고치려는 것이라 기획 검색어로 돌아가면 같은 실패를 한다.
+      const userQueries = uniqueQueries([query, keywordCore(input.keyword), input.keyword]);
+      requirementQueries[slot.index] = userQueries;
+      const { caution: _droppedPlanCaution, ...rest } = slot;
       return {
-        ...slot,
-        // 검색어를 못 뽑았으면 기존 검색어를 그대로 둔다 - 문장을 넣느니 낫다.
-        query: query || slot.query,
+        ...rest,
+        query: userQueries[0],
         // **설명을 사용자 말로 갈아 끼운다.** 덧붙이기만 하면 옛 설명이 판정을 끌고 간다
         // (실측: 자리 5의 옛 설명이 "조회수·추천수·댓글수"라, 유튜브 캡처를 요청했는데도
         // 검증자가 "조회수를 요약할 이미지가 없다"며 전부 버렸다).
         description: want,
       };
-    });
+    })
+    // "방송 화면·캡처·자막"을 원하는 자리(2026-10-02). 공식 스틸 강제와 자막 감점을 끈다 -
+    // 예능 사연 자리에서는 **자막이 박힌 방송 캡처가 곧 내용**이다(이혼숙려캠프 사용자 요청).
+    .map((slot) => (wantsBroadcastCapture(slot.description) ? { ...slot, broadcastCapture: true } : slot));
   if (slots.length === 0) return { images: [], failures: [], unfilled: [] };
+  // 사용자 요구가 있는 자리는 기획 검색어·최신성 대신 사용자 기준으로 찾는다(위 map 참고).
+  const effectivePlanQueries = input.planQueries || Object.keys(requirementQueries).length > 0
+    ? { ...(input.planQueries ?? {}), ...requirementQueries }
+    : undefined;
 
   // 사용자가 주소를 찍어준 자리는 검색을 돌리지 않는다. 에이전트 대신 그 주소를 "고른 결과"로
   // 넣어 주면, 내려받기·크기 검사·업로드는 기존 경로를 그대로 탄다(2026-09-22).
@@ -190,7 +210,15 @@ export async function collectWebImagesForJob(
         const res = await fetch(url);
         if (!res.ok) continue;
         const buffer = Buffer.from(await res.arrayBuffer());
-        await deduper.claim(`자리 ${index}(이미 사용 중)`, buffer, res.headers.get("content-type") ?? "image/jpeg");
+        // **파일로 남긴다**(2026-10-02). 파일이 없으면 애매할 때 비전 비교를 못 해, 같은 사진을 다르게
+        // 자른 것(스틸 ↔ 포스터)이 그대로 통과했다(이혼숙려캠프 1·6번). 이미 쓴 컷은 거리와
+        // 상관없이 비전에 묻는다 - 이 경로는 이미지 수정 재수집 때만 돌아 호출이 많지 않다.
+        const filePath = resolve(dir, `existing-${index}`);
+        await writeFile(filePath, buffer);
+        await deduper.claim(`자리 ${index}(이미 사용 중)`, buffer, res.headers.get("content-type") ?? "image/jpeg", {
+          filePath,
+          alwaysCompare: true,
+        });
         registered += 1;
       } catch {
         // 못 받아도 수집은 진행한다 - 중복을 놓치는 쪽이 자리를 비우는 쪽보다 낫다.
@@ -249,9 +277,13 @@ export async function collectWebImagesForJob(
         category: input.category ?? null,
         briefType: input.briefType ?? null,
         researchText: input.researchText ?? null,
-        planQueries: input.planQueries,
+        planQueries: effectivePlanQueries,
         planRecency: input.planSubjects
-          ? Object.fromEntries(Object.entries(input.planSubjects).map(([k, v]) => [Number(k), v.recency]))
+          ? Object.fromEntries(
+              Object.entries(input.planSubjects)
+                .filter(([k]) => !requirementQueries[Number(k)])
+                .map(([k, v]) => [Number(k), v.recency])
+            )
           : undefined,
       }
     );
@@ -279,11 +311,32 @@ export async function collectWebImagesForJob(
         license: record.license,
       }));
 
-    return { images, failures, unfilled };
+    // 판정자가 열어 본 후보(2026-10-02). 사용자가 직접 찍어 준 자리는 후보가 없다(검색을 안 한다).
+    const candidates = { ...(direct.candidates ?? {}), ...(result.candidates ?? {}) };
+
+    return { images, failures, unfilled, candidates };
   } finally {
     // 지문 계산용 Chromium을 닫는다. 안 닫으면 러너에 브라우저가 남는다.
     // 호출부가 넘긴 deduper는 호출부가 닫는다 - 여기서 닫으면 재사용을 깨뜨린다.
     if (!options.deduper) await ownedDeduper?.close();
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * 원고 키워드의 핵심 - 앞 두 단어(2026-10-02).
+ * `이혼숙려캠프 자극부부 남편 성적 폭언` → `이혼숙려캠프 자극부부`. 키워드는 "대상 + 사건" 순서로
+ * 만들어지므로 앞 두 단어가 대상이다. 사용자가 검색어 없이 "방송 캡처로 바꿔줘"라고만 했을 때 쓴다.
+ */
+export function keywordCore(keyword: string): string {
+  return (keyword ?? "").trim().split(/\s+/).slice(0, 2).join(" ");
+}
+
+function uniqueQueries(queries: string[]): string[] {
+  return [...new Set(queries.map((q) => (q ?? "").trim()).filter(Boolean))];
+}
+
+/** 방송 화면 캡처(자막 포함)를 원하는 자리인가. 설명은 사용자 요구나 기획 대상이다. */
+export function wantsBroadcastCapture(description: string): boolean {
+  return /방송\s*(화면|캡처|캡쳐|장면)|캡처|캡쳐|자막/.test(description ?? "");
 }
