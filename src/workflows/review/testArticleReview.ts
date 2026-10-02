@@ -323,6 +323,18 @@ function main(): void {
   assert(!varied.some((c) => c.message.includes("같은 정보를 반복")), "서로 다른 정보는 반복으로 보면 안 된다");
   console.log("✅ 품질: thin 분량 표시 + 같은 정보 반복 탐지(정상 문장 통과)");
 
+  // 15-10) 2026-10-02: 올해 날짜의 연도 표기는 경고, 다른 연도는 통과.
+  const asOfNow = new Date("2026-10-02T09:00:00+09:00");
+  const thisYear = checkAttributionHedging("2026년 10월 1일에 SNS에서 퍼졌습니다.", asOfNow);
+  assert(thisYear.some((c) => c.message.includes("올해 날짜에 연도")), "올해 연도+월 표기를 경고해야 한다");
+  const pastYear = checkAttributionHedging("한글날은 1990년 공휴일에서 빠졌고 2012년 12월 28일에 복원됐습니다.", asOfNow);
+  assert(pastYear.length === 0, `다른 연도는 정보라 통과해야 한다 (${JSON.stringify(pastYear)})`);
+  const yearOnly = checkAttributionHedging("2026년 공휴일은 70일입니다.", asOfNow);
+  assert(yearOnly.length === 0, `연도만 쓴 표기는 날짜가 아니라 통과해야 한다 (${JSON.stringify(yearOnly)})`);
+  const noYear = checkAttributionHedging("10월 1일에 SNS에서 퍼졌습니다.", asOfNow);
+  assert(noYear.length === 0, "연도를 뺀 날짜는 통과해야 한다");
+  console.log("✅ 인용/헤지: 올해 날짜 연도 표기 경고, 다른 연도·연도 단독은 통과");
+
   // ---------- 공통 문체(voice) (2026-09-16) ----------
 
   // v1) voice.md §2가 금지한 구어 어미는 1건이라도 경고 + 어떤 어미인지 표시.

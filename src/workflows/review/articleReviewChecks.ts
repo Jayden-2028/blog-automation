@@ -20,6 +20,8 @@ import {
   UNPUBLISHED_PATTERN,
   COMMENT_INVITE_PATTERN,
   ACCORDING_TO_PATTERN,
+  currentYearInDatePattern,
+  kstYear,
   BANNED_COLLOQUIAL_ENDINGS,
 } from "../writing/bannedPatterns.js";
 
@@ -367,7 +369,7 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
 
 
 /** 참고 자료 이후는 남의 글 링크 제목이라 대상이 아니다(stripReferencesSection과 같은 이유). */
-export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
+export function checkAttributionHedging(rawBody: string | null, now: Date = new Date()): ReviewCheck[] {
   if (!rawBody) return [];
   const body = stripReferencesSection(rawBody);
   const checks: ReviewCheck[] = [];
@@ -425,6 +427,15 @@ export function checkAttributionHedging(rawBody: string | null): ReviewCheck[] {
       category: "quality",
       severity: "warning",
       message: '"아직 공개되지 않았습니다/일정 미정" 같은 비공개·미정 서술이 있습니다(facts-and-hedging.md 핵심 원칙 4 - 없는 값은 쓰지 않는다)',
+    });
+  }
+
+  const year = kstYear(now);
+  if (currentYearInDatePattern(year).test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `올해 날짜에 연도를 붙였습니다("${year}년 ○월 ○일") - core-rules.md §1-11: 올해 날짜는 연도를 빼고 씁니다(다른 연도는 그대로 씁니다)`,
     });
   }
 

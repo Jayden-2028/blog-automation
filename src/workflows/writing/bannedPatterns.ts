@@ -55,6 +55,21 @@ export const BANNED_COLLOQUIAL_ENDINGS =
  */
 export const ACCORDING_TO_PATTERN = /[가-힣A-Za-z0-9]+\s*(?:에\s*따르면|에\s*의하면)/g;
 
+/**
+ * 올해 날짜에 붙은 연도 표기(2026-10-02 사용자 결정). "2026년 10월 1일에 SNS에 퍼졌습니다"에서 연도만 뺀다.
+ *
+ * **다른 연도는 정보다** - 올해 연도 바로 뒤에 월이 오는 경우만 걸린다("1990년 공휴일에서 빠졌습니다"는 통과).
+ * 연도만 쓴 표기("2026년 공휴일은 70일")도 날짜가 아니라 그 해의 값이라 대상이 아니다.
+ */
+export function currentYearInDatePattern(year: number): RegExp {
+  return new RegExp(`${year}년\\s*(?=\\d{1,2}월)`, "g");
+}
+
+/** 파이프라인은 한국 시간으로 돈다 - "올해"도 KST 기준이다. */
+export function kstYear(now: Date = new Date()): number {
+  return Number(now.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }).slice(0, 4));
+}
+
 /** 댓글·의견 유도 마무리(2026-09-30 금지). "여러분은 어떻게 생각하시나요?", "댓글로 남겨주세요". */
 export const COMMENT_INVITE_PATTERN =
   /여러분(?:은|도|의)?[^.!?\n]{0,30}(?:생각|의견|경험)[^.!?\n]{0,20}\?|댓글(?:로|에)?\s*(?:남겨|공유|알려|달아)|의견(?:을)?\s*(?:남겨|들려)\s*주/g;
