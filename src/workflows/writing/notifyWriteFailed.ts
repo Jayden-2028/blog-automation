@@ -52,11 +52,17 @@ export function buildWriteFailedMessage(
 ): TelegramOutgoingMessage {
   const { reason, action } = describeWriteFailure(error, researchText);
   const text = ["❌ <b>원고 작성 실패</b>", "", `키워드: <b>${escapeTelegramHtml(job.keyword)}</b>`, `사유: ${escapeTelegramHtml(reason)}`].join("\n");
-  const label = action === "rerun" ? "🔍 자료조사 다시 하기" : "🔄 다시 시도";
-  return {
-    text,
-    replyMarkup: { inline_keyboard: [[{ text: label, callback_data: buildResearchDecisionCallbackData(action, job.id) }]] },
-  };
+  const callback = (a: "retry" | "rerun" | "reject") => buildResearchDecisionCallbackData(a, job.id);
+  // 자료 부족은 [자료조사 다시 하기] + [반려] 두 개 - 다시 해 볼지, 이 키워드를 버릴지 사람이 정한다.
+  // 그 밖의 실패(시간 초과 등)는 같은 자료로 [다시 시도] 하나.
+  const row =
+    action === "rerun"
+      ? [
+          { text: "🔍 자료조사 다시 하기", callback_data: callback("rerun") },
+          { text: "🗑 반려", callback_data: callback("reject") },
+        ]
+      : [{ text: "🔄 다시 시도", callback_data: callback("retry") }];
+  return { text, replyMarkup: { inline_keyboard: [row] } };
 }
 
 /** 조사 파일 내용: job.metadata에 저장된 것을 먼저 쓰고(클라우드 실행), 없으면 로컬 파일을 읽는다. */

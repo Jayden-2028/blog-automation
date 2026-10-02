@@ -1026,7 +1026,9 @@ export class TelegramBot {
       return this.handleResearchRerun(job);
     }
 
-    if (!this.isStillAtResearchCheckpoint(job)) {
+    // 작성이 실패한 job(자료 부족 등)은 status가 writing에 남는다 - 실패 알림의 [반려]가 먹어야 한다(2026-10-02).
+    const rejectableFailure = parsed.action === "reject" && job.status === "writing" && this.hasKnownWriteFailure(job);
+    if (!this.isStillAtResearchCheckpoint(job) && !rejectableFailure) {
       // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
       // 집필은 수 분 걸려 사용자가 여러 번 누르기 쉬우므로, 두 번째 탭에도 "지금 진행 중"이라고
       // 분명히 알려준다(무음으로 넘기면 오히려 더 누른다). writing에 임계값 넘게 멈춰 있으면
@@ -1119,20 +1121,16 @@ export class TelegramBot {
     const messageId = query.message?.message_id;
     if (!keyboard || messageId === undefined) return;
 
-    const LABELS: Record<ResearchDecisionAction, string> = {
-      write: "원고 작성",
-      reject: "중단",
-      retry: "다시 시도",
-      rerun: "자료조사 다시 하기",
-    };
-
+    // 라벨은 버튼이 원래 달고 있던 문구를 쓴다(앞의 이모지만 뗀다) - 같은 reject라도 조사 확인 메시지는
+    // "중단", 작성 실패 알림은 "반려"라고 부르므로 동작 이름으로 고정하면 문구가 바뀐다.
+    const plain = (text: string) => text.replace(/^[^\p{L}\p{N}]+/u, "");
     const updated = keyboard.map((row) =>
       row.map((button) => {
         const parsedButton = parseResearchDecisionCallbackData(button.callback_data);
         if (!parsedButton) return button;
 
         const selected = parsedButton.action === action;
-        return { ...button, text: selected ? `✅ ${LABELS[parsedButton.action]}` : LABELS[parsedButton.action] };
+        return { ...button, text: selected ? `✅ ${plain(button.text)}` : plain(button.text) };
       })
     );
 

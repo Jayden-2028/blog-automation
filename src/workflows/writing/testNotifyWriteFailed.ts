@@ -25,13 +25,14 @@ function main(): void {
   assert(blocked.text.includes("공식 자료(공공기관·법원 등)가 1건뿐"), `어떤 자료가 모자란지 알려야 한다: ${blocked.text}`);
   assert(!blocked.text.includes("보강") && !blocked.text.includes("다시 쓸 수"), "이유만 알린다 - 보강/재작성 안내는 없다");
   assert(!/verdict|blocked|draft|\/home|npm run/.test(blocked.text), `개발 용어/경로가 없어야 한다: ${blocked.text}`);
-  const rerunButton = blocked.replyMarkup?.inline_keyboard[0]?.[0];
-  assert(
-    rerunButton && "callback_data" in rerunButton && rerunButton.callback_data === `research:rerun:${JOB.id}`,
-    "자료 부족은 [자료조사 다시 하기] 버튼(rerun)이어야 한다 - 글쓰기만 다시 하면 같은 이유로 또 막힌다"
-  );
-  assert(rerunButton.text.includes("자료조사 다시"), "버튼 문구");
-  console.log("✅ 자료 부족(blocked) -> 키워드 + 쉬운 사유 + [자료조사 다시 하기] 버튼");
+  const row = blocked.replyMarkup?.inline_keyboard[0] ?? [];
+  assert(row.length === 2, `자료 부족은 버튼 2개(자료조사 다시 하기 / 반려)여야 한다 (실제: ${row.length})`);
+  const [rerunButton, rejectButton] = row;
+  assert("callback_data" in rerunButton && rerunButton.callback_data === `research:rerun:${JOB.id}`, "첫 버튼은 rerun");
+  assert(rerunButton.text.includes("자료조사 다시"), "rerun 버튼 문구");
+  assert("callback_data" in rejectButton && rejectButton.callback_data === `research:reject:${JOB.id}`, "둘째 버튼은 reject");
+  assert(rejectButton.text.includes("반려"), "reject 버튼 문구");
+  console.log("✅ 자료 부족(blocked) -> 키워드 + 쉬운 사유 + [자료조사 다시 하기][반려] 버튼");
 
   // 2) 시간 초과 -> 재시도 버튼(research:retry:<jobId>).
   const timeout = buildWriteFailedMessage(JOB, "헤드리스 실행이 1200000ms 안에 끝나지 않아 중단했습니다.");

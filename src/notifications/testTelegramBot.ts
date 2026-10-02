@@ -821,6 +821,23 @@ async function main(): Promise<void> {
     console.log("✅ research:rerun -> 실패한 적 없거나 이미 지나간 job은 거부");
   }
 
+  // 8-8c) research:reject - 작성이 실패해 writing에 남은 job도 [반려]로 접을 수 있어야 한다(2026-10-02).
+  //       실패한 적 없는 writing job(지금 정말 돌고 있는 중)은 그대로 막는다.
+  {
+    const calls = newResearchCalls();
+    const failedJob = makeResearchJob({ status: "writing", metadata: { lastError: "[writing] verdict가 blocked" } });
+    const bot = makeResearchBot({ job: failedJob, calls });
+    const rejected = await bot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(rejected.outcome.status === "rejected", `실패한 writing job은 반려돼야 한다 (실제: ${rejected.outcome.status})`);
+    assert(calls.rejectJob === 1, "rejectJob을 1회 불러야 한다");
+
+    const calls2 = newResearchCalls();
+    const runningBot = makeResearchBot({ job: makeResearchJob({ status: "writing", metadata: {} }), calls: calls2 });
+    const blocked = await runningBot.handleResearchDecisionCallback(researchQuery(`research:reject:${RESEARCH_JOB_ID}`));
+    assert(blocked.outcome.status === "already_final" && calls2.rejectJob === 0, "정말 돌고 있는 writing job은 반려하면 안 된다");
+    console.log("✅ research:reject -> 실패한 writing job은 반려, 돌고 있는 job은 거부");
+  }
+
   // 8-9) research: 콜백이 키워드 선택/원고 검수 핸들러를 침범하지 않는다.
   {
     const calls = newCalls();
