@@ -262,6 +262,13 @@ export type CollectWebImagesOptions = {
    * 없으면 이 경로는 조용히 비활성이고 기존 흐름 그대로다.
    */
   researchText?: string | null;
+  /**
+   * 기획 단계가 자리마다 정한 검색어(2026-10-02, A안). 있으면 **이것을 그대로 쓴다** -
+   * 카테고리 서치풀 확장(expandQueriesForPools)을 건너뛴다. 기획이 이미 문단을 읽고 중의성과
+   * 서치풀까지 판단해 만든 질의라, 거기에 또 서치풀 단어를 붙이면 검색어가 길어져 영상 썸네일이
+   * 올라온다(R8).
+   */
+  planQueries?: Record<number, string[]>;
   /** 테스트 주입 지점. 기본은 실제 HEAD 요청. */
   fetchTrailerFrames?: typeof fetchTrailerFrameCandidates;
   /**
@@ -309,7 +316,12 @@ export type CollectWebImagesOptions = {
 export function buildWebImageSlots(
   body: string,
   imagePrompts: string[],
-  alsoInclude: ReadonlySet<number> = new Set()
+  alsoInclude: ReadonlySet<number> = new Set(),
+  /**
+   * 기획 단계가 "웹 검색"으로 정한 자리(2026-10-02, A안). 주면 **이 목록만** 수집한다 -
+   * 마커의 획득 방식은 보지 않는다. 획득 방식을 정하는 주체가 기획으로 넘어갔다.
+   */
+  onlyIndexes?: ReadonlySet<number>
 ): WebImageSlot[] {
   const blocks = parseManuscriptBlocks(body, imagePrompts);
   const slots: WebImageSlot[] = [];
@@ -319,7 +331,12 @@ export function buildWebImageSlots(
   for (const block of blocks) {
     if (block.type === "image") {
       imageIndex += 1;
-      if (block.acquisition === "search" || alsoInclude.has(imageIndex)) {
+      // `unknown`은 획득 방식 꼬리가 없는 마커다 - 웹 검색으로 받는다(2026-10-01).
+      // 꼬리를 지우는 방향(A안)의 준비다. 전에는 AI 생성으로 갔는데 그건 "웹 검색이 기본"이라는
+      // 지금 규격과 반대였다.
+      const byMarker = block.acquisition === "search" || block.acquisition === "unknown";
+      const wanted = onlyIndexes ? onlyIndexes.has(imageIndex) : byMarker;
+      if (wanted || alsoInclude.has(imageIndex)) {
         slots.push({ index: imageIndex, description: block.description, query: block.prompt, context: lastText });
       }
       continue;
@@ -861,7 +878,11 @@ export async function collectWebImages(
         // 원고 검색어만 쓰면 일반 색인에서 기사 사진·재가공 썸네일이 올라온다 - 실측에서
         // `추영우 김소현 연애박사`는 700px 기사 사진을, `연애박사 키노라이츠`는 2747x1920
         // 공식 스틸을 줬다. 순서는 유지한다(원고 검색어가 먼저, 서치풀이 뒤).
-        const queries = expandQueriesForPools(query, input.keyword, options.category ?? null, options.briefType ?? null);
+        const planned = options.planQueries?.[slot.index];
+        const queries =
+          planned && planned.length > 0
+            ? planned
+            : expandQueriesForPools(query, input.keyword, options.category ?? null, options.briefType ?? null);
         const results = await Promise.all(queries.map((q) => searchImages(q).catch(() => [])));
 
         // 질의별 결과를 **번갈아** 섞는다(2026-09-24). 이어 붙이면 원고 검색어 결과가 앞을 다

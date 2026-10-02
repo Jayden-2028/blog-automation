@@ -121,10 +121,13 @@ export async function generateManuscriptImages(
     .map((block, i) => ({ block, index: i + 1 }))
     // `infographic`도 AI가 만든다(2026-10-01). `table`은 여전히 제외 - 본문 표를 그대로 옮긴
     // 이미지는 만들지 않는다(image-maker.md §9).
-    .filter(
-      ({ block }) =>
-        block.acquisition === "ai" || block.acquisition === "unknown" || block.acquisition === "infographic"
-    )
+    //
+    // **`unknown`(획득 방식 꼬리가 없는 마커)을 뺐다**(2026-10-01). 전에는 옛 원고 호환으로 AI에
+    // 보냈는데, 그 기본값이 꼬리를 지우는 길을 막고 있었다 - 집필자가 꼬리를 안 쓰기 시작하면
+    // **전 자리가 AI 생성으로 쏟아진다.** 지금 규격은 "웹 검색이 기본, AI는 폴백"이므로
+    // (image-maker.md §2) 꼬리가 없으면 웹 검색으로 간다(buildWebImageSlots가 같이 바뀌었다).
+    // 웹에서 못 찾으면 폴백이 AI로 메우므로 결과적으로 잃는 자리는 없다.
+    .filter(({ block }) => block.acquisition === "ai" || block.acquisition === "infographic")
     .filter(({ index }) => !onlyIndexes || onlyIndexes.has(index));
 
   // 웹 수집이 실패해 AI로 돌려받은 자리를 같은 대상 목록에 합친다. 본문 마커의 acquisition은

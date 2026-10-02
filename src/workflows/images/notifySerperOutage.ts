@@ -51,10 +51,39 @@ export type NotifySerperOutageOptions = {
 };
 
 /** 이번 실행에서 장애가 있었으면 한 번 알린다. 없으면 아무것도 하지 않는다. */
+/**
+ * 알림 스위치(2026-10-02 사용자 요청). **기본은 꺼짐**이다.
+ *
+ * 왜 껐나: Serper 크레딧이 소진돼 **모든 실행이 같은 장애를 다시 알린다.** 사용자는 이미 알고
+ * 있고, 며칠 더 이미지를 지켜본 뒤 충전 여부를 정하기로 했다. 그동안 같은 메시지가 반복해서
+ * 오는 것은 알림을 무디게 만들 뿐이다.
+ *
+ * **장애가 묻히지는 않는다** - 콘솔 경고는 그대로 남고, 수집 기록(imageNotes)에도 자리별로
+ * 남아 뷰어에서 보인다. 텔레그램만 조용해진다.
+ *
+ * 충전하고 다시 켤 때는 저장소 variables에 `SERPER_OUTAGE_ALERT=true`를 넣는다.
+ */
+function alertsEnabled(): boolean {
+  return (process.env.SERPER_OUTAGE_ALERT ?? "").trim().toLowerCase() === "true";
+}
+
 export async function notifySerperOutage(options: NotifySerperOutageOptions = {}): Promise<boolean> {
   const takeOutage = options.takeOutage ?? takeSerperOutage;
   const outage = takeOutage();
   if (!outage) return false;
+
+  // 스위치가 꺼져 있어도 **장애는 소비한다**(takeOutage를 이미 불렀다) - 다음 실행에 묵은 장애가
+  // 되살아나지 않게 한다. 대신 콘솔에는 남긴다.
+  //
+  // 주입된 sendMessages도 예외로 두지 않는다 - 테스트가 운영과 다른 길을 타면 스위치가 실제로
+  // 작동하는지 아무도 모른다.
+  if (!alertsEnabled()) {
+    console.warn(
+      `⚠️ [serper] 구글 이미지 검색 장애(HTTP ${outage.status}) - 텔레그램 알림은 꺼져 있습니다` +
+        `(SERPER_OUTAGE_ALERT=true로 켭니다). 검색어: ${outage.query}`
+    );
+    return false;
+  }
 
   const sendMessages =
     options.sendMessages ?? ((messages) => TelegramNotifier.fromEnv().sendMessages(messages));
