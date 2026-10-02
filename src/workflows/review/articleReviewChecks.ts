@@ -199,7 +199,29 @@ export type CheckQualityInput = {
   isMedical: boolean;
   /** 자료조사 verdict가 thin이면 분량 하한 미달은 예상된 결과다(2026-09-30). */
   researchThin?: boolean;
+  /** 이 job의 메인 키워드. 제목 첫 마디에 들어갔는지 본다(2026-10-02). */
+  keyword?: string | null;
 };
+
+/** 제목 꼬리의 "~정리/총정리/모음". 후킹을 죽이는 자리다(core-rules.md §5). */
+const TITLE_SUMMARY_TAIL = /(?:정리|총정리|모음|총집합)\s*$/;
+
+/**
+ * 제목 맨 앞에서 키워드를 찾을 때 보는 범위. 따옴표나 짧은 수식어 한 토막은 앞설 수 있게 두되
+ * ("'스캔들' 최대 수혜자, 한선화…", "버추얼 아이돌 플레이브 컴백"은 통과), 어절 서넛을 앞세워
+ * 키워드를 뒤로 미는 형태("천재 의사가 된 김지원…")는 걸리도록 8자로 잡았다.
+ */
+const TITLE_HEAD_WINDOW = 8;
+
+/**
+ * 제목이 "줄거리, 공개일, 출연진, 방영 채널"처럼 짧은 명사를 나열하며 끝나는가.
+ * 쉼표로 끊은 **마지막 세 조각이 전부 8자 이하**면 나열로 본다 - 한 조각이라도 길면 설명이다.
+ */
+function hasKeywordListTail(title: string): boolean {
+  const parts = title.split(/\s*,\s*/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 4) return false;
+  return parts.slice(-3).every((part) => part.length <= 8);
+}
 
 /** 문장 단위로 나눈다. 중복 문장 검사에 쓴다. */
 function splitSentences(body: string): string[] {
@@ -292,6 +314,26 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
       severity: "error",
       message: "참고 자료 섹션 또는 출처 링크가 없습니다",
     });
+  }
+
+  // 제목 - 첫 마디 키워드와 나열 꼬리(2026-10-02 사용자 결정, core-rules.md §5)
+  if (input.title) {
+    const title = input.title.trim();
+    if (TITLE_SUMMARY_TAIL.test(title) || hasKeywordListTail(title)) {
+      checks.push({
+        category: "quality",
+        severity: "warning",
+        message: `제목이 키워드 나열로 끝납니다("${title.slice(-20)}") - core-rules.md §5: 그 키워드는 소제목·해시태그로 넣고 제목은 후킹으로 끝냅니다`,
+      });
+    }
+    const tokens = (input.keyword ?? "").split(/\s+/).filter((t) => t.length >= 2);
+    if (tokens.length > 0 && !tokens.some((t) => title.slice(0, TITLE_HEAD_WINDOW).includes(t))) {
+      checks.push({
+        category: "quality",
+        severity: "warning",
+        message: `제목 첫 마디에 메인 키워드가 없습니다(앞 ${TITLE_HEAD_WINDOW}자: "${title.slice(0, TITLE_HEAD_WINDOW)}") - core-rules.md §5: 인물명·작품명을 맨 앞에 둡니다`,
+      });
+    }
   }
 
   // 제목-본문 일치

@@ -336,6 +336,57 @@ function main(): void {
   assert(noYear.length === 0, "연도를 뺀 날짜는 통과해야 한다");
   console.log("✅ 인용/헤지: 올해 날짜 연도 표기 경고, 다른 연도·연도 단독은 통과");
 
+  // ---------- 제목 (2026-10-02 사용자 결정) ----------
+  {
+    const base = { body: makeCleanBody(), hashtags: Array(10).fill("#t"), isMedical: false };
+    const listTail = checkQuality({
+      ...base,
+      title: "설인아 퍼컬이 남장? '나의 유죄인간' 남장 스틸 화제, 줄거리, 공개일, 출연진, 방영 채널",
+      keyword: "설인아 나의 유죄인간",
+    });
+    assert(listTail.some((c) => c.message.includes("키워드 나열로 끝납니다")), `나열 꼬리를 경고해야 한다 (${JSON.stringify(listTail.map((c) => c.message))})`);
+
+    const summaryTail = checkQuality({
+      ...base,
+      title: "김지원 '닥터X 하얀 마피아의 시대' 티저 예고편, 편성, 채널 정리",
+      keyword: "김지원 닥터X",
+    });
+    assert(summaryTail.some((c) => c.message.includes("키워드 나열로 끝납니다")), "'~정리'로 끝나면 경고");
+
+    const keywordLate = checkQuality({
+      ...base,
+      title: "천재 의사가 된 김지원, 새 드라마에서 메스를 들었습니다",
+      keyword: "김지원 닥터X",
+    });
+    assert(keywordLate.some((c) => c.message.includes("첫 마디에 메인 키워드가 없습니다")), `키워드가 뒤로 밀리면 경고 (${JSON.stringify(keywordLate.map((c) => c.message))})`);
+
+    // 공식대로 쓴 제목은 둘 다 통과한다(실측에서 조회수가 높았던 형태 포함).
+    for (const [title, keyword] of [
+      ["김지원이 메스를 들었다, '닥터X' 티저 공개", "김지원 닥터X"],
+      ["유인영 결정사 상담 영상 속 이상형 조건 다섯 가지, 스스로 짚은 결혼 못하는 이유", "유인영 결정사"],
+      ["'스캔들' 최대 수혜자, 한선화 분회 연기 호평, 신스틸러가 주연보다 더 뜬 이유", "한선화 스캔들"],
+    ] as const) {
+      const ok = checkQuality({ ...base, title, keyword });
+      assert(
+        !ok.some((c) => c.message.includes("첫 마디") || c.message.includes("나열로 끝납니다")),
+        `공식대로 쓴 제목은 통과해야 한다: ${title} (${JSON.stringify(ok.map((c) => c.message))})`
+      );
+    }
+
+    // 수식어를 앞세워 키워드가 세 번째 어절로 밀린 형태도 경고한다 - 사용자 규칙은 "제일 첫 마디"다.
+    const modifierFirst = checkQuality({
+      ...base,
+      title: "버추얼 아이돌 플레이브 컴백, 10월 12일 오후 6시, 5집 듣는 법",
+      keyword: "플레이브 컴백",
+    });
+    assert(modifierFirst.some((c) => c.message.includes("첫 마디")), "수식어를 앞세우면 경고한다");
+
+    // 키워드를 안 넘기면 첫 마디 검사는 건너뛴다(옛 호출부 호환).
+    const noKeyword = checkQuality({ ...base, title: "천재 의사가 된 김지원, 새 드라마 소식" });
+    assert(!noKeyword.some((c) => c.message.includes("첫 마디")), "키워드가 없으면 첫 마디 검사를 하지 않는다");
+    console.log("✅ 제목: 나열 꼬리·'정리' 경고, 키워드가 뒤로 밀리면 경고, 공식대로면 통과");
+  }
+
   // ---------- 기관 귀속 (2026-10-02) ----------
   {
     const research = [
