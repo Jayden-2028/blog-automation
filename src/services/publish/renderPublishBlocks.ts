@@ -38,9 +38,13 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// URL 안의 괄호는 짝이 맞을 때만 URL의 일부로 본다. 위키백과 `…_(2026년_영화)` 같은 주소가
+// `)`에서 끊겨 404 링크가 된 적이 있다(2026-10-03 실측). 짝 없는 `)`는 마크다운 링크의 끝이다.
+const URL_SOURCE = String.raw`https?:\/\/(?:[^\s()]|\([^\s()]*\))+`;
+
 /** 굵게(**text**), 이탤릭(*text*), 링크([text](url))가 섞인 한 줄을 인라인 HTML로. */
 export function inlineToHtml(text: string, options: PublishRenderOptions): string {
-  const pattern = /\*\*(.+?)\*\*|\*(.+?)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  const pattern = new RegExp(`\\*\\*(.+?)\\*\\*|\\*(.+?)\\*|\\[([^\\]]+)\\]\\((${URL_SOURCE})\\)`, "g");
   let result = "";
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -61,7 +65,7 @@ export function inlineToHtml(text: string, options: PublishRenderOptions): strin
   return result;
 }
 
-const IMAGE_LINE_PATTERN = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
+const IMAGE_LINE_PATTERN = new RegExp(`^!\\[([^\\]]*)\\]\\((${URL_SOURCE})\\)$`);
 const IMAGE_PLACEHOLDER_PATTERN = /^\[IMAGE:[^\]]*\]$/;
 const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
 

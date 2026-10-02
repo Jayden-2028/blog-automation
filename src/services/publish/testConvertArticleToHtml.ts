@@ -47,6 +47,12 @@ function main(): void {
   assert(inline.includes("<strong>굵게</strong>"), "strong 실패");
   assert(inline.includes("<em>이탤릭</em>"), "em 실패");
   assert(inline.includes('<a href="https://example.com" target="_blank" rel="noopener">링크</a>'), `a 실패 (${inline})`);
+
+  // 주소 안의 짝 맞는 괄호는 URL의 일부다(위키백과 문서명). 뒤따르는 짝 없는 `)`는 링크의 끝이다.
+  const paren = convertArticleToHtml("- [룩백 (2026년 영화) - 위키백과](https://ko.wikipedia.org/wiki/룩백_(2026년_영화))");
+  assert(paren.includes('href="https://ko.wikipedia.org/wiki/룩백_(2026년_영화)"'), `괄호 URL 실패 (${paren})`);
+  const plain = convertArticleToHtml("[가](https://a.com/x) 그리고 (참고: [나](https://b.com/y))");
+  assert(plain.includes('href="https://a.com/x"') && plain.includes('href="https://b.com/y"'), `일반 URL 회귀 (${plain})`);
   console.log("✅ 인라인 strong/em/a(target=_blank)");
 
   // 4) 목록(소제목 없이 단독으로 오는 경우)
