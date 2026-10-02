@@ -44,33 +44,14 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
 
   // 2026-08-28 사용자 피드백으로 제목/카테고리만 남겼다: 키워드는 제목과 거의 겹치고, 근거
   // 건수와 작성 소요 시간은 이 시점에 사람이 내릴 결정(승인/수정/반려)에 쓰이지 않는다.
-  // 근거 구성은 job.metadata.sourceCounts에 그대로 남아 있고, 조사 단계 알림에서 이미 봤다.
+  // 2026-10-02: 제목 / 카테고리 / 검수 결과만 보여준다. 이미지 상태·독자 질문 커버리지·안내 문구는
+  // 뺐다(이미지는 승인 이후 단계가 맡고, 폰 화면에서 길어진다). 마커/프롬프트 짝 불일치는 승인하면
+  // AI 이미지가 전부 비는 결함 신호라 불일치일 때만 남겼다.
   lines.push(
     "",
     `<b>${escapeTelegramHtml(article.title ?? job.keyword)}</b>`,
     `category: ${escapeTelegramHtml(job.category ?? "N/A")}`
   );
-
-  // 이미지 요약(2026-08-28) - 실패가 있으면 알려서, "원고 보기"를 열었을 때 이미지 빠진 섹션이
-  // 있어도 놀라지 않게 한다. 2026-09-01부터 자동생성 기본 보류(held): 본문에 `[IMAGE: 설명]`
-  // 마커가 그대로 남아 있으니 사용자가 그 자리에 직접 이미지를 제작·삽입한 뒤 발행해야 한다.
-  if (result.images.held) {
-    lines.push("", "🖼 이미지 자동생성 보류 중 - 본문 [IMAGE: ...] 마커 위치에 직접 제작·삽입한 뒤 발행하세요.");
-  } else if (result.images.succeeded > 0 || result.images.failed > 0) {
-    const imageLine =
-      result.images.failed > 0
-        ? `🖼 이미지 ${result.images.succeeded}장 생성됨 (${result.images.failed}장 실패 - 본문에서 빠진 자리가 있을 수 있습니다)`
-        : `🖼 이미지 ${result.images.succeeded}장 생성됨`;
-    lines.push("", imageLine);
-  }
-
-  // 기획 브리프 커버리지(2026-09-17) - 독자 질문 5개 중 몇 개에 답했는지. writer의 자기 신고라
-  // 게이트가 아니라 신호다. "3/5"가 보이면 승인 전에 수정 요청을 넣을 근거가 된다.
-  if (result.briefCoverage) {
-    const { answered, total } = result.briefCoverage;
-    const missing = result.unansweredQuestions.length > 0 ? ` (미답: ${result.unansweredQuestions.join(", ")})` : "";
-    lines.push("", `🎯 독자 질문 ${answered}/${total} 답함${escapeTelegramHtml(missing)}`);
-  }
 
   // 이미지 마커/프롬프트 짝 불일치(2026-09-18). 이 상태로 승인하면 AI 생성 이미지가 **전부** 빈다.
   // 원고 자체는 멀쩡하므로 차단하지 않고, "수정 필요"로 돌릴지 사용자가 정하게 한다.
@@ -89,8 +70,6 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
 
   if (!result.telegraphUrl) {
     lines.push("", "(Telegraph 발행 실패 - 아래에 본문 전문을 대신 보냅니다)");
-  } else {
-    lines.push("", "아래 버튼으로 원고 전문을 열어본 뒤 결정해주세요.");
   }
 
   // 결정 버튼은 telegraphUrl이 있을 때만 헤더에 함께 붙인다. telegraphUrl이 없으면 아래
