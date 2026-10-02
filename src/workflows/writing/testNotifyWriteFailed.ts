@@ -1,5 +1,6 @@
 // buildWriteFailedMessage / describeWriteFailure 테스트. 실제 발송 없음.
-import { buildWriteFailedMessage, describeShortage, describeWriteFailure } from "./notifyWriteFailed.js";
+import { describeShortage } from "../research/describeResearchShortage.js";
+import { buildWriteFailedMessage, describeWriteFailure } from "./notifyWriteFailed.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -24,8 +25,13 @@ function main(): void {
   assert(blocked.text.includes("공식 자료(공공기관·법원 등)가 1건뿐"), `어떤 자료가 모자란지 알려야 한다: ${blocked.text}`);
   assert(!blocked.text.includes("보강") && !blocked.text.includes("다시 쓸 수"), "이유만 알린다 - 보강/재작성 안내는 없다");
   assert(!/verdict|blocked|draft|\/home|npm run/.test(blocked.text), `개발 용어/경로가 없어야 한다: ${blocked.text}`);
-  assert(!blocked.replyMarkup, "자료 부족은 다시 해도 같은 결과라 버튼이 없어야 한다");
-  console.log("✅ 자료 부족(blocked) -> 키워드 + 쉬운 사유, 버튼 없음");
+  const rerunButton = blocked.replyMarkup?.inline_keyboard[0]?.[0];
+  assert(
+    rerunButton && "callback_data" in rerunButton && rerunButton.callback_data === `research:rerun:${JOB.id}`,
+    "자료 부족은 [자료조사 다시 하기] 버튼(rerun)이어야 한다 - 글쓰기만 다시 하면 같은 이유로 또 막힌다"
+  );
+  assert(rerunButton.text.includes("자료조사 다시"), "버튼 문구");
+  console.log("✅ 자료 부족(blocked) -> 키워드 + 쉬운 사유 + [자료조사 다시 하기] 버튼");
 
   // 2) 시간 초과 -> 재시도 버튼(research:retry:<jobId>).
   const timeout = buildWriteFailedMessage(JOB, "헤드리스 실행이 1200000ms 안에 끝나지 않아 중단했습니다.");
@@ -47,7 +53,7 @@ function main(): void {
   assert(describeWriteFailure("claude가 종료 코드 1로 끝났습니다").reason.includes("응답하지"), "종료 코드");
   assert(describeWriteFailure("usage limit reached").reason.includes("한도"), "사용 한도");
   assert(describeWriteFailure("[research] NAVER 검색 실패").reason.includes("자료조사"), "자료조사 단계");
-  assert(describeWriteFailure("뭔지 모르는 오류").retryable, "알 수 없는 오류는 재시도 가능");
+  assert(describeWriteFailure("뭔지 모르는 오류").action === "retry", "알 수 없는 오류는 다시 시도 버튼");
   console.log("✅ 오류 분류 -> 쉬운 사유");
 
   // 4) HTML 특수문자 이스케이프.

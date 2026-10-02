@@ -159,7 +159,11 @@ export type HandleResearchDecisionOutcome =
   /** 오래 writing에 멈춰 있던 job을 재시도로 다시 detached 띄웠다. */
   | { status: "retry_started"; job: ArticleJobRow }
   /** retry 버튼을 눌렀지만 이미 정상 진행 중(임계값 미만)이거나 writing이 아니게 됐다 - 재시도 거부. */
-  | { status: "retry_rejected"; job: ArticleJobRow };
+  | { status: "retry_rejected"; job: ArticleJobRow }
+  /** 자료 부족으로 막힌 job의 자료조사를 새로 돌렸다(2026-10-02). 끝나면 조사 CLI가 글쓰기까지 이어 부른다. */
+  | { status: "rerun_started"; job: ArticleJobRow }
+  /** rerun 버튼을 눌렀지만 실패한 job이 아니다(이미 다시 돌고 있거나 끝났다) - 거부. */
+  | { status: "rerun_rejected"; job: ArticleJobRow };
 
 export type TelegramInlineKeyboard = { text: string; callback_data: string }[][];
 
@@ -783,6 +787,29 @@ export class TelegramBot {
     return typeof lastError === "string" && (lastError.startsWith("[writing]") || lastError.startsWith("[research]"));
   }
 
+  /**
+   * "research:rerun:<jobId>" - 자료 부족으로 글을 못 쓴 job의 자료조사를 처음부터 다시 돌린다(2026-10-02).
+   * 실패가 기록된 job만 받는다. 기록(lastError)을 먼저 지워 같은 버튼을 한 번 더 눌러도 조사가 두 번 뜨지
+   * 않게 하고, forceFreshResearch로 "2시간 내 조사 파일 재사용"을 끈다(안 끄면 막힌 파일이 그대로 쓰인다).
+   */
+  private async handleResearchRerun(job: ArticleJobRow): Promise<HandleResearchDecisionResult> {
+    const inFlow = job.status === "writing" || job.status === "researching";
+    if (!inFlow || !this.hasKnownWriteFailure(job)) {
+      return {
+        outcome: { status: "rerun_rejected", job },
+        message: inFlow ? `⏳ 이미 다시 진행 중이에요.` : `⏭ 이미 다른 단계로 넘어간 작업이에요.`,
+      };
+    }
+    await this.mergeJobMetadata(job.id, { lastError: null, forceFreshResearch: true });
+    this.triggerResearch(job.id);
+    return {
+      outcome: { status: "rerun_started", job },
+      message:
+        `🔍 <b>자료조사를 다시 시작합니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+        `조사가 끝나면 이어서 원고 작성까지 진행해요.`,
+    };
+  }
+
   private buildRetryKeyboard(jobId: string): TelegramInlineKeyboard {
     return [[{ text: "🔄 다시 시도", callback_data: buildResearchDecisionCallbackData("retry", jobId) }]];
   }
@@ -995,6 +1022,9 @@ export class TelegramBot {
     if (parsed.action === "retry") {
       return this.handleWriteRetry(job);
     }
+    if (parsed.action === "rerun") {
+      return this.handleResearchRerun(job);
+    }
 
     if (!this.isStillAtResearchCheckpoint(job)) {
       // 중복 클릭이거나, 이미 다른 경로(터미널 등)로 write/reject가 끝난 뒤 눌린 경우다.
@@ -1093,6 +1123,7 @@ export class TelegramBot {
       write: "원고 작성",
       reject: "중단",
       retry: "다시 시도",
+      rerun: "자료조사 다시 하기",
     };
 
     const updated = keyboard.map((row) =>

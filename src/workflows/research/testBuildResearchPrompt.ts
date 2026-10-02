@@ -42,6 +42,18 @@ function main(): void {
   assert(empty.includes("없음") && empty.includes("직접 조사"), "baseline이 비면 '전부 직접 조사' 안내");
   console.log("✅ baseline 비었을 때 안내");
 
+  // 재조사 안내(2026-10-02): 있을 때만, 무엇이 모자랐는지 그대로 들어간다.
+  const retry = buildResearchPrompt({
+    job: { keyword: "x", headline: null, category: null },
+    baselineSources: [],
+    outputPath: "/repo/research/x.md",
+    today: "2026-10-02",
+    retryHint: "공식 자료(공공기관·법원 등)가 1건뿐이에요. 2건 이상 있어야 해요.",
+  });
+  assert(retry.includes("재조사") && retry.includes("공식 자료(공공기관·법원 등)가 1건뿐"), "재조사 안내에 모자란 점이 들어가야 한다");
+  assert(!empty.includes("재조사"), "일반 조사에는 재조사 안내가 없어야 한다");
+  console.log("✅ 재조사 안내 - 모자랐던 점 전달, 일반 조사에는 없음");
+
   console.log("\n✅ buildResearchPrompt 테스트 완료");
 }
 
