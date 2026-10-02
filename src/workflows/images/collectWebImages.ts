@@ -319,7 +319,10 @@ export function buildWebImageSlots(
   for (const block of blocks) {
     if (block.type === "image") {
       imageIndex += 1;
-      if (block.acquisition === "search" || alsoInclude.has(imageIndex)) {
+      // `unknown`은 획득 방식 꼬리가 없는 마커다 - 웹 검색으로 받는다(2026-10-01).
+      // 꼬리를 지우는 방향(A안)의 준비다. 전에는 AI 생성으로 갔는데 그건 "웹 검색이 기본"이라는
+      // 지금 규격과 반대였다.
+      if (block.acquisition === "search" || block.acquisition === "unknown" || alsoInclude.has(imageIndex)) {
         slots.push({ index: imageIndex, description: block.description, query: block.prompt, context: lastText });
       }
       continue;

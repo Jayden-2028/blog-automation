@@ -11,6 +11,9 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 async function main(): Promise<void> {
+  // 알림 스위치는 **기본이 꺼짐**이다(2026-10-02). 메시지 내용을 보는 케이스들은 켜고 돈다.
+  process.env.SERPER_OUTAGE_ALERT = "true";
+
   // --- 1. 멀쩡하면 알리지 않는다 ---------------------------------------------------------------
   {
     let sent = 0;
@@ -90,6 +93,18 @@ async function main(): Promise<void> {
     if (!credit.text.includes("충전하거나")) throw new Error("❌ 403은 충전 안내가 있어야 한다");
     if (credit.text.includes("크레딧 문제가 아닙니다")) throw new Error("❌ 403에 '크레딧 문제 아님'이 붙으면 안 된다");
     console.log("✅ 429(속도 초과)와 크레딧 소진을 구분한다");
+  }
+
+  // 스위치가 꺼져 있으면 보내지 않는다 - 크레딧 소진 동안 같은 알림이 반복되는 것을 막는다.
+  {
+    delete process.env.SERPER_OUTAGE_ALERT;
+    const sent = await notifySerperOutage({
+      takeOutage: () => ({ status: 400, message: "Not enough credits", query: "테스트" }) as never,
+      sendMessages: async () => { throw new Error("스위치가 꺼졌는데 보냈다"); },
+    });
+    assert(!sent, "스위치가 꺼져 있으면 보내지 않아야 한다");
+    process.env.SERPER_OUTAGE_ALERT = "true";
+    console.log("✅ 알림 스위치 off - 장애는 소비하되 보내지 않는다");
   }
 
   console.log("\n🎉 구글 이미지 검색 장애 알림 테스트 통과");
