@@ -22,6 +22,7 @@ import { capturePageImage } from "./captureRankingImage.js";
 import { defaultChooseImage } from "./collectWebImages.js";
 import type { ChooseImageInput, ChooseImageResult } from "./collectWebImages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import { isPressUrl } from "./pressDomains.js";
 
 export type CapturePagesForJobInput = {
   jobId: string;
@@ -86,6 +87,14 @@ export async function capturePagesForJob(
       if (!/^https?:\/\//i.test(url)) {
         failures.push(
           `[자리 ${imageIndex}] 캡처할 URL이 없습니다(둘째 줄에 리서치 §11의 주소를 그대로 넣어야 합니다): ${url.slice(0, 60) || "(빈 값)"}`
+        );
+        continue;
+      }
+
+      // 언론사 기사 화면은 캡처하지 않는다(2026-10-02 사용자 결정 - pressDomains.ts).
+      if (isPressUrl(url)) {
+        failures.push(
+          `[자리 ${imageIndex}] ⚠️ 언론사 기사 화면은 캡처하지 않습니다(${url}) - 이 자리는 웹 검색이나 인포그래픽으로 다시 채워야 합니다.`
         );
         continue;
       }

@@ -549,7 +549,7 @@ async function main(): Promise<void> {
           summary: "예고편 공개",
           protagonist: "김윤석",
           slots: [
-            { index: 1, subject: "예고편 장면", queries: ["영화 폭설 김윤석 구교환 예고편"], acquisition: "search" as const, changed: true, reason: "한 줄 요약이 예고편 공개다", caution: "" },
+            { index: 1, subject: "예고편 장면", queries: ["영화 폭설 김윤석 구교환 예고편"], acquisition: "search" as const, changed: true, reason: "한 줄 요약이 예고편 공개다", caution: "포스터 말고 예고편" },
             { index: 2, subject: "기사 화면", queries: ["https://example.com/news/1"], acquisition: "capture" as const, changed: true, reason: "그 페이지가 답이다", caution: "" },
           ],
         },
@@ -566,6 +566,9 @@ async function main(): Promise<void> {
     );
     const queries = (collectInput as never as { planQueries: Record<number, string[]> }).planQueries;
     assert(queries[1][0] === "영화 폭설 김윤석 구교환 예고편", "기획 검색어를 넘겨야 한다(집필자 검색어가 아니다)");
+    const subjects = (collectInput as never as { planSubjects: Record<number, { subject: string; caution?: string }> }).planSubjects;
+    assert(subjects?.[1]?.subject === "예고편 장면", "기획 대상을 넘겨야 한다 - 안 넘기면 판정이 마커 원문으로 한다(오세훈 2심 사고)");
+    assert(subjects[1].caution === "포스터 말고 예고편", "기획 주의사항을 넘겨야 한다");
     assert(
       (captureInput as never as { planUrls: Record<number, string> }).planUrls[2] === "https://example.com/news/1",
       "기획이 캡처로 정한 자리의 URL을 넘겨야 한다"
@@ -591,6 +594,7 @@ async function main(): Promise<void> {
     const withoutPlan = collectInput as never as Record<string, unknown>;
     assert(withoutPlan.planSearchIndexes === undefined, "기획이 꺼지면 자리 배분을 넘기지 않아야 한다");
     assert(withoutPlan.planQueries === undefined, "기획이 꺼지면 검색어도 넘기지 않아야 한다");
+    assert(withoutPlan.planSubjects === undefined, "기획이 꺼지면 대상도 넘기지 않아야 한다");
     console.log("✅ 기획 off - 예전 경로 그대로");
   }
 

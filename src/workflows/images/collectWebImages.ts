@@ -128,6 +128,12 @@ export type WebImageSlot = {
   query: string | null;
   /** 바로 위 문단(또는 소제목+문단) 원문. 이 문단을 한 장으로 요약하는 것이 판단 기준이다. */
   context: string;
+  /**
+   * 기획 단계가 이 자리에 붙인 주의사항(2026-10-02). 판정할 때 한 줄로 보여 준다.
+   * `description`에 섞지 않는 이유: 설명은 캡션 폴백으로도 나가므로 "표정이 과한 사진 피하기"
+   * 같은 지시가 발행 캡션에 새어 나간다.
+   */
+  caution?: string;
 };
 
 /**
@@ -201,9 +207,11 @@ export type ImageChoiceCandidate = {
 
 export type ChooseImageInput = {
   candidates: ImageChoiceCandidate[];
-  /** 판정 기준: 원고 마커가 요구한 것. */
+  /** 판정 기준: 이 자리가 요구한 것. 기획이 있으면 기획의 대상, 없으면 원고 마커. */
   markerDescription: string;
   context: string;
+  /** 기획의 주의사항(2026-10-02). 없으면 생략. */
+  caution?: string;
   keyword: string;
   /** 이미지 메이커 규격. 없으면 파일에서 읽는다(테스트는 null로 끈다). */
   spec?: string | null;
@@ -483,6 +491,7 @@ export function buildPrompt(
     lines.push("");
     lines.push(`### 자리 ${slot.index}`);
     lines.push(`- 필요한 이미지: ${slot.description}`);
+    if (slot.caution) lines.push(`- 주의: ${slot.caution}`);
     if (slot.query) {
       lines.push(`- 원고가 제안한 검색어: ${slot.query}`);
       const broader = broadenQuery(slot.query);
@@ -676,7 +685,8 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "그 자리에 가장 맞는 것 하나를 고른다. 맞는 것이 하나도 없으면 고르지 않는다.",
     "",
     `원고 주제: ${input.keyword}`,
-    `이 자리에 필요한 것(원고 마커): ${input.markerDescription}`,
+    `이 자리에 필요한 것: ${input.markerDescription}`,
+    ...(input.caution ? [`주의: ${input.caution}`] : []),
     "이 이미지가 요약해야 할 문단:",
     `"""${input.context.slice(0, 600)}"""`,
     "",
@@ -1113,6 +1123,7 @@ export async function collectWebImages(
         })),
         markerDescription: slot.description,
         context: slot.context,
+        caution: slot.caution,
         keyword: input.keyword,
       });
       if (verdict.picked === null) {

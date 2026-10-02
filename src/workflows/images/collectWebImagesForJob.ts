@@ -39,6 +39,15 @@ export type CollectWebImagesForJobInput = {
   planSearchIndexes?: number[];
   /** 기획이 자리마다 정한 검색어. 주면 서치풀 확장 없이 그대로 쓴다. */
   planQueries?: Record<number, string[]>;
+  /**
+   * 기획이 자리마다 정한 **대상**(2026-10-02). 주면 마커 설명 대신 이것이 판정 기준이 된다.
+   *
+   * 실측 사고(오세훈 2심): 기획은 1번 자리를 "청사 외관 → 오세훈 서울시장 단독 사진"으로 바꿨고
+   * 검색도 그걸로 했다. 그런데 판정은 마커 원문("서울고등법원 청사 외관")으로 해서, 정확히
+   * 기획이 원한 오세훈 사진 4장을 "청사가 없다"며 전량 탈락시켰다. 2026-09-22에 사용자 요구로
+   * 고친 "검색은 A, 판정은 B"를 기획 배선에서 그대로 다시 만든 것이었다.
+   */
+  planSubjects?: Record<number, { subject: string; caution?: string }>;
   body: string;
   imagePrompts: string[];
   /** 이미 채워진 자리 번호(생성 이미지 등). 여기 있는 자리는 건너뛴다. */
@@ -87,6 +96,18 @@ export async function collectWebImagesForJob(
     input.planSearchIndexes ? new Set(input.planSearchIndexes) : undefined
   )
     .filter((s) => !filled.has(s.index))
+    // 기획의 대상을 **검색과 판정 양쪽에** 얹는다(2026-10-02). 아래 사용자 요구가 그 위에 덮인다 -
+    // 사람이 결과를 보고 적은 것이 기획보다 우선한다. 주소를 직접 찍어 준 자리는 건드리지 않는다.
+    .map((slot) => {
+      const planned = input.planSubjects?.[slot.index];
+      if (!planned?.subject || directIndexes.has(slot.index)) return slot;
+      return {
+        ...slot,
+        description: planned.subject,
+        query: input.planQueries?.[slot.index]?.[0] ?? slot.query,
+        ...(planned.caution ? { caution: planned.caution } : {}),
+      };
+    })
     // 사용자가 적어 보낸 요구를 **검색어와 판정 기준 양쪽에** 얹는다.
     //
     // 2026-09-22 실측 사고: 처음에는 설명(판정 기준)에만 붙였다. 그러자 검색은 옛 검색어로 하고

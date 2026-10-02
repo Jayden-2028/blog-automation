@@ -408,6 +408,13 @@ export async function prepareManuscript(
   const planQueries = plan
     ? Object.fromEntries(plan.slots.filter((s) => s.queries.length > 0).map((s) => [s.index, s.queries]))
     : undefined;
+  const planSubjects = plan
+    ? Object.fromEntries(
+        plan.slots
+          .filter((s) => s.subject.trim().length > 0)
+          .map((s) => [s.index, { subject: s.subject, caution: s.caution || undefined }])
+      )
+    : undefined;
   const planCaptureUrls = plan
     ? Object.fromEntries(
         plan.slots
@@ -468,6 +475,7 @@ export async function prepareManuscript(
       researchText: typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
       planSearchIndexes,
       planQueries,
+      planSubjects,
       // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
       // 같은 사진이 다시 들어오는 것을 막는다.
       existingImageUrls: Object.fromEntries(
