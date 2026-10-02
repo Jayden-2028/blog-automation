@@ -10,6 +10,7 @@
 
 import {
   checkAdDisclosure,
+  checkInstitutionAttribution,
   checkAttributionHedging,
   checkFacts,
   checkImagePrompts,
@@ -334,6 +335,41 @@ function main(): void {
   const noYear = checkAttributionHedging("10월 1일에 SNS에서 퍼졌습니다.", asOfNow);
   assert(noYear.length === 0, "연도를 뺀 날짜는 통과해야 한다");
   console.log("✅ 인용/헤지: 올해 날짜 연도 표기 경고, 다른 연도·연도 단독은 통과");
+
+  // ---------- 기관 귀속 (2026-10-02) ----------
+  {
+    const research = [
+      "- [official] 2026년 10월 9~11일은 한글날과 토·일요일 3일 연휴다 — 확인일 2026-10-02",
+      "  · 출처: https://www.kasi.re.kr/kor/publication/post/newsMaterial/32031",
+      "| 1 | official | 「2026년 월력요항」 발표 (한국천문연구원) | https://www.kasi.re.kr/... | 2025-06-30 |",
+      "| 2 | news | 우주항공청, 2026년 월력요항 발표 (경남뉴스) | https://www.gnnews24.kr/... | 발행일 미상 |",
+    ].join("\n");
+
+    // official 근거에 있는 기관 -> "발표 주체인지 확인" 요청
+    const backed = checkInstitutionAttribution("한국천문연구원의 월력요항도 10월 9~11일을 사흘 연휴로 적고 있습니다.", research);
+    assert(backed.length === 1 && backed[0].message.includes("기관 귀속 확인 필요"), `official 기관은 확인 요청 1건 (${JSON.stringify(backed)})`);
+    assert(backed[0].message.includes("한국천문연구원"), "기관명을 보여줘야 한다");
+
+    // news 줄에만 있는 기관을 출처로 쓰면 더 센 경고
+    const unbacked = checkInstitutionAttribution("우주항공청의 2026년 월력요항에 따르면 한글날은 10월 9일입니다.", research);
+    assert(unbacked.some((c) => c.message.includes("근거에 없는 기관")), `news-only 기관은 경고 (${JSON.stringify(unbacked)})`);
+    assert(unbacked.some((c) => c.message.includes("우주항공청")), "어느 기관인지 보여줘야 한다");
+
+    // 기관을 출처로 내세우지 않은 문장은 걸리지 않는다
+    const noCue = checkInstitutionAttribution("국립중앙박물관에서 12일 학술대회가 열립니다. 광화문광장 행사는 6~8일입니다.", research);
+    assert(noCue.length === 0, `출처로 내세우지 않은 기관 언급은 통과 (${JSON.stringify(noCue)})`);
+    const plain = checkInstitutionAttribution("한글날 연휴는 10월 9일부터 11일까지 사흘입니다. 연차 3일을 쓰면 9일을 쉽니다.", research);
+    assert(plain.length === 0, "기관명이 없으면 검사 자체가 걸리지 않는다");
+
+    // 기관 꼬리를 가진 일상 명사는 기관이 아니다
+    const notInst = checkInstitutionAttribution("지원금의 신청 기준은 전부 같습니다. 정부의 발표 자료를 기다립니다.", research);
+    assert(!notInst.some((c) => c.message.includes("전부") || c.message.includes("정부")), `일상 명사는 기관이 아니다 (${JSON.stringify(notInst)})`);
+
+    // 리서치가 없으면 모든 기관이 "근거 없음"으로 간다
+    const noResearch = checkInstitutionAttribution("질병관리청은 생후 6개월부터를 기준으로 안내합니다.", null);
+    assert(noResearch.some((c) => c.message.includes("근거에 없는 기관")), "리서치 없으면 근거 없음으로 본다");
+    console.log("✅ 기관 귀속: official 근거는 확인 요청, news-only는 경고, 일상 명사·단순 언급은 통과");
+  }
 
   // ---------- 공통 문체(voice) (2026-09-16) ----------
 

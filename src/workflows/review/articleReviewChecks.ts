@@ -460,6 +460,92 @@ export function checkAttributionHedging(rawBody: string | null, now: Date = new 
   return checks;
 }
 
+// ---------- 기관 귀속 (2026-10-02) ----------
+//
+// 왜: 원고가 "○○의 자료에 따르면", "○○는 ~라고 밝혔습니다"처럼 기관을 주어로 쓸 때 **그 기관이
+// 그 사실의 발표 주체인지**는 규칙으로도, 코드로도 판정할 수 없다. 실측 2건:
+//   2차 원고 - "우주항공청의 월력요항에 따르면 한글날은 10월 9일". 뉴스 문구를 기관 출처로 올렸다.
+//   3차 원고 - "한국천문연구원의 월력요항도 ~ 적고 있습니다". 리서처가 kasi.re.kr 원문을 열었으니
+//              규칙은 통과했지만, 월력요항을 관보로 발표하는 주체는 우주항공청이다.
+// 자료를 **산출·게시하는 기관**과 **발표·소관 주체**가 갈리는 사안이 있어서, 코드는 판정하지 않고
+// **사람에게 확인을 요청**한다. 리서치의 official/medical 근거에 없는 기관명이면 경고를 더 세게 쓴다.
+
+/** 공공·연구 기관 이름으로 끝나는 꼬리. 일상 명사와 겹치는 꼬리(원·실·과)는 넣지 않는다. */
+const INSTITUTION_NAME =
+  /[가-힣]{1,8}(?:위원회|진흥원|연구원|연구소|교육청|감독원|평가원|개발원|관리원|중앙회|공단|공사|학회|재단|협회|시청|도청|군청|청|처|부)/g;
+
+/** 기관 꼬리를 가졌지만 기관이 아닌 말. */
+const NOT_INSTITUTION = new Set([
+  "정부", "일부", "전부", "내부", "외부", "상부", "하부", "대부", "간부", "본부", "지부", "학부",
+  "전반부", "후반부", "상반부", "회사", "본사",
+]);
+
+/** 그 문장이 기관을 출처로 내세우고 있다는 신호. */
+const ATTRIBUTION_CUE =
+  /발표|자료|요항|기준|지침|고시|공고|안내|밝혔|밝힌|정했|정한|집계|통계|권고|발간|적고|명시|규정|따르면/;
+
+function institutionNames(text: string): string[] {
+  INSTITUTION_NAME.lastIndex = 0;
+  return [...text.matchAll(INSTITUTION_NAME)]
+    .map((m) => m[0])
+    .filter((name) => name.length >= 3 && !NOT_INSTITUTION.has(name));
+}
+
+/** 리서치 파일에서 **official·medical 등급 줄**에 등장하는 기관명만 모은다(표 행과 불릿 둘 다). */
+function officialInstitutions(researchText: string | null | undefined): Set<string> {
+  if (!researchText) return new Set();
+  const names = new Set<string>();
+  for (const line of researchText.split("\n")) {
+    if (!/\[(?:official|medical)\]/.test(line) && !/^\s*\|[^|]*\|\s*(?:official|medical)\s*\|/.test(line)) continue;
+    for (const name of institutionNames(line)) names.add(name);
+  }
+  return names;
+}
+
+/**
+ * 원고가 기관을 주어·출처로 쓴 자리를 찾아 사람에게 확인을 요청한다. 차단하지 않는다.
+ * 리서치 official/medical 근거에 없는 기관명은 따로 분리해 먼저 보여준다.
+ */
+export function checkInstitutionAttribution(
+  rawBody: string | null,
+  researchText?: string | null
+): ReviewCheck[] {
+  if (!rawBody) return [];
+  const body = stripReferencesSection(rawBody);
+  const backed = officialInstitutions(researchText);
+  const cited = new Set<string>();
+  const unbacked = new Set<string>();
+
+  for (const sentence of body.split(/(?<=[.!?。])\s+|\n/)) {
+    if (!ATTRIBUTION_CUE.test(sentence)) continue;
+    for (const name of institutionNames(sentence)) {
+      // 기관명 바로 뒤에 조사가 붙어 있을 때만 "주어·출처로 썼다"고 본다("박물관에서 열린다"는 제외).
+      if (!new RegExp(`${name}(?:의|은|는|이|가|도)`).test(sentence)) continue;
+      cited.add(name);
+      if (!backed.has(name)) unbacked.add(name);
+    }
+  }
+
+  if (cited.size === 0) return [];
+  const checks: ReviewCheck[] = [];
+  if (unbacked.size > 0) {
+    checks.push({
+      category: "fact",
+      severity: "warning",
+      message: `리서치 official·medical 근거에 없는 기관을 출처로 썼습니다: ${[...unbacked].join(", ")} (core-rules.md §1-1 - 원문을 직접 연 기관만 주어로 씁니다)`,
+    });
+  }
+  const confirmed = [...cited].filter((name) => backed.has(name));
+  if (confirmed.length > 0) {
+    checks.push({
+      category: "fact",
+      severity: "warning",
+      message: `기관 귀속 확인 필요: ${confirmed.join(", ")} — 이 기관이 그 사실의 **발표·소관 주체**인지 봐 주세요(자료를 산출·게시하는 기관과 발표 주체가 다를 수 있습니다)`,
+    });
+  }
+  return checks;
+}
+
 // ---------- 공통 문체(voice) + 이미지 프롬프트 (2026-09-16) ----------
 //
 // 사용자 지적 두 건을 규칙으로 잡는다. (1) 원고마다 어투가 달라 블로그 톤이 흔들린다 -
