@@ -13,6 +13,7 @@ import {
   planImageSlots,
 } from "./planImageSlots.js";
 import type { ImagePlan, PlanImageSlotsInput } from "./planImageSlots.js";
+import { isPressUrl } from "./pressDomains.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -154,6 +155,52 @@ async function main(): Promise<void> {
     assert(slotNotes[0].includes("자리 2"), "바뀐 것은 2번이다");
     assert(slotNotes[0].includes("방영 전"), "왜 바꿨는지가 들어가야 한다");
     console.log("✅ 기록 - 바뀐 자리만, 사유와 함께");
+  }
+
+  // 10) 기획이 언론사 기사 캡처를 골라도 웹 검색(주인공)으로 돌린다(2026-10-02 사용자 결정).
+  {
+    const { plan, notes } = parsePlan(
+      {
+        summary: "오세훈 2심 구형",
+        protagonist: "오세훈 서울시장",
+        slots: [
+          { index: 1, subject: "YTN 기사 화면", queries: ["https://www.ytn.co.kr/_ln/0103_1"], acquisition: "capture" },
+          { index: 2, subject: "신청 안내", queries: ["https://www.gov.kr/portal/1"], acquisition: "capture" },
+        ],
+      },
+      2
+    );
+    assert(plan, "기획이 나와야 한다");
+    assert(plan!.slots[0].acquisition === "search", "기사 캡처는 웹 검색으로 돌려야 한다");
+    assert(plan!.slots[0].queries[0] === "오세훈 서울시장", "검색어는 주인공이어야 한다");
+    assert(plan!.slots[0].changed, "바뀐 것으로 기록돼야 한다");
+    assert(plan!.slots[1].acquisition === "capture", "공공 페이지 캡처는 그대로 둔다");
+    assert(notes.some((n) => n.includes("언론사 기사 화면")), "사유가 기록돼야 한다");
+    assert(buildPlanPrompt(INPUT, null).includes("언론사 기사 화면·헤드라인은 캡처하지 않는다"), "프롬프트에 금지가 실려야 한다");
+    console.log("✅ 기사 캡처 → 주인공 웹 검색으로 강등, 공공 캡처는 유지");
+  }
+
+  // 11) 언론사 판별 - 하위 도메인·포털 뉴스·이름 규칙, 공공은 예외.
+  {
+    for (const url of [
+      "https://view.asiae.co.kr/article/1",
+      "https://www.hankookilbo.com/news/article/A1",
+      "https://n.news.naver.com/article/001/1",
+      "https://v.daum.net/v/1",
+      "https://www.somenewsdaily.com/a/1",
+    ]) {
+      assert(isPressUrl(url), `언론사로 봐야 한다: ${url}`);
+    }
+    for (const url of [
+      "https://www.korea.kr/news/policyNewsView.do?newsId=1",
+      "https://news.seoul.go.kr/welfare/1",
+      "https://gift.kakao.com/page/1",
+      "https://www.kinolights.com/title/1",
+      "주소 아님",
+    ]) {
+      assert(!isPressUrl(url), `언론사로 보면 안 된다: ${url}`);
+    }
+    console.log("✅ 언론사 판별 - 포털·하위 도메인 차단, 공공·공식 페이지 통과");
   }
 
   console.log("\n✅ 이미지 기획 단계 테스트 전부 통과");

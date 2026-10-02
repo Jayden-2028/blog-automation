@@ -73,4 +73,32 @@ const upload = async ({ index }: { index: number }) => ({ ok: true as const, url
   console.log("✅ 이미 채워진 자리는 건너뛴다");
 }
 
+// --- 5. 언론사 기사 화면은 찍지 않는다(2026-10-02 사용자 결정) ---------------------------------
+{
+  const urls: string[] = [];
+  const pressBody = [
+    "특검은 징역 1년 6개월을 구형했습니다.",
+    "[IMAGE: 구형 소식을 전한 YTN 기사 화면 — 페이지 캡처]",
+    "1심은 벌금 1000만 원이었습니다.",
+    "[IMAGE: 1심 기사 화면 — 페이지 캡처]",
+    "신청 방법입니다.",
+    "[IMAGE: 신청 안내 페이지 — 페이지 캡처]",
+  ].join("\n\n");
+  const result = await capturePagesForJob(
+    {
+      jobId: "job-1",
+      body: pressBody,
+      imagePrompts: [
+        "https://www.ytn.co.kr/_ln/0103_202610021751160200",
+        "https://n.news.naver.com/article/001/0012345678",
+        "https://www.gov.kr/portal/service/serviceInfo/1",
+      ],
+    },
+    { capture: async (url) => { urls.push(url); return shot(); }, chooseImage: false, upload }
+  );
+  assert(urls.length === 1 && urls[0].includes("gov.kr"), `공공 페이지만 찍어야 한다 (${JSON.stringify(urls)})`);
+  assert(result.failures.filter((f) => f.includes("언론사 기사 화면")).length === 2, "막은 자리마다 사유를 남겨야 한다");
+  console.log("✅ 언론사 기사 화면은 찍지 않고, 공공 페이지는 그대로 찍는다");
+}
+
 console.log("\n🎉 페이지 캡처 테스트 통과");

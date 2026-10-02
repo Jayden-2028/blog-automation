@@ -199,6 +199,7 @@
     "test:youtube-frames": "tsx src/workflows/images/testYoutubeTrailerFrames.ts",
     "test:image-plan": "tsx src/workflows/images/testPlanImageSlots.ts",
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
+    "test:plan-subject": "tsx src/workflows/images/testPlanSubjectWiring.ts",
     "test:image-url-version": "tsx src/services/supabase/storage/testImageUrlVersion.ts",
     "test:remove-table-markers": "tsx src/workflows/manuscripts/testRemoveTableMarkers.ts",
     "test:outage-tracker": "tsx src/jobs/lib/testOutageTracker.ts",

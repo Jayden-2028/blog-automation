@@ -23,6 +23,7 @@ import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { stripAcquisitionSuffix } from "../manuscripts/parseManuscriptBlocks.js";
 import { imageMakerSpecLines } from "./imageMakerSpec.js";
+import { isPressUrl } from "./pressDomains.js";
 
 /** 기획이 정할 수 있는 획득 방식. `table`은 폐지됐고 기획이 고르지 않는다. */
 export const PLANNABLE_ACQUISITIONS = ["search", "capture", "ai", "infographic"] as const;
@@ -152,6 +153,8 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "## 획득 방식 고르기",
     "- `search` — 이미 찍힌 사진으로 되는 자리(대부분 여기다)",
     "- `capture` — 그 페이지를 보여주는 것이 답인 자리. **리서치에 있는 URL만** 쓴다. 지어내지 않는다.",
+    "  공공기관·공식 홈페이지·예매·순위 페이지만 해당한다. **언론사 기사 화면·헤드라인은 캡처하지 않는다**",
+    "  (2026-10-02 사용자 결정 - 남발돼서 폐지). 기사 화면을 떠올렸다면 그 문단의 인물·대상을 `search`로 찾는다.",
     "- `ai` — 위 둘이 전부 불가능할 때만. 실존 인물·작품·제품은 AI로 만들지 않는다.",
     "- `infographic` — 행사·정책에서 절차·조건·금액을 아이콘·그래프로 요약할 때만",
     "",
@@ -217,16 +220,30 @@ export function parsePlan(raw: unknown, slotCount: number): { plan: ImagePlan | 
       notes.push(`[자리 ${index}] 이미지 기획: 모르는 획득 방식 "${acquisitionRaw}" - 웹 검색으로 둡니다.`);
     }
 
-    const queries = Array.isArray(slot.queries)
+    let queries = Array.isArray(slot.queries)
       ? slot.queries.map(asString).filter(Boolean).slice(0, 3)
       : [];
+
+    // 언론사 기사 화면 캡처는 폐지됐다(2026-10-02). 규격에 적어도 모델이 고를 수 있으니 여기서
+    // **웹 검색으로 돌린다**. 검색어는 주인공 - 사용자가 그런 자리마다 고른 대안이 전부 인물이었다
+    // ("오세훈 1000만원", "오세훈 시장 활동"). 주인공이 없으면 비운다.
+    let finalAcquisition: PlannedAcquisition = acquisition;
+    if (acquisition === "capture" && queries[0] && isPressUrl(queries[0])) {
+      const protagonist = asString(data.protagonist);
+      finalAcquisition = "search";
+      queries = protagonist ? [protagonist] : [];
+      notes.push(
+        `[자리 ${index}] 이미지 기획: 언론사 기사 화면 캡처는 쓰지 않습니다 - ` +
+          (protagonist ? `웹 검색 "${protagonist}"로 돌립니다.` : "주인공이 없어 비웁니다.")
+      );
+    }
 
     slots.push({
       index,
       subject: asString(slot.subject),
       queries,
-      acquisition,
-      changed: slot.changed === true,
+      acquisition: finalAcquisition,
+      changed: slot.changed === true || finalAcquisition !== acquisition,
       reason: asString(slot.reason),
       caution: asString(slot.caution),
     });
