@@ -11,6 +11,7 @@ import {
   checkAttributionHedging,
   checkFacts,
   checkImagePrompts,
+  checkInstitutionAttribution,
   checkLegal,
   checkQuality,
   checkVoice,
@@ -26,6 +27,8 @@ export type ArticleReviewInput = {
   isMedical: boolean;
   /** 자료조사 verdict(ok | thin | blocked). thin이면 분량 미달을 "자료 얇음"으로 표시한다. */
   researchVerdict?: string | null;
+  /** 자료조사 파일 원문. 기관 귀속을 official 근거와 대조한다(2026-10-02). */
+  researchText?: string | null;
 };
 
 export type ArticleReviewResult = {
@@ -49,6 +52,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
       researchThin: input.researchVerdict === "thin",
     }),
     ...checkAttributionHedging(input.article.content),
+    ...checkInstitutionAttribution(input.article.content, input.researchText),
     ...checkVoice(input.article.content),
     ...checkImagePrompts(input.article.content, input.job.category),
   ];
