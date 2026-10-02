@@ -6,6 +6,7 @@
 import "dotenv/config";
 
 import {
+  collectionDayString,
   evaluateWatchdog,
   formatWatchdogAlert,
   runWatchdog,
@@ -103,6 +104,39 @@ async function main(): Promise<void> {
   });
   assert(failResult.alerted === false && failResult.sendError === "network down", "발송 실패는 sendError로만 알린다");
   console.log("  ✅ 발송 실패 → 예외 없이 sendError");
+
+  // 8) 수집일 경계(2026-10-02 사고). 21:00 KST 예약이 GitHub schedule 지연으로 02:42 KST에
+  //    돌았을 때 거짓 실패 알림이 나갔다. 실제 값 그대로 재현한다.
+  const lateNow = new Date("2026-10-01T17:42:25Z"); // KST 2026-10-02 02:42
+  const eveningRun = makeRun("2026-10-01T09:01:00Z", { id: 102 }); // KST 2026-10-01 18:01
+  assert(
+    evaluateWatchdog(eveningRun, lateNow).ok,
+    "21시 예약이 자정을 넘겨 돌아도 전날 저녁 run은 같은 수집일이라 ok여야 한다 (실제 사고 재현)"
+  );
+  console.log("  ✅ 지연으로 자정을 넘겨 돌아도 전날 저녁 run → ok");
+
+  // 9) 11시간 밀려도(= 다음 날 08:00 KST) 같은 수집일이다.
+  const veryLate = new Date("2026-10-02T23:00:00Z"); // KST 2026-10-03 08:00
+  assert(
+    evaluateWatchdog(makeRun("2026-10-02T09:01:00Z"), veryLate).ok,
+    "11시간 밀려도 같은 수집일이어야 한다"
+  );
+  console.log("  ✅ 11시간 지연에도 ok");
+
+  // 10) 진짜 누락은 여전히 잡는다: 그날 저녁 run이 없고 어제 run만 있는 경우.
+  const missed = evaluateWatchdog(makeRun("2026-10-01T09:01:00Z", { id: 102 }), new Date("2026-10-02T12:00:00Z"));
+  assert(!missed.ok && missed.reason === "stale_run", "그날 저녁 run이 없으면 정시에 돌아도 stale이어야 한다");
+  const missedLate = evaluateWatchdog(makeRun("2026-10-01T09:01:00Z", { id: 102 }), new Date("2026-10-02T17:42:25Z"));
+  assert(!missedLate.ok && missedLate.reason === "stale_run", "지연돼 돌아도 진짜 누락은 잡아야 한다");
+  console.log("  ✅ 진짜 누락(정시·지연 모두) → stale_run");
+
+  // 11) 경계 자체: 정오 직전/직후에 수집일이 바뀐다.
+  assert(
+    collectionDayString(new Date("2026-10-02T02:59:00Z")) === "2026-10-01" && // KST 11:59
+      collectionDayString(new Date("2026-10-02T03:00:00Z")) === "2026-10-02", // KST 12:00
+    "수집일은 KST 정오에 바뀌어야 한다"
+  );
+  console.log("  ✅ 수집일 경계 = KST 12:00");
 
   if (shouldActuallySend) {
     console.log("\n▶ SEND=1 - 실제 Telegram으로 stale 알림 발송");
