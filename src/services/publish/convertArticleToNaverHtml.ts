@@ -17,45 +17,11 @@
 // - 목록 / ![alt](url) 이미지 / 문단 사이 빈 줄 1개, 이미지 마커 앞뒤 빈 줄 2개(writer.md §6·§8,
 // 2026-09-06).
 
-/** HTML 특수문자 이스케이프. 원고 텍스트를 그대로 태그 안에 넣기 전에 반드시 거친다. */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** 굵게(**text**), 이탤릭(*text*), 링크([text](url))가 섞인 한 줄을 인라인 HTML로 변환한다. */
-function inlineToHtml(text: string): string {
-  const pattern = /\*\*(.+?)\*\*|\*(.+?)\*|\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-  let result = "";
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) result += escapeHtml(text.slice(lastIndex, match.index));
-
-    if (match[1] !== undefined) {
-      result += `<b>${escapeHtml(match[1])}</b>`;
-    } else if (match[2] !== undefined) {
-      result += `<i>${escapeHtml(match[2])}</i>`;
-    } else {
-      result += `<a href="${escapeHtml(match[4])}">${escapeHtml(match[3])}</a>`;
-    }
-    lastIndex = pattern.lastIndex;
-  }
-  if (lastIndex < text.length) result += escapeHtml(text.slice(lastIndex));
-
-  return result;
-}
+import { renderPublishBlocks } from "./renderPublishBlocks.js";
+import type { PublishRenderOptions } from "./renderPublishBlocks.js";
 
 /** "![alt](url)" 한 줄짜리 블록인지 확인한다. generateArticleImages.ts가 이 형식으로만 삽입한다. */
 const IMAGE_LINE_PATTERN = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/;
-const IMAGE_PLACEHOLDER_PATTERN = /^\[IMAGE:[^\]]*\]$/;
-const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
-/** 이미지(실제/placeholder) 블록 위아래를 다른 블록보다 넓게 띄운다(writer.md §7·§8, 2026-09-06). */
-const IMAGE_BLOCK_MARGIN = "margin:2em 0";
 
 /**
  * 본문에서 "![alt](url)" 이미지 블록만 제거한다(그 외 텍스트는 그대로 유지).
@@ -73,66 +39,18 @@ export function stripImageMarkdownBlocks(markdown: string): string {
     .join("\n\n");
 }
 
-function isListLine(line: string): boolean {
-  return /^\s*[-*]\s+/.test(line);
-}
-
-function stripListMarker(line: string): string {
-  return line.replace(/^\s*[-*]\s+/, "");
-}
-
-/** 헤더가 아닌 나머지 줄을 목록/문단으로 판정한다(예: "**참고 자료**" 다음 줄이 "- " 목록인 경우). */
-function renderNonHeadingLines(lines: string[]): string {
-  if (lines.every(isListLine)) {
-    const items = lines.map((line) => `<li>${inlineToHtml(stripListMarker(line))}</li>`).join("");
-    return `<ul>${items}</ul>`;
-  }
-  return `<p>${lines.map((line) => inlineToHtml(line)).join("<br>")}</p>`;
-}
-
 /**
- * 원고 본문(마크다운 부분집합)을 SmartEditor 붙여넣기용 HTML 문자열로 변환한다.
- * 빈 줄로 문단을 나누고, 첫 줄이 "**볼드**" 단독이면 h3(+ 바로 붙는 문단/목록), 전부 "-"로
- * 시작하면 ul, "![alt](url)" 단독 줄은 img로 만든다.
+ * 네이버 SmartEditor용 옵션. 굵게는 <b>, 이미지는 <img> 하나.
+ * **간격·글자 크기 규칙은 renderPublishBlocks.ts가 한 곳에서 정한다**(2026-10-02).
  */
+const NAVER_OPTIONS: PublishRenderOptions = {
+  boldTag: "b",
+  italicTag: "i",
+  image: "img",
+  linkTarget: false,
+};
+
+/** 원고 본문(마크다운 부분집합)을 SmartEditor 붙여넣기용 HTML로 변환한다. */
 export function convertArticleToNaverHtml(markdown: string): string {
-  const paragraphs = markdown.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
-  const blocks: string[] = [];
-
-  for (const block of paragraphs) {
-    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
-    if (lines.length === 0) continue;
-
-    if (lines.length === 1) {
-      const imageMatch = lines[0].match(IMAGE_LINE_PATTERN);
-      if (imageMatch) {
-        const [, alt, src] = imageMatch;
-        blocks.push(`<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" style="${IMAGE_BLOCK_MARGIN}">`);
-        continue;
-      }
-      if (IMAGE_PLACEHOLDER_PATTERN.test(lines[0])) {
-        blocks.push(`<p style="${IMAGE_BLOCK_MARGIN}">${escapeHtml(lines[0])}</p>`);
-        continue;
-      }
-    }
-
-    const headingMatch = lines[0].match(HEADING_LINE_RE);
-    if (headingMatch) {
-      const rest = lines.slice(1);
-      if (rest.length === 0) {
-        blocks.push(`<p><b>${inlineToHtml(headingMatch[1])}</b></p>`);
-      } else if (rest.every(isListLine)) {
-        blocks.push(`<p style="margin-bottom:0"><b>${inlineToHtml(headingMatch[1])}</b></p>`);
-        blocks.push(renderNonHeadingLines(rest).replace("<ul>", '<ul style="margin-top:0">'));
-      } else {
-        const restHtml = rest.map((line) => inlineToHtml(line)).join("<br>");
-        blocks.push(`<p><b>${inlineToHtml(headingMatch[1])}</b><br>${restHtml}</p>`);
-      }
-      continue;
-    }
-
-    blocks.push(renderNonHeadingLines(lines));
-  }
-
-  return blocks.join("\n");
+  return renderPublishBlocks(markdown, NAVER_OPTIONS);
 }

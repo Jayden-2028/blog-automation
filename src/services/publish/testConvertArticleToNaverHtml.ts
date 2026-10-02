@@ -1,4 +1,6 @@
 // convertArticleToNaverHtml 테스트. 실제 브라우저/SmartEditor 없이 순수 변환 함수만 검증한다.
+// 간격·글자 크기 규칙은 renderPublishBlocks.ts가 정하고 testRenderPublishBlocks.ts가 따로 검증한다.
+// 여기서는 **네이버 고유 선택**(b/i 태그, img 하나, 링크에 target 없음)과 이미지 제거만 확인한다.
 
 import { convertArticleToNaverHtml, stripImageMarkdownBlocks } from "./convertArticleToNaverHtml.js";
 
@@ -11,13 +13,16 @@ function main(): void {
 
   // 1) **소제목** -> <b>, 바로 다음 줄(빈 줄 없음)은 <br>로 붙은 같은 <p>(2026-09-06, writer.md §6)
   const withHeader = convertArticleToNaverHtml("**2026년 일정과 가격**\n본문 내용입니다.");
-  assert(withHeader === "<p><b>2026년 일정과 가격</b><br>본문 내용입니다.</p>", `소제목+문단 결합 실패 (실제: ${withHeader})`);
-  console.log("✅ **소제목** -> 문단과 <br>로 붙은 하나의 <p>(<b> 태그)");
+  assert(
+    withHeader === '<p style="font-size:19px"><b>2026년 일정과 가격</b></p>\n<p style="font-size:15px">본문 내용입니다.</p>',
+    `소제목+문단 변환 실패 (실제: ${withHeader})`
+  );
+  console.log("✅ **소제목** -> 19px <b> 문단, 본문은 15px 문단");
 
   // 1-1) 소제목 뒤가 목록이면 별도 ul로 두되 margin을 서로 붙인다
   const headingWithList = convertArticleToNaverHtml("**참고 자료**\n- [링크1](https://a.com)\n- [링크2](https://b.com)");
-  assert(headingWithList.includes('<p style="margin-bottom:0"><b>참고 자료</b></p>'), `헤더+목록의 헤더 margin 실패 (${headingWithList})`);
-  assert(headingWithList.includes('<ul style="margin-top:0">'), `헤더+목록의 목록 margin 실패 (${headingWithList})`);
+  assert(headingWithList.includes('<p style="font-size:19px"><b>참고 자료</b></p>'), `헤더 변환 실패 (${headingWithList})`);
+  assert(headingWithList.includes('<ul style="font-size:15px">'), `목록 변환 실패 (${headingWithList})`);
   console.log("✅ 소제목 다음 줄이 목록이면 ul로");
 
   // 2) **굵게**, *이탤릭*, 링크
@@ -29,25 +34,25 @@ function main(): void {
 
   // 3) - 목록 -> ul/li
   const withList = convertArticleToNaverHtml("- 첫째 항목\n- 둘째 항목");
-  assert(withList.includes("<ul><li>첫째 항목</li><li>둘째 항목</li></ul>"), `목록 변환 실패 (실제: ${withList})`);
+  assert(withList === '<ul style="font-size:15px"><li>첫째 항목</li><li>둘째 항목</li></ul>', `목록 변환 실패 (실제: ${withList})`);
   console.log("✅ 목록 -> <ul><li> 변환");
 
-  // 4) ![alt](url) 이미지 -> img(2em 여백), (generateArticleImages.ts가 삽입하는 형식)
+  // 4) ![alt](url) 이미지 -> img 하나(generateArticleImages.ts가 삽입하는 형식)
   const withImage = convertArticleToNaverHtml("![대표 이미지](https://example.com/a.png)");
   assert(
-    withImage === '<img src="https://example.com/a.png" alt="대표 이미지" style="margin:2em 0">',
+    withImage === '<img src="https://example.com/a.png" alt="대표 이미지">',
     `이미지 변환 실패 (실제: ${withImage})`
   );
-  console.log("✅ ![alt](url) -> <img> 변환(2em 여백)");
+  console.log("✅ ![alt](url) -> <img> 변환");
 
-  // 4-1) [IMAGE: 설명] placeholder도 여백을 받는다
+  // 4-1) [IMAGE: 설명] placeholder는 본문 문단으로
   const placeholder = convertArticleToNaverHtml("[IMAGE: 대표 사진 — 웹 검색]");
-  assert(placeholder === '<p style="margin:2em 0">[IMAGE: 대표 사진 — 웹 검색]</p>', `placeholder 여백 실패 (${placeholder})`);
-  console.log("✅ [IMAGE: 설명] placeholder도 2em 여백");
+  assert(placeholder === '<p style="font-size:15px">[IMAGE: 대표 사진 — 웹 검색]</p>', `placeholder 실패 (${placeholder})`);
+  console.log("✅ [IMAGE: 설명] placeholder도 본문 문단");
 
   // 5) alt 텍스트가 비어 있어도 안전해야 한다
   const withEmptyAlt = convertArticleToNaverHtml("![](https://example.com/b.png)");
-  assert(withEmptyAlt === '<img src="https://example.com/b.png" alt="" style="margin:2em 0">', `빈 alt 처리 실패 (실제: ${withEmptyAlt})`);
+  assert(withEmptyAlt === '<img src="https://example.com/b.png" alt="">', `빈 alt 처리 실패 (실제: ${withEmptyAlt})`);
   console.log("✅ 빈 alt 텍스트 처리");
 
   // 6) HTML 특수문자 이스케이프 (본문에 <, >, & 등이 그대로 있으면 SmartEditor paste가 깨질 수 있다)
@@ -60,7 +65,7 @@ function main(): void {
 
   // 7) 소제목 없는 한 블록 안 여러 줄은 <br>로 보존
   const withMultiline = convertArticleToNaverHtml("질문입니다.\n답변입니다.");
-  assert(withMultiline === "<p>질문입니다.<br>답변입니다.</p>", `<br> 보존 실패 (실제: ${withMultiline})`);
+  assert(withMultiline === '<p style="font-size:15px">질문입니다.<br>답변입니다.</p>', `<br> 보존 실패 (실제: ${withMultiline})`);
   console.log("✅ 블록 내 줄바꿈 -> <br> 보존");
 
   // 8) 여러 블록이 섞인 실제 원고 형태 회귀 케이스
@@ -71,10 +76,14 @@ function main(): void {
   ].join("\n\n");
   const fullHtml = convertArticleToNaverHtml(fullArticle);
   const blocks = fullHtml.split("\n");
-  assert(blocks.length === 3, `블록 3개여야 한다 (실제: ${blocks.length}개)`);
-  assert(blocks[0] === "<p><b>신청 기간과 대상</b><br>2026년 9월 1일부터 접수를 시작합니다.</p>", `블록 순서 오류: ${blocks[0]}`);
-  assert(blocks[1] === '<img src="https://example.com/main.png" alt="대표 이미지" style="margin:2em 0">', `블록 순서 오류: ${blocks[1]}`);
-  assert(blocks[2].startsWith("<ul>"), `블록 순서 오류: ${blocks[2]}`);
+  // 소제목 / 본문 / 빈 줄 / 이미지 / 빈 줄 / 목록
+  assert(blocks.length === 6, `블록 6개여야 한다 (실제: ${blocks.length}개 - ${fullHtml})`);
+  assert(blocks[0] === '<p style="font-size:19px"><b>신청 기간과 대상</b></p>', `블록 순서 오류: ${blocks[0]}`);
+  assert(blocks[1] === '<p style="font-size:15px">2026년 9월 1일부터 접수를 시작합니다.</p>', `블록 순서 오류: ${blocks[1]}`);
+  assert(blocks[2] === "<p>&nbsp;</p>", `문단 뒤 빈 줄 누락: ${blocks[2]}`);
+  assert(blocks[3] === '<img src="https://example.com/main.png" alt="대표 이미지">', `블록 순서 오류: ${blocks[3]}`);
+  assert(blocks[4] === "<p>&nbsp;</p>", `이미지 뒤 빈 줄 누락: ${blocks[4]}`);
+  assert(blocks[5].startsWith('<ul style="font-size:15px">'), `블록 순서 오류: ${blocks[5]}`);
   console.log("✅ 헤더+문단 결합 + 이미지 + 목록이 섞인 전체 원고 변환");
 
   // 9) stripImageMarkdownBlocks - 이미지 블록만 제거, 나머지는 그대로 유지

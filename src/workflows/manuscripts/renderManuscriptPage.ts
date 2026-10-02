@@ -207,13 +207,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
   #preview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:26px 24px}
   #preview p{margin:0 0 1.15em;font-size:15px;line-height:1.95;white-space:pre-wrap}
-  #preview p.h{font-weight:800;font-size:16px;margin:2.3em 0 1.1em;letter-spacing:-.02em}
-  #preview p.h:first-child{margin-top:0}
-  #preview p.tags-line{color:var(--muted);font-size:13px;margin-top:1.6em}
+  /* 발행 서식과 같은 비율로 보여준다(renderPublishBlocks.ts): 본문 15px, 소제목 19px,
+     소제목 아래 간격 0, 해시태그 앞 두 줄. 화면에서 본 간격이 복사 결과와 같아야 한다. */
+  #preview p.h{font-weight:800;font-size:19px;margin:0;letter-spacing:-.02em}
+  #preview p.tags-line{color:var(--muted);font-size:15px;margin-top:2.3em}
   .editable[contenteditable="true"]{outline:2px dashed var(--pen);outline-offset:4px;
                                     padding:4px;border-radius:6px}
 
-  figure.cut{margin:1.9em 0}
+  figure.cut{margin:1.15em 0}  /* 위아래 한 줄씩 - 규칙 4 */
   figure.cut img{width:100%;height:auto;display:block;border-radius:8px;background:var(--card)}
   figure.cut figcaption{font-size:12.5px;color:#6B6259;margin-top:8px;line-height:1.6}
   .cutlab{display:inline-block;font-size:11px;font-weight:700;color:var(--muted);
@@ -509,26 +510,30 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         .replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)]+)\\)/g, '<a href="$2">$1</a>');
     }
 
+    var BODY_PX = 15, HEADING_PX = 19, SPACER = "<p>&nbsp;</p>";
+
     function linesToHtml(lines) {
       if (lines.length > 0 && lines.every(isListLine)) {
-        return "<ul>" + lines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + "</ul>";
+        return '<ul style="font-size:' + BODY_PX + 'px">' + lines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + "</ul>";
       }
-      return "<p>" + lines.map(inlineHtml).join("<br>") + "</p>";
+      return '<p style="font-size:' + BODY_PX + 'px">' + lines.map(inlineHtml).join("<br>") + "</p>";
     }
 
-    /** 블록 하나(수정 중이면 편집된 값)를 rich HTML로. 이미지는 collectRichHtml이 먼저 처리한다. */
+    /**
+     * 블록 하나(수정 중이면 편집된 값)를 rich HTML로. **서버의 renderPublishBlocks.ts와 같은 서식**이다
+     * (본문 15px / 소제목 19px, 소제목 아래 간격 없음) - 한쪽만 고치면 "화면에서 복사한 것"과
+     * "자동 발행된 것"이 달라진다. 블록 사이 빈 줄은 collectRichHtml이 넣는다.
+     */
     function blockHtml(block, i) {
       if (block.type === "heading") {
         var hEl = findEditable(i, "h"), bEl = findEditable(i, "b");
         var headingText = (hEl ? hEl.innerText : block.heading).trim();
         var bodyLines = (bEl ? bEl.innerText : block.body || "").split("\\n")
           .map(function (l) { return l.trim(); }).filter(Boolean);
-        if (bodyLines.length === 0) return "<p><b>" + inlineHtml(headingText) + "</b></p>";
-        if (bodyLines.every(isListLine)) {
-          return '<p style="margin-bottom:0"><b>' + inlineHtml(headingText) + "</b></p>"
-            + '<ul style="margin-top:0">' + bodyLines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + "</ul>";
-        }
-        return "<p><b>" + inlineHtml(headingText) + "</b><br>" + bodyLines.map(inlineHtml).join("<br>") + "</p>";
+        var head = '<p style="font-size:' + HEADING_PX + 'px"><b>' + inlineHtml(headingText) + "</b></p>";
+        if (bodyLines.length === 0) return head;
+        // 줄바꿈으로 이어 붙인다 - 발행 변환기 출력과 글자 단위로 같아야 testManuscriptViewerCopy가 통과한다.
+        return head + "\\n" + linesToHtml(bodyLines);
       }
       var el = findEditable(i, null);
       var text = (el ? el.innerText : block.content).trim();
@@ -551,12 +556,32 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
      *  마커 줄을 지우는 용도) - 번호는 캡션 표/프롬프트 팩과 같은 순서다. */
     function collectRichHtml(topic) {
       var parts = [], n = 0;
+      // 뒤에 붙은 빈 문단 개수를 원하는 만큼 맞춘다(renderPublishBlocks.ts의 setSpacers와 같은 규칙).
+      function setSpacers(want) {
+        var have = 0;
+        for (var k = parts.length - 1; k >= 0 && parts[k] === SPACER; k -= 1) have += 1;
+        while (have > want) { parts.pop(); have -= 1; }
+        while (have < want) { parts.push(SPACER); have += 1; }
+      }
       topic.blocks.forEach(function (block, i) {
-        if (block.type === "image") { n += 1; parts.push("<p>[[이미지 " + n + "]]</p>"); return; }
+        if (block.type === "image") {
+          n += 1;
+          parts.push('<p style="font-size:' + BODY_PX + 'px">[[이미지 ' + n + "]]</p>");
+          setSpacers(1); // 규칙 4 - 이미지 아래 한 줄
+          return;
+        }
         var html = blockHtml(block, i);
-        if (html) parts.push(html);
+        if (!html) return;
+        parts.push(html);
+        // 소제목만 있고 본문이 없는 블록은 아래에 빈 줄을 넣지 않는다(규칙 3).
+        if (!(block.type === "heading" && !(block.body || "").trim())) setSpacers(1);
       });
-      if (topic.tags && topic.tags.length > 0) parts.push("<p>" + esc(hashtagLine(topic.tags)) + "</p>");
+      if (topic.tags && topic.tags.length > 0) {
+        setSpacers(2); // 규칙 5 - 해시태그 앞 두 줄
+        parts.push('<p style="font-size:' + BODY_PX + 'px">' + esc(hashtagLine(topic.tags)) + "</p>");
+      } else {
+        setSpacers(0);
+      }
       return parts.join("\\n");
     }
 
@@ -567,7 +592,8 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         var text = blockPlain(block, i);
         if (text) parts.push(text);
       });
-      if (topic.tags && topic.tags.length > 0) parts.push(hashtagLine(topic.tags));
+      // 규칙 5 - 평문으로 붙여넣을 때도 해시태그 앞은 두 줄이다(블록 사이는 한 줄).
+      if (topic.tags && topic.tags.length > 0) parts.push("", hashtagLine(topic.tags));
       return parts.join("\\n\\n");
     }
 
@@ -590,7 +616,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         var text = (block.content || "").trim();
         if (text) parts.push(text);
       });
-      if (naver.tags && naver.tags.length > 0) parts.push(hashtagLine(naver.tags));
+      if (naver.tags && naver.tags.length > 0) parts.push("", hashtagLine(naver.tags));
       return parts.join("\\n\\n");
     }
 

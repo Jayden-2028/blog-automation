@@ -2,6 +2,38 @@
 
 기준일: 2026-10-02 (Asia/Seoul)
 
+## 2026-10-02 세션(5) — 발행 서식 한 곳으로 통일 (브랜치 `claude/manuscript-quality-control-oasnpf`, 미병합)
+
+**한 줄**: 사용자가 손으로 다듬어 발행한 네이버 글 4편을 읽어 **발행 서식 5개 규칙**을 뽑고,
+변환기 두 개와 원고 뷰어 복사 버튼이 **같은 구현**을 쓰게 했다. 뷰어에서 복사해 네이버 편집기·
+Blogspot에 붙여넣으면 발행 버튼 경로와 서식이 똑같다.
+
+규칙(실측: `whyissuenow/224423211962`, `224429461072` — 본문 `se-fs-fs15`, 소제목 `se-fs-fs19`):
+
+| # | 규칙 |
+|---|---|
+| 1 | 문단이 끝나면 빈 줄 1개 |
+| 2 | 소제목은 본문의 125%(본문 15px, 소제목 19px) |
+| 3 | 소제목 바로 아래에는 빈 줄 없음 |
+| 4 | 이미지 아래 빈 줄 1개 |
+| 5 | 마지막 문단과 해시태그 사이 빈 줄 2개 |
+
+- **간격은 CSS margin이 아니라 빈 문단(`<p>&nbsp;</p>`)이다.** SmartEditor는 붙여넣은 HTML의 margin을
+  대부분 버린다 - 사람이 엔터로 만든 것과 같은 형태여야 양쪽에서 같이 보인다. 전에 쓰던
+  `margin:2em 0` / `margin-bottom:0`은 걷어냈다.
+- **단일 구현** `src/services/publish/renderPublishBlocks.ts` 신설. `convertArticleToHtml.ts`(Blogspot:
+  strong/em, figure+figcaption, target=_blank)와 `convertArticleToNaverHtml.ts`(네이버: b/i, img 하나)는
+  옵션만 넘기고 위임한다. 전에는 같은 규칙을 두 파일이 따로 구현해 조금씩 달랐다.
+- **뷰어도 같은 서식**(`renderManuscriptPage.ts`) - 미리보기 CSS(소제목 19px, 아래 간격 0, 이미지 위아래
+  한 줄, 해시태그 앞 두 줄)와 복사 HTML을 함께 맞췄다. 평문 복사도 해시태그 앞만 두 줄이다.
+- 뷰어 복사 로직은 브라우저로 내보내는 문자열 템플릿 안에 있어 import할 수 없다 →
+  `test:viewer-copy`가 **렌더된 페이지에서 그 함수들을 잘라 내 실행하고** `renderPublishBlocks` 출력과
+  글자 단위로 비교한다. 한쪽만 고치면 이 테스트가 깨진다.
+- 집필자 쪽 마크다운 계약은 **안 바뀌었다**. 규격은 `rules/output-format.md` §8-3에 적었다.
+- 검증: `test:publish-blocks`(신설, 5개 규칙) · `test:viewer-copy`(신설) · `test:naver-html` ·
+  `test:html-generic` · `test:image-notes` · `test:article-parts` · `test:parse-blocks` · `npm run build` 통과.
+- 남은 것: main 병합(사용자 승인 대기). 배포는 뷰어 페이지가 다시 빌드될 때(다음 승인 원고) 반영된다.
+
 ## 2026-10-02 세션(4) — 오세훈 2심 피드백으로 이미지 규칙 개정 (main 병합 완료)
 
 **한 줄**: 사용자가 오세훈 2심 원고의 이미지 6자리에 단 댓글을 반영했다. 핵심은 **"이미지는 문단이
