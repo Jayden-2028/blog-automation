@@ -143,6 +143,7 @@
     "test:ruliweb-parser": "tsx src/services/community/ruliweb/testParseRuliwebHtml.ts",
     "test:fmkorea-parser": "tsx src/services/community/fmkorea/testParseFmkoreaHtml.ts",
     "test:worker-cron": "tsx scripts/testWorkerCronSync.ts",
+    "test:worker-scheduled": "tsx scripts/testWorkerScheduled.ts",
     "recon:community": "tsx scripts/communityRecon.ts",
     "test:robots-matcher": "tsx scripts/testRobotsMatcher.ts",
     "job:close": "tsx scripts/closeJob.ts",
