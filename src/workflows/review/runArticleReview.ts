@@ -29,6 +29,8 @@ export type ArticleReviewInput = {
   researchVerdict?: string | null;
   /** 자료조사 파일 원문. 기관 귀속을 official 근거와 대조한다(2026-10-02). */
   researchText?: string | null;
+  /** 이 job의 메인 키워드. 제목 첫 마디 검사에 쓴다(2026-10-02). */
+  keyword?: string | null;
 };
 
 export type ArticleReviewResult = {
@@ -50,6 +52,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
       hashtags: input.hashtags,
       isMedical: input.isMedical,
       researchThin: input.researchVerdict === "thin",
+      keyword: input.keyword,
     }),
     ...checkAttributionHedging(input.article.content),
     ...checkInstitutionAttribution(input.article.content, input.researchText),
