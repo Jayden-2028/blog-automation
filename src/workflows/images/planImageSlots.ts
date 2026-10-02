@@ -24,6 +24,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { stripAcquisitionSuffix } from "../manuscripts/parseManuscriptBlocks.js";
 import { imageMakerSpecLines } from "./imageMakerSpec.js";
 import { isPressUrl } from "./pressDomains.js";
+import { groupShotsAllowed } from "../../config/imageGroupShots.js";
 
 /** 기획이 정할 수 있는 획득 방식. `table`은 폐지됐고 기획이 고르지 않는다. */
 export const PLANNABLE_ACQUISITIONS = ["search", "capture", "ai", "infographic"] as const;
@@ -115,6 +116,29 @@ export function collectPlanSlots(
   return slots;
 }
 
+/**
+ * R7 - 여러 인물을 한 자리에 요구해도 되나(2026-10-02 사용자 결정으로 **기본은 허용**).
+ * 옛 R7("두 인물을 동시에 요구하지 않는다")이 "한 명짜리로 넘어간다"는 기획을 만들었고, 영상물에서는
+ * 배우 2샷·단체샷이 흔해 오히려 손해였다. `IMAGE_GROUP_SHOTS=false`면 옛 문구로 돌아간다.
+ */
+export function r7Lines(allowed: boolean): string[] {
+  if (allowed) {
+    return [
+      "**R7. 함께 나오는 인물은 함께 찾는다.** 드라마·영화·OTT·예능·방송은 배우 2샷·단체샷이 많다.",
+      "문단이 여러 사람을 말하면 `queries` 첫째는 **작품명 + 인물들**로 묶고, 둘째에 한 명짜리를 둔다.",
+      "단체 사진·2샷·합성컷을 피하라는 `caution`을 쓰지 않는다(2026-10-02 폐지).",
+      "  (O) `유일무이 로맨스 박수영 김현진` → 둘째 `유일무이 로맨스 박수영`",
+      "",
+    ];
+  }
+  return [
+      "**R7. 두 인물을 한 자리에 동시에 요구하지 않는다.** 함께 찍힌 사진은 특정 행사뿐이라 거의 없다.",
+      "한 명씩 쪼개고 작품명을 붙인다.",
+      "  (X) `박수영 김현진`  (O) `유일무이 로맨스 박수영`",
+      "",
+  ];
+}
+
 export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null): string {
   const slots = collectPlanSlots(input.body, input.imagePrompts);
   const lines = [
@@ -148,8 +172,8 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "실명과 얼굴이 이미 보도된 사람들이라 **당사자 실사진**을 쓴다. AI 일반 장면(콜센터·법정 일러스트)으로",
     "바꾸지 않는다 - 그건 보호가 아니라 내용과 무관한 장식이다. 당사자가 여럿이면 **이름을 묶어** 먼저 찾는다.",
     "  (X) `전화 여론조사 콜센터` (AI)   (O) `명태균 오세훈 김한정`",
-    "  R7(두 인물 동시 요구 금지)은 함께 찍힌 사진이 **없을 때** 쪼개라는 것이고, 한 사건으로 함께 보도된",
-    "  당사자는 같은 기사 사진에 함께 나오는 경우가 많다. 그래도 `queries` 둘째에는 한 명짜리를 넣어 둔다.",
+    "  한 사건으로 함께 보도된 당사자는 같은 기사 사진에 함께 나오는 경우가 많다.",
+    "  그래도 `queries` 둘째에는 한 명짜리를 넣어 둔다.",
     "  **보호 대상은 예외다** - 피해자·미성년자·일반인 피의자·신원 비공개 인물은 실사진을 쓰지 않는다.",
     "",
     "**R1. 1번 자리는 한 줄 요약을 보여준다.** 요약이 \"예고편 공개\"면 1번은 예고편 장면이다 -",
@@ -172,10 +196,7 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "",
     "**R6. 비우느니 대상을 바꾼다.** 단, 바꾼 대상이 문단과 무관하면 그때는 비운다(`queries`를 빈 배열로).",
     "",
-    "**R7. 두 인물을 한 자리에 동시에 요구하지 않는다.** 함께 찍힌 사진은 특정 행사뿐이라 거의 없다.",
-    "한 명씩 쪼개고 작품명을 붙인다.",
-    "  (X) `박수영 김현진`  (O) `유일무이 로맨스 박수영`",
-    "",
+    ...r7Lines(groupShotsAllowed()),
     "**R8. 부제·채널명·시즌 표기를 뺀다.** 길수록 영상 썸네일이 올라온다.",
     "  (X) `닥터X 하얀 마피아의 시대 스틸컷`  (O) `닥터X 김지원`",
     "",
