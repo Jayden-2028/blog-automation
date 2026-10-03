@@ -226,4 +226,21 @@ const eq = (text: string, expected: Array<[number, string]>) => {
     console.log("✅ 자리 삭제 요청 - 삭제/빼줘/지워줘/제거/없애 인식, 오인 없음");
   }
 
+  // 후보 선택(2026-10-02) - 뷰어 "후보 보기"의 번호로 고른다.
+  {
+    const parsed = parseImageEditReply("1번 후보3, 5번 후보 2", 6);
+    if (parsed.length !== 2) throw new Error(`❌ "후보 2"의 2를 자리 번호로 읽으면 안 된다 (${JSON.stringify(parsed)})`);
+    if (parsed[0].candidate !== 3 || parsed[1].candidate !== 2) throw new Error(`❌ 후보 번호를 읽어야 한다 (${JSON.stringify(parsed)})`);
+
+    const candidates = {
+      "1": [{ number: 1, url: "https://a/1.jpg", sourcePage: "" }, { number: 3, url: "https://a/3.jpg", sourcePage: "" }],
+    };
+    const applied = applyImageEditRequest([], parsed, candidates);
+    const direct = applied.patch.imageDirectUrls as Record<string, string>;
+    if (direct?.["1"] !== "https://a/3.jpg") throw new Error(`❌ 고른 후보 주소를 써야 한다 (${JSON.stringify(direct)})`);
+    if (JSON.stringify(applied.missingCandidates) !== "[5]") throw new Error("❌ 기록에 없는 후보는 알려야 한다");
+    if (!describeImageEditRequests(parsed).includes("후보 3번으로 교체")) throw new Error("❌ 되읽기에 후보가 보여야 한다");
+    console.log("✅ 후보 선택 - 번호 파싱, 주소 해석, 없는 후보 안내");
+  }
+
   console.log("\n🎉 이미지 수정 답장 파싱 테스트 통과");

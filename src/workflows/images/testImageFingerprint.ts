@@ -186,6 +186,39 @@ async function main(): Promise<void> {
     console.log("✅ 지문이 실패해도 바이트가 같으면 차단(Chromium 무관)");
   }
 
+  // 11) 이미 원고에 있던 이미지(alwaysCompare)는 거리와 상관없이 비전에 묻는다(2026-10-02).
+  //     실측(이혼숙려캠프): 6번 공식 포스터와 1번 공식 스틸이 같은 사진인데, 자르기·글자 때문에 dHash가
+  //     "확실히 다름"으로 나와 비전에 한 번도 안 물었다. 게다가 등록 때 파일이 없어 물을 수도 없었다.
+  {
+    const asked: string[][] = [];
+    const deduper = new ImageDeduper({
+      fingerprint: async (buffer) =>
+        buffer.toString() === "poster"
+          ? { hash: "0000000000000000", swapped: "0000000000000000" }
+          : { hash: "ffffffffffffffff", swapped: "ffffffffffffffff" }, // 거리 64 = 확실히 다름
+      askSameCut: async ({ against }) => {
+        asked.push(against.map((a) => a.key));
+        return against[0]?.key ?? null;
+      },
+    });
+    await deduper.claim("자리 6(이미 사용 중)", buf("poster"), "image/jpeg", { filePath: "/tmp/existing-6", alwaysCompare: true });
+    const verdict = await deduper.claim("자리 1", buf("still"), "image/jpeg", { index: 1, filePath: "/tmp/cand1" });
+    assert(asked.length === 1 && asked[0][0] === "자리 6(이미 사용 중)", `거리가 멀어도 이미 쓴 컷과는 비전 비교 (${JSON.stringify(asked)})`);
+    assert(verdict.duplicate && verdict.against === "자리 6(이미 사용 중)", "비전이 같다면 막는다");
+
+    // 대조군: alwaysCompare가 아니면(이번 실행에서 채운 것) 먼 거리는 묻지 않는다 - 호출 수 유지.
+    const asked2: number[] = [];
+    const plain = new ImageDeduper({
+      fingerprint: async (buffer) =>
+        buffer.toString() === "a" ? { hash: "0000000000000000", swapped: "0000000000000000" } : { hash: "ffffffffffffffff", swapped: "ffffffffffffffff" },
+      askSameCut: async () => { asked2.push(1); return null; },
+    });
+    await plain.claim("자리 1", buf("a"), "image/jpeg", { index: 1, filePath: "/tmp/a" });
+    await plain.claim("자리 2", buf("b"), "image/jpeg", { index: 2, filePath: "/tmp/b" });
+    assert(asked2.length === 0, "일반 항목은 먼 거리에 비전을 부르지 않는다");
+    console.log("✅ 이미 쓴 컷은 거리와 상관없이 비전 비교(스틸 ↔ 포스터), 일반 항목은 그대로");
+  }
+
   console.log("\n🎉 같은 컷 검출 테스트 통과");
 }
 

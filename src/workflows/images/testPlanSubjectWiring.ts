@@ -152,6 +152,57 @@ async function main(): Promise<void> {
     console.log("✅ any - 최신순 검색 생략");
   }
 
+  // 7) 이혼숙려캠프 실측(2026-10-02): 사용자 요구가 오면 기획의 주의사항·검색어를 버리고,
+  //    검색어가 없으면 원고 키워드 핵심으로 찾고, "방송 화면 캡처"면 공식 스틸을 후보에서 뺀다.
+  {
+    const queriesSeen: string[] = [];
+    let seen: ChooseImageInput | null = null;
+    let agentPrompt = "";
+    const hit = (link: string) => ({ title: link, link, thumbnail: link, width: 1600, height: 900 });
+    const result = await collectWebImagesForJob(
+      {
+        jobId: "test-job",
+        keyword: "이혼숙려캠프 자극부부 남편 성적 폭언",
+        category: "entertainment",
+        body: "남편의 성적 폭언이 방송됐다.\n\n[IMAGE: 이혼숙려캠프 공식 스틸 — 웹 검색]\n[IMAGE PROMPT: 이혼숙려캠프 스틸컷]",
+        imagePrompts: [],
+        planQueries: { 1: ["이혼숙려캠프 스틸컷", "이혼숙려캠프 키노라이츠"] },
+        planSubjects: { 1: { subject: "이혼숙려캠프 공식 스틸", caution: "자극부부 당사자 얼굴이 크게 나온 사진은 쓰지 않는다." } },
+        requirements: { "1": "해당 회차 방송 화면을 캡쳐한 이미지로 바꿔줘. 성적 폭언이 자막으로 나온 이미지." },
+      },
+      {
+        searchImages: async (q) => { queriesSeen.push(q); return [hit("https://news.example.com/cap.jpg")]; },
+        searchRecentImages: false,
+        searchKinolights: async () => [{ imageUrl: "https://kinolights.example.com/still.jpg", sourcePage: "https://m.kinolights.com/title/1" }],
+        cropTall: false,
+        deduper: undefined,
+        runCodex: async (input) => {
+          agentPrompt = input.prompt;
+          return {
+            ok: true as const,
+            durationMs: 0,
+            data: { slots: [{ index: 1, imageUrl: "https://news.example.com/cap.jpg", sourcePage: "https://news.example.com", alt: "방송 캡처", caption: "", license: "보도", reusePermission: "news_photo", rationale: "", skipped: false, skipReason: "", alternates: [] }] },
+          };
+        },
+        fetchImage: async () => ({ ok: true, buffer: PNG, contentType: "image/png" }),
+        readSize: () => ({ width: 1600, height: 900 }),
+        chooseImage: async (input) => { seen = input; return { picked: 1, reason: "맞다", caption: "방송 캡처" }; },
+        upload: async ({ fileName }) => ({ ok: true as const, url: `https://storage/${fileName}` }),
+      }
+    );
+    const s = seen as ChooseImageInput | null;
+    assert(s, "판정이 불려야 한다");
+    assert(!s!.caution, `사용자 요구가 오면 기획 주의사항을 버려야 한다 (${s!.caution})`);
+    assert(s!.broadcastCapture === true, "방송 화면 캡처 요청을 알아야 한다");
+    assert(!queriesSeen.some((q) => q.includes("스틸컷") || q.includes("키노라이츠")), `기획 검색어로 찾으면 안 된다 (${queriesSeen.join(" / ")})`);
+    assert(queriesSeen[0] === "이혼숙려캠프 자극부부", `검색어가 없으면 키워드 핵심으로 (${queriesSeen.join(" / ")})`);
+    assert(!agentPrompt.includes("kinolights.example.com"), "방송 캡처 자리에는 공식 스틸을 후보로 넣지 않는다");
+    assert(agentPrompt.includes("그 회차 방송 화면 캡처"), "수집 에이전트에도 방송 캡처를 지시한다");
+    const cands = result.candidates?.[1] ?? [];
+    assert(cands.length >= 1 && cands[0].url === "https://news.example.com/cap.jpg" && cands[0].picked, `후보가 기록되고 채택 표시 (${JSON.stringify(cands)})`);
+    console.log("✅ 사용자 요구 - 기획 주의사항·검색어 폐기, 키워드 핵심 검색, 방송 캡처면 공식 스틸 제외, 후보 기록");
+  }
+
   console.log("\n✅ 기획 대상 배선 테스트 전부 통과");
 }
 

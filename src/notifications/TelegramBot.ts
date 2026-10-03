@@ -29,7 +29,7 @@ import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExpo
 import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
-import { applyImageEditRequest, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
+import { applyImageEditRequest, readImageCandidates, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
 import { removeMarkersAt } from "../workflows/manuscripts/removeTableMarkers.js";
 import type { MarkerChange } from "../workflows/images/applyImageEditRequest.js";
 import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
@@ -933,6 +933,7 @@ export class TelegramBot {
           "이 메시지에 <b>답장</b>으로 바꾸고 싶은 자리를 적어주세요.",
           "예) <code>2번은 인물 단독샷으로, 5번은 제품 컷으로</code>",
           "번호만 적으면 그 자리를 그냥 다시 찾습니다. 빈 자리만 채우려면 <code>없음</code>이라고 답장하세요.",
+          "원고 페이지의 <b>후보 보기</b>에서 고르려면 <code>1번 후보3</code>처럼 적으세요.",
         ].join("\n")
       ).catch(() => null);
 
@@ -1174,7 +1175,11 @@ export class TelegramBot {
 
     const images = readJobManuscriptImages(job);
     const requests = parseImageEditReply(text, Math.max(images.length, 1));
-    const applied = applyImageEditRequest(images, requests);
+    const applied = applyImageEditRequest(
+      images,
+      requests,
+      readImageCandidates(job.metadata as Record<string, unknown> | null)
+    );
     await this.mergeJobMetadata(job.id, applied.patch);
 
     // 사용자가 획득 방식을 지시했으면 **본문 마커를 실제로 고친다**(2026-09-22).
@@ -1231,6 +1236,12 @@ export class TelegramBot {
         "언론사·공식 사이트 도메인이면 맞습니다(예: <code>images.khan.co.kr/....png</code>).",
         "",
         "지금은 요구사항만 반영해 다시 찾습니다."
+      );
+    }
+    if (applied.missingCandidates.length > 0) {
+      lines.push(
+        "",
+        `⚠️ ${applied.missingCandidates.join(", ")}번은 고르신 후보 번호가 기록에 없습니다. 원고 페이지의 "후보 보기"에서 번호를 다시 확인해 주세요. 지금은 다시 찾기로 처리합니다.`
       );
     }
     lines.push("", "완료되면 원고 준비 알림을 다시 보내드립니다.");
