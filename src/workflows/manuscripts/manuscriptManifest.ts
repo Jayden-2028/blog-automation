@@ -95,6 +95,17 @@ export type ManuscriptEntry = {
   sourceTag?: "instagram" | null;
   /** sourceTag가 있을 때만 의미 있다. 배지 클릭/표시에 쓸 원본 링크. */
   sourceUrl?: string | null;
+  /**
+   * 마지막 "뷰어 수정본 반영" 결과(2026-10-03). 뷰어가 언제 무엇이 발행 원고에 들어갔고 무엇을 왜
+   * 건너뛰었는지 보여준다 - 반영은 비동기(GitHub Actions)라 버튼을 누른 화면에서는 결과를 모른다.
+   */
+  viewerEdit?: ViewerEditRecord | null;
+};
+
+export type ViewerEditRecord = {
+  appliedAt: string;
+  applied: string[];
+  skipped: { key: string; reason: string }[];
 };
 
 /** 판정자가 열어 본 후보 한 장. 주소만 남긴다 - 파일은 저장하지 않는다(저장소 용량). */
