@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describeRecovery, recordFailure, takeRecovery } from "./outageTracker.js";
+import { describeRecovery, MIN_ALERT_MINUTES, recordFailure, takeRecovery } from "./outageTracker.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -66,6 +66,27 @@ console.log("▶ 멈춤 기록 테스트 시작\n");
   assert(text.includes("복구됐습니다"), "짧은 멈춤은 복구 알림이다");
   assert(!text.includes("사라졌을 수 있습니다"), "유실 경고를 붙이면 안 된다");
   console.log("✅ 짧은 멈춤은 경고하지 않는다");
+}
+
+// 6) 10분 안에 돌아온 짧은 끊김은 알리지 않는다(2026-10-03). 기록은 지워야 다음 장애가 이어 붙지 않는다.
+{
+  assert(MIN_ALERT_MINUTES === 10, "기준은 10분이다");
+  recordFailure(path, "fetch failed", new Date("2026-10-03T08:04:00Z"));
+  assert(takeRecovery(path, new Date("2026-10-03T08:05:00Z")) === null, "1분 끊김은 알리지 않는다");
+  assert(takeRecovery(path, new Date("2026-10-03T08:06:00Z")) === null, "기록이 지워져 있어야 한다");
+
+  recordFailure(path, "fetch failed", new Date("2026-10-03T09:00:00Z"));
+  assert(takeRecovery(path, new Date("2026-10-03T09:09:59Z")) === null, "10분 직전(9분 59초)은 알리지 않는다");
+
+  recordFailure(path, "fetch failed", new Date("2026-10-03T10:00:00Z"));
+  recordFailure(path, "fetch failed", new Date("2026-10-03T10:05:00Z"));
+  const recovery = takeRecovery(path, new Date("2026-10-03T10:10:00Z"));
+  assert(recovery !== null && recovery.failures === 2, "정확히 10분이면 알린다");
+  // 시작 시각은 한국 시간으로 보여 준다: 10:00Z -> 19:00 KST.
+  const text = describeRecovery(recovery!, "인스타 링크 수신");
+  assert(text.includes("시작 2026-10-03 19:00"), `시작 시각이 한국 시간이어야 한다: ${text}`);
+  assert(!text.includes("T10:00"), "UTC 원문이 남으면 안 된다");
+  console.log("✅ 10분 미만 끊김은 알리지 않고, 10분 이상만 알린다");
 }
 
 rmSync(dir, { recursive: true, force: true });
