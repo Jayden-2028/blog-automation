@@ -44,6 +44,22 @@ strict mode 예외 → `.catch`가 삼켜 **빈 문자열** → "본문이 비�
 **그때 볼 것**: 서식이 살아 있으면 끝이다. 텔레그램에 "이미지 N장 중 0장"이 뜨면 SmartEditor가 외부
 이미지를 안 받는다는 뜻이고, 그때 툴바 업로드(`uploadImages` - 코드는 이미 있고 호출만 안 한다)를 붙인다.
 
+**배포 완료(같은 날)**: 맥미니 `~/blog-automation/prod`에서 main 병합 + 폴러 재등록까지 끝냈다.
+`job:naver-poll`은 `tsx`로 **소스를 직접 실행**하므로(빌드 산출물을 쓰지 않는다) main 병합만으로
+반영된다 - `npm run build`는 이 경로에 필수가 아니다.
+
+배포 중에 밟은 것 두 가지, 둘 다 문서가 현실과 달라서 생겼다:
+- **맥미니 `prod`는 worktree가 아니라 일반 clone**이다(MACMINI_MIGRATION.md §알아둘 점). WORKFLOW.md
+  §4의 "main이 운영 worktree에 잡혀 있어 `checkout main`이 안 되니 temp-merge를 거친다"는 **옛 맥 기준**
+  이다. 맥미니에서는 `git checkout main && git merge <브랜치> && git push origin main`이면 된다.
+- **`install-launchd.sh`의 `uninstall` → `install` 왕복이 항상 깨졌다**(이번에 고침). `uninstall`이
+  `launchctl disable`을 남기는데 `install`은 `enable`을 `bootstrap` **뒤에** 호출해서, disable된 라벨이
+  `Bootstrap failed: 5: Input/output error`로 떨어지고 `set -e` 때문에 첫 job에서 스크립트가 통째로
+  죽는다(폴러 5개 전부 미등록). `enable`을 `bootstrap` 앞으로 옮겼다. 이미 disable이 남은 맥에서는
+  `launchctl enable gui/$(id -u)/com.blogautomation.<job>`을 한 번 돌려 풀면 된다.
+- 맥미니 `prod`의 git 원격이 HTTPS라 push가 막혔다(GitHub 비밀번호 인증 폐지). SSH 키로 전환했다 -
+  무인 서버라 만료되는 토큰보다 키가 맞다.
+
 ## 2026-10-03 — 소제목 규칙 적용 실측 + 규격 잔재 정리 + 뷰어 복사 괄호 URL
 
 **한 줄**: 사용자가 "소제목 AEO 수정이 오늘 원고에 적용됐는지" 물어 실측했다. **적용돼 있었다.**

@@ -56,7 +56,11 @@ case "${1:-status}" in
       f="$AGENTS/$PFX.$n.plist"
       launchctl bootout "gui/$UID_/$PFX.$n" 2>/dev/null || true
       plist "$n" "$s" "$i" > "$f"
-      launchctl bootstrap "gui/$UID_" "$f"; launchctl enable "gui/$UID_/$PFX.$n"
+      # enable이 bootstrap보다 **먼저**여야 한다(2026-10-03 실측). uninstall이 disable을 남기는데,
+      # disable된 라벨은 bootstrap이 "5: Input/output error"로 떨어지고 set -e 때문에 첫 job에서
+      # 스크립트가 통째로 죽는다 - uninstall -> install 왕복이 항상 깨졌다.
+      launchctl enable "gui/$UID_/$PFX.$n" 2>/dev/null || true
+      launchctl bootstrap "gui/$UID_" "$f"
       # 주기 표기는 형태에 맞춰 쓴다 - "07:30초" 같은 출력은 사람이 잘못 읽는다.
       if [[ "$i" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then echo "✅ 등록: $PFX.$n (매일 $i)"
       else echo "✅ 등록: $PFX.$n (${i}초마다)"; fi
