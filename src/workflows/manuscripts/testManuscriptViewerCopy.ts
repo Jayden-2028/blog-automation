@@ -27,6 +27,8 @@ const BODY = [
   "**금요일 한글날, 사흘 연휴**\n10월 9일 금요일부터 11일 일요일까지 사흘입니다.",
   "[IMAGE: 달력 — 웹 검색]",
   "**무엇이 바뀌나**\n- 첫째 항목입니다\n- 둘째 항목입니다",
+  // URL 안 괄호가 끊기면 404 링크가 된다(2026-10-03 발행 변환기에서 실측). 두 구현이 같아야 한다.
+  "**참고 자료**\n- [룩백 (2026년 영화) - 위키백과](https://ko.wikipedia.org/wiki/룩백_(2026년_영화))",
   "마무리 문단입니다.",
 ].join("\n\n");
 
@@ -124,6 +126,10 @@ function main(): void {
   assert(lines[3].startsWith('<p style="font-size:15px">10월 9일'), `소제목 아래 빈 줄이 들어갔다 (${lines[3]})`);
   assert(viewer.includes('<p style="font-size:15px">[[이미지 1]]</p>\n<p>&nbsp;</p>'), "이미지 뒤 빈 줄 1개 실패");
   assert(viewer.includes('<ul style="font-size:15px">'), "목록 본문 크기 실패");
+  assert(
+    viewer.includes('href="https://ko.wikipedia.org/wiki/룩백_(2026년_영화)"'),
+    "URL 안 괄호가 끊겼다(복사 결과가 404 링크가 된다)"
+  );
   assert(
     viewer.endsWith('<p>&nbsp;</p>\n<p>&nbsp;</p>\n<p style="font-size:15px">#한글날 #연휴</p>'),
     "해시태그 앞 빈 줄 2개 실패"

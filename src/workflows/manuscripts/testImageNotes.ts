@@ -117,6 +117,46 @@ async function main(): Promise<void> {
     console.log("✅ 다 찬 원고에는 경고를 붙이지 않는다");
   }
 
+  // 후보 보기(2026-10-02) - **실제 브라우저로** 연다. 뷰어 스크립트는 템플릿 문자열 안에 있어
+  // 문법이 깨져도 tsc가 못 잡는다. 빈 자리에도 후보가 보여야 한다(가장 필요한 곳이다).
+  {
+    const html = page(
+      topic({
+        imageCandidates: {
+          "1": [
+            { number: 1, url: "https://x/1.jpg", sourcePage: "https://x", width: 1600, height: 900, picked: true },
+            { number: 2, url: "https://x/2.jpg", sourcePage: "https://x" },
+          ],
+          "2": [{ number: 1, url: "https://y/1.jpg", sourcePage: "https://y" }],
+        },
+      })
+    );
+    const { chromium } = await import("playwright");
+    // PLAYWRIGHT_CHROMIUM_PATH - 설치된 브라우저 버전이 playwright와 다른 환경(클라우드 세션 등)용.
+    const browser = await chromium.launch({
+      args: ["--no-sandbox"],
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    });
+    try {
+      const pageErrors: string[] = [];
+      const tab = await browser.newPage();
+      tab.on("pageerror", (error) => pageErrors.push(String(error)));
+      // 외부 이미지는 불러오지 않는다 - 테스트가 네트워크에 기대면 안 된다.
+      await tab.route("**/*", (route) => (route.request().resourceType() === "image" ? route.abort() : route.continue()));
+      await tab.setContent(html, { waitUntil: "load" });
+      const counts = await tab.evaluate(
+        "({ groups: document.querySelectorAll('details.cands').length, cards: document.querySelectorAll('.cand').length, picked: document.querySelectorAll('.cand.picked').length, hint: (document.querySelector('details.cands summary') || {}).textContent || '' })"
+      ) as { groups: number; cards: number; picked: number; hint: string };
+      assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
+      assert(counts.groups === 2, `채운 자리와 빈 자리 모두 후보 묶음이 보여야 한다 (${counts.groups})`);
+      assert(counts.cards === 3 && counts.picked === 1, `후보 3장, 채택 1장 (${JSON.stringify(counts)})`);
+      assert(counts.hint.includes("1번 후보N"), `고르는 법이 보여야 한다 (${counts.hint})`);
+    } finally {
+      await browser.close();
+    }
+    console.log("✅ 후보 보기 - 브라우저에서 오류 없이 자리별로 표시, 채택 표시, 고르는 법 안내");
+  }
+
   console.log("\n✅ 이미지 수집 기록 테스트 전부 통과");
 }
 

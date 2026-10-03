@@ -7,7 +7,7 @@
 // 게이트(channelManuscriptsReadyAt·webImagesReadyAt을 null로)는 resetWebImagesCli와 같은 방식이다.
 // 그쪽은 사람이 터미널에서 돌리는 일괄 도구고, 이쪽은 텔레그램 버튼 경로다.
 
-import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
+import type { ImageCandidateRecord, ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { ACQUISITION_LABEL, inferAcquisition, isLikelyImageUrl } from "./imageEditRequest.js";
 import type { ImageEditRequest, RequestedAcquisition } from "./imageEditRequest.js";
 
@@ -15,6 +15,8 @@ import type { ImageEditRequest, RequestedAcquisition } from "./imageEditRequest.
 export const IMAGE_REQUIREMENTS_KEY = "imageRequirements";
 /** 사용자가 직접 찍어준 이미지 주소. 있으면 검색하지 않는다. */
 export const IMAGE_DIRECT_URLS_KEY = "imageDirectUrls";
+/** 자리별로 판정자가 열어 본 후보(2026-10-02). 뷰어 "후보 보기"와 `N번 후보M` 선택에 쓴다. */
+export const IMAGE_CANDIDATES_KEY = "imageCandidates";
 
 /** 사용자가 없애 달라고 한 자리 번호. 본문 마커째 지운다. */
 export type ApplyImageEditResult = {
@@ -28,6 +30,8 @@ export type ApplyImageEditResult = {
   unusableUrls: number[];
   /** 사용자가 **없애 달라**고 한 자리(2026-09-24). 호출부가 본문 마커를 지운다. */
   removed: number[];
+  /** `N번 후보M`을 골랐는데 그 후보가 기록에 없는 자리(2026-10-02). 사용자에게 알린다. */
+  missingCandidates: number[];
 };
 
 /**
@@ -38,7 +42,9 @@ export type ApplyImageEditResult = {
  */
 export function applyImageEditRequest(
   images: readonly ManuscriptImage[],
-  requests: readonly ImageEditRequest[]
+  requests: readonly ImageEditRequest[],
+  /** 자리별 후보(2026-10-02). `1번 후보3`을 그 후보의 주소로 바꾼다. */
+  candidates: Record<string, ImageCandidateRecord[]> = {}
 ): ApplyImageEditResult {
   // 삭제 요청은 다시 찾을 대상이 아니다 - 자리 자체를 없앤다.
   const removals = requests.filter((request) => request.remove).map((request) => request.index);
@@ -69,7 +75,16 @@ export function applyImageEditRequest(
   // 단, 구글 공유 링크처럼 이미지가 아닌 주소는 제외한다 - 내려받으면 HTML이 온다.
   const directUrls: Record<string, string> = {};
   const unusableUrls: number[] = [];
+  const missingCandidates: number[] = [];
   for (const request of refills) {
+    // `N번 후보M` - 뷰어에서 본 후보를 고른 것이다(2026-10-02). 그 주소를 그대로 쓴다.
+    // 사람이 눈으로 고른 것이라 검색도 비전 판정도 하지 않는다(directUrls 경로).
+    if (request.candidate !== undefined) {
+      const picked = (candidates[String(request.index)] ?? []).find((c) => c.number === request.candidate);
+      if (picked) directUrls[String(request.index)] = picked.url;
+      else missingCandidates.push(request.index);
+      continue;
+    }
     if (!request.url) continue;
     if (isLikelyImageUrl(request.url)) directUrls[String(request.index)] = request.url;
     else unusableUrls.push(request.index);
@@ -89,6 +104,7 @@ export function applyImageEditRequest(
     alreadyEmpty: alreadyEmpty.sort((a, b) => a - b),
     unusableUrls: unusableUrls.sort((a, b) => a - b),
     removed: [...new Set(removals)].sort((a, b) => a - b),
+    missingCandidates: missingCandidates.sort((a, b) => a - b),
   };
 }
 
@@ -99,6 +115,22 @@ export function readImageDirectUrls(metadata: Record<string, unknown> | null): R
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof value === "string" && value.trim()) out[key] = value.trim();
+  }
+  return out;
+}
+
+/** 자리별 후보(2026-10-02). 없으면 빈 객체. */
+export function readImageCandidates(metadata: Record<string, unknown> | null): Record<string, ImageCandidateRecord[]> {
+  const raw = metadata?.[IMAGE_CANDIDATES_KEY];
+  if (!raw || typeof raw !== "object") return {};
+  const out: Record<string, ImageCandidateRecord[]> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue;
+    const list = value.filter(
+      (c): c is ImageCandidateRecord =>
+        !!c && typeof c === "object" && typeof (c as ImageCandidateRecord).url === "string" && Number.isInteger((c as ImageCandidateRecord).number)
+    );
+    if (list.length > 0) out[key] = list;
   }
   return out;
 }

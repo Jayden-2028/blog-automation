@@ -26,6 +26,10 @@ export type ImageEditRequest = {
    * 요구사항으로만 기록됐다. 자리는 그대로 남고 빈 칸이 됐다.
    */
   remove?: boolean;
+  /**
+   * 뷰어 "후보 보기"에서 고른 후보 번호(2026-10-02). `1번 후보3` → 3. 있으면 그 후보 주소를 쓴다.
+   */
+  candidate?: number;
 };
 
 /** "삭제"·"빼줘"·"지워줘"처럼 **자리를 없애 달라**는 말인가. */
@@ -67,6 +71,8 @@ export function parseImageEditReply(text: string, maxIndex = 20): ImageEditReque
       return URL_PLACEHOLDER;
     })
     .replace(/\s+/g, " ")
+    // `후보 3`의 3을 자리 번호로 읽지 않게 붙인다(2026-10-02) - 붙으면 INDEX_TOKEN의 경계 검사가 막는다.
+    .replace(/후보\s+(\d)/g, "후보$1")
     .trim();
   if (!masked) return [];
 
@@ -94,9 +100,11 @@ export function parseImageEditReply(text: string, maxIndex = 20): ImageEditReque
     if (!Number.isInteger(index) || index < 1 || index > maxIndex) return;
 
     const requirement = segment.replace(TRAILING_SEPARATORS, "").trim();
+    const candidateMatch = requirement.match(/후보\s*(\d{1,2})/);
     found.push({
       index,
       requirement,
+      ...(candidateMatch ? { candidate: Number(candidateMatch[1]) } : {}),
       ...(segmentUrls[0] ? { url: segmentUrls[0] } : {}),
       ...(isRemovalRequest(requirement) ? { remove: true } : {}),
     });
@@ -114,7 +122,9 @@ export function describeImageEditRequests(requests: readonly ImageEditRequest[])
     .map((request) =>
       request.remove
         ? `${request.index}번 - **자리 삭제**`
-        : request.requirement
+        : request.candidate !== undefined
+          ? `${request.index}번 - 후보 ${request.candidate}번으로 교체`
+          : request.requirement
           ? `${request.index}번 - ${request.requirement}`
           : `${request.index}번 - 다시 찾기`
     )
