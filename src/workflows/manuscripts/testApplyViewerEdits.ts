@@ -140,6 +140,24 @@ async function main(): Promise<void> {
   }
   console.log("✅ 공백·nbsp 차이는 수정으로 보지 않는다");
 
+  // 같은 수정을 두 번 보내면(새로고침 전에 반영을 또 누름) 두 번째는 "이미 반영됨"이다 - 건너뜀으로 세지 않는다.
+  {
+    const captioned = IMAGES.map((image) => ({ ...image, description: "고친 첫 캡션" }));
+    const again = applyViewerEdits({
+      manifestBody: MANIFEST.replace("도입 문단입니다.", "고친 도입입니다."),
+      imagePrompts: [],
+      articleContent: ARTICLE.replace("도입 문단입니다.", "고친 도입입니다."),
+      images: captioned,
+      edits: {
+        "cap:1": { from: "수집된 첫 캡션", to: "고친 첫 캡션" },
+        "0": { from: "도입 문단입니다.", to: "고친 도입입니다." },
+      },
+    });
+    assert(again.skipped.length === 0 && again.applied.length === 0, `이미 반영된 수정은 건너뜀이 아니다 (${JSON.stringify(again.skipped)})`);
+    assert(!again.articleChanged && !again.imagesChanged, "아무것도 다시 쓰지 않는다");
+  }
+  console.log("✅ 같은 수정을 다시 보내면 이미 반영됨으로 조용히 넘긴다");
+
   // 요청 검증
   {
     let threw = false;

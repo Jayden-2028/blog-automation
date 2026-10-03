@@ -148,7 +148,11 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
         continue;
       }
       const block = blocks[blockIndex] as Extract<ManuscriptBlock, { type: "image" }>;
-      if (normalizeEditText(currentCaption(input.images, n, block.description)) !== from) {
+      const nowCaption = normalizeEditText(currentCaption(input.images, n, block.description));
+      // 이미 그 값이면 반영된 것이다 - 페이지를 새로고침하기 전에 반영을 한 번 더 누르면 같은 수정이 다시
+      // 온다(2026-10-04 실측: 첫 실행이 반영한 캡션을 둘째 실행이 "바뀌었습니다"로 건너뛰어 헷갈렸다).
+      if (nowCaption === to) continue;
+      if (nowCaption !== from) {
         skipped.push({ key, reason: "페이지를 연 뒤 캡션이 바뀌었습니다 - 새로고침 후 다시 고치세요" });
         continue;
       }
@@ -173,6 +177,7 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     }
     const original =
       block.type === "heading" ? (field === "h" ? block.heading : field === "b" ? block.body : null) : field ? null : block.content;
+    if (original !== null && normalizeEditText(original) === to) continue; // 이미 반영됨(캡션과 같은 이유)
     if (original === null || normalizeEditText(original) !== from) {
       skipped.push({ key, reason: "페이지를 연 뒤 원고가 바뀌었습니다 - 새로고침 후 다시 고치세요" });
       continue;

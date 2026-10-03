@@ -91,7 +91,13 @@ Workers & Pages → `blog-automation-manuscripts` → 설정 → 변수 및 시�
 4. `ACCESS_AUD`(권장) - Zero Trust → Access → 애플리케이션 → 원고 페이지 앱 → "애플리케이션 대상(AUD) 태그".
 변수는 **다음 배포부터** 적용된다 - 넣은 뒤 `manuscripts-refresh`를 수동 실행(workflow_dispatch)하면 된다.
 
-**⚠️ 라이브 미검증**: 이 컨테이너에는 Cloudflare 자격이 없어 실제 Access 토큰·dispatch를 못 돌렸다. 설정 뒤 원고 하나에서
+**✅ 라이브 검증(2026-10-04 01:10 KST)**: 사용자가 Pages 변수 4개(`OWNER_EMAIL`·`ACCESS_TEAM_DOMAIN`·`ACCESS_AUD`·
+`GH_DISPATCH_TOKEN` - 세분화 PAT, blog-automation 한정, Contents 쓰기, 1년 만료)를 넣고 `manuscripts-refresh`를 수동 실행했다.
+대구 북구 수해 원고(job 6517c3ce)에서 캡션 수정 → `manuscript-edit` run 1(캡션 1곳 반영)·run 2(2곳 중 1곳 반영) 성공,
+페이지 상단에 반영 상자 표시. run 2의 "이미지 3 캡션 건너뜀"은 새로고침 전에 반영을 또 눌러 같은 수정이 다시 온 것이었다
+(run 1이 이미 반영) → 이미 그 값이면 건너뜀이 아니라 조용히 넘기도록 고쳤다(`applyViewerEdits.ts`, 테스트 추가).
+(아래는 첫 구현 때 적어 둔 확인 절차다.)
+**⚠️ (당시) 라이브 미검증**: 이 컨테이너에는 Cloudflare 자격이 없어 실제 Access 토큰·dispatch를 못 돌렸다. 설정 뒤 원고 하나에서
 캡션 한 줄을 고쳐 반영 → 1~2분 뒤 새로고침 → 상단 "📤 뷰어 수정 반영" 상자 확인 → 발행 버튼으로 실제 반영 확인.
 **되돌리기**: `functions/`와 `manuscript-edit.yml`을 지우고 배포하면 버튼이 503으로 닫힌다(DB 쓰기는 버튼을 눌렀을 때만).
 
