@@ -4,8 +4,10 @@
 // 경로다. 이쪽은 writer가 이미 본문에 남긴 [IMAGE PROMPT: ...]를 그대로 써서, 본문을 건드리지
 // 않고 이미지만 만든다. 옛 경로는 지우지 않되 호출하지 않는다(ARTICLE_IMAGE_GENERATION은 계속 false).
 //
-// 기본값이 false인 이유: 유료 API 호출이다. 켜는 것은 사용자 결정이고, .env / GitHub Secrets에
-// `MANUSCRIPT_IMAGE_GENERATION=true`와 OPENAI_API_KEY(또는 GEMINI_API_KEY)가 들어가야 실제로 돈다.
+// 기본값은 켜짐(2026-10-03 - 운영 variables `MANUSCRIPT_IMAGE_GENERATION=true`와 맞췄다. 전에는 코드 false /
+// 운영 true로 갈려 맥 로컬과 클라우드가 다르게 돌았다). 유료 API 호출이라 끄는 건 `=false`로 명시한다.
+// OPENAI_API_KEY(또는 GEMINI_API_KEY)가 없으면 생성이 실패로 기록될 뿐 원고 준비는 그대로 진행된다.
+// IMAGE_AB_COMPARE도 같은 이유로 운영값(false)이 기본이다 - A/B 비교는 끝났다.
 
 function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined || value.trim() === "") return defaultValue;
@@ -52,8 +54,8 @@ function parseQualityEnv(raw: string | undefined, fallback: ImageQuality): Image
 }
 
 export const MANUSCRIPT_IMAGE_CONFIG: ManuscriptImageConfig = {
-  enabled: parseBooleanEnv(process.env.MANUSCRIPT_IMAGE_GENERATION, false),
-  abCompare: parseBooleanEnv(process.env.IMAGE_AB_COMPARE, true),
+  enabled: parseBooleanEnv(process.env.MANUSCRIPT_IMAGE_GENERATION, true),
+  abCompare: parseBooleanEnv(process.env.IMAGE_AB_COMPARE, false),
   maxPerArticle: parseIntEnv(process.env.IMAGE_MAX_PER_ARTICLE, 8),
   infographicQuality: parseQualityEnv(process.env.IMAGE_INFOGRAPHIC_QUALITY, "low"),
 };
