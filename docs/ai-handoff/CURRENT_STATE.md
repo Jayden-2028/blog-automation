@@ -57,6 +57,8 @@
 되돌림 검증: 정규식 원복·"몇 번째" 제거·원문 스냅샷 제거를 각각 되돌리면 테스트가 깨진다.
 `test:manuscript-manifest`·`test:prepare-manuscripts`는 이 컨테이너에 Supabase 자격이 없어 import 단계에서 실패(main도 동일).
 
+**병합·배포**: main `eaf59ed`. `manuscripts-refresh` run 26 성공(Function 포함 배포 - wrangler 출력은 로그에 안 남아 Function 업로드 자체는 라이브로 확인 필요).
+
 **⬜ 사용자가 할 일(이것 전에는 버튼이 "서버 반영이 아직 설정되지 않았습니다"로 닫혀 있다)** - Cloudflare 대시보드 →
 Workers & Pages → `blog-automation-manuscripts` → 설정 → 변수 및 시크릿(Production):
 1. `GH_DISPATCH_TOKEN`(시크릿) - 텔레그램 릴레이에 넣은 것과 같은 GitHub PAT면 된다.
