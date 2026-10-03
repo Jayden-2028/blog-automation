@@ -22,13 +22,52 @@
 막혀 가짜 주소(`https://viewer.test/`)로 서빙해 연다. 데스크톱 1200px 스크린샷으로 배치 확인.
 **배포**: main 병합 시 `manuscripts-refresh.yml`이 자동으로 다시 그려 배포한다(렌더러만 바뀜, DB 무관).
 
-**뷰어 수정본으로 발행 - 가능 여부 확인(사용자 질문 3)**: 지금은 **안 된다.** 뷰어는 자격증명 없는 정적 페이지라
-수정이 localStorage에만 남고, 발행 버튼(Blogspot `publishArticleToBlogspot`, 네이버 `publishJobToNaver`)은
-`articles.content`(본문)와 `job.metadata.images[].description`(캡션)을 읽는다. **되게 만들 수는 있다** - 기존 패턴
-그대로: Pages Function(`manuscripts/functions/api/edit`, Access 게이트 상속·`Cf-Access-Authenticated-User-Email`로
-본인 확인) → `repository_dispatch` → 새 워크플로우가 Node로 `articles.content`·`job.metadata.images[].description`·
-manifest 행을 갱신하고 페이지를 다시 그린다. 필요한 것: Pages 프로젝트에 GitHub 토큰 시크릿 1개(사용자), 워크플로우
-1개, 적용 CLI 1개, 뷰어 "반영" 버튼. 미착수 - 사용자 승인 대기.
+**병합**: main `b1971fb`. `manuscripts-refresh` run 25 성공(자동 재배포 확인).
+
+### 같은 세션(후속) — 뷰어 수정본을 발행 원고에 반영 ("📤 수정본 반영", 사용자 승인)
+
+**왜**: 뷰어 수정은 localStorage에만 남고 발행 버튼은 DB(`articles.content`, `job.metadata.images[].description`)를
+읽어서, 뷰어에서 고치고 발행하면 **옛 글이 올라갔다.**
+
+**흐름**: 뷰어 `📤 수정본 반영(N곳)` → Pages Function `functions/api/manuscript-edit.ts`
+(로직 `cloudflare/manuscripts-pages/editApi.ts`) → `repository_dispatch(manuscript_edit)` →
+`.github/workflows/manuscript-edit.yml` → `npm run manuscripts:apply-edit`
+(`applyViewerEditRequest.ts`, 계산은 순수 함수 `applyViewerEdits.ts`) → 페이지 재배포(1~2분).
+- 뷰어는 **바뀐 항목만** `{ from, to }`로 보낸다. 서버는 from을 지금 원고와 대조해 다르면 건너뛴다.
+- 뷰어 본문(manifest)과 발행 본문은 글자 단위로 다르다(해시태그 빠짐, 내부 링크 붙음, 표 생성 자리 빠짐) →
+  **블록 번호가 아니라 원문 블록 텍스트로** 발행 본문의 같은 블록을 찾는다(같은 문장이 여러 번이면 몇 번째까지).
+- 쓰는 순서: `articles.content` → `job.metadata`(images 캡션 + `viewerEdit` 기록) → manifest 행 → 배포.
+  본문을 먼저 쓴다 - 뒤가 실패해도 발행은 고친 글로 나간다.
+- 건너뛰는 경우(사유가 뷰어 상단 "📤 뷰어 수정 반영" 상자에 뜬다): from 불일치, 내부 링크처럼 뷰어에만 있는
+  블록, 이미지 마커를 넣거나 빼는 수정, 이미지가 없는 빈 자리의 캡션.
+- 다시 배포된 페이지에서는 원본 = 수정본이라 localStorage 수정 기록이 저절로 비워진다.
+- `enforceWritingRules`(금지 표현 집행)는 태우지 않는다 - 사람이 직접 쓴 문장이고 사람이 품질 게이트다.
+
+**보안**: Access 앱은 `blog-automation-manuscripts.pages.dev`에만 걸려 있고, 배포마다 생기는
+`<해시>.blog-automation-manuscripts.pages.dev`는 보호 밖이다. 그래서 Function이 **Access JWT를 팀 공개키로 직접
+검증**하고(RS256, iss·exp·aud), 이메일이 `OWNER_EMAIL`일 때만 통과시킨다. Origin이 다르면 거부. 설정값이 없으면 503(닫힘).
+
+**덤으로 고친 버그**: 뷰어 캡션의 획득 방식 꼬리(`— AI 생성` 등) 제거 정규식이 템플릿 문자열 안에서 `\s`가 `s`로
+바뀌어 **아무것도 떼지 못했다**(빈 자리 캡션에 꼬리가 그대로 보이던 원인). 역슬래시를 두 번 써서 고쳤다.
+
+**검증**: `test:viewer-edits`(신설 12케이스) · `test:viewer-edit-api`(신설 - 실제 RSA 서명 토큰으로 위조·변조·만료·
+다른 계정·다른 AUD·다른 발급자 거부) · `test:viewer-layout`(반영 버튼 흐름·자동 정리·스크립트 문법 추가) ·
+`viewer-copy` · `image-notes` · `deploy-manuscripts-page` · `manuscript-blocks` · `publish-blocks` ·
+`notify-manuscripts-ready` · `npm run build` 통과. `wrangler pages functions build`로 Function 번들 성공 확인.
+되돌림 검증: 정규식 원복·"몇 번째" 제거·원문 스냅샷 제거를 각각 되돌리면 테스트가 깨진다.
+`test:manuscript-manifest`·`test:prepare-manuscripts`는 이 컨테이너에 Supabase 자격이 없어 import 단계에서 실패(main도 동일).
+
+**⬜ 사용자가 할 일(이것 전에는 버튼이 "서버 반영이 아직 설정되지 않았습니다"로 닫혀 있다)** - Cloudflare 대시보드 →
+Workers & Pages → `blog-automation-manuscripts` → 설정 → 변수 및 시크릿(Production):
+1. `GH_DISPATCH_TOKEN`(시크릿) - 텔레그램 릴레이에 넣은 것과 같은 GitHub PAT면 된다.
+2. `ACCESS_TEAM_DOMAIN` - Zero Trust → 설정 → 팀 도메인(예: `xxx.cloudflareaccess.com`).
+3. `OWNER_EMAIL` - Access 정책 `owner-email`의 이메일.
+4. `ACCESS_AUD`(권장) - Zero Trust → Access → 애플리케이션 → 원고 페이지 앱 → "애플리케이션 대상(AUD) 태그".
+변수는 **다음 배포부터** 적용된다 - 넣은 뒤 `manuscripts-refresh`를 수동 실행(workflow_dispatch)하면 된다.
+
+**⚠️ 라이브 미검증**: 이 컨테이너에는 Cloudflare 자격이 없어 실제 Access 토큰·dispatch를 못 돌렸다. 설정 뒤 원고 하나에서
+캡션 한 줄을 고쳐 반영 → 1~2분 뒤 새로고침 → 상단 "📤 뷰어 수정 반영" 상자 확인 → 발행 버튼으로 실제 반영 확인.
+**되돌리기**: `functions/`와 `manuscript-edit.yml`을 지우고 배포하면 버튼이 503으로 닫힌다(DB 쓰기는 버튼을 눌렀을 때만).
 
 ## 2026-10-03 세션(메인 윈도우) — 규격 충돌·죽은 코드·기본값 불일치 점검 후 정리
 

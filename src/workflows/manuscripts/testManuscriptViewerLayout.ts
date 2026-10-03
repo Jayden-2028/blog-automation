@@ -64,7 +64,8 @@ async function main(): Promise<void> {
   assert(!html.includes("네이버 배리에이션 없음"), "'네이버 배리에이션 없음' 문구는 없어야 한다");
   assert(!html.includes("네이버용 원고 복사"), "네이버 복사 버튼은 없어야 한다");
   assert(!html.includes('"naver":'), "manifest의 naver 본문을 페이지 JSON에 싣지 않는다");
-  console.log("✅ 정적 - 사이드바 제목, 초안 안내·채울 것 표 제거, 네이버 버튼 제거");
+  for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Function(match[1]); // 문법 오류면 여기서 던진다
+  console.log("✅ 정적 - 사이드바 제목, 초안 안내·채울 것 표 제거, 네이버 버튼 제거, 스크립트 문법");
 
   // ④⑤ - 브라우저.
   const { chromium } = await import("playwright");
@@ -78,10 +79,21 @@ async function main(): Promise<void> {
     tab.on("pageerror", (error) => pageErrors.push(String(error)));
     // setContent(about:blank)는 origin이 불투명해 localStorage가 막힌다 - 수정 저장이 그 위에 있으므로
     // 가짜 주소로 서빙해 연다. 외부 이미지는 불러오지 않는다(테스트가 네트워크에 기대면 안 된다).
+    // /api/manuscript-edit은 Pages Function 자리다 - 여기서는 받은 내용을 적어 두고 202로 답한다.
+    let servedHtml = html;
+    const posted: string[] = [];
     await tab.route("**/*", (route) => {
-      if (route.request().url() === "https://viewer.test/") return route.fulfill({ body: html, contentType: "text/html" });
+      const url = route.request().url();
+      if (url === "https://viewer.test/") return route.fulfill({ body: servedHtml, contentType: "text/html" });
+      if (url === "https://viewer.test/api/manuscript-edit") {
+        posted.push(route.request().postData() ?? "");
+        return route.fulfill({ status: 202, body: JSON.stringify({ ok: true }), contentType: "application/json" });
+      }
+      // 가짜 주소의 나머지(파비콘 등)와 외부 이미지는 바깥 네트워크로 내보내지 않는다.
+      if (url.startsWith("https://viewer.test/")) return route.fulfill({ status: 404, body: "" });
       return route.request().resourceType() === "image" ? route.abort() : route.continue();
     });
+    tab.on("dialog", (dialog) => void dialog.accept());
     await tab.goto("https://viewer.test/", { waitUntil: "load" });
 
     // ④ 후보 묶음이 펼쳐져 있다.
@@ -93,6 +105,9 @@ async function main(): Promise<void> {
     assert(capButtons === 2, `캡션 수정 버튼이 자리마다 있어야 한다 (${capButtons})`);
     const before = await tab.evaluate("document.querySelector('.cap[data-cap=\"1\"]').textContent");
     assert(before === "수집된 캡션", `수집 캡션이 먼저 보여야 한다 (${before})`);
+    // 빈 자리는 마커 설명에서 획득 방식 꼬리를 떼고 보여준다(템플릿 안 정규식 역슬래시 버그, 2026-10-03).
+    const emptyCaption = await tab.evaluate("document.querySelector('.cap[data-cap=\"2\"]').textContent");
+    assert(emptyCaption === "둘째 자리", `빈 자리 캡션에서 '— AI 생성' 꼬리가 떨어져야 한다 (${emptyCaption})`);
 
     // 1번 수정 → 편집 상태는 1번만.
     await tab.click('.cap-edit[data-cap="1"]');
@@ -124,11 +139,58 @@ async function main(): Promise<void> {
     const reverted = await tab.evaluate("document.querySelector('.cap[data-cap=\"1\"]').textContent");
     assert(reverted === "수집된 캡션", `원본으로 돌리면 수집 캡션이어야 한다 (${reverted})`);
 
+    // ⑥ 수정본 반영 - 바뀐 항목만 from/to로 보낸다.
+    await tab.click('.cap-edit[data-cap="1"]');
+    await tab.evaluate("document.querySelector('.cap[data-cap=\"1\"]').innerText = '고친 캡션'");
+    await tab.click('.cap-edit[data-cap="1"]');
+    await tab.click("#edit-toggle");
+    await tab.evaluate("document.querySelector('.editable[data-block-index=\"0\"]').innerText = '고친 도입 문단입니다.'");
+    await tab.click("#edit-toggle");
+    const submitLabel = (await tab.evaluate("(document.querySelector('#submit-edits') || {}).textContent || ''")) as string;
+    assert(submitLabel.includes("2곳"), `바뀐 2곳만 세야 한다 - 안 바꾼 문단은 수정이 아니다 (${submitLabel})`);
+    await tab.click("#submit-edits");
+    await tab.waitForFunction("(document.querySelector('.edited-badge') || {}).textContent && document.querySelector('.edited-badge').textContent.indexOf('반영 요청') >= 0");
+    assert(posted.length === 1, `요청 1건 (${posted.length})`);
+    const sent = JSON.parse(posted[0]) as { jobId: string; edits: Record<string, { from: string; to: string }> };
+    assert(sent.jobId === ENTRY.jobId, "jobId");
+    assert(Object.keys(sent.edits).sort().join(",") === "0,cap:1", `보낸 키 (${Object.keys(sent.edits).join(",")})`);
+    assert(sent.edits["0"].from === "도입 문단입니다." && sent.edits["0"].to === "고친 도입 문단입니다.", `본문 from/to (${JSON.stringify(sent.edits["0"])})`);
+    assert(sent.edits["cap:1"].from === "수집된 캡션" && sent.edits["cap:1"].to === "고친 캡션", `캡션 from/to (${JSON.stringify(sent.edits["cap:1"])})`);
+
+    // 다시 배포된 페이지(원본 = 수정본 + 반영 기록)를 열면 수정 기록이 저절로 비고 결과가 보인다.
+    servedHtml = renderManuscriptPage(
+      {
+        topics: [
+          {
+            ...ENTRY,
+            manuscript: {
+              ...ENTRY.manuscript,
+              body: BODY.replace("도입 문단입니다.", "고친 도입 문단입니다."),
+              images: [{ ...ENTRY.manuscript.images[0], description: "고친 캡션" }],
+              viewerEdit: {
+                appliedAt: "2099-01-01T00:00:00.000Z",
+                applied: ["0", "cap:1"],
+                skipped: [{ key: "cap:2", reason: "이미지 자리 2번이 비어 있어 발행본에 실릴 캡션이 없습니다" }],
+              },
+            },
+          },
+        ],
+      },
+      new Date("2026-10-03T09:00:00Z")
+    );
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    const afterDeploy = await tab.evaluate(
+      "({ submit: !!document.querySelector('#submit-edits'), badge: !!document.querySelector('.edited-badge'), stored: localStorage.getItem('manuscript-edit:" + ENTRY.jobId + "'), result: (document.querySelector('.edit-result') || {}).textContent || '' })"
+    ) as { submit: boolean; badge: boolean; stored: string | null; result: string };
+    assert(!afterDeploy.submit && !afterDeploy.badge && afterDeploy.stored === null, `반영본이 배포되면 수정 기록이 비어야 한다 (${JSON.stringify(afterDeploy)})`);
+    assert(afterDeploy.result.includes("2곳 반영") && afterDeploy.result.includes("이미지 2 캡션"), `반영 결과와 건너뛴 사유가 보여야 한다 (${afterDeploy.result})`);
+
     assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
   } finally {
     await browser.close();
   }
   console.log("✅ 브라우저 - 후보 항상 펼침, 캡션 자리별 수정·저장·되돌리기, 본문 수정과 공존");
+  console.log("✅ 브라우저 - 수정본 반영은 바뀐 곳만 from/to로 보내고, 반영본이 배포되면 기록이 저절로 빈다");
 
   console.log("\n✅ 뷰어 레이아웃 테스트 전부 통과");
 }

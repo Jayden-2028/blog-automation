@@ -24,6 +24,9 @@ on:
       - "src/workflows/manuscripts/manuscriptManifest.ts"
       - "src/workflows/manuscripts/buildManuscriptPageCli.ts"
       - "src/workflows/manuscripts/deployManuscriptsPage.ts"
+      # 뷰어 "수정본 반영" API(Pages Function). 배포할 때 함께 묶여 올라가므로 바뀌면 다시 배포해야 한다.
+      - "functions/**"
+      - "cloudflare/manuscripts-pages/**"
       # 네이버 육아 뷰어. 이 파일이 바뀌면 같은 Pages 프로젝트에 다시 얹어야 한다.
       - "public/naver-parenting.html"
       - ".github/workflows/manuscripts-refresh.yml"

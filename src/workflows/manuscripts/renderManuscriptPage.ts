@@ -16,12 +16,13 @@
 // 본문 자체에는 손대지 않는다(generateManuscriptImages.ts 주석 참고). A/B 비교 모드에서는 같은
 // index에 provider만 다른 이미지가 2장 들어오므로 나란히 보여주고 어느 쪽인지 라벨을 붙인다.
 //
-// 수정(편집) 결과는 브라우저 localStorage에만 남는다(2026-09-05 사용자 결정) - 로컬 원고 파일은
-// 항상 원본 그대로다. 정적 파일이라 서버에 다시 쓸 방법이 없다.
+// 수정(편집) 결과는 먼저 브라우저 localStorage에 남는다(2026-09-05 사용자 결정). "📤 수정본 반영"을
+// 누르면 바뀐 항목만 Pages Function(functions/api/manuscript-edit.ts)으로 보내고, GitHub Actions가
+// 발행 원고(DB)에 옮겨 적은 뒤 페이지를 다시 배포한다(2026-10-03, applyViewerEditRequest.ts).
 
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
-import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
+import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord } from "./manuscriptManifest.js";
 
 const CATEGORY_LABEL: Record<string, string> = {
   incident: "사건사고",
@@ -52,6 +53,8 @@ type PageTopic = {
   imageCandidates: Record<string, { number: number; url: string; sourcePage: string; width?: number | null; height?: number | null; picked?: boolean }[]>;
   /** 공백 제외 본문 글자수(참조 파일의 "본문 N자(공백 제외)"와 같은 기준). */
   charCount: number;
+  /** 마지막 "수정본 반영" 결과(2026-10-03). 없으면 null. */
+  viewerEdit: ViewerEditRecord | null;
   // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
   // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
@@ -89,6 +92,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     imageNotes: m.imageNotes ?? [],
     imageCandidates: m.imageCandidates ?? {},
     charCount: m.body.replace(/\s/g, "").length,
+    viewerEdit: m.viewerEdit ?? null,
   };
 }
 
@@ -194,6 +198,10 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .btn.primary:hover{opacity:.9}
   .btn.active{background:var(--warn);border-color:var(--warn);color:#fff}
   .edited-badge{font-size:12px;color:var(--warn);align-self:center}
+  .edit-result{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 13px;
+               font-size:12.5px;margin:-8px 0 16px;line-height:1.7}
+  .edit-result ul{margin:4px 0 0;padding-left:18px;color:var(--warn)}
+  .edit-result .bad{color:var(--warn);font-weight:700}
 
   #preview{background:#fff;border:1px solid var(--line);border-radius:10px;padding:26px 24px}
   #preview p{margin:0 0 1.15em;font-size:15px;line-height:1.95;white-space:pre-wrap}
@@ -633,7 +641,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       if (edits && edits[captionKey(n)] != null) return edits[captionKey(n)];
       var shots = imagesFor(topic, n);
       return (shots[0] && shots[0].description)
-        || String(block.description || "").replace(/\s*—\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\s*$/, "")
+        // 템플릿 문자열 안이라 역슬래시를 두 번 쓴다. 한 번만 쓰면 \\s가 s로 바뀌어 꼬리가 하나도 안
+        // 떨어졌다(2026-10-03 발견 - 빈 자리 캡션에 "— AI 생성"이 그대로 보이던 원인).
+        || String(block.description || "").replace(/\\s*—\\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\\s*$/, "").trim()
         || "캡션 없음";
     }
 
@@ -684,6 +694,120 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       return '<figure class="cut">' + inner + figcaption + '</figure>';
     }
 
+    // ---- 수정본 반영(2026-10-03) ----
+    // 뷰어 수정은 localStorage에 남고, "📤 수정본 반영"을 누르면 바뀐 항목만 서버(/api/manuscript-edit)로
+    // 보낸다. 서버는 from(고치기 전 값)을 지금 원고와 대조한 뒤 발행 원고(DB)를 고치고 페이지를 다시
+    // 배포한다(GitHub Actions, 1~2분). 다시 배포된 페이지에서는 원본이 곧 수정본이라 아래 prune이
+    // 수정 기록을 저절로 비운다.
+
+    /** 서버(applyViewerEdits.ts normalizeEditText)와 같은 비교 기준. */
+    function normalizeText(v) {
+      return String(v == null ? "" : v).replace(/\\r\\n?/g, "\\n").replace(/\\u00a0/g, " ").replace(/[ \\t]+\\n/g, "\\n").trim();
+    }
+
+    /** 키가 가리키는 지금 원고의 값(수정 전). 모르는 키면 null. */
+    function originalFor(topic, key) {
+      if (key.indexOf("cap:") === 0) {
+        var n = Number(key.slice(4));
+        var imgBlock = imageBlocks(topic)[n - 1];
+        return imgBlock ? captionFor(topic, n, imgBlock, null) : null;
+      }
+      var parts = key.split(":");
+      var block = topic.blocks[Number(parts[0])];
+      if (!block) return null;
+      if (block.type === "heading") return parts[1] === "h" ? block.heading : parts[1] === "b" ? block.body : null;
+      if (block.type === "text") return parts[1] ? null : block.content;
+      return null;
+    }
+
+    /** 원본과 다른 항목만 { 키: { from, to } }로. */
+    function pendingEdits(topic, edits) {
+      var out = {};
+      Object.keys(edits || {}).forEach(function (key) {
+        var from = originalFor(topic, key);
+        if (from == null) return;
+        if (normalizeText(from) === normalizeText(edits[key])) return;
+        out[key] = { from: from, to: edits[key] };
+      });
+      return out;
+    }
+
+    /** 원본과 같아진 항목을 지운다(반영돼 다시 배포됐거나, 고쳤다가 되돌린 경우). 남은 수정을 돌려준다. */
+    function pruneEdits(topic) {
+      var edits = loadEdits(topic.jobId);
+      if (!edits) return null;
+      var kept = {};
+      Object.keys(pendingEdits(topic, edits)).forEach(function (key) { kept[key] = edits[key]; });
+      if (Object.keys(kept).length === 0) { clearEdits(topic.jobId); clearSent(topic.jobId); return null; }
+      saveEdits(topic.jobId, kept);
+      return kept;
+    }
+
+    function sentKey(jobId) { return "manuscript-edit-sent:" + jobId; }
+    function loadSent(jobId) { try { return localStorage.getItem(sentKey(jobId)); } catch (e) { return null; } }
+    function markSent(jobId) { try { localStorage.setItem(sentKey(jobId), new Date().toISOString()); } catch (e) {} }
+    function clearSent(jobId) { try { localStorage.removeItem(sentKey(jobId)); } catch (e) {} }
+
+    function kstTime(iso) {
+      try {
+        return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+      } catch (e) { return iso; }
+    }
+
+    /** 키를 사람이 읽는 이름으로("3:h" -> "3번 블록 소제목"). */
+    function editLabel(key) {
+      if (key.indexOf("cap:") === 0) return "이미지 " + key.slice(4) + " 캡션";
+      var parts = key.split(":");
+      var n = Number(parts[0]) + 1;
+      return parts[1] === "h" ? n + "번째 블록 소제목" : parts[1] === "b" ? n + "번째 블록 본문" : n + "번째 문단";
+    }
+
+    /** 마지막 반영 결과(서버가 manifest에 남긴 viewerEdit). 건너뛴 항목과 사유를 함께 보여준다. */
+    function viewerEditHtml(topic) {
+      var rec = topic.viewerEdit;
+      if (!rec || !rec.appliedAt) return "";
+      var h = '<div class="edit-result"><b>📤 뷰어 수정 반영</b> ' + esc(kstTime(rec.appliedAt))
+        + ' · ' + (rec.applied || []).length + '곳 반영';
+      var skipped = rec.skipped || [];
+      if (skipped.length > 0) {
+        h += ' · <span class="bad">' + skipped.length + '곳 건너뜀</span><ul>'
+          + skipped.map(function (s) { return '<li>' + esc(editLabel(s.key)) + ' — ' + esc(s.reason) + '</li>'; }).join("")
+          + '</ul>';
+      }
+      return h + '</div>';
+    }
+
+    function submitEdits(topic, btn) {
+      var pending = pendingEdits(topic, loadEdits(topic.jobId));
+      var count = Object.keys(pending).length;
+      if (count === 0) { toast("반영할 수정이 없습니다"); return; }
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 반영할 수 있습니다"); return; }
+      if (!window.confirm("고친 " + count + "곳을 발행 원고에 반영합니다.\\n1~2분 뒤 페이지가 새로 배포됩니다. 계속할까요?")) return;
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "📤 보내는 중…";
+      function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
+      fetch("/api/manuscript-edit", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobId: topic.jobId, edits: pending }),
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (res.status === 202) {
+            markSent(topic.jobId);
+            toast("반영 요청을 보냈습니다 — 1~2분 뒤 새로고침하세요");
+            render(topic.jobId);
+            return;
+          }
+          fail((body && body.error) || ("반영 실패(" + res.status + ")"));
+        });
+      }).catch(function () {
+        // Access 로그인이 만료되면 로그인 화면으로 돌려보내져(다른 출처) fetch 자체가 실패한다.
+        fail("반영 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+      });
+    }
+
     function render(jobId) {
       var topic = findTopic(jobId);
       if (!topic) return;
@@ -693,7 +817,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       });
       history.replaceState(null, "", "#" + jobId);
 
-      var edits = loadEdits(jobId);
+      var edits = pruneEdits(topic);
+      var pendingCount = edits ? Object.keys(pendingEdits(topic, edits)).length : 0;
+      var sentAt = loadSent(jobId);
+      // 서버 반영 기록이 보낸 시각보다 뒤면 그 요청은 끝났다.
+      if (sentAt && topic.viewerEdit && topic.viewerEdit.appliedAt >= sentAt) { clearSent(jobId); sentAt = null; }
       var blocks = imageBlocks(topic);
       var madeCount = (topic.images || []).filter(function (i) { return i.url; }).length;
 
@@ -712,6 +840,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       h += '<div class="doc-title' + (topic.sourceTag === "instagram" ? " ig" : "") + '">'
         + esc(topic.title || topic.keyword) + '</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
+      h += viewerEditHtml(topic);
 
       // 초안 자동 저장 안내와 "채울 항목" 표는 2026-10-03에 뺐다(사용자 요청). 이 주석은 페이지에 실리므로 옛 문구를 그대로 적지 않는다.
       // 초안 저장은 2026-09-19부터 하지 않고 발행은 텔레그램 버튼이라 안내가 옛 흐름이었다. 빈 자리의
@@ -742,7 +871,13 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
       // 수정은 localStorage에만 남는다 - 발행 버튼은 DB 원고를 읽으므로 반영되지 않는다. 그 사실을 숨기면
       // 뷰어에서 고치고 발행 버튼을 눌렀는데 옛 글이 올라가는 사고가 난다.
-      if (edits) h += '<button class="btn" id="revert">↩️ 원본으로</button><span class="edited-badge">이 브라우저에서 수정됨 · 복사에만 반영(발행 버튼 미반영)</span>';
+      if (edits) {
+        h += '<button class="btn primary" id="submit-edits">📤 수정본 반영(' + pendingCount + '곳)</button>';
+        h += '<button class="btn" id="revert">↩️ 원본으로</button>';
+        h += '<span class="edited-badge">' + (sentAt
+          ? '반영 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 반영본이 보입니다'
+          : '이 브라우저에서 수정됨 · 반영 전까지 복사에만 적용(발행 버튼 미반영)') + '</span>';
+      }
       h += '</div>';
 
       if (blocks.length > 0) {
@@ -851,6 +986,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         // 캡션 수정(cap:N)을 지우지 않도록 기존 값 위에 본문 텍스트를 덮어쓴다.
         if (!editing) { saveEdits(topic.jobId, Object.assign({}, loadEdits(topic.jobId) || {}, currentTexts())); render(topic.jobId); }
       });
+
+      var submitBtn = document.getElementById("submit-edits");
+      if (submitBtn) submitBtn.addEventListener("click", function () { submitEdits(topic, submitBtn); });
 
       var revertBtn = document.getElementById("revert");
       if (revertBtn) revertBtn.addEventListener("click", function () {
