@@ -1,5 +1,7 @@
 # 키워드 수집 감시인 - 로컬 맥과 다른 호스트(GitHub 클라우드 러너)에서 매일 돌면서
-# "오늘 성공한 discovery_run이 있는가"만 확인한다. 없으면 Telegram으로 알린다.
+# "사회·경제 / 엔터·OTT / 커뮤니티 각 job이 이번 수집일에 성공했는가"를 job별로 확인한다.
+# 하나라도 아니면 안 돈 job 이름을 붙여 Telegram으로 알린다(2026-10-03: 전에는 하나라도 있으면 정상으로
+# 봐서 일부 job만 죽어도 경보가 없었다). 판정 로직은 src/jobs/watchdogJob.ts.
 #
 # 배경: docs/ai-handoff/CLOUD_MIGRATION.md, CURRENT_STATE.md "잠자기로 인한 조용한 실패".
 # 로컬 09:00 job이 강제 종료되면 실패 알림조차 못 보내는데, 이 워크플로우가 그 구멍을 밖에서 막는다.
