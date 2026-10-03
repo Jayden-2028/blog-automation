@@ -2,6 +2,30 @@
 
 기준일: 2026-10-03 (Asia/Seoul)
 
+## 2026-10-04 세션 — 버튼 발행 글에 내부 링크가 빠지던 문제 (브랜치 `claude/manuscript-viewer-layout-features-ck5i2u`)
+
+**실측(공개 피드, 읽기만)**: 09-30까지 올라간 Blogspot 글은 "함께 보면 좋은 글"이 있고, **10-01 이후 버튼 발행 9건은
+0개**였다. 원인은 09-30 배리에이션 폐지(`0943e53`): 전에는 준비 단계가 링크를 붙인 원고를 새 article 행으로 DB에
+저장했고 발행이 그 행을 읽었다. 폐지 뒤에는 링크가 뷰어(manifest)에만 붙고 DB 원고에는 안 들어갔다.
+
+**고친 것**
+- `prepareManuscript.ts` - 기준 원고 경로에서 링크를 **DB 원고(articles.content)에 붙여 저장**한다(바뀐 경우만).
+  뷰어와 발행본이 같은 링크를 갖는다. 재실행해도 `appendRelatedPosts`가 블록을 갈아 끼워 쌓이지 않는다.
+  저장 실패는 준비를 막지 않고 뷰어 원고 기록에 남는다. 주입 옵션 `saveArticleContent`.
+- `publishJobToNaver.ts` - 네이버에서는 이 블록을 **뺀다**(`removeRelatedPosts`). 링크가 전부 Blogspot 주소라
+  네이버에서는 바깥 링크이고 같은 글의 다른 채널 사본으로 이어진다 - `참고 자료`를 빼는 09-22 결정과 같은 취지.
+  **사용자 결정 사항** - 네이버에도 넣고 싶으면 이 한 줄을 되돌리면 된다.
+- 뷰어 수정본 반영: 이제 내부 링크 블록도 발행 원고에 있으니 고치면 반영된다(10-04 전 원고는 여전히 건너뜀).
+
+**검증**: `test:prepare-manuscripts`(케이스 추가) · `test:publish-naver-job`(케이스 확장) · `test:related-posts` ·
+`test:publish-blogspot` · `test:viewer-edits` · `test:viewer-layout` · `test:viewer-copy` · `test:publish-blocks` ·
+`npm run build` 통과(앞 둘은 `SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`에 dummy 값을 넣어 돌림 - 전부 주입식이라
+네트워크를 안 탄다). DB 저장·네이버 제거를 각각 되돌리면 테스트가 깨지는 것까지 확인.
+
+**⬜ 남은 것**: 이미 발행된 10-01~10-04 글 9건은 링크가 없다. 채우려면 그 job들의 원고를 다시 준비
+(`npm run manuscripts:build -- <jobId>`, DB 쓰기 + 페이지 배포)한 뒤 🔵 블로그 발행을 다시 누르면 공개 글 본문이
+갱신된다. 운영 DB·공개 글을 바꾸는 일이라 사용자 승인 대기.
+
 ## 2026-10-03 세션 — 원고 뷰어 레이아웃·기능 정리 (브랜치 `claude/manuscript-viewer-layout-features-ck5i2u`)
 
 **사용자 결정으로 바꾼 것**(`renderManuscriptPage.ts`)

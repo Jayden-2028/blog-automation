@@ -72,6 +72,11 @@ export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
   /** 내부 링크 후보(이미 발행된 글). 기본은 publications에서 읽는다. false면 링크를 붙이지 않는다. */
   loadPublishedPosts?: (() => Promise<PublishedPost[]>) | false;
+  /**
+   * 내부 링크를 붙인 본문을 기준 원고(articles.content)에 저장한다(2026-10-04). 기본은 updateArticle.
+   * 발행 버튼은 DB 본문을 읽으므로 여기서 저장하지 않으면 링크가 뷰어에만 남는다.
+   */
+  saveArticleContent?: (articleId: number, content: string) => Promise<unknown>;
   writeManuscriptFile?: (path: string, content: string) => Promise<void>;
   /** job.metadata 병합(이미지 진행 표시 등). 기본은 ArticleJobRepository.mergeMetadata. */
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
@@ -209,8 +214,9 @@ async function defaultWriteManuscriptFile(path: string, content: string): Promis
  * 실패해도 원고를 막지 않는다 - 링크는 부가 기능이고, 여기서 예외를 던지면 원고 준비 전체가
  * 실패한다. 발행 기록을 못 읽으면 링크 없이 그대로 간다.
  *
- * **새로 만드는 배리에이션에만** 붙인다. 이미 만들어진 원고를 재사용하는 경로에서 본문만 바꾸면
- * DB의 article 행과 원고 파일이 어긋난다.
+ * 기준 원고 경로에서 붙이고, 붙인 본문은 호출부가 DB(articles.content)에도 저장한다(2026-10-04) -
+ * 뷰어와 발행본이 같은 링크를 갖게 하려고. 옛 배리에이션 행을 재사용하는 경로는 그 행에 이미 링크가
+ * 들어 있어(배리에이션 시절 저장분) 여기를 거치지 않는다.
  */
 async function withRelatedPosts(
   content: string,
@@ -302,6 +308,8 @@ export async function prepareManuscript(
   let slug: string | null = null;
   let tags: string[] = [];
   let shortName: string | null = null;
+  // 이미지 단계 전에 생긴 기록(내부 링크 저장 실패 등). 아래 imageFailures 앞에 붙인다.
+  const imageFailuresBeforeImages: string[] = [];
 
   if (existing) {
     title = existing.title ?? job.keyword;
@@ -319,14 +327,30 @@ export async function prepareManuscript(
   } else {
     // 기준 원고가 곧 최종본이다. 발행 메타는 writer가 남긴 draftMeta에서, 태그는 본문 끝 해시태그 줄에서 읽는다.
     const meta = readDraftMeta(job);
-    const split = splitTrailingHashtags(baseArticle.content ?? "");
+    // 내부 링크는 **DB 원고에 붙여 저장한다**(2026-10-04). 2026-09-30 배리에이션 폐지 전에는 준비 단계가
+    // 링크를 붙인 원고를 새 article 행(platform=blogspot)으로 저장했고 발행이 그 행을 읽었다. 폐지 뒤에는
+    // 링크가 뷰어(manifest)에만 붙어, 10-01 이후 버튼으로 발행한 Blogspot 글 9건에 내부 링크가 0개였다
+    // (공개 피드 실측). 다시 돌려도 appendRelatedPosts가 기존 블록을 갈아 끼우므로 쌓이지 않는다.
+    const original = baseArticle.content ?? "";
+    const withLinks = await withRelatedPosts(original, job, options);
+    if (withLinks !== original) {
+      const save = options.saveArticleContent ?? ((id: number, body: string) => updateArticle(id, { content: body }));
+      try {
+        await save(baseArticle.id, withLinks);
+      } catch (error) {
+        // 저장 실패가 원고 준비를 막지는 않는다 - 뷰어에는 링크가 보이지만 발행본에는 빠진다는 것을 남긴다.
+        imageFailuresBeforeImages.push(
+          `ℹ️ 내부 링크를 발행 원고에 저장하지 못했습니다(뷰어에만 보임): ${error instanceof Error ? error.message : error}`
+        );
+      }
+    }
+    const split = splitTrailingHashtags(withLinks);
     title = baseArticle.title ?? job.keyword;
     content = split.body;
     searchDescription = meta.searchDescription;
     slug = meta.slug;
     shortName = meta.shortName;
     tags = meta.tags.length > 0 ? meta.tags : split.tags;
-    content = await withRelatedPosts(content, job, options);
     // `표 생성` 자리는 만들지 않는다(2026-09-24 사용자 결정 - 메인 규칙 5번). 저장 파일에 빈 칸이 남지 않게 뺀다.
     const cleaned = removeTableMarkers(content);
     if (cleaned.removed > 0) {
@@ -335,7 +359,7 @@ export async function prepareManuscript(
     }
   }
 
-  const imageFailures: string[] = [];
+  const imageFailures: string[] = [...imageFailuresBeforeImages];
 
   // 배리에이션이 문단을 재배열하면 마커 순서도 바뀌는데, imagePrompts는 **기준 원고 순서**로
   // 저장돼 있다. 번호로만 짝지으면 통째로 밀려 "검색은 A, 판정은 B"가 된다 - 2026-09-21 지창욱

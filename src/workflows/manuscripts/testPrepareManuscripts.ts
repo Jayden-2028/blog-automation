@@ -105,6 +105,60 @@ async function main(): Promise<void> {
   assert(parenting.status === "success", "카테고리와 무관하게 원고를 준비해야 한다");
   console.log("✅ 모든 카테고리 -> Blogspot 원고 1건 (채널 배정 실패 경로 없음)");
 
+  // 2-1) 내부 링크는 DB 원고에도 저장한다(2026-10-04). 전에는 뷰어에만 붙어 버튼 발행본에 빠졌다.
+  {
+    const original = "도입 문단입니다.\n\n**참고 자료**\n- [출처](https://example.com/src)\n\n#태그1 #태그2";
+    const posts = [
+      { jobId: "other", keyword: "테스트 키워드 다른 글", category: "living", title: "다른 글", url: "https://whynowissue.blogspot.com/2026/09/other.html" },
+    ];
+    const saved: { id: number; content: string }[] = [];
+    const run = (content: string) =>
+      prepareManuscript(job("a", "living"), {
+        loadArticles: async () => [baseArticle(content)],
+        writeManuscriptFile: async () => {},
+        mergeJobMetadata: async () => {},
+        generateImages: false,
+        collectWebImages: false,
+        capturePages: false,
+        loadPublishedPosts: async () => posts as never,
+        saveArticleContent: async (id, body) => {
+          saved.push({ id, content: body });
+        },
+      });
+    const first = await run(original);
+    assert(first.status === "success", "준비가 성공해야 한다");
+    assert(saved.length === 1 && saved[0].id === 1, `기준 원고(id 1)에 한 번 저장해야 한다 (${saved.length})`);
+    const persisted = saved[0].content;
+    assert(persisted.includes("**함께 보면 좋은 글**\n- [다른 글](https://whynowissue.blogspot.com/2026/09/other.html)"), `DB 원고에 내부 링크 (${persisted})`);
+    assert(persisted.indexOf("함께 보면 좋은 글") < persisted.indexOf("**참고 자료**"), "참고 자료 앞에 들어간다");
+    assert(persisted.endsWith("#태그1 #태그2"), "해시태그 줄은 그대로 끝에 남는다");
+    assert(first.status === "success" && first.topic.manuscript.body.includes("함께 보면 좋은 글"), "뷰어 본문에도 같은 링크");
+    assert(first.status === "success" && !first.topic.manuscript.body.includes("#태그1"), "뷰어 본문에는 해시태그 줄이 없다(tags로 따로)");
+    assert(first.status === "success" && first.topic.manuscript.tags.join(",") === "태그1,태그2", "태그는 해시태그 줄에서");
+
+    // 다시 돌려도(이미지 수정 등) 블록이 쌓이지 않고, 바뀐 게 없으면 저장하지 않는다.
+    const second = await run(persisted);
+    assert(second.status === "success" && (second.topic.manuscript.body.match(/함께 보면 좋은 글/g) ?? []).length === 1, "블록이 한 번만");
+    assert(saved.length === 1, `같은 내용이면 다시 저장하지 않는다 (${saved.length})`);
+
+    // 저장이 실패해도 원고 준비는 계속되고, 그 사실이 기록에 남는다.
+    const failing = await prepareManuscript(job("a", "living"), {
+      loadArticles: async () => [baseArticle(original)],
+      writeManuscriptFile: async () => {},
+      mergeJobMetadata: async () => {},
+      generateImages: false,
+      collectWebImages: false,
+      capturePages: false,
+      loadPublishedPosts: async () => posts as never,
+      saveArticleContent: async () => {
+        throw new Error("db down");
+      },
+    });
+    assert(failing.status === "success", "저장 실패가 준비를 막으면 안 된다");
+    assert(failing.status === "success" && (failing.topic.manuscript.imageNotes ?? []).some((n) => n.includes("내부 링크를 발행 원고에 저장하지 못했습니다")), "실패 기록이 남아야 한다");
+  }
+  console.log("✅ 내부 링크를 DB 원고에도 저장(참고 자료 앞·해시태그 유지), 재실행 시 중복·재저장 없음, 실패해도 계속");
+
   // 3) 기준 원고가 곧 최종본: LLM 호출 없이 파일 1개 + draftMeta + imagePrompts 전달
   const writes: Record<string, string> = {};
   const r3 = await prepareManuscript(
