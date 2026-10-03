@@ -8,7 +8,7 @@
 파이프라인이 실제로 여러 날 멈춰 있었다. 사용자가 "맥 꺼져도 자동으로 도는" 방향을 다시 우선순위로
 올림(맥미니는 최후 옵션, 클라우드+무료 우선).
 
-**실측 검증 완료(스모크테스트, `.github/workflows/test-claude-subscription-auth.yml`)** - 아래
+**실측 검증 완료(스모크테스트 워크플로우 `test-claude-subscription-auth.yml` - 확인 끝나 2026-10-03 삭제)** - 아래
 "핵심 제약 두 가지" 중 2번(`claude -p` 과금 문제)이 해소됨:
 
 1. `claude setup-token`으로 발급한 구독(Pro/Max) 기반 OAuth 토큰(`CLAUDE_CODE_OAUTH_TOKEN` secret)이

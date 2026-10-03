@@ -2,6 +2,32 @@
 
 기준일: 2026-10-03 (Asia/Seoul)
 
+## 2026-10-03 세션(메인 윈도우) — 규격 충돌·죽은 코드·기본값 불일치 점검 후 정리
+
+**점검 결과**: 빌드 통과, 테스트 102 pass / 37 fail - fail 36건은 컨테이너에 Supabase·Playwright 자격이
+없어서였고 진짜 고장은 `test:channel-routing`(없는 파일) 1건. 규격 충돌 6곳은 전부 옛 규칙 잔재였다.
+
+**고친 것**
+- 규격 문서: `style/voice.md` 예문 "2026년 8월 기준 30만 원"(core-rules §1-3 금지 표현을 (O)로 가르침) →
+  "30만 원입니다"; §5 마무리 "해요체"가 §2·§6 "합니다체"와 모순 → 합니다체로 통일.
+  `rules/output-format.md`: "세 스킬"→카테고리 문체 파일, 목표 "2,000~3,000자"→"2,000자 이상(정보성 상한 없음,
+  thin 면제)", 예시 `skill_used: parenting-blog-writer`→`content-blog`(파서가 읽는 키 이름은 유지),
+  `image_ai_generated (절반 이하)`→비율 상한 없음. `writer.md` 체크리스트·실패표의 "회의·발표 현장 0개"가
+  images.md §8-4 정책("보도 현장 사진 적극 활용")과 충돌 → 웹 검색으로. `rules/images.md` "최소 5쌍"에 thin 면제 명시.
+- 코드 기본값 ↔ 운영값 정렬(`src/config/manuscriptImages.ts`): `MANUSCRIPT_IMAGE_GENERATION` 기본 true,
+  `IMAGE_AB_COMPARE` 기본 false. 맥 로컬(variables 없음)과 클라우드가 같은 동작을 하게 됐다.
+- `.env.example` 현행화: 죽은 변수 7개 삭제(TISTORY_* 4, NAVER_VARIANT_ENABLED, GOOGLE_SEARCH_*,
+  COMMUNITY_TRENDS_MAX_CANDIDATES_PER_SITE), 코드가 읽지만 기록이 없던 변수 ~35개 추가(네이버 발행 3, 이미지 생성
+  10, IG 8, 경로·도구 7 등). Blogger 상한 5→20, draft 주석 현행화.
+- `package.json` `test:channel-routing` 삭제, `test-claude-subscription-auth.yml` 삭제(수동 전용·확인 끝).
+- 원격 브랜치 정리: main에 완전히 들어간 7개 삭제, 세션 브랜치는 main과 같은 지점으로 재설정.
+
+**남은 것**
+- ⬜ `telegram-bot-setup-7bqiyc`에 미병합 3커밋(outageTracker 10분 미만 끊김 제외·KST 표시) - 그 세션에서 병합 판단.
+- ⬜ GitHub Actions `BLOGGER_*` 시크릿 유무(아래 2036줄 ⬜) - 여기서는 확인 불가. 없으면 🔵 버튼이 클라우드에서 실패한다.
+- 집필 클라우드 경로가 외부 저장소(`modu-ai/moai-cowork`) 플러그인을 실행 시점에 설치해 의존한다
+  (`job-write.yml:72-73`). 그쪽이 바뀌면 원고 품질이 바뀐다 - CLAUDE.md에는 아직 안 적혀 있다.
+
 ## 2026-10-03 세션(3) — 네이버 발행에 서식·이미지가 하나도 없던 원인: 붙여넣기 검증의 거짓 음성
 
 **증상**(사용자 실측, 티빙 러브 바이러스 글): 비공개로 발행된 네이버 글에 소제목 크기·굵게·이미지가

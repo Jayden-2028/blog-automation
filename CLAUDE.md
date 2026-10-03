@@ -63,11 +63,11 @@ Claude는 핵심 설계 판단, 최종 검증, 승인 요청을 Codex에 넘기�
     다시 쓰고(이미지는 두 채널이 **같은 것**을 쓴다), 네이버 원고에서는 `참고 자료` 링크아웃을
     뺀다. 발행 간격은 코드가 강제하지 않는다 - 사용자가 그때그때 판단한다(2026-09-22 결정).
 - 원고 내 이미지: writer가 남긴 `[IMAGE: 설명]` + `[IMAGE PROMPT: ...]` 마커 쌍으로 **승인 이후**
-  자동 생성한다(`workflows/images/generateManuscriptImages.ts`). **코드 기본값은 꺼짐이지만 운영에서는
-  켜져 있다**(2026-10-01 실측 - 저장소 variables의 `MANUSCRIPT_IMAGE_GENERATION=true`. 최근 일주일
-  AI 생성 이미지가 사건사고·생활정보에서 실제로 나왔다). 코드만 보고 "안 돈다"고 판단하지 말 것.
-  A/B 비교는 끝났다 - **코드 기본값은 `IMAGE_AB_COMPARE=true`이고 운영 variables에서 꺼 둔 상태**다
-  (실측 데이터에 A/B 흔적이 없다). `IMAGE_PROVIDER=openai`. 웹 검색으로 채우는 자리는 네이버 + 구글 두 색인을 쓴다
+  자동 생성한다(`workflows/images/generateManuscriptImages.ts`). **코드 기본값과 운영값이 같다 -
+  켜짐**(2026-10-03 정렬. 전에는 코드 false / 운영 variables `MANUSCRIPT_IMAGE_GENERATION=true`로 갈려
+  맥 로컬과 클라우드가 다르게 돌았다). 끄려면 `=false`를 명시한다. OPENAI 키가 없으면 생성 단계가 실패로
+  기록되고 원고는 그대로 진행된다. A/B 비교는 끝났다 - **`IMAGE_AB_COMPARE` 기본값도 운영값(false)**이다
+  (2026-10-03 정렬). `IMAGE_PROVIDER=openai`. 웹 검색으로 채우는 자리는 네이버 + 구글 두 색인을 쓴다
   (구글은 공식 API가 신규 발급 차단이라 Serper 중계, `SERPER_API_KEY`). 생성 이미지는 Supabase
   Storage(`article-images`)가 원본이고 `npm run sync:images`가 맥으로 내려받는다. 옛 경로
   (`ARTICLE_IMAGE_GENERATION` + `workflows/writing/generateArticleImages.ts`, 자체 브리프 생성 후
