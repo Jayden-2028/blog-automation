@@ -82,6 +82,10 @@ console.log("▶ 멈춤 기록 테스트 시작\n");
   recordFailure(path, "fetch failed", new Date("2026-10-03T10:05:00Z"));
   const recovery = takeRecovery(path, new Date("2026-10-03T10:10:00Z"));
   assert(recovery !== null && recovery.failures === 2, "정확히 10분이면 알린다");
+  // 시작 시각은 한국 시간으로 보여 준다: 10:00Z -> 19:00 KST.
+  const text = describeRecovery(recovery!, "인스타 링크 수신");
+  assert(text.includes("시작 2026-10-03 19:00"), `시작 시각이 한국 시간이어야 한다: ${text}`);
+  assert(!text.includes("T10:00"), "UTC 원문이 남으면 안 된다");
   console.log("✅ 10분 미만 끊김은 알리지 않고, 10분 이상만 알린다");
 }
 

@@ -106,6 +106,13 @@ export function takeRecovery(path: string, now: Date = new Date()): OutageRecove
   };
 }
 
+/** ISO 시각을 한국 시간 "2026-10-03 17:04"로 바꾼다(2026-10-03 - 예전엔 UTC가 그대로 나와 9시간 어긋나 보였다). */
+function formatKst(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString("sv-SE", { timeZone: "Asia/Seoul" }).slice(0, 16);
+}
+
 /** 사람이 읽을 알림 문구. 유실 가능성이 있으면 그것부터 말한다. */
 export function describeRecovery(recovery: OutageRecovery, jobLabel: string): string {
   const lines = [
@@ -123,7 +130,7 @@ export function describeRecovery(recovery: OutageRecovery, jobLabel: string): st
     );
   }
 
-  lines.push(`실패 ${recovery.failures}회 · 시작 ${recovery.firstFailedAt.replace("T", " ").slice(0, 16)}`);
+  lines.push(`실패 ${recovery.failures}회 · 시작 ${formatKst(recovery.firstFailedAt)}`);
   if (recovery.reason) lines.push(`<code>${recovery.reason}</code>`);
   return lines.join("\n");
 }
