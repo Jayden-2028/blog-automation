@@ -50,12 +50,19 @@ async function main(): Promise<void> {
       if (result.ok) {
         await finishNaverPublish(job.id, { ok: true, url: result.url });
         console.log(`   ✅ ${job.keyword} -> ${result.url}`);
+        // 경고는 "올라갔지만 서식·이미지가 기대와 다르다"는 뜻이다. 로그에만 남기면 사용자가
+        // 글을 눈으로 열어보기 전에는 모른다(2026-10-03 - 그래서 서식 없는 글을 뒤늦게 발견했다).
+        const warnings = result.warnings ?? [];
+        if (warnings.length > 0) console.warn(`   ⚠️ ${warnings.join(" / ")}`);
         await notify(
           [
             result.alreadyDone ? "ℹ️ <b>이미 네이버에 올라가 있습니다</b>" : "🟢 <b>네이버에 발행했습니다</b>",
             "",
             `<b>${escapeTelegramHtml(job.keyword)}</b>`,
             escapeTelegramHtml(result.url),
+            ...(warnings.length > 0
+              ? ["", "⚠️ 확인이 필요합니다", ...warnings.map((warning) => `· ${escapeTelegramHtml(warning)}`)]
+              : []),
           ].join("\n")
         );
       } else {

@@ -55,11 +55,14 @@ import { chromium, type Page } from "playwright";
 
 import { NAVER_DEFAULT_CATEGORY_NO } from "../../config/naverCategoryMapping.js";
 import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
-
-/** 공백을 뺀 실제 글자 수. 본문이 실제로 채워졌는지 판정하는 데 쓴다. */
-function nonWhitespaceLength(text: string): number {
-  return text.replace(/\s/g, "").length;
-}
+import {
+  describePasteGap,
+  expectBodyFormat,
+  isBodyFilled,
+  isPasteFormatted,
+  LARGE_FONT_MIN_PX,
+} from "./naverPasteCheck.js";
+import type { BodyFormatObserved } from "./naverPasteCheck.js";
 
 /**
  * bodyHtml을 문단 구분이 살아 있는 평문으로 바꾼다(붙여넣기 실패 시 keyboard.type 폴백용).
@@ -114,7 +117,11 @@ export type NaverDraftSaveInput = {
 export type NaverDraftSaveStage = "login" | "navigate" | "title" | "body" | "image" | "save";
 
 export type NaverDraftSaveResult =
-  | { ok: true; draftUrl: string }
+  /**
+   * `warnings`: 올라가긴 했지만 사람이 알아야 하는 차이(이미지 일부 누락 등). 조용히 넘기면
+   * 2026-10-03처럼 "서식·이미지가 하나도 없는 글이 성공으로 보고되는" 일이 반복된다.
+   */
+  | { ok: true; draftUrl: string; warnings?: string[] }
   | { ok: false; stage: NaverDraftSaveStage; error: string };
 
 export type NaverBlogPublisherOptions = {
@@ -187,9 +194,14 @@ export class NaverBlogPublisher {
   }
 
   /** 제목/본문/이미지/태그를 채우고 임시저장한다. 실제 발행은 절대 하지 않는다(파일 상단 설명 참고). */
-  /** 임시저장까지만. 발행 버튼을 누르지 않는다. */
+  /**
+   * 임시저장까지만. 발행 버튼을 누르지 않는다.
+   *
+   * 여기서는 평문 폴백을 허용한다 - 사람이 에디터에서 손보는 흐름이라 "서식 없는 초안"이
+   * "빈 초안"보다 낫다. 공개로 나가는 publish()는 반대다(아래).
+   */
   async saveDraft(input: NaverDraftSaveInput): Promise<NaverDraftSaveResult> {
-    return this.fill(input, (page) => this.clickSave(page));
+    return this.fill(input, (page) => this.clickSave(page), true);
   }
 
   /**
@@ -202,13 +214,16 @@ export class NaverBlogPublisher {
     input: NaverDraftSaveInput,
     visibility: NaverVisibility
   ): Promise<NaverDraftSaveResult> {
-    return this.fill(input, (page) => this.clickPublish(page, visibility));
+    // 평문 폴백을 쓰지 않는다(2026-10-03). 이 경로는 글을 실제로 올리므로, 서식·이미지가 빠진
+    // 글이 조용히 올라가는 것보다 실패로 끝내고 재시도 버튼을 살리는 쪽이 낫다.
+    return this.fill(input, (page) => this.clickPublish(page, visibility), false);
   }
 
   /** 제목·본문·이미지를 채우는 공통 흐름. 마지막 "완료" 동작만 호출자가 정한다. */
   private async fill(
     input: NaverDraftSaveInput,
-    finish: (page: Page) => Promise<string>
+    finish: (page: Page) => Promise<string>,
+    allowPlainTextFallback: boolean
   ): Promise<NaverDraftSaveResult> {
     const context = await chromium.launchPersistentContext(this.profileDir, { headless: this.headless });
     // 본문 붙여넣기가 실제 OS 클립보드 + Ctrl/Cmd+V를 쓰므로 미리 권한을 승인해둔다(파일 상단
@@ -248,8 +263,9 @@ export class NaverBlogPublisher {
         return { ok: false, stage: "title", error: this.errorMessage(error) };
       }
 
+      let warnings: string[] = [];
       try {
-        await this.fillBody(page, SELECTORS.bodyParagraph, input.bodyHtml);
+        warnings = await this.fillBody(page, SELECTORS.bodyParagraph, input.bodyHtml, allowPlainTextFallback);
       } catch (error) {
         await this.saveFailureSnapshot(page, "body");
         return { ok: false, stage: "body", error: this.errorMessage(error) };
@@ -266,7 +282,7 @@ export class NaverBlogPublisher {
 
       try {
         const draftUrl = await finish(page);
-        return { ok: true, draftUrl };
+        return { ok: true, draftUrl, warnings };
       } catch (error) {
         await this.saveFailureSnapshot(page, "save");
         return { ok: false, stage: "save", error: this.errorMessage(error) };
@@ -343,32 +359,90 @@ export class NaverBlogPublisher {
   }
 
   /**
-   * 본문을 채운다. 1차로 OS 클립보드 + Ctrl/Cmd+V 붙여넣기를 시도하고(서식 보존), 붙여넣기 후
-   * 본문 요소 텍스트를 되읽어 실제로 들어갔는지 검증한다. 비어 있으면(2026-09-01 E2E에서 제목만
-   * 들어가고 본문이 통째로 빈 사례 발생) 제목 입력과 같은 방식인 page.keyboard.type()으로 평문을
-   * 다시 넣는다 - 서식은 잃지만 "본문 통째로 빈 초안"보다는 낫다(사용자가 발행 전 손보는 흐름).
+   * 본문을 채운다. OS 클립보드 + 붙여넣기로 **서식을 살려** 넣고, 넣은 뒤 에디터를 되읽어
+   * 글자뿐 아니라 **굵게·소제목 크기까지** 들어갔는지 검증한다(naverPasteCheck.ts).
+   *
+   * 2026-10-03에 고친 사고: 예전에는 글자 수만 봤고, 그 측정마저 locator strict mode 때문에
+   * 거짓 음성이었다(readBodyState 주석 참고). 붙여넣기가 성공했는데도 "비었다"로 읽혀
+   * Cmd+A -> Backspace로 지우고 평문을 타이핑했다 - 발행된 글에 서식과 이미지가 하나도 없었다.
+   *
+   * 돌려주는 값은 사람에게 보여줄 경고 목록이다(발행을 막을 정도는 아니지만 알아야 하는 차이).
    */
-  private async fillBody(page: Page, selector: string, html: string): Promise<void> {
+  private async fillBody(
+    page: Page,
+    selector: string,
+    html: string,
+    allowPlainTextFallback: boolean
+  ): Promise<string[]> {
     const plainText = htmlToPlainWithBreaks(html);
+    const expected = expectBodyFormat(html);
 
     await this.pasteHtml(page, html, plainText);
     await this.safeClick(page, selector);
-    await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+    await this.pressPaste(page);
     await page.waitForTimeout(1200);
 
-    const afterPaste = await this.readBodyText(page);
-    if (nonWhitespaceLength(afterPaste) >= 50) return;
+    let observed = await this.readBodyState(page);
 
-    console.warn("⚠️ [naver] 본문 붙여넣기 결과가 비어 있어 평문 타이핑으로 폴백합니다.");
+    // 글자가 아예 안 들어갔을 때만 단축키 경로로 한 번 더 시도한다. 글자가 들어간 상태에서
+    // 다시 붙여넣으면 본문이 두 번 들어간다.
+    if (!isBodyFilled(expected, observed)) {
+      await this.safeClick(page, selector);
+      await page.keyboard.press(process.platform === "darwin" ? "Meta+V" : "Control+V");
+      await page.waitForTimeout(1200);
+      observed = await this.readBodyState(page);
+    }
+
+    if (isPasteFormatted(expected, observed)) {
+      const warnings = describePasteGap(expected, observed);
+      for (const warning of warnings) console.warn(`⚠️ [naver] ${warning}`);
+      return warnings;
+    }
+
+    const gap = describePasteGap(expected, observed).join(" ") || "서식이 반영되지 않았습니다.";
+
+    if (!allowPlainTextFallback) {
+      // 공개로 나가는 경로다. 서식 없는 글을 올리느니 실패로 끝내고 재시도 버튼을 살린다.
+      throw new Error(`본문 붙여넣기 실패 - ${gap}`);
+    }
+
+    console.warn(`⚠️ [naver] 붙여넣기 실패로 평문 타이핑으로 폴백합니다 - ${gap}`);
     await this.safeClick(page, selector);
     await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
     await page.keyboard.press("Backspace");
     await page.keyboard.type(plainText, { delay: 1 });
     await page.waitForTimeout(600);
 
-    const afterType = await this.readBodyText(page);
-    if (nonWhitespaceLength(afterType) < 50) {
-      throw new Error("본문 입력 실패 - 붙여넣기와 평문 타이핑 모두 본문 요소가 비어 있습니다.");
+    const afterType = await this.readBodyState(page);
+    if (!isBodyFilled(expected, afterType)) {
+      throw new Error("본문 입력 실패 - 붙여넣기와 평문 타이핑 모두 본문이 비어 있습니다.");
+    }
+    return [`서식 없이 평문으로 입력했습니다(붙여넣기 실패 - ${gap}).`];
+  }
+
+  /**
+   * 붙여넣기 키를 보낸다.
+   *
+   * macOS에서 `keyboard.press("Meta+V")`는 **브라우저 단축키**로 처리돼 렌더러에 편집 명령이
+   * 전달되지 않는 경우가 있다(네이버 폴러는 맥에서만 돈다). CDP `Input.dispatchKeyEvent`에
+   * `commands:["paste"]`를 실으면 렌더러가 붙여넣기 명령을 그대로 실행한다 - 사람이 Cmd+V를
+   * 누른 것과 같은 경로다. CDP가 막히면 기존 단축키로 떨어진다.
+   */
+  private async pressPaste(page: Page): Promise<void> {
+    const isMac = process.platform === "darwin";
+    const modifiers = isMac ? 4 : 2; // 4 = Meta(Command), 2 = Control
+    const key = { key: "v", code: "KeyV", windowsVirtualKeyCode: 86, nativeVirtualKeyCode: 86, modifiers };
+    try {
+      const client = await page.context().newCDPSession(page);
+      try {
+        await client.send("Input.dispatchKeyEvent", { type: "keyDown", ...key, commands: ["paste"] });
+        await client.send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+        return;
+      } finally {
+        await client.detach().catch(() => {});
+      }
+    } catch {
+      await page.keyboard.press(isMac ? "Meta+V" : "Control+V");
     }
   }
 
@@ -388,12 +462,57 @@ export class NaverBlogPublisher {
     );
   }
 
-  /** SmartEditor 본문 컴포넌트의 표시 텍스트를 읽는다. 붙여넣기·타이핑 결과 검증용. */
-  private async readBodyText(page: Page): Promise<string> {
+  /**
+   * SmartEditor 본문 상태(글자 수·이미지·굵게·큰 글씨)를 읽는다. 붙여넣기 결과 검증용.
+   *
+   * ⚠️ **여기에 2026-10-03 사고의 근본 원인이 있었다.** 예전 구현은
+   * `page.locator('.se-component.se-text[data-a11y-title="본문"]').innerText()` 하나였는데,
+   * 붙여넣기가 성공하면 본문이 **여러 컴포넌트로 쪼개져** 이 locator가 N개에 매칭된다.
+   * Playwright strict mode는 그때 예외를 던지고, 뒤에 붙은 `.catch(() => "")`가 그 예외를 삼켜
+   * **빈 문자열**을 돌려줬다 - 성공한 붙여넣기가 "본문이 비었다"로 읽힌 것이다.
+   * 그래서 지금은 캔버스 전체를 순회해 **합산**한다(제목 컴포넌트는 뺀다).
+   *
+   * 큰 글씨 판정에 계산된 스타일(getComputedStyle)을 쓰는 이유: SmartEditor는 붙여넣은
+   * `font-size:19px`를 자기 크기 등급(se-fs-fsNN 클래스)으로 바꿔 넣기 때문에, 인라인 style만
+   * 보면 서식이 살아 있어도 못 찾는다. 실제로 렌더된 크기를 본다.
+   */
+  private async readBodyState(page: Page): Promise<BodyFormatObserved> {
     return page
-      .locator('.se-component.se-text[data-a11y-title="본문"]')
-      .innerText()
-      .catch(() => "");
+      .evaluate((minPx: number) => {
+        // tsconfig에 "dom" lib이 없어(Node 전용 프로젝트) document를 직접 참조할 수 없다 -
+        // pasteHtml과 같은 globalThis 캐스팅 우회를 쓴다.
+        const g: any = globalThis as any;
+        const canvas = g.document.querySelector(".se-canvas") ?? g.document.body;
+        const components: any[] = Array.from(canvas.querySelectorAll(".se-component")).filter(
+          (el: any) => !el.classList.contains("se-documentTitle")
+        );
+
+        let text = "";
+        let bold = 0;
+        let large = 0;
+        let inlineImages = 0;
+
+        for (const el of components) {
+          text += `${el.innerText ?? ""}\n`;
+          bold += el.querySelectorAll("b, strong").length;
+          inlineImages += el.querySelectorAll("img").length;
+          const nodes: any[] = Array.from(el.querySelectorAll("span, b, strong, p"));
+          const hasLarge = nodes.some((node: any) => {
+            const px = Number.parseFloat(g.getComputedStyle(node).fontSize);
+            return Number.isFinite(px) && px >= minPx;
+          });
+          if (hasLarge) large += 1;
+        }
+
+        const imageComponents = canvas.querySelectorAll(".se-component.se-image").length;
+        return {
+          chars: text.replace(/\s/g, "").length,
+          images: Math.max(imageComponents, inlineImages),
+          bold,
+          large,
+        };
+      }, LARGE_FONT_MIN_PX)
+      .catch(() => ({ chars: 0, images: 0, bold: 0, large: 0 }));
   }
 
   /**

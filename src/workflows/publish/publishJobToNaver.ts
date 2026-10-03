@@ -34,7 +34,8 @@ export const NAVER_PLATFORM = "naver";
 const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "publishing", "published"];
 
 export type PublishJobToNaverResult =
-  | { ok: true; publicationId: number; url: string; alreadyDone: boolean }
+  /** `warnings`: 올라갔지만 사람이 알아야 하는 차이(이미지 일부 누락 등). 폴러가 알림에 싣는다. */
+  | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[] }
   | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found" | "naver_failed"; detail: string };
 
 export type PublishJobToNaverOptions = {
@@ -139,5 +140,11 @@ export async function publishJobToNaver(
     publishedUrl: result.draftUrl,
   });
 
-  return { ok: true, publicationId: publication.id, url: result.draftUrl, alreadyDone: false };
+  return {
+    ok: true,
+    publicationId: publication.id,
+    url: result.draftUrl,
+    alreadyDone: false,
+    warnings: result.warnings,
+  };
 }
