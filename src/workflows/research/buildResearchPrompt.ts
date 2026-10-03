@@ -116,7 +116,7 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     `- 출력 파일은 researcher.md §7의 이름 규칙·충돌 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못",
     "  채운 빈칸(정의·핵심 수치·시행 이력·예외·자주 묻는 질문·오해)을 WebSearch/WebFetch로 보강하는 데 집중한다.",
-    "- researcher.md §4의 7개 카테고리를 baseline 위에서 빠짐없이 시도한다. 각도를 바꿔 최소 3회 검색한다.",
+    "- researcher.md §4의 8개 카테고리(나무위키 포함)를 baseline 위에서 빠짐없이 시도한다. 각도를 바꿔 최소 3회 검색한다.",
     "- baseline의 **(지식iN 질문)·(카페 글)** 항목은 §5 '사람들이 실제로 묻는 질문'의 원문이다. 그 제목을",
     "  그대로 §5에 옮긴다(URL 포함) - 이 항목이 있는데 §5를 '찾지 못함'으로 두지 않는다.",
     "- **§11 캡처할 페이지**를 반드시 채운다(없으면 \"없음\"). 이벤트·프로모션 안내, 공식 신청 페이지,",
