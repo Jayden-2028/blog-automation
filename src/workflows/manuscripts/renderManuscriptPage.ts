@@ -52,11 +52,8 @@ type PageTopic = {
   imageCandidates: Record<string, { number: number; url: string; sourcePage: string; width?: number | null; height?: number | null; picked?: boolean }[]>;
   /** 공백 제외 본문 글자수(참조 파일의 "본문 N자(공백 제외)"와 같은 기준). */
   charCount: number;
-  /**
-   * 네이버용 배리에이션(2026-09-18). 이미지는 위 images를 그대로 쓰므로 blocks와 마커 순서가 같다.
-   * 생성 전이거나 실패했으면 null - 그때는 네이버 복사 버튼을 숨긴다.
-   */
-  naver: { title: string; tags: string[]; blocks: ManuscriptBlock[] } | null;
+  // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
+  // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
 
 function escapeHtml(value: string): string {
@@ -92,11 +89,6 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     imageNotes: m.imageNotes ?? [],
     imageCandidates: m.imageCandidates ?? {},
     charCount: m.body.replace(/\s/g, "").length,
-    // 네이버 본문도 같은 파서를 태운다 - 뷰어의 복사 로직(이미지 자리를 [[이미지 N]]으로 남김)을
-    // 그대로 재사용하려면 블록 모양이 같아야 한다.
-    naver: m.naver
-      ? { title: m.naver.title, tags: m.naver.tags, blocks: parseManuscriptBlocks(m.naver.body, m.imagePrompts) }
-      : null,
   };
 }
 
@@ -180,11 +172,6 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   .doc-sub code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px}
   .doc-sub .bad{color:var(--warn);font-weight:700}
 
-  .hint{background:#F3EADC;border-left:3px solid var(--pen);padding:12px 15px;font-size:13px;
-        line-height:1.75;border-radius:0 5px 5px 0;margin:0 0 20px}
-  .hint code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--bg);
-             border:1px solid var(--line);border-radius:4px;padding:1px 5px}
-
   .thumbrow{display:flex;gap:16px;align-items:flex-start;margin-bottom:18px;flex-wrap:wrap}
   .thumbrow img{width:184px;height:184px;object-fit:cover;border-radius:8px;flex:0 0 auto;
                 border:1px solid var(--line);background:var(--card)}
@@ -220,6 +207,10 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   figure.cut{margin:1.15em 0}  /* 위아래 한 줄씩 - 규칙 4 */
   figure.cut img{width:100%;height:auto;display:block;border-radius:8px;background:var(--card)}
   figure.cut figcaption{font-size:12.5px;color:#6B6259;margin-top:8px;line-height:1.6}
+  figure.cut figcaption .cap{margin-right:8px}
+  figure.cut figcaption .cap.editing{outline:2px dashed var(--pen);outline-offset:3px;border-radius:4px;
+                                     padding:1px 3px;background:#fff;color:var(--fg)}
+  figure.cut figcaption .cap-edit{vertical-align:baseline}
   .cutlab{display:inline-block;font-size:11px;font-weight:700;color:var(--muted);
           border:1px solid var(--line);border-radius:4px;padding:1px 7px;margin-right:8px;
           font-family:ui-monospace,Menlo,monospace}
@@ -269,8 +260,8 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
   </div>
   <div class="backdrop" id="backdrop"></div>
   <aside id="sidebar">
-    <h1>우아아빠 · Blogspot</h1>
-    <p class="meta">본문 복사 → Blogger 붙여넣기<br>생성 ${escapeHtml(generated)} (KST)</p>
+    <h1>왜지금 NAVER &amp; Blogger</h1>
+    <p class="meta">원고 확인 → 텔레그램 버튼으로 발행<br>생성 ${escapeHtml(generated)} (KST)</p>
     <div id="nav"></div>
   </aside>
   <main id="main"><div class="wrap" id="wrap"><div class="placeholder">${pageTopics.length === 0 ? "아직 준비된 원고가 없습니다." : "왼쪽에서 원고를 선택하세요."}</div></div></main>
@@ -610,32 +601,10 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
     }
 
     /**
-     * 네이버 배리에이션을 복사용 평문으로. collectPlainText를 재사용하지 **않는** 이유: 그쪽은
-     * 화면의 편집 가능한 요소(findEditable)를 우선 읽는데, 화면에 그려진 건 Blogspot 본문이라
-     * 네이버 본문을 복사해도 Blogspot 텍스트가 나온다(2026-09-18 작성 중 발견).
-     * 여기서는 DOM을 보지 않고 블록 데이터만 쓴다.
-     */
-    function naverPlainText(naver) {
-      var parts = [naver.title], n = 0;
-      naver.blocks.forEach(function (block) {
-        if (block.type === "image") { n += 1; parts.push("[[이미지 " + n + "]]"); return; }
-        if (block.type === "heading") {
-          var head = (block.heading || "").trim();
-          var body = (block.body || "").trim();
-          parts.push(body ? head + "\\n" + body : head);
-          return;
-        }
-        var text = (block.content || "").trim();
-        if (text) parts.push(text);
-      });
-      if (naver.tags && naver.tags.length > 0) parts.push("", hashtagLine(naver.tags));
-      return parts.join("\\n\\n");
-    }
-
-    /**
-     * 판정자가 열어 본 후보(2026-10-02 사용자 요청). 접어 두고, 펼치면 썸네일과 번호가 나온다.
-     * 이미지 수정에서 "N번 후보M"으로 고르면 그 주소를 그대로 쓴다. 외부 주소를 그대로 띄우므로
-     * 핫링크를 막는 사이트는 안 보일 수 있다 - 그때를 위해 출처 링크를 함께 둔다.
+     * 판정자가 열어 본 후보(2026-10-02 사용자 요청). 썸네일과 번호가 나온다. 접지 않고 **항상 펼쳐
+     * 둔다**(2026-10-03 사용자 결정 - 매번 펼치는 클릭이 번거롭다). 이미지 수정에서 "N번 후보M"으로
+     * 고르면 그 주소를 그대로 쓴다. 외부 주소를 그대로 띄우므로 핫링크를 막는 사이트는 안 보일 수
+     * 있다 - 그때를 위해 출처 링크를 함께 둔다.
      */
     function candidatesHtml(topic, n) {
       var list = (topic.imageCandidates || {})[String(n)] || [];
@@ -648,26 +617,44 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
           + '<div class="candlab">후보 ' + c.number + (c.picked ? ' ✅ 채택' : '') + (size ? ' · ' + esc(size) : '')
           + ' · <a href="' + esc(c.sourcePage) + '" target="_blank" rel="noopener noreferrer">출처</a></div></div>';
       }).join("");
-      return '<details class="cands"><summary>후보 ' + list.length + '장 보기 — 바꾸려면 이미지 수정에서 <code>'
+      return '<details class="cands" open><summary>후보 ' + list.length + '장 — 바꾸려면 이미지 수정에서 <code>'
         + n + '번 후보N</code></summary><div class="candgrid">' + items + '</div></details>';
     }
 
+    /** 캡션 수정의 localStorage 키(자리 번호별). 본문 수정(블록 인덱스 키)과 같은 객체에 산다. */
+    function captionKey(n) { return "cap:" + n; }
+
+    /**
+     * 그 자리의 캡션. 이 브라우저에서 고친 값이 있으면 그것, 아니면 **수집된 이미지의 것**(2026-09-24.
+     * 검증자가 실제 사진을 보고 다시 쓴 값이라 마커 원문보다 정확하다). 마커 원문은 획득 방식 꼬리
+     * (" — 웹 검색")까지 붙어 있어 검토할 때 헷갈린다 - 수집 전이거나 캡션이 없으면 그 꼬리만 떼어 쓴다.
+     */
+    function captionFor(topic, n, block, edits) {
+      if (edits && edits[captionKey(n)] != null) return edits[captionKey(n)];
+      var shots = imagesFor(topic, n);
+      return (shots[0] && shots[0].description)
+        || String(block.description || "").replace(/\s*—\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\s*$/, "")
+        || "캡션 없음";
+    }
+
+    /** 캡션 줄 - 번호 라벨 + 캡션 + 자리별 수정 버튼(2026-10-03 사용자 요청). */
+    function figcaptionHtml(n, caption) {
+      return '<figcaption>' + '<span class="cutlab">' + n + '</span>'
+        + '<span class="cap" data-cap="' + n + '">' + esc(caption) + '</span>'
+        + '<button type="button" class="mini cap-edit" data-cap="' + n + '">수정</button></figcaption>';
+    }
+
     /** 이미지 한 장(또는 A/B 두 장)을 figure로. url이 없으면 사유와 프롬프트를 대신 보여준다. */
-    function figureHtml(topic, n, block) {
-      var html = figureCore(topic, n, block);
+    function figureHtml(topic, n, block, edits) {
+      var html = figureCore(topic, n, block, edits);
       var at = html.lastIndexOf("</figure>");
       return at < 0 ? html : html.slice(0, at) + candidatesHtml(topic, n) + html.slice(at);
     }
 
-    function figureCore(topic, n, block) {
+    function figureCore(topic, n, block, edits) {
       var shots = imagesFor(topic, n);
-      var lab = '<span class="cutlab">' + n + '</span>';
-      // 캡션은 **수집된 이미지의 것**을 먼저 쓴다(2026-09-24). 검증자가 실제 사진을 보고 다시 쓴
-      // 값이라 마커 원문보다 정확하다. 마커 원문은 획득 방식 꼬리(" — 웹 검색")까지 붙어 있어
-      // 검토할 때 헷갈린다. 수집 전이거나 캡션이 없으면 마커 원문에서 그 꼬리만 떼어 쓴다.
-      var caption = (shots[0] && shots[0].description)
-        || String(block.description || "").replace(/\s*—\s*(웹 검색|AI 생성|표 생성|페이지 캡처)\s*$/, "")
-        || "캡션 없음";
+      var caption = captionFor(topic, n, block, edits);
+      var figcaption = figcaptionHtml(n, caption);
 
       if (shots.length === 0) {
         var why = notesFor(topic, n);
@@ -675,14 +662,13 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
           ? '<div class="missing">비어 있는 이유 — ' + esc(why.join(" / ")) + '</div>'
           : '<div class="missing">이미지 미생성 — 아래 프롬프트로 직접 만들어 이 자리에 넣으세요.</div>';
         if (block.prompt) body += '<div class="prompt-inline">' + esc(block.prompt) + '</div>';
-        return '<figure class="cut">' + body + '<figcaption>' + lab + esc(caption) + '</figcaption></figure>';
+        return '<figure class="cut">' + body + figcaption + '</figure>';
       }
 
       var usable = shots.filter(function (s) { return s.url; });
       if (usable.length === 0) {
         var why = shots[0].error ? esc(shots[0].error) : "생성 실패";
-        return '<figure class="cut"><div class="missing">이미지 생성 실패 — ' + why + '</div>'
-          + '<figcaption>' + lab + esc(caption) + '</figcaption></figure>';
+        return '<figure class="cut"><div class="missing">이미지 생성 실패 — ' + why + '</div>' + figcaption + '</figure>';
       }
 
       var inner;
@@ -695,7 +681,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
             + '<img src="' + esc(s.url) + '" alt="' + esc(caption) + '" loading="lazy"></div>';
         }).join("") + '</div>';
       }
-      return '<figure class="cut">' + inner + '<figcaption>' + lab + esc(caption) + '</figcaption></figure>';
+      return '<figure class="cut">' + inner + figcaption + '</figure>';
     }
 
     function render(jobId) {
@@ -727,57 +713,9 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         + esc(topic.title || topic.keyword) + '</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
 
-      // 2026-09-16부터 승인 시 Blogspot 초안이 자동 저장된다(제목·본문·이미지·라벨·댓글 설정까지).
-      // 그래서 안내는 "전부 복사해 붙여넣기"가 아니라 "초안에서 무엇을 더 채워야 하는가"여야 한다.
-      // 퍼머링크와 검색 설명은 Blogger API로 설정할 수 없고(2026-09-16 실측), 웹 검색 마커 자리의
-      // 이미지도 사람이 넣어야 해서 - 그 셋만 모아 아래 "발행 전 채울 것"에 띄운다.
-      var todo = [];
-      if (topic.slug) {
-        todo.push({ label: "퍼머링크", value: topic.slug, where: "글 설정 → 퍼머링크 → 맞춤 퍼머링크" });
-      }
-      if (topic.searchDescription) {
-        todo.push({ label: "검색 설명", value: topic.searchDescription, where: "글 설정 → 검색 설명" });
-      }
-      // 본문에 실제로 박히지 못한 이미지 자리(확정 1장이 아닌 곳) - 발행 코드와 같은 기준이다.
-      var unfilled = [];
-      blocks.forEach(function (block, i) {
-        var n = i + 1;
-        if (imagesFor(topic, n).filter(function (s) { return s.url; }).length !== 1) {
-          unfilled.push({ n: n, description: block.description, prompt: block.prompt });
-        }
-      });
-
-      h += '<div class="hint"><b>초안이 Blogspot에 자동 저장됩니다</b>'
-         + ' — 제목 · 본문 · 이미지 · 라벨 · 댓글 비허용까지 들어갑니다.'
-         + ' 아래 항목만 Blogger 편집 화면에서 직접 채운 뒤 발행하세요.</div>';
-
-      if (todo.length > 0 || unfilled.length > 0) {
-        h += '<h2 class="sec">✍️ 발행 전 채울 것 ' + (todo.length + unfilled.length) + '건</h2>';
-        h += '<div class="meta-grid">';
-        todo.forEach(function (item) {
-          h += '<div class="k">' + esc(item.label) + '</div>';
-          h += '<div class="v">' + esc(item.value)
-             + '<br><span style="color:#8A7F72;font-size:12px">' + esc(item.where) + '</span></div>';
-          h += '<button class="mini" data-copy="' + esc(item.value) + '">복사</button>';
-        });
-        unfilled.forEach(function (item) {
-          var why = notesFor(topic, item.n);
-          h += '<div class="k">이미지 ' + item.n + '</div>';
-          h += '<div class="v">' + esc(item.description)
-             + '<br><span style="color:#8A7F72;font-size:12px">'
-             + (item.prompt ? '검색어: ' + esc(item.prompt) : '검색어 미상 - 본문 마커 참고')
-             + '</span>'
-             + (why.length > 0 ? '<br><span style="color:var(--warn);font-size:12px">' + esc(why.join(" / ")) + '</span>' : '')
-             + '</div>';
-          h += item.prompt
-            ? '<button class="mini" data-copy="' + esc(item.prompt) + '">검색어</button>'
-            : '<span></span>';
-        });
-        h += '</div>';
-      } else {
-        h += '<div class="hint">✅ 추가로 채울 항목이 없습니다 — 초안을 확인하고 바로 발행하면 됩니다.</div>';
-      }
-
+      // 초안 자동 저장 안내와 "채울 항목" 표는 2026-10-03에 뺐다(사용자 요청). 이 주석은 페이지에 실리므로 옛 문구를 그대로 적지 않는다.
+      // 초안 저장은 2026-09-19부터 하지 않고 발행은 텔레그램 버튼이라 안내가 옛 흐름이었다. 빈 자리의
+      // 사유·검색어는 본문의 그 자리(figureCore)에 이미 뜬다. 퍼머링크·검색 설명은 아래 메타 표에 있다.
       var hero = heroImage(topic);
       if (hero) {
         h += '<div class="thumbrow">';
@@ -797,18 +735,14 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 
       h += '<div class="toolbar">';
       h += '<button class="btn primary" id="c-body">📋 본문 복사 (서식 유지)</button>';
-      // 2026-09-18: "본문 평문 복사"를 네이버용으로 바꿨다(사용자 요청). 평문 복사는 Blogspot
-      // 초안이 자동 저장되면서 쓸 일이 없어졌고, 네이버는 그 자리에 붙여넣을 판이 따로 필요하다.
-      if (topic.naver) {
-        h += '<button class="btn" id="c-naver">📗 네이버용 원고 복사</button>';
-      } else {
-        // 왜 없는지 알려준다 - 버튼이 그냥 사라지면 고장인지 미생성인지 구분이 안 된다.
-        h += '<span class="doc-sub" style="align-self:center">네이버 배리에이션 없음</span>';
-      }
+      // 네이버 복사 버튼과 배리에이션 없음 문구는 2026-10-03에 뺐다 - 배리에이션
+      // 단계가 09-30에 폐지돼 새 원고는 전부 "없음"으로만 떴다. 네이버 발행은 텔레그램 버튼이 한다.
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
       if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
-      if (edits) h += '<button class="btn" id="revert">↩️ 원본으로</button><span class="edited-badge">이 브라우저에서 수정됨</span>';
+      // 수정은 localStorage에만 남는다 - 발행 버튼은 DB 원고를 읽으므로 반영되지 않는다. 그 사실을 숨기면
+      // 뷰어에서 고치고 발행 버튼을 눌렀는데 옛 글이 올라가는 사고가 난다.
+      if (edits) h += '<button class="btn" id="revert">↩️ 원본으로</button><span class="edited-badge">이 브라우저에서 수정됨 · 복사에만 반영(발행 버튼 미반영)</span>';
       h += '</div>';
 
       if (blocks.length > 0) {
@@ -817,9 +751,11 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
           var n = i + 1;
           var shots = imagesFor(topic, n);
           var file = shots.length > 0 ? shots[0].fileName : "";
-          h += '<tr><th>이미지 ' + n + '</th><td>' + esc(block.description || "—")
+          // 본문 그림 아래 캡션과 같은 값(수정본 포함)을 보여준다 - 표와 그림이 다르면 어느 쪽이 맞는지 헷갈린다.
+          var caption = captionFor(topic, n, block, edits);
+          h += '<tr><th>이미지 ' + n + '</th><td>' + esc(caption)
              + (file ? '<br><span style="color:var(--muted);font-size:12px">' + esc(file) + '</span>' : "")
-             + '</td><td class="copycol"><button class="mini" data-copy="' + esc(block.description) + '">복사</button></td></tr>';
+             + '</td><td class="copycol"><button class="mini" data-copy="' + esc(caption) + '">복사</button></td></tr>';
         });
         h += '</tbody></table>';
       }
@@ -829,7 +765,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       topic.blocks.forEach(function (block, i) {
         if (block.type === "image") {
           n += 1;
-          h += figureHtml(topic, n, block);
+          h += figureHtml(topic, n, block, edits);
         } else if (block.type === "heading") {
           var headText = edits && edits[i + ":h"] != null ? edits[i + ":h"] : block.heading;
           h += '<p class="h editable" data-block-index="' + i + '" data-field="h">' + esc(headText) + '</p>';
@@ -874,14 +810,29 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
       document.getElementById("c-body").addEventListener("click", function () {
         copyRich(collectRichHtml(topic), collectPlainText(topic));
       });
-      var naverBtn = document.getElementById("c-naver");
-      if (naverBtn) {
-        naverBtn.addEventListener("click", function () {
-          // 제목·태그가 Blogspot과 다르므로 제목까지 함께 복사한다. 이미지 자리는 [[이미지 N]]으로
-          // 남고 번호가 Blogspot과 같아, 아래 캡션 표를 그대로 보고 이미지를 채우면 된다.
-          copyText(naverPlainText(topic.naver));
+
+      // 캡션 자리별 수정(2026-10-03). 누르면 그 캡션만 편집 상태가 되고, 다시 누르면 저장한다.
+      // 본문 수정(edit-toggle)과 같은 localStorage 객체에 cap:N 키로 산다 - 한쪽을 저장할 때
+      // 다른 쪽을 지우지 않도록 둘 다 기존 값에 합쳐 쓴다.
+      wrap.querySelectorAll(".cap-edit").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var n = btn.getAttribute("data-cap");
+          var span = wrap.querySelector('.cap[data-cap="' + n + '"]');
+          if (!span) return;
+          if (span.getAttribute("contenteditable") !== "true") {
+            span.setAttribute("contenteditable", "true");
+            span.classList.add("editing");
+            span.focus();
+            btn.textContent = "저장";
+            return;
+          }
+          var merged = loadEdits(topic.jobId) || {};
+          merged[captionKey(n)] = span.innerText.trim();
+          saveEdits(topic.jobId, merged);
+          render(topic.jobId);
         });
-      }
+      });
+
       var promptBtn = document.getElementById("c-prompt");
       if (promptBtn) promptBtn.addEventListener("click", function () { copyText(promptPack(topic)); });
 
@@ -897,7 +848,8 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
         document.querySelectorAll(".editable").forEach(function (el) {
           el.setAttribute("contenteditable", editing ? "true" : "false");
         });
-        if (!editing) { saveEdits(topic.jobId, currentTexts()); render(topic.jobId); }
+        // 캡션 수정(cap:N)을 지우지 않도록 기존 값 위에 본문 텍스트를 덮어쓴다.
+        if (!editing) { saveEdits(topic.jobId, Object.assign({}, loadEdits(topic.jobId) || {}, currentTexts())); render(topic.jobId); }
       });
 
       var revertBtn = document.getElementById("revert");
