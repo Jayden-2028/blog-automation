@@ -1174,7 +1174,13 @@ export class TelegramBot {
     await this.mergeJobMetadata(job.id, { imageEditRequestMessageId: null });
 
     const images = readJobManuscriptImages(job);
-    const requests = parseImageEditReply(text, Math.max(images.length, 1));
+    // 자리 번호 상한은 **원고의 이미지 자리 수**다(2026-10-03 실측 사고). 전에는 채워진 이미지 수를
+    // 썼는데, 대구 북구 원고는 6자리 중 3자리만 차 있어 상한이 3이 됐고 "5번 AI로 생성하세요"가
+    // 조용히 버려졌다 - 빈 자리야말로 고치고 싶은 자리인데 그걸 못 고르게 막은 셈이다.
+    // 원고를 못 읽으면 넉넉히 20으로 둔다(자리 번호가 아닌 숫자는 파서가 이미 거른다).
+    const markerCount = await this.countJobImageMarkers(job.id).catch(() => 0);
+    const maxIndex = markerCount > 0 ? Math.max(markerCount, ...images.map((image) => image.index)) : 20;
+    const requests = parseImageEditReply(text, maxIndex);
     const applied = applyImageEditRequest(
       images,
       requests,
@@ -1252,6 +1258,13 @@ export class TelegramBot {
     };
   }
 
+
+  /** 원고 본문의 이미지 자리 수. 이미지 수정 답장의 자리 번호 상한으로 쓴다. */
+  private async countJobImageMarkers(jobId: string): Promise<number> {
+    const articles = await this.loadArticlesByJobId(jobId);
+    const target = [...articles].reverse().find((article) => article.platform != null) ?? articles[articles.length - 1];
+    return (target?.content?.match(/\[IMAGE:/g) ?? []).length;
+  }
 
   /**
    * 사용자가 지시한 획득 방식을 본문 마커에 반영한다. 배리에이션 article을 직접 고친다 -

@@ -626,6 +626,61 @@ async function main(): Promise<void> {
     console.log("✅ 기획 인포그래픽 → 생성, 기획 밖 자리 → 마커대로 수집");
   }
 
+  // 사용자가 이미지 수정에서 AI 생성을 지시한 자리는 **만든다**(2026-10-03 대구 북구 실측).
+  // 다른 자리가 이미 차 있어도, 기획이 그 자리를 "비운다"·"웹 검색"으로 정해 두었어도 사용자 지시가 이긴다.
+  // 그리고 그 자리는 웹 수집에 다시 태우지 않는다(만든 그림이 덮인다).
+  {
+    const body = [
+      "첫 문단.", "[IMAGE: 자리 1 — 웹 검색]\n[IMAGE PROMPT: 검색어 1]",
+      "주민들이 구청을 찾아가 항의했다.", "[IMAGE: 구청 민원실 항의 — AI 생성]\n[IMAGE PROMPT: 구청 민원실 주민 항의]",
+      "업혀 이동했다.", "[IMAGE: 업혀 가는 장면 — 웹 검색]\n[IMAGE PROMPT: 사건반장 업혀]",
+    ].join("\n\n");
+    const genCalls: { fallbackSlots?: { index: number; acquisition?: string }[] }[] = [];
+    let fallbackInput: { unfilled: { index: number; userRequested?: boolean }[] } | null = null;
+    let collectInput: Record<string, unknown> | null = null;
+    const merged: Record<string, unknown>[] = [];
+    await prepareManuscript(
+      job("a", "incident", {
+        images: [{ index: 1, description: "현장", prompt: null, url: "https://s/1.jpg", provider: "web", fileName: "1.jpg", sourcePage: "https://x" }],
+        imageRequirements: { "2": "주민 항의 장면 AI로 생성하세요", "3": "업혀가는 공무원 AI로 생성하세요" },
+        imagePlanReadyAt: "2026-10-03T00:00:00Z",
+        imagePlan: {
+          summary: "s", protagonist: "p",
+          slots: [
+            { index: 2, subject: "항의", queries: [], acquisition: "search", changed: true, reason: "비운다", caution: "" },
+            { index: 3, subject: "업혀 가는 장면", queries: ["사건반장 업혀"], acquisition: "search", changed: true, reason: "", caution: "" },
+          ],
+        },
+      }),
+      {
+        loadArticles: async () => [baseArticle(body)],
+        writeManuscriptFile: async () => {},
+        mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
+        loadPublishedPosts: false,
+        capturePages: false,
+        planSlots: false,
+        buildFallbackPrompts: async (input) => {
+          fallbackInput = input as never;
+          return { slots: input.unfilled.map((u) => ({ index: u.index, description: u.description, prompt: "photorealistic photograph in Korea, no text, 16:9" })), failures: [] };
+        },
+        generateImages: async (_input, options) => {
+          genCalls.push(options ?? {});
+          const slots = options?.fallbackSlots ?? [];
+          return { images: slots.map((s) => ({ index: s.index, description: "AI", prompt: "p", url: `https://s/ai-${s.index}.png`, provider: "openai", fileName: "x.png" })) as never, failures: [] };
+        },
+        collectWebImages: async (input) => { collectInput = input as never; return { images: [], failures: [], unfilled: [] }; },
+      }
+    );
+    const fb = fallbackInput as { unfilled: { index: number; userRequested?: boolean }[] } | null;
+    assert(fb && fb.unfilled.map((u) => u.index).join(",") === "2,3", `지시한 두 자리 모두 AI 프롬프트로 (${JSON.stringify(fb?.unfilled)})`);
+    assert(fb!.unfilled.every((u) => u.userRequested), "사용자 지시임을 표시해야 한다(결정론적 SKIP 우회)");
+    const userGen = genCalls.find((c) => c.fallbackSlots?.some((s) => s.index === 2));
+    assert(userGen && userGen.fallbackSlots!.every((s) => s.acquisition === "ai"), "생성까지 가야 한다");
+    const filled = (collectInput as never as { filledIndexes: number[] }).filledIndexes;
+    assert(filled.includes(2) && filled.includes(3), `AI로 정한 자리는 웹 수집에서 뺀다 (${JSON.stringify(filled)})`);
+    console.log("✅ 사용자 AI 지시 - 다른 자리가 차 있어도·기획이 비우라 해도 생성, 웹 수집에서 제외");
+  }
+
   // 기획을 끄면 예전 경로 그대로다. 운영 영향 없이 병합하려면 이게 보장돼야 한다.
   {
     const body = "도입입니다.\n\n[IMAGE: 사진 — 웹 검색]\n[IMAGE PROMPT: 집필자 검색어]";

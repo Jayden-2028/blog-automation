@@ -33,6 +33,8 @@ import { readImageDirectUrls, readImageRequirements } from "../images/applyImage
 import { buildFallbackImagePrompts } from "../images/buildFallbackImagePrompts.js";
 import type { FallbackImagePrompt } from "../images/buildFallbackImagePrompts.js";
 import type { UnfilledSlot } from "../images/collectWebImages.js";
+import { buildWebImageSlots } from "../images/collectWebImages.js";
+import { inferAcquisition } from "../images/imageEditRequest.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
@@ -453,6 +455,52 @@ export async function prepareManuscript(
     await mergeJobMetadata(job.id, { planImagesGeneratedAt: now().toISOString(), images });
   }
 
+  // 사용자가 이미지 수정에서 **AI 생성을 직접 지시한** 자리(2026-10-03). 기획·마커·실물 판정보다
+  // 우선한다 - 사람이 결과를 보고 정한 것이다.
+  //
+  // 실측(대구 북구 수해, 3번): "주민 항의 장면 AI로 생성하세요"를 두 번 보냈는데 두 번 다 아무것도
+  // 안 만들어졌다. 세 군데서 막혔다 - ① 첫 생성 단계는 "이미지가 하나도 없을 때"만 돌아 이미 다른 자리가
+  // 찬 원고에서는 안 돈다 ② 기획이 그 자리를 "비운다"로 정해 두어 어느 경로에도 안 실렸다
+  // ③ AI 대체 단계의 결정론적 방어선이 "키워드의 실존 대상을 지목한다"며 건너뛰었다.
+  const userRequirements = readImageRequirements(job.metadata as Record<string, unknown> | null);
+  const userAiRequested = Object.entries(userRequirements)
+    .filter(([, requirement]) => inferAcquisition(requirement) === "ai")
+    .map(([key]) => Number(key))
+    .filter((index) => Number.isInteger(index));
+  const userAiIndexes = userAiRequested.filter((index) => !images.some((i) => i.index === index && i.url));
+  if (generateImages && buildFallbacks && userAiIndexes.length > 0) {
+    // 문단 맥락은 웹 수집과 같은 함수로 뽑는다(획득 방식과 무관하게 alsoInclude로 꺼낸다).
+    const wanted = new Set(userAiIndexes);
+    const unfilledByUser: UnfilledSlot[] = buildWebImageSlots(content, slotPrompts, wanted, new Set())
+      .filter((slot) => wanted.has(slot.index))
+      .map((slot) => ({
+        index: slot.index,
+        description: userRequirements[String(slot.index)],
+        context: slot.context,
+        suggestion: `사용자 지시: ${userRequirements[String(slot.index)]}`,
+        userRequested: true,
+      }));
+    const prompts = await buildFallbacks({ keyword: job.keyword, unfilled: unfilledByUser });
+    imageFailures.push(...prompts.failures);
+    if (prompts.slots.length > 0) {
+      const made = await generateImages(
+        { jobId: job.id, keyword: job.keyword, date, body: content, imagePrompts: slotPrompts },
+        { onlyIndexes: [], fallbackSlots: prompts.slots.map((slot) => ({ ...slot, acquisition: "ai" as const })) }
+      );
+      imageFailures.push(...made.failures);
+      const usable = made.images.filter((i) => i.url);
+      if (usable.length > 0) {
+        images = [...images.filter((e) => !usable.some((n) => n.index === e.index)), ...usable].sort(
+          (a, b) => a.index - b.index
+        );
+        await mergeJobMetadata(job.id, { images });
+      }
+    }
+  }
+  // 사용자가 AI로 정한 자리는 웹 검색·캡처에 다시 태우지 않는다 - 만든 그림을 검색 결과가 덮어쓴다.
+  // **이미 만든 자리도** 포함한다. AI 이미지는 sourcePage가 없어 웹 수집이 "빈 자리"로 보기 때문이다.
+  const userAiSet = new Set(userAiRequested);
+
   // `페이지 캡처` 자리(2026-09-18). 리서처가 열어본 URL을 그대로 연다 - 웹 검색으로는 못 찾고
   // AI로도 못 만드는데 주소만 알면 되는 자리다(스타벅스 프로모션 페이지, OTT 시청 화면 등).
   // 표 렌더와 웹 수집 **사이**에 둔다: 표보다 구체적이고, 웹 검색보다 확실하다.
@@ -461,7 +509,7 @@ export async function prepareManuscript(
       jobId: job.id,
       body: content,
       imagePrompts: slotPrompts,
-      filledIndexes: images.filter((i) => i.url).map((i) => i.index),
+      filledIndexes: [...images.filter((i) => i.url).map((i) => i.index), ...userAiSet],
       planUrls: planCaptureUrls,
     });
     imageFailures.push(...outcome.failures);
@@ -498,7 +546,10 @@ export async function prepareManuscript(
       ),
       body: content,
       imagePrompts: slotPrompts,
-      filledIndexes: images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
+      filledIndexes: [
+        ...images.filter((i) => i.url && i.sourcePage).map((i) => i.index),
+        ...userAiSet,
+      ],
       // "🖼 이미지 수정"에서 사람이 적어 보낸 자리별 요구(2026-09-22). 없으면 빈 객체다.
       requirements: readImageRequirements(job.metadata as Record<string, unknown> | null),
       // 사용자가 주소를 찍어준 자리는 검색하지 않고 그대로 쓴다(2026-09-22).

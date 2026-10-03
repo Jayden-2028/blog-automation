@@ -138,9 +138,20 @@ export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): 
     "## 자리",
   ];
 
+  if (unfilled.some((slot) => slot.userRequested)) {
+    lines.push(
+      "",
+      "## ⚠️ 사용자가 AI 생성을 직접 지시한 자리",
+      "아래에 **[사용자 지시]**가 붙은 자리는 사용자가 \"AI로 만들어라\"라고 직접 정했다. **SKIP하지 않는다.**",
+      "대신 위 규칙대로 **누구인지 특정되지 않는 일반화된 장면**으로 그린다 - 실존 인물의 얼굴·이름·",
+      "소속 로고를 그리지 않는다. 예: '업혀 가는 구청 직원' → 수해 복구 현장에서 작업복 차림의 남성이",
+      "다른 사람 등에 업혀 진흙길을 지나는 장면(얼굴은 뒷모습·원경)."
+    );
+  }
+
   for (const slot of unfilled) {
     lines.push("");
-    lines.push(`### 자리 ${slot.index}`);
+    lines.push(`### 자리 ${slot.index}${slot.userRequested ? " [사용자 지시]" : ""}`);
     lines.push(`- 원래 필요했던 이미지: ${slot.description}`);
     if (slot.suggestion) lines.push(`- 수집기가 적은 실패 사유와 대안: ${slot.suggestion}`);
     lines.push("- 이 자리가 속한 문단(이 문단이 **무엇에 관한 것인지** 보여주면 된다 - 내용을 다 담을 필요는 없다):");
@@ -204,8 +215,11 @@ export async function buildFallbackImagePrompts(
 
   // 1차 방어선(결정론적, LLM에 묻지 않는다) - 키워드에 이미 등장하는 실존 인물·팀명을 지목하는
   // 자리는 그 자리에서 걸러낸다. 나머지만 LLM 판정으로 넘긴다(위 실측 사고 주석 참고).
-  const forcedSkip = input.unfilled.filter((slot) => mentionsKeywordEntity(slot.description, input.keyword));
-  const candidates = input.unfilled.filter((slot) => !mentionsKeywordEntity(slot.description, input.keyword));
+  // 사용자가 AI 생성을 직접 지시한 자리는 이 방어선을 건너뛴다(2026-10-03) - 사람이 정한 것을
+  // 코드가 뒤집으면 수정 요청이 영원히 안 먹는다(대구 북구 3·5번 실측).
+  const guarded = (slot: UnfilledSlot) => !slot.userRequested && mentionsKeywordEntity(slot.description, input.keyword);
+  const forcedSkip = input.unfilled.filter(guarded);
+  const candidates = input.unfilled.filter((slot) => !guarded(slot));
 
   const failures: string[] = forcedSkip.map(
     (slot) =>
@@ -248,7 +262,11 @@ export async function buildFallbackImagePrompts(
       continue;
     }
     // 캡션이 "포스터"인데 생성 이미지가 붙는 일이 없게, 대체 이미지임을 설명에 남긴다(뷰어 캡션에 보인다).
-    slots.push({ index: slot.index, description: `${slot.description} (웹 검색 실패 - AI 대체 장면)`, prompt: match.prompt });
+    slots.push({
+      index: slot.index,
+      description: slot.userRequested ? `${slot.description} (AI 생성 장면)` : `${slot.description} (웹 검색 실패 - AI 대체 장면)`,
+      prompt: match.prompt,
+    });
   }
 
   return { slots, failures };
