@@ -24,7 +24,7 @@
 
 **남은 것**
 - ⬜ `telegram-bot-setup-7bqiyc`에 미병합 3커밋(outageTracker 10분 미만 끊김 제외·KST 표시) - 그 세션에서 병합 판단.
-- ⬜ GitHub Actions `BLOGGER_*` 시크릿 유무(아래 2036줄 ⬜) - 여기서는 확인 불가. 없으면 🔵 버튼이 클라우드에서 실패한다.
+- ✅ GitHub Actions `BLOGGER_*` 시크릿 - 등록돼 있다(Blogspot 당일 발행 실적으로 확인. 발행은 Actions에서만 돈다).
 - 집필 클라우드 경로가 외부 저장소(`modu-ai/moai-cowork`) 플러그인을 실행 시점에 설치해 의존한다
   (`job-write.yml:72-73`). 그쪽이 바뀌면 원고 품질이 바뀐다 - CLAUDE.md에는 아직 안 적혀 있다.
 
@@ -2059,7 +2059,7 @@ quality=low: 1024x1024 196토큰 $0.0059 → 1536x864 120토큰 $0.0036 - 정사
 있었다.
 
 **남은 것**:
-- ⬜ **GitHub Actions에 `BLOGGER_*` 시크릿이 하나도 없다**(현재 secret 목록 확인). Blogger
+- ✅ (2026-10-03 해소 확인 - 🔵 버튼은 `telegram-update.yml`에서만 돌고 Blogspot에 당일 글이 올라가 있다. 시크릿은 등록돼 있다) ~~**GitHub Actions에 `BLOGGER_*` 시크릿이 하나도 없다**(현재 secret 목록 확인)~~. Blogger
   자격증명은 로컬 `.env`에만 있어서, 자동 발행을 켜려면 클라우드에도 등록해야 한다
   (`BLOGGER_CLIENT_ID`/`CLIENT_SECRET`/`REFRESH_TOKEN`/`BLOG_ID`).
 - ⬜ 현재 "왜지금" 게시글의 og:image가 640x360으로 나간다(디스커버 최소 1200 미달) - 소스
