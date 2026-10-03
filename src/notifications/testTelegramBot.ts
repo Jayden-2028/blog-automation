@@ -1380,7 +1380,27 @@ main().catch((error) => {
       assert(state.patches.length === 0 && state.prepared === 0, "무관한 답장으로 재수집을 걸면 안 된다");
     }
 
-    console.log("✅ 이미지 수정 - 자리 목록 / 지정 자리만 비움 / 재수집 트리거 / 남의 답장 무시");
+    // 빈 자리 번호도 받아야 한다(2026-10-03 실측 사고). 6자리 중 3자리만 찬 원고에서 "5번"이
+    // 자리 번호 상한(채워진 이미지 수 = 3)에 걸려 조용히 버려졌다.
+    {
+      const body = Array.from({ length: 6 }, (_, i) => `문단 ${i + 1}.\n\n[IMAGE: 자리 ${i + 1} — 웹 검색]\n[IMAGE PROMPT: 검색어 ${i + 1}]`).join("\n\n");
+      const { bot, state } = makeBotFor({
+        loadArticlesByJobId: async () => [{ id: "art-1", platform: null, content: body }],
+        updateArticleContent: async () => {},
+      });
+      const out = await bot.handleImageEditReply({
+        chat: { id: Number(CHAT_ID) },
+        message_id: 62,
+        reply_to_message: { message_id: 55 },
+        text: "3번 AI생성해주세요.\n5번 AI생성해주세요",
+      } as never);
+      assert(out.outcome.status === "accepted", "처리돼야 한다");
+      const patch = state.patches.find((p) => "imageRequirements" in p) as { imageRequirements: Record<string, string> } | undefined;
+      assert(patch?.imageRequirements?.["3"] && patch.imageRequirements["5"], `3번과 5번 둘 다 받아야 한다 (${JSON.stringify(patch?.imageRequirements)})`);
+      assert(out.message.includes("5번"), "되읽기에 5번이 있어야 한다");
+    }
+
+    console.log("✅ 이미지 수정 - 자리 목록 / 지정 자리만 비움 / 재수집 트리거 / 남의 답장 무시 / 빈 자리 번호도 받음");
   }
   }
 }

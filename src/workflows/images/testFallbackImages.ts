@@ -219,4 +219,31 @@ const UNFILLED: UnfilledSlot[] = [
   console.log("✅ 폴백 이미지가 원래 자리 번호에 붙는다");
 }
 
+// --- 사용자가 AI 생성을 직접 지시한 자리(2026-10-03 대구 북구 실측) -------------------------------
+// 결정론적 방어선("키워드의 실존 대상을 지목하면 SKIP")이 사용자 지시를 뒤집으면 안 된다.
+{
+  let sentPrompt = "";
+  const keyword = "대구 북구 수해 복구 현장 구청 직원 업혀 이동 논란";
+  const result = await buildFallbackImagePrompts(
+    {
+      keyword,
+      unfilled: [
+        { index: 5, description: "업혀가는 공무원 AI로 생성하세요", context: "구청 직원이 업혀 이동했다.", suggestion: "", userRequested: true },
+        { index: 6, description: "대구 북구 구청 직원 업혀 이동", context: "같은 문단", suggestion: "" },
+      ],
+    },
+    {
+      generate: async (prompt) => {
+        sentPrompt = prompt;
+        return { ok: true as const, output: "INDEX: 5\nPROMPT: photorealistic photograph of a worker in Korea being carried on another man's back through a muddy flood-recovery street, seen from behind, no text, no letters, 16:9", durationMs: 0 } as never;
+      },
+    }
+  );
+  assert(result.slots.some((s) => s.index === 5), `사용자 지시 자리는 만들어야 한다 (${JSON.stringify(result)})`);
+  assert(result.slots.find((s) => s.index === 5)!.description.includes("AI 생성 장면"), "캡션 꼬리는 '웹 검색 실패'가 아니다");
+  assert(sentPrompt.includes("[사용자 지시]") && sentPrompt.includes("SKIP하지 않는다"), "LLM에도 사용자 지시임을 알린다");
+  assert(result.failures.some((f) => f.includes("[자리 6]") && f.includes("결정론적")), "지시가 없는 자리는 예전 방어선 그대로");
+  console.log("✅ 사용자 AI 지시 - 결정론적 SKIP을 건너뛰고 생성, 지시 없는 자리는 그대로 방어");
+}
+
 console.log("\n🎉 폴백 이미지 테스트 통과");
