@@ -2,6 +2,34 @@
 
 기준일: 2026-10-03 (Asia/Seoul)
 
+## 2026-10-03 세션 — 원고 뷰어 레이아웃·기능 정리 (브랜치 `claude/manuscript-viewer-layout-features-ck5i2u`)
+
+**사용자 결정으로 바꾼 것**(`renderManuscriptPage.ts`)
+- 사이드바 제목 "우아아빠 · Blogspot" → **"왜지금 NAVER & Blogger"**. 부제도 "본문 복사 → Blogger 붙여넣기"에서
+  "원고 확인 → 텔레그램 버튼으로 발행"으로(채널 둘, 발행은 버튼이라 옛 문구였다).
+- **"초안이 Blogspot에 자동 저장됩니다" 안내와 "발행 전 채울 것" 표 제거.** 초안 저장은 09-19에 폐지됐고 발행은
+  버튼이라 거짓 안내였다. 빈 자리 사유·검색어는 본문의 그 자리에 이미 뜨고, 퍼머링크·검색 설명은 메타 표에 있다.
+- **"네이버 배리에이션 없음" 문구·네이버 복사 버튼 제거.** `generateNaverVariant`는 09-30 폐지 때 지워져 새 원고는
+  전부 null이라 영원히 "없음"으로만 떴다. 페이지 JSON에도 `naver`를 싣지 않는다(manifest 타입은 그대로).
+- **캡션마다 `수정` 버튼.** 누르면 그 캡션만 편집, 다시 누르면 저장. 본문 수정과 같은 localStorage 객체에
+  `cap:N` 키로 산다(서로 지우지 않도록 합쳐 쓴다). 캡션 표·복사 버튼도 고친 값을 쓴다. `↩️ 원본으로`가 함께 지운다.
+- **후보 묶음 항상 펼침**(`<details open>`).
+- 수정됨 배지에 **"복사에만 반영(발행 버튼 미반영)"**을 명시 - 뷰어에서 고치고 발행 버튼을 누르면 옛 글이 올라간다는
+  사실을 숨기면 안 된다(아래 "뷰어 수정본으로 발행" 참고).
+
+**검증**: `test:viewer-layout`(신설 - 정적 문구 + 실제 Chromium으로 캡션 수정·저장·되돌리기·본문 수정과 공존) ·
+`test:viewer-copy` · `test:image-notes` · `tsc` · `npm run build` 통과. 브라우저 테스트는 about:blank의 localStorage가
+막혀 가짜 주소(`https://viewer.test/`)로 서빙해 연다. 데스크톱 1200px 스크린샷으로 배치 확인.
+**배포**: main 병합 시 `manuscripts-refresh.yml`이 자동으로 다시 그려 배포한다(렌더러만 바뀜, DB 무관).
+
+**뷰어 수정본으로 발행 - 가능 여부 확인(사용자 질문 3)**: 지금은 **안 된다.** 뷰어는 자격증명 없는 정적 페이지라
+수정이 localStorage에만 남고, 발행 버튼(Blogspot `publishArticleToBlogspot`, 네이버 `publishJobToNaver`)은
+`articles.content`(본문)와 `job.metadata.images[].description`(캡션)을 읽는다. **되게 만들 수는 있다** - 기존 패턴
+그대로: Pages Function(`manuscripts/functions/api/edit`, Access 게이트 상속·`Cf-Access-Authenticated-User-Email`로
+본인 확인) → `repository_dispatch` → 새 워크플로우가 Node로 `articles.content`·`job.metadata.images[].description`·
+manifest 행을 갱신하고 페이지를 다시 그린다. 필요한 것: Pages 프로젝트에 GitHub 토큰 시크릿 1개(사용자), 워크플로우
+1개, 적용 CLI 1개, 뷰어 "반영" 버튼. 미착수 - 사용자 승인 대기.
+
 ## 2026-10-03 세션(메인 윈도우) — 규격 충돌·죽은 코드·기본값 불일치 점검 후 정리
 
 **점검 결과**: 빌드 통과, 테스트 102 pass / 37 fail - fail 36건은 컨테이너에 Supabase·Playwright 자격이
