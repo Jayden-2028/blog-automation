@@ -16,6 +16,13 @@ import { dirname } from "node:path";
 /** 텔레그램이 미확인 업데이트를 보관하는 시간. 이걸 넘기면 유실을 의심해야 한다. */
 export const TELEGRAM_RETENTION_HOURS = 24;
 
+/**
+ * 이 시간보다 짧게 멈췄다 돌아온 것은 알리지 않는다(2026-10-03 사용자 요청). 와이파이가 잠깐 끊겼다
+ * 붙는 정도는 실측으로 1분 안팎인데, 그때마다 "복구됐습니다"를 보내면 정말 긴 장애(39시간)의 알림이
+ * 묻힌다. 텔레그램 보관 한도(24시간)에는 한참 못 미쳐 링크 유실 걱정도 없다.
+ */
+export const MIN_ALERT_MINUTES = 10;
+
 export type OutageState = {
   /** 처음 실패한 시각(ISO). */
   firstFailedAt: string;
@@ -74,7 +81,7 @@ export function recordFailure(path: string, reason: string, now: Date = new Date
 
 /**
  * 성공했을 때 부른다. 직전에 멈춰 있었으면 그 내역을 돌려주고 기록을 지운다.
- * 멈춘 적이 없으면 null - 알릴 것이 없다.
+ * 멈춘 적이 없거나 MIN_ALERT_MINUTES보다 짧게 멈췄으면 null - 알릴 것이 없다(기록은 지운다).
  */
 export function takeRecovery(path: string, now: Date = new Date()): OutageRecovery | null {
   const state = read(path);
@@ -86,7 +93,10 @@ export function takeRecovery(path: string, now: Date = new Date()): OutageRecove
     // 못 지워도 다음 실행에서 다시 시도한다.
   }
 
-  const hours = (now.getTime() - new Date(state.firstFailedAt).getTime()) / 3_600_000;
+  const elapsedMs = now.getTime() - new Date(state.firstFailedAt).getTime();
+  if (elapsedMs < MIN_ALERT_MINUTES * 60_000) return null;
+
+  const hours = elapsedMs / 3_600_000;
   return {
     hours: Math.round(hours * 10) / 10,
     failures: state.failures,
