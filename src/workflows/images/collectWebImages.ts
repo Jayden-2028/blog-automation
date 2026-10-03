@@ -161,6 +161,12 @@ export type UnfilledSlot = {
   context: string;
   /** 수집기가 적은 대안 제안 또는 실패 사유. 비어 있을 수 있다. */
   suggestion: string;
+  /**
+   * 사용자가 이미지 수정에서 **AI 생성을 직접 지시한** 자리(2026-10-03). 실물 판정(SKIP)을 하지 않는다 -
+   * 사람이 이미 정한 것이다. 실측(대구 북구): "3번 주민 항의 장면 AI로 생성하세요"를 두 번 보냈는데
+   * 두 번 다 아무것도 안 만들어졌다.
+   */
+  userRequested?: boolean;
 };
 
 export type CollectWebImagesResult = {
