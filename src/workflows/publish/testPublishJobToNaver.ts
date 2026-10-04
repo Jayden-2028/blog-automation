@@ -114,14 +114,15 @@ async function main(): Promise<void> {
     console.log("✅ 채널이 다르면 막지 않는다");
   }
 
-  // 3) 작성 단계 원고 그대로 올린다: 참고 자료 링크아웃만 빼고 해시태그·고지는 남긴다.
+  // 3) 작성 단계 원고 그대로 올린다: 바깥 링크(참고 자료, Blogspot 내부 링크)만 빼고 해시태그·고지는 남긴다.
+  //    내부 링크는 2026-10-04부터 준비 단계가 DB 원고에 저장한다 - 전부 Blogspot 주소라 네이버에는 싣지 않는다.
   {
     let html = "";
     let titleSeen = "";
     const out = await publishJobToNaver("job-1", {
       ...baseDeps,
       loadArticles: async () => [
-        article({ title: "최종 제목", content: "본문 문단입니다.\n\n**참고 자료**\n- [출처 하나](https://src.example.com/1)\n- [출처 둘](https://src.example.com/2)\n\n#태그1 #태그2" }),
+        article({ title: "최종 제목", content: "본문 문단입니다.\n\n**함께 보면 좋은 글**\n- [다른 글](https://whynowissue.blogspot.com/2026/09/other.html)\n\n**참고 자료**\n- [출처 하나](https://src.example.com/1)\n- [출처 둘](https://src.example.com/2)\n\n#태그1 #태그2" }),
       ],
       publish: async (input) => {
         html = input.bodyHtml;
@@ -132,8 +133,10 @@ async function main(): Promise<void> {
     assert(out.ok, `발행이 성공해야 한다 (${JSON.stringify(out)})`);
     assert(titleSeen === "최종 제목", "작성 단계 원고의 제목을 그대로 써야 한다");
     assert(!html.includes("src.example.com") && !html.includes("참고 자료"), "참고 자료 링크아웃은 네이버에 싣지 않는다");
+    assert(!html.includes("blogspot.com") && !html.includes("함께 보면 좋은 글"), "Blogspot 내부 링크는 네이버에 싣지 않는다");
+    assert(html.includes("본문 문단입니다"), "본문은 그대로");
     assert(html.includes("#태그1"), "해시태그 줄은 남겨야 한다");
-    console.log("✅ 작성 단계 원고 그대로 발행 - 참고 자료만 제외");
+    console.log("✅ 작성 단계 원고 그대로 발행 - 참고 자료·Blogspot 내부 링크 제외");
   }
 
   // 4) 이미지는 Blogspot과 같은 것(job.metadata.images)을 쓰고, 남은 마커는 지운다.

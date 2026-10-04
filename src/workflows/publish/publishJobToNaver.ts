@@ -26,6 +26,7 @@ import {
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
 import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
 import { removeReferencesBlock } from "../manuscripts/articleContentParts.js";
+import { removeRelatedPosts } from "../manuscripts/appendRelatedPosts.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
 export const NAVER_PLATFORM = "naver";
@@ -112,7 +113,12 @@ export async function publishJobToNaver(
   // 이미지는 Blogspot과 **같은 것**을 쓴다(사용자 결정). 확정된 이미지만 마커 자리에 끼워 넣고,
   // 남은 마커는 지운다 - 공개 발행이라 `[IMAGE: ... — 웹 검색]` 글자가 독자에게 보이면 안 된다.
   const confirmedImages = readJobManuscriptImages(job);
-  const bodyWithImages = substituteConfirmedImages(removeReferencesBlock(article.content ?? ""), confirmedImages);
+  // 바깥 링크는 둘 다 뺀다: `참고 자료`(2026-09-22)와 Blogspot 내부 링크 "함께 보면 좋은 글"(2026-10-04 -
+  // 준비 단계가 DB 원고에 저장하기 시작했다. 네이버에서는 바깥 링크라 같은 취지로 뺀다).
+  const bodyWithImages = substituteConfirmedImages(
+    removeRelatedPosts(removeReferencesBlock(article.content ?? "")),
+    confirmedImages
+  );
   const bodyHtml = convertArticleToNaverHtml(manuscriptBodyWithoutImages(bodyWithImages));
 
   const categoryNo = naverCategoryNo(job.category);

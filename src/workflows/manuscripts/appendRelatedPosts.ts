@@ -56,7 +56,15 @@ export function pickRelatedPosts(
   return chosen.map((entry) => ({ title: entry.post.title, url: entry.post.url }));
 }
 
-/** 이미 붙어 있는 "함께 보면 좋은 글" 블록을 통째로 들어낸다(멱등 처리용). */
+/**
+ * 이미 붙어 있는 "함께 보면 좋은 글" 블록을 통째로 들어낸다. 멱등 처리용이고, 네이버 발행에서도
+ * 쓴다(2026-10-04) - 링크가 전부 Blogspot 주소라 네이버에서는 바깥 링크이고, 같은 글의 다른 채널
+ * 사본으로 이어져 유사문서 판정 위험만 키운다. `참고 자료`를 빼는 2026-09-22 결정과 같은 취지다.
+ */
+export function removeRelatedPosts(body: string): string {
+  return stripExisting(body);
+}
+
 function stripExisting(body: string): string {
   const start = body.indexOf(RELATED_HEADING);
   if (start < 0) return body;

@@ -6,7 +6,8 @@
 //
 // 뷰어가 보는 본문(manifest body)과 발행 본문(articles.content)은 **글자 단위로 같지 않다**:
 //   - manifest에는 끝 해시태그 줄이 빠져 있다(splitTrailingHashtags - 뷰어는 tags로 따로 그린다).
-//   - manifest에는 "함께 보면 좋은 글"(내부 링크)이 끝에 붙어 있다(prepareManuscript의 withRelatedPosts).
+//   - 2026-10-04 전에 준비된 원고는 "함께 보면 좋은 글"(내부 링크)이 manifest에만 있다. 그 뒤로는 준비
+//     단계가 DB 원고에도 저장하므로 양쪽에 같이 있다(prepareManuscript의 withRelatedPosts).
 //   - `표 생성` 자리는 manifest에서만 빠졌을 수 있다(removeTableMarkers).
 // 그래서 뷰어의 블록 **번호**로 발행 본문을 고치면 엉뚱한 문단을 덮는다. 대신 그 블록의 **원문 텍스트**로
 // 발행 본문에서 같은 블록을 찾는다(같은 텍스트가 여러 번이면 몇 번째인지까지 맞춘다). 못 찾으면 그
@@ -147,7 +148,11 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
         continue;
       }
       const block = blocks[blockIndex] as Extract<ManuscriptBlock, { type: "image" }>;
-      if (normalizeEditText(currentCaption(input.images, n, block.description)) !== from) {
+      const nowCaption = normalizeEditText(currentCaption(input.images, n, block.description));
+      // 이미 그 값이면 반영된 것이다 - 페이지를 새로고침하기 전에 반영을 한 번 더 누르면 같은 수정이 다시
+      // 온다(2026-10-04 실측: 첫 실행이 반영한 캡션을 둘째 실행이 "바뀌었습니다"로 건너뛰어 헷갈렸다).
+      if (nowCaption === to) continue;
+      if (nowCaption !== from) {
         skipped.push({ key, reason: "페이지를 연 뒤 캡션이 바뀌었습니다 - 새로고침 후 다시 고치세요" });
         continue;
       }
@@ -172,6 +177,7 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     }
     const original =
       block.type === "heading" ? (field === "h" ? block.heading : field === "b" ? block.body : null) : field ? null : block.content;
+    if (original !== null && normalizeEditText(original) === to) continue; // 이미 반영됨(캡션과 같은 이유)
     if (original === null || normalizeEditText(original) !== from) {
       skipped.push({ key, reason: "페이지를 연 뒤 원고가 바뀌었습니다 - 새로고침 후 다시 고치세요" });
       continue;
@@ -208,7 +214,7 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     const articlePos = matches[occurrence];
     if (articlePos === undefined) {
       for (const key of slot.keys) {
-        skipped.push({ key, reason: "발행 원고에서 같은 문단을 찾지 못했습니다(내부 링크처럼 뷰어에만 있는 부분)" });
+        skipped.push({ key, reason: "발행 원고에서 같은 문단을 찾지 못했습니다(10월 4일 전에 준비된 원고의 내부 링크처럼 뷰어에만 있는 부분)" });
       }
       continue;
     }
