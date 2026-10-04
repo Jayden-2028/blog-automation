@@ -1,6 +1,5 @@
-# 클라우드 이전 Phase 2 - 연예·OTT 키워드 수집(블로그스팟용). social-issue-keyword.yml이 같은 날
-# 먼저 실행되어 trend_candidates를 채워둔 뒤에 실행해야 한다(entertainmentKeywordJob.ts 상단 주석
-# 참고 - 재수집 없이 candidates를 읽기만 함). KST 19:00에 Worker cron이 깨운다(2026-10-01 변경, 전에는 12:00).
+# 엔터·OTT 키워드 수집. 2026-10-05부터 social-issue와 무관하게 자체 수집한다(entertainmentKeywordJob.ts
+# 상단 주석, RESTRUCTURE-PLAN-2026-10.md §2.2). 하루 3회(KST 09/13/18시) - 회차는 round 입력으로 받는다.
 #
 # 지금은 workflow_dispatch(수동)만 - social-issue-keyword.yml과 같은 이유로 schedule은 아직 안 넣음.
 #
@@ -14,7 +13,12 @@ name: entertainment-keyword
 # 상단 메모와 같은 이유). social-issue-keyword.yml(KST 18:00)보다 1시간 뒤인 KST 19:00에 돌도록
 # Worker 쪽에 등록돼 있다 - social-issue가 채운 trend_candidates를 읽는 순서 의존이 유지된다.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      round:
+        description: "회차(morning|noon|evening). 비우면 실행 시각(KST)으로 추정"
+        required: false
+        default: ""
 
 concurrency:
   group: entertainment-keyword
@@ -55,4 +59,6 @@ jobs:
           BLOG_COMPETITION_APPLY_TO_SCORE: ${{ vars.BLOG_COMPETITION_APPLY_TO_SCORE }}
           # 주제어 기반 다양성 판정. 미설정이면 빈 문자열 -> false(preview만). 켤 때 repo variable로 true.
           DIVERSITY_TOPIC_QUERY_ENABLED: ${{ vars.DIVERSITY_TOPIC_QUERY_ENABLED }}
+          # 알림 제목·run metadata의 회차. 비어 있으면 job이 실행 시각으로 추정한다.
+          KEYWORD_ROUND: ${{ inputs.round }}
         run: npm run job:entertainment-keyword
