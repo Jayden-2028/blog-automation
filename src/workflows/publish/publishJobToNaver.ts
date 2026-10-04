@@ -15,9 +15,13 @@ import {
   createPublication,
   listPublicationsByArticleIds,
 } from "../../services/supabase/repositories/publicationRepository.js";
-import { convertArticleToNaverHtml } from "../../services/publish/convertArticleToNaverHtml.js";
+import { convertArticleToNaverPaste } from "../../services/publish/convertArticleToNaverHtml.js";
 import { NaverBlogPublisher } from "../../services/publish/NaverBlogPublisher.js";
-import type { NaverDraftSaveResult, NaverVisibility } from "../../services/publish/NaverBlogPublisher.js";
+import type {
+  NaverDraftSaveResult,
+  NaverPublishImageInput,
+  NaverVisibility,
+} from "../../services/publish/NaverBlogPublisher.js";
 import { naverCategoryNo } from "../../config/naverCategoryMapping.js";
 import {
   manuscriptBodyWithoutImages,
@@ -45,7 +49,7 @@ export type PublishJobToNaverOptions = {
   savePublication?: (input: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) => Promise<PublicationRow>;
   /** NaverBlogPublisher.publish와 같은 시그니처. 테스트에서 브라우저 대신 가짜 결과를 준다. */
   publish?: (
-    input: { title: string; bodyHtml: string },
+    input: { title: string; bodyHtml: string; images: ReadonlyArray<NaverPublishImageInput> },
     visibility: NaverVisibility,
     categoryNo: number
   ) => Promise<NaverDraftSaveResult>;
@@ -111,9 +115,13 @@ export async function publishJobToNaver(
 
   // 이미지는 Blogspot과 **같은 것**을 쓴다(사용자 결정). 확정된 이미지만 마커 자리에 끼워 넣고,
   // 남은 마커는 지운다 - 공개 발행이라 `[IMAGE: ... — 웹 검색]` 글자가 독자에게 보이면 안 된다.
+  // 2026-10-04: 이미지를 `<img src="외부URL">`로 붙여넣지 않는다. 네이버가 외부 이미지를 자기
+  // 서버로 가져가지 않아 **대표이미지가 안 잡히고** 발행본이 Supabase를 핫링크하기 때문이다
+  // (naverImageMarkers.ts 상단 설명). 본문에는 자리 표식만 넣고, 발행기가 그 자리에서 툴바로
+  // 직접 업로드한다.
   const confirmedImages = readJobManuscriptImages(job);
   const bodyWithImages = substituteConfirmedImages(removeReferencesBlock(article.content ?? ""), confirmedImages);
-  const bodyHtml = convertArticleToNaverHtml(manuscriptBodyWithoutImages(bodyWithImages));
+  const { html: bodyHtml, images } = convertArticleToNaverPaste(manuscriptBodyWithoutImages(bodyWithImages));
 
   const categoryNo = naverCategoryNo(job.category);
   const publish =
@@ -126,7 +134,7 @@ export async function publishJobToNaver(
         headless: false,
       }).publish(input, vis));
 
-  const result = await publish({ title: article.title ?? job.keyword, bodyHtml }, visibility, categoryNo);
+  const result = await publish({ title: article.title ?? job.keyword, bodyHtml, images }, visibility, categoryNo);
 
   if (!result.ok) {
     // 실패도 기록한다 - 조용히 죽는 job을 만들지 않는다.
