@@ -60,3 +60,6 @@ docs/ai-handoff/community-recon/
 _workspace/
 _e2e_check.mjs
 backups/
+
+# 개인 권한 오버라이드(커밋하지 않는다)
+.claude/settings.local.json
