@@ -94,10 +94,10 @@ export function expiryRiskWarning(item: {
 }
 
 /** 주제·시드쿼리·카테고리만 보여준다 - 원문(headline)과 항목별 배점표(scoreBreakdown)는 뺀다(2026-09-04 사용자 요청, 폰 화면에서 항목당 너무 길었다). */
-function formatItemBlock(item: NotificationKeywordItem): string {
+function formatItemBlock(item: NotificationKeywordItem, isCommunity = false): string {
   const keyword = escapeTelegramHtml(item.keyword);
 
-  const lines: string[] = [`<b>${item.rank}. ${keyword}</b>`];
+  const lines: string[] = [`<b>${item.rank}. ${isCommunity ? "📡 " : ""}${keyword}</b>`];
   if (item.seedQuery) {
     lines.push(`   seedQuery: ${escapeTelegramHtml(item.seedQuery)} · category: ${escapeTelegramHtml(item.category ?? "N/A")}`);
   }
@@ -128,6 +128,8 @@ export type NotificationMessageChunk = {
 export type FormatNotificationMessageOptions = {
   /** 헤더 첫 줄. 생략하면 "📊 오늘의 키워드 랭킹 TOP N"(오전 기본). 오후 커뮤니티 run은 별도 문구를 넘긴다. */
   headerTitle?: string;
+  /** 커뮤니티 유래 seedQuery. 일치하는 항목 제목에 📡를 붙인다. */
+  communityQueries?: readonly string[];
 };
 
 export function formatNotificationMessage(
@@ -149,8 +151,12 @@ export function formatNotificationMessage(
 
   // 항목 하나가 글자 수 제한을 넘는 일은 현실적으로 없지만(실측 200자 안팎), headline이 비정상적으로
   // 길 때 Telegram이 400을 돌려주며 그 항목만 통째로 사라지는 것을 막기 위해 잘라둔다.
+  const communityQueries = new Set((options.communityQueries ?? []).map((q) => q.trim().toLowerCase()));
+  const isCommunityItem = (item: NotificationKeywordItem): boolean =>
+    communityQueries.has(item.keyword.trim().toLowerCase()) ||
+    (item.seedQuery !== null && communityQueries.has(item.seedQuery.trim().toLowerCase()));
   const items: NotificationMessageChunk[] = payload.items.map((item) => ({
-    text: truncateForTelegram(formatItemBlock(item)),
+    text: truncateForTelegram(formatItemBlock(item, isCommunityItem(item))),
     ranks: [item.rank],
   }));
 

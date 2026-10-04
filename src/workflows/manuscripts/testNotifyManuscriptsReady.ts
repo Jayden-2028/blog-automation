@@ -95,13 +95,12 @@ main().catch((error) => {
   if (!rows[0][0].url?.includes(`#${JOB}`)) throw new Error("❌ 첫 줄은 원고 페이지 딥링크여야 한다");
 
   const actions = [...rows[1], ...rows[2]];
-  if (rows[1].length !== 2 || rows[2].length !== 2) {
-    throw new Error(`❌ 액션 버튼은 두 줄에 2개씩이어야 한다 (${JSON.stringify(rows.slice(1))})`);
+  if (rows[1].length !== 2 || rows[2].length !== 1) {
+    throw new Error(`❌ 액션 버튼은 2개 + 1개(네이버만)여야 한다 (${JSON.stringify(rows.slice(1))})`);
   }
   const expected = [
     { needle: "이미지", data: `publish:images:${JOB}` },
     { needle: "내려받기", data: `publish:export:${JOB}` },
-    { needle: "블로그", data: `publish:blogspot:${JOB}` },
     { needle: "네이버", data: `publish:naver:${JOB}` },
   ];
   expected.forEach((want, i) => {
@@ -109,10 +108,14 @@ main().catch((error) => {
     if (actions[i].callback_data !== want.data) throw new Error(`❌ ${i + 1}번 콜백이 틀렸다 (${actions[i].callback_data})`);
   });
 
+  if (actions.some((a) => a.callback_data?.startsWith("publish:blogspot:"))) {
+    throw new Error("❌ 엔터 트랙에는 블로그(Blogspot) 발행 버튼이 없어야 한다");
+  }
+
   // jobId가 UUID가 아니면 버튼만 빠지고 알림 자체는 살아야 한다(예외로 알림을 죽이지 않는다).
   const legacy = buildManuscriptReadyMessage(successResult(job("a")), "https://pages.example.dev");
   const legacyRows = legacy.replyMarkup?.inline_keyboard ?? [];
   if (legacyRows.length !== 1 || legacyRows[0].length !== 1) throw new Error("❌ UUID가 아니면 액션 버튼만 빠져야 한다");
   if (!legacy.text.includes("원고 준비 완료")) throw new Error("❌ 알림 본문은 그대로여야 한다");
-  console.log("✅ 액션 버튼 - 이미지 수정/맥으로 내려받기/블로그 발행/네이버 발행, UUID 아니면 생략");
+  console.log("✅ 액션 버튼 - 이미지 수정/맥으로 내려받기/네이버 발행(블로그 발행 없음), UUID 아니면 생략");
 }

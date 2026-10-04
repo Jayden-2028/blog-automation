@@ -17,6 +17,7 @@ function assert(condition: unknown, message: string): asserts condition {
 type Scheduled = (event: unknown, env: unknown, ctx: unknown) => Promise<void>;
 const scheduled = (worker as unknown as { scheduled: Scheduled }).scheduled;
 
+const KW = "0 0,4,9,11,12 * * *";
 const ENV = { GITHUB_OWNER: "o", GITHUB_REPO: "r", GH_DISPATCH_TOKEN: "t", TELEGRAM_WEBHOOK_SECRET: "s" };
 const realFetch = globalThis.fetch;
 const realLog = console.log;
@@ -25,15 +26,18 @@ const realError = console.error;
 /** fetch와 console을 가짜로 바꿔 한 번 실행하고, 호출 기록과 waitUntil 결과를 돌려준다. */
 async function run(
   cron: string,
-  fetchImpl: () => Promise<Response>
-): Promise<{ urls: string[]; logs: string[]; errors: string[]; outcome: "ok" | "rejected"; threw: boolean }> {
+  fetchImpl: () => Promise<Response>,
+  scheduledIso = "2026-10-05T00:00:00Z"
+): Promise<{ bodies: string[]; urls: string[]; logs: string[]; errors: string[]; outcome: "ok" | "rejected"; threw: boolean }> {
   const urls: string[] = [];
+  const bodies: string[] = [];
   const logs: string[] = [];
   const errors: string[] = [];
   const waits: Promise<unknown>[] = [];
 
-  globalThis.fetch = (async (input: unknown) => {
+  globalThis.fetch = (async (input: unknown, init?: { body?: unknown }) => {
     urls.push(String(input));
+    bodies.push(String(init?.body ?? ""));
     return fetchImpl();
   }) as typeof fetch;
   console.log = (...a: unknown[]) => void logs.push(a.join(" "));
@@ -42,7 +46,7 @@ async function run(
   let threw = false;
   try {
     await scheduled(
-      { cron, scheduledTime: Date.parse("2026-10-02T10:00:00Z") },
+      { cron, scheduledTime: Date.parse(scheduledIso) },
       ENV,
       { waitUntil: (p: Promise<unknown>) => void waits.push(p) }
     );
@@ -62,41 +66,46 @@ async function run(
   globalThis.fetch = realFetch;
   console.log = realLog;
   console.error = realError;
-  return { urls, logs, errors, outcome, threw };
+  return { bodies, urls, logs, errors, outcome, threw };
 }
 
 async function main(): Promise<void> {
   console.log("▶ Worker scheduled() 동작 검사");
 
   // 1) 정상: 깨어남이 기록되고, 올바른 워크플로우를 dispatch한다.
-  const okRun = await run("0 10 * * *", async () => new Response(null, { status: 204 }));
-  assert(okRun.logs.some((l) => l.includes("[cron] 0 10 * * *") && l.includes("entertainment-keyword.yml")),
+  const okRun = await run(KW, async () => new Response(null, { status: 204 }), "2026-10-05T00:00:00Z");
+  assert(okRun.logs.some((l) => l.includes(`[cron] ${KW}`) && l.includes("entertainment-keyword.yml")),
     "깨어남이 [cron] 한 줄로 남아야 한다(어느 cron이 어느 워크플로우로 매핑됐는지 포함)");
   assert(okRun.urls.length === 1 && okRun.urls[0].includes("/workflows/entertainment-keyword.yml/dispatches"),
-    "0 10 cron은 entertainment-keyword.yml을 dispatch해야 한다");
+    "00 UTC는 entertainment-keyword.yml을 dispatch해야 한다");
   assert(okRun.logs.some((l) => l.includes("workflow_dispatch 성공")), "성공도 한 줄 남아야 한다");
   assert(okRun.outcome === "ok" && !okRun.threw, "성공은 던지지 않아야 한다");
   console.log("  ✅ 정상: 깨어남 기록 + 올바른 워크플로우 + 성공 기록");
 
-  // 2) 새 cron 세 개가 각자 맞는 워크플로우로 간다.
-  for (const [cron, file] of [
-    ["0 9 * * *", "social-issue-keyword.yml"],
-    ["0 10 * * *", "entertainment-keyword.yml"],
-    ["0 11 * * *", "community-keyword.yml"],
+  // 2) 발화 시각(UTC hour)별로 맞는 워크플로우+회차 입력으로 간다.
+  for (const [iso, file, round] of [
+    ["2026-10-05T00:00:00Z", "entertainment-keyword.yml", "morning"],
+    ["2026-10-05T04:00:00Z", "entertainment-keyword.yml", "noon"],
+    ["2026-10-05T09:00:00Z", "entertainment-keyword.yml", "evening"],
+    ["2026-10-05T11:00:00Z", "social-issue-keyword.yml", undefined],
   ] as const) {
-    const r = await run(cron, async () => new Response(null, { status: 204 }));
-    assert(r.urls[0]?.includes(`/${file}/`), `${cron}은 ${file}로 가야 한다 (실제: ${r.urls[0]})`);
+    const r = await run(KW, async () => new Response(null, { status: 204 }), iso);
+    assert(r.urls.length === 1 && r.urls[0].includes(`/${file}/`), `${iso}은 ${file}로 가야 한다 (실제: ${r.urls.join(",")})`);
+    const body = JSON.parse(r.bodies[0]) as { ref: string; inputs?: { round?: string } };
+    assert(body.inputs?.round === round, `${iso}의 round 입력은 ${round}여야 한다 (실제: ${r.bodies[0]})`);
   }
-  console.log("  ✅ 18/19/20시 cron이 각각 사회·엔터·커뮤니티로 매핑됨");
+  const idle = await run(KW, async () => new Response(null, { status: 204 }), "2026-10-05T12:00:00Z");
+  assert(!idle.threw && idle.urls.length === 0, "12 UTC(사용설명서 미구현)는 던지지도 호출하지도 않는다");
+  console.log("  ✅ 09/13/18시=엔터 회차, 20시=사회, 21시=대기");
 
   // 3) GitHub가 거절하면(토큰 만료·권한 등) 던져서 오류로 남긴다. 전에는 조용히 끝났다.
-  const forbidden = await run("0 10 * * *", async () => new Response("Resource not accessible", { status: 403 }));
+  const forbidden = await run(KW, async () => new Response("Resource not accessible", { status: 403 }));
   assert(forbidden.outcome === "rejected", "dispatch가 403이면 던져야 한다 - 조용히 끝나면 실패 흔적이 안 남는다");
   assert(forbidden.errors.some((e) => e.includes("403")), "실패 사유(상태 코드)가 로그에 남아야 한다");
   console.log("  ✅ dispatch 거절(403) → 오류로 던짐 + 사유 기록");
 
   // 4) 네트워크 오류도 마찬가지다.
-  const down = await run("0 11 * * *", async () => {
+  const down = await run(KW, async () => {
     throw new Error("network down");
   });
   assert(down.outcome === "rejected", "네트워크 오류도 던져야 한다");

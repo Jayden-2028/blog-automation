@@ -1,6 +1,29 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-04 (Asia/Seoul)
+기준일: 2026-10-05 (Asia/Seoul)
+
+## 2026-10-05 — 개편1: 엔터 트랙 일 3회 전환 (브랜치 `feat/restructure-1-entertainment-3x`, 설계서 `RESTRUCTURE-PLAN-2026-10.md` §2)
+
+**바뀐 것**
+- **엔터 job 자체 수집**(`entertainmentKeywordJob.ts`): 구글 트렌드·다음 실시간을 직접 수집(social job 의존 제거). Creator Advisor는
+  클라우드에서 크롤링하지 않고 맥미니가 넣은 값을 읽기만 한다. 커뮤니티도 같은 회차에서 함께 수집한다.
+- **회차(round)**: `config/keywordRound.ts` - `KEYWORD_ROUND`(Worker가 넘김) 또는 실행 시각(KST)으로 morning/noon/evening 판정.
+  알림 제목 "🎬 엔터 키워드 — 오전(09시) 회차", `discovery_runs.metadata.round`에 기록.
+- **Worker cron 5개 -> 3개**: `0 0,4,9,11,12 * * *`(09/13/18시 엔터 회차, 20시 사회, 21시 대기) + analytics 2개. Worker가 발화 UTC 시로 분기
+  (`cloudflare/telegram-relay/src/schedule.ts`). **`wrangler.toml` crons와 `KEYWORD_CRON`은 문자열이 같아야 한다**(`npm run test:relay-schedule`).
+- **커뮤니티 독립 알림 폐지**: `community-keyword.yml` 삭제, 커뮤니티발 키워드는 엔터 알림에서 📡 표시. 사회 계열로 분류된 것은
+  `trend_candidates`에 남는다(2순위 사회 리포트가 수거).
+- **발행 버튼 네이버만**(`notifyManuscriptsReady.ts`). Blogspot 콜백 처리 코드는 3순위용으로 남김.
+- **watchdog**: 엔터 3회차(kind+round) + 사회를 각각 감시, 커뮤니티 제외. **수집일 경계 정오 -> 05:00**(09시 회차가 전날로 분류되던 문제).
+- **맥미니**: `install-launchd.sh`의 creator-advisor를 `08:30,17:30`으로(StartCalendarInterval 배열). **repo 쪽 변경만 - 맥미니 반영은 맥미니 소유 세션/사용자가 `install` 재실행.**
+
+**배포 순서(승인 필요)**: ① main 병합 → ② `cd cloudflare/telegram-relay && npx wrangler deploy`(cron 3개로 교체) → ③ 수동 dispatch로 확인.
+병합만 하고 Worker를 안 올리면 옛 cron(18/19/20시)이 계속 돈다. 옛 cron은 `community-keyword.yml` 삭제로 20시 dispatch가 404 날 수 있다.
+
+**검증**: `test:keyword-round` · `test:relay-schedule` · `scripts/testWorkerScheduled.ts` · `test:watchdog` · `test:format-notification-message` ·
+`test:notify-manuscripts-ready` · `test:notification` · `test:daily-query-pool` · `tsc` · `wrangler deploy --dry-run` 번들 통과. launchd plist 생성은 `plutil -lint` 확인.
+**실운영 검증은 아직**: 13시·18시 회차 실수신, 네이버 ⟦IMG⟧ 실발행 1건(§2.5).
+
 
 ## 2026-10-04 — 사용자가 고른 후보가 중복 검사에 막히던 문제
 

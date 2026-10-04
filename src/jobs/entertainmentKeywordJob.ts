@@ -27,7 +27,9 @@ const job: SchedulerJob = {
     console.log(`▶ 엔터 키워드 수집 - ${round.label}`);
 
     const result = await runDailyKeywordWorkflow({
-      collectionSources: ["creator_advisor", "google_trends", "daum_realtime"],
+      // 커뮤니티(더쿠·루리웹·에펨코리아)도 회차마다 함께 수집한다(§2.4 - 독립 커뮤니티 알림 폐지).
+      // 엔터·OTT로 분류된 것만 이 알림에 오르고, 사회 계열은 trend_candidates에 남아 20시 리포트가 수거한다.
+      collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community"],
       // CA는 크롤링하지 않고 맥미니가 넣어 둔 값을 읽기만 한다. 구글·다음은 기본값(켜짐)으로 직접 수집한다.
       trendCollectOptions: { enabled: false },
       includeCategories: ["entertainment", "ott"],
@@ -46,6 +48,13 @@ const job: SchedulerJob = {
         `\n▶ relevance filter: ${result.relevance.totalBefore}건 → ${result.relevance.totalAfter}건 ` +
           `(제외 ${result.relevance.droppedCount}건)`
       );
+    }
+
+    if (result.communityCollection?.status === "failed") {
+      console.log(`\n⚠️ 커뮤니티 수집 실패(비치명적) - ${result.communityCollection.error}`);
+    }
+    for (const [site, error] of Object.entries(result.communityCollection?.sourceErrors ?? {})) {
+      console.log(`\n⚠️ 커뮤니티 "${site}" 조회 실패(비치명적, 나머지로 진행) - ${error}`);
     }
 
     const failedStage = result.stageLog.find(

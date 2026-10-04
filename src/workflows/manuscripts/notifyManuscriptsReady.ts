@@ -41,7 +41,7 @@ export function buildManuscriptReadyMessage(
   // 원고와 6개가 다 찬 원고가 알림에서 구분되지 않았다 - 뷰어를 열어야만 알 수 있었다.
   const markerCount = (outcome.topic.manuscript.body.match(/\[IMAGE:/g) ?? []).length;
   const emptyCount = Math.max(0, markerCount - imageCount);
-  const summary = imageCount > 0 ? `🔵 Blogspot · 이미지 ${imageCount}장` : "🔵 Blogspot";
+  const summary = imageCount > 0 ? `🟢 네이버 · 이미지 ${imageCount}장` : "🟢 네이버";
   const lines0 = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
 
   const lines = ["📄 <b>원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, lines0];
@@ -57,7 +57,7 @@ export function buildManuscriptReadyMessage(
   // 그래서 **두 줄로** 나눈다(한 줄 4개는 글자가 잘린다).
   //   · 이미지 수정 - 빈 자리 재수집 + 사용자가 번호·요구사항으로 지정한 자리 다시 만들기
   //   · 맥으로 내려받기 - 보관함 내보내기를 30분 주기 전에 지금 돌린다. 맥의 폴러가 집어 간다
-  //   · 블로그 발행 - Blogspot 공식 API라 GitHub Actions에서 바로 끝난다
+  //   · (블로그 발행 버튼은 2026-10-05에 뺐다 - 아래 참고)
   //   · 네이버 발행 - 공식 API가 없어 로그인된 브라우저가 필요하다. 맥의 로컬 폴러가 집어 간다
   let actionRows: TelegramInlineKeyboardButton[][] = [];
   try {
@@ -67,10 +67,9 @@ export function buildManuscriptReadyMessage(
         { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
         { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
       ],
-      [
-        { text: "🔵 블로그 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") },
-        { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") },
-      ],
+      // 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §2.5): 엔터 트랙은 네이버 발행만 한다. Blogspot
+      // 버튼은 뺐다(콜백 처리 코드는 남아 있다 - 3순위에서 사용설명서 트랙이 K-Scene 블로그로 쓴다).
+      [{ text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") }],
     ];
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.

@@ -1,5 +1,5 @@
 # 키워드 수집 감시인 - 로컬 맥과 다른 호스트(GitHub 클라우드 러너)에서 매일 돌면서
-# "사회·경제 / 엔터·OTT / 커뮤니티 각 job이 이번 수집일에 성공했는가"를 job별로 확인한다.
+# "엔터 오전·오후·저녁 3회 + 사회 각 job이 이번 수집일에 성공했는가"를 job별로 확인한다.
 # 하나라도 아니면 안 돈 job 이름을 붙여 Telegram으로 알린다(2026-10-03: 전에는 하나라도 있으면 정상으로
 # 봐서 일부 job만 죽어도 경보가 없었다). 판정 로직은 src/jobs/watchdogJob.ts.
 #
@@ -15,11 +15,12 @@ name: keyword-collection-watchdog
 on:
   schedule:
     # 12:00 UTC = 21:00 KST. **마지막 수집 job보다 뒤여야 한다.**
+    # 2026-10-05: 수집이 09/13/18시(엔터)·20시(사회)라 마지막 job은 20시다. 21:00 예약은 그대로 뒤다.
     # 2026-10-01: 수집이 저녁(18/19/20시 KST)으로 옮겨가면서 11:00 KST -> 21:00 KST로 미뤘다.
     #
     # ⚠️ 이 예약은 **몇 시간씩 밀린다**(GitHub 네이티브 schedule의 알려진 지연 - 수집을 Cloudflare
     # Worker cron으로 옮긴 이유와 같다). 10-01 21:00 예약이 10-02 02:42 KST에 돌았다. 그래서 감시인은
-    # "오늘" 대신 **수집일(KST 정오에 바뀐다)**로 판정한다(src/jobs/watchdogJob.ts collectionDayString).
+    # "오늘" 대신 **수집일(KST 05:00에 바뀐다, 2026-10-05 개편 전에는 정오)**로 판정한다(src/jobs/watchdogJob.ts collectionDayString).
     # 지연에 기대는 시각 계산을 하지 말 것 - 처음엔 "마지막 job 뒤 55분 여유"라고 적었다가
     # 자정을 넘겨 도는 바람에 거짓 경보가 났다.
     # 수집 시각을 바꿀 때는 이 값도 같이 봐야 한다(cloudflare/telegram-relay/wrangler.toml).

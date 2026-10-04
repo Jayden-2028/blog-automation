@@ -145,3 +145,16 @@ main();
   }
   console.log("✅ 유효기간 위험 - 예약·마감형만 표시, 종료 표현은 강한 경고");
 }
+
+// 커뮤니티 유래 항목에 📡 표시(2026-10-05 - 엔터 회차에 커뮤니티 통합)
+{
+  const community = item({ rank: 1, keyword: "더쿠 화제 키워드", seedQuery: "더쿠 화제 키워드" });
+  const normal = item({ rank: 2, keyword: "일반 키워드", seedQuery: "일반 seed" });
+  const chunks = formatNotificationMessage(payload([community, normal]), { communityQueries: ["더쿠 화제 키워드"] });
+  const [, first, second] = chunks;
+  if (!first.text.includes("📡")) throw new Error("❌ 커뮤니티 항목에 📡가 없다");
+  if (second.text.includes("📡")) throw new Error("❌ 일반 항목에 📡가 붙었다");
+  const without = formatNotificationMessage(payload([community]));
+  if (without[1].text.includes("📡")) throw new Error("❌ communityQueries 없이 📡가 붙었다");
+  console.log("✅ 커뮤니티 항목 📡 표시");
+}

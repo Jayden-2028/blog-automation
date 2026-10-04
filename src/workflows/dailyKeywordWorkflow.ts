@@ -487,6 +487,8 @@ export async function runDailyKeywordWorkflow(
   // seed_queries(사람이 등록한 상시 검색어)만 모은다. Creator Advisor에서 온 그날의 화제 키워드는
   // 주제 그 자체이므로 분류어로 취급하면 안 된다(topicGrouping.ts 참고).
   let stableSeedTerms: string[] | undefined;
+  // 이번 pool에서 커뮤니티(source=community)로 들어온 키워드 - 알림에서 📡로 표시한다.
+  let communityQueries: string[] = [];
 
   if (!queries) {
     // Creator Advisor를 먼저 수집해 trend_candidates를 최신화한 뒤 query pool을 조립한다.
@@ -615,6 +617,7 @@ export async function runDailyKeywordWorkflow(
     }
 
     queries = scopedEntries.map((entry) => entry.keyword);
+    communityQueries = scopedEntries.filter((entry) => entry.source === "community").map((entry) => entry.keyword);
     seedCategoryByQuery = Object.fromEntries(scopedEntries.map((entry) => [entry.keyword, entry.category]));
     seedPriorityByQuery = Object.fromEntries(scopedEntries.map((entry) => [entry.keyword, entry.priority]));
     stableSeedTerms = scopedEntries
@@ -831,7 +834,10 @@ export async function runDailyKeywordWorkflow(
   }
 
   const notification = await runStage(stageLog, "notify", () =>
-    sendTelegramNotification(runId, options.notifyOptions)
+    sendTelegramNotification(runId, {
+      ...options.notifyOptions,
+      communityQueries: options.notifyOptions?.communityQueries ?? communityQueries,
+    })
   );
   result.notification = notification;
 

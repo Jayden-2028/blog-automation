@@ -1,6 +1,6 @@
-// 외부 감시인(watchdog). "감시 대상 수집 job(사회·경제 / 엔터·OTT / 커뮤니티) 각각이 이번 수집일에 성공했는가"를
+// 외부 감시인(watchdog). "감시 대상 수집 job(엔터 오전·오후·저녁 / 사회) 각각이 이번 수집일에 성공했는가"를
 // 확인하고, 하나라도 아니면 어느 job인지 이름을 붙여 Telegram으로 알린다.
-// 수집일은 KST 정오에 바뀐다 - collectionDayString 주석 참고.
+// 수집일은 KST 05:00에 바뀐다 - collectionDayString 주석 참고.
 //
 // 왜 필요한가(CURRENT_STATE.md "운영 노트: 잠자기로 인한 조용한 실패"):
 // 매일 09:00 job이 caffeinate 보호를 받지만, 전원 차단·강제 재부팅·launchd 미발화 같은 경우엔
@@ -27,20 +27,20 @@ export function seoulDateString(date: Date): string {
 }
 
 /**
- * "수집일"의 경계를 KST 자정이 아니라 **정오(12:00)**로 본다(2026-10-02).
+ * "수집일"의 경계를 KST 자정이 아니라 **새벽 05:00**으로 본다(2026-10-05 개편, 전에는 정오).
  *
- * 왜 자정이면 안 되는가: 수집이 저녁(18/19/20시 KST)으로 옮겨가면서 이 감시인을 21:00 KST에
- * 예약했는데, GitHub Actions 네이티브 schedule은 4~6시간 밀린다(이 저장소가 키워드 수집을
- * Cloudflare Worker cron으로 옮긴 바로 그 이유다). 실제로 10-01 21:00 예약이 **10-02 02:42 KST**에
- * 돌았고, 그 시각의 "오늘(10-02)"에는 아직 수집이 없으니 매일 밤 거짓 실패 알림이 나갔다.
+ * 왜 자정이면 안 되는가: 감시인은 21:00 KST로 예약돼 있는데 GitHub Actions 네이티브 schedule은 4~6시간
+ * 밀린다(10-01 21:00 예약이 10-02 02:42 KST에 돌았다). 자정 경계면 그 시각의 "오늘"에는 수집이 없어
+ * 매일 밤 거짓 실패 알림이 나갔다(2026-10-02).
  *
- * 정오 경계는 "수집이 전부 저녁에 있다"는 현재 운영을 그대로 옮긴 것이다. 21:00 예약이 자정을
- * 넘겨 돌아도(02:42 KST -> 14:42 전날) 같은 수집일에 속하고, 15시간 넘게 밀리지 않는 한
- * 거짓 경보가 없다. 진짜 누락은 여전히 잡는다 - 그날 저녁 run이 없으면 수집일이 어긋난다.
+ * 왜 정오가 아니라 05:00인가: 엔터가 09:00 KST에도 돌게 되면서(하루 09/13/18시 + 사회 20시) 모든 수집이
+ * 같은 달력 날짜 안의 09~20시에 있다. 정오 경계는 09시 회차를 **전날**로 잘못 분류한다. 05:00이면
+ * 09~20시 수집이 한 수집일에 묶이고, 21:00 예약이 8시간(05:00 이전)까지 밀려도 같은 수집일로 본다.
+ * 진짜 누락은 여전히 잡는다 - 그날 회차 run이 없으면 수집일이 어긋난다.
  *
- * 수집 시각을 오전으로 되돌리면 이 값도 같이 봐야 한다.
+ * 수집 시각을 바꾸면 이 값도 같이 봐야 한다.
  */
-const COLLECTION_DAY_OFFSET_MS = 12 * 60 * 60 * 1000;
+const COLLECTION_DAY_OFFSET_MS = 5 * 60 * 60 * 1000;
 
 export function collectionDayString(date: Date): string {
   return seoulDateString(new Date(date.getTime() - COLLECTION_DAY_OFFSET_MS));
@@ -72,22 +72,26 @@ export function evaluateWatchdog(
 }
 
 /**
- * 감시할 수집 job. 각 job은 discovery_runs.metadata.kind에 자기 이름을 남긴다
- * (socialIssueKeywordJob / entertainmentKeywordJob / communityKeywordJob가 넘기는 metadata).
+ * 감시할 수집 job. 각 job은 discovery_runs.metadata.kind에 자기 이름을, 회차가 있는 job은
+ * metadata.round에 회차를 남긴다(entertainmentKeywordJob / socialIssueKeywordJob이 넘기는 metadata).
  *
  * 왜 job별로 보는가(2026-10-03): 전에는 "이번 수집일에 완료된 run이 **하나라도** 있는가"만 봤다.
  * 그래서 2026-10-01·10-02에 엔터·커뮤니티 두 job이 통째로 안 돌았는데도 사회·경제가 돌았다는
  * 이유로 정상 판정이었고, 이틀 동안 아무 경보도 없었다. 일부만 죽는 경우를 잡으려면 job마다 따로
  * 봐야 한다.
  *
+ * 2026-10-05 개편: 엔터는 회차(오전/오후/저녁)마다 따로 본다. 커뮤니티는 엔터 회차에 통합돼 독립 job이
+ * 아니므로 목록에서 뺐다. 사용설명서(21시)는 3순위에서 job이 생길 때 여기 추가한다.
+ *
  * **job을 없애거나 이름을 바꾸면 여기도 같이 고쳐야 한다.** 목록에 남은 job은 매일 돌아야 하는
  * 것으로 보고 안 돌면 경보를 보낸다.
  */
 export const WATCHED_JOBS = [
-  { kind: "social_issue", label: "사회·경제" },
-  { kind: "entertainment", label: "엔터·OTT" },
-  { kind: "community", label: "커뮤니티" },
-] as const;
+  { kind: "entertainment", round: "morning", label: "엔터 오전(09시)" },
+  { kind: "entertainment", round: "noon", label: "엔터 오후(13시)" },
+  { kind: "entertainment", round: "evening", label: "엔터 저녁(18시)" },
+  { kind: "social_issue", label: "사회" },
+] as const satisfies readonly { kind: string; round?: string; label: string }[];
 
 export type WatchedJob = (typeof WATCHED_JOBS)[number];
 
@@ -106,10 +110,16 @@ function runKind(run: DiscoveryRunRow): string | null {
   return typeof kind === "string" ? kind : null;
 }
 
+function runRound(run: DiscoveryRunRow): string | null {
+  const round = run.metadata?.round;
+  return typeof round === "string" ? round : null;
+}
+
 /**
  * 최근 run 목록에서 job별 최신 완료 run을 찾아 각각 "이번 수집일 것인가"를 판정한다. 순수 함수.
  *
  * - 완료(completed)된 run만 센다. 실패했거나 진행 중인 run은 돌았다고 치지 않는다.
+ * - 회차가 있는 job은 kind와 round가 모두 맞는 run만 센다(오전 run이 저녁 누락을 가리면 안 된다).
  * - metadata.kind가 없는 run은 어느 job에도 속하지 않는다. 옛 run이나 수동 실행이 다른 job의
  *   누락을 가려 주면 안 된다.
  */
@@ -122,7 +132,7 @@ export function evaluateWatchdogByJob(
   const checks: JobWatchdogCheck[] = WATCHED_JOBS.map((job) => {
     const latest =
       completed
-        .filter((run) => runKind(run) === job.kind)
+        .filter((run) => runKind(run) === job.kind && (!("round" in job) || runRound(run) === job.round))
         .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))[0] ?? null;
     return { job, verdict: evaluateWatchdog(latest, now) };
   });
@@ -160,7 +170,7 @@ export function formatWatchdogAlert(verdict: JobWatchdogVerdict, now: Date): str
   return lines.join("\n");
 }
 
-/** 한 번에 읽을 최근 run 수. 하루 3건이므로 열흘 남짓이다 - 한 job이 오래 멈췄다면 어차피 경보 대상이다. */
+/** 한 번에 읽을 최근 run 수. 하루 4건이므로 열흘이다 - 한 job이 오래 멈췄다면 어차피 경보 대상이다. */
 const RECENT_RUNS_LIMIT = 40;
 
 export type RunWatchdogOptions = {

@@ -48,6 +48,11 @@ export type SendKeywordNotificationOptions = {
   runId?: number;
   /** 알림 헤더 첫 줄 override. 오후 커뮤니티 전용 run이 "📡 오후 커뮤니티 키워드" 문구를 넘긴다. */
   headerTitle?: string;
+  /**
+   * 커뮤니티 유래 키워드의 seedQuery 목록. 해당 항목에 📡를 붙여 "커뮤니티 화제"임을 보여 준다
+   * (2026-10-05 개편 - 커뮤니티 수집이 엔터 회차에 통합돼 독립 알림이 사라졌다).
+   */
+  communityQueries?: readonly string[];
 };
 
 export type SendKeywordNotificationResult = {

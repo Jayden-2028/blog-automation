@@ -25,6 +25,8 @@
 // workflow_dispatch 호출이 403(Resource not accessible)으로 실패했다(실측 확인). 1분 주기
 // 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
+import { resolveScheduled, type ScheduledDispatch } from "./schedule.js";
+
 export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
   GH_DISPATCH_TOKEN: string;
@@ -90,29 +92,6 @@ async function answerCallbackQuery(env: Env, callbackQueryId: string, text = CAL
 }
 
 /**
- * cron 표현식(UTC) -> 깨울 워크플로우 파일명. KST 18:00/19:00/20:00에 맞춘 것이다
- * (2026-10-01 사용자 결정으로 저녁대로 옮겼다. 그 전에는 08:00/12:00/18:00).
- * 순서 의존: 연예 잡은 social-issue가 채운 trend_candidates를 읽지만, "오늘 날짜"가 아니라
- * latestAvailableTrendDate를 쓰므로 날짜 경계와 무관하다.
- *
- * 저녁으로 옮기면서 UTC 날짜가 갈리는 문제는 사라졌다(18:00 KST = 같은 날 09:00 UTC). 전에는
- * 08:00 KST가 전날 23:00 UTC라 cron만 보고는 어느 날 것인지 헷갈렸다.
- *
- * 2026-09-16 간격 확대(사용자 요청): 원래 09:00/09:10/13:00로 10분만 띄웠는데, 그 좁은 간격이
- * heavy-pipeline 전체 부하를 짧은 시간에 몰아 사용자가 같은 목록에서 Go를 연달아 누르는 상황과
- * 겹치기 쉬웠다. 카테고리 간 간격을 넓혀 시스템 전체 부하를 분산한다 - 다만 이것만으로는 **같은
- * 카테고리 안에서** 클릭이 몰리는 문제(오늘 실제 사고의 주 원인)는 못 잡는다는 점은 알고 진행한다.
- * 그건 dispatchWorkflow.ts의 DB 큐(2026-09-16, 아래 참고)가 담당한다.
- */
-const SCHEDULED_WORKFLOWS: Record<string, string> = {
-  "0 9 * * *": "social-issue-keyword.yml", // 18:00 KST
-  "0 10 * * *": "entertainment-keyword.yml", // 19:00 KST - social-issue가 채운 trend_candidates를 읽는다
-  "0 11 * * *": "community-keyword.yml", // 20:00 KST
-  "30 0 * * *": "analytics-search.yml", // 09:30 KST - Search Console 일일 성과(데이터는 3일 전 것)
-  "0 1 * * 1": "analytics-index-health.yml", // 월요일 10:00 KST - 색인 건강 점검(주 1회)
-};
-
-/**
  * cron이 깨울 워크플로우를 GitHub API로 dispatch한다.
  *
  * **실패하면 던진다**(2026-10-02). 전에는 console.error만 하고 조용히 끝났다. 그러면 Cloudflare
@@ -120,7 +99,8 @@ const SCHEDULED_WORKFLOWS: Record<string, string> = {
  * 남지 않았다. 던지면 이 호출이 대시보드 Metrics의 오류로 잡히고 로그에 사유가 남는다.
  * 성공도 한 줄 남긴다 - "호출은 됐다"는 사실이 있어야 "호출이 안 됐다"와 구분된다.
  */
-async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {
+async function dispatchWorkflow(env: Env, target: ScheduledDispatch): Promise<void> {
+  const workflowFile = target.workflow;
   let res: Response;
   try {
     res = await fetch(
@@ -134,7 +114,7 @@ async function dispatchWorkflow(env: Env, workflowFile: string): Promise<void> {
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "blog-automation-telegram-relay",
         },
-        body: JSON.stringify({ ref: "main" }),
+        body: JSON.stringify(target.inputs ? { ref: "main", inputs: target.inputs } : { ref: "main" }),
       }
     );
   } catch (error) {
@@ -225,16 +205,19 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    const workflowFile = SCHEDULED_WORKFLOWS[event.cron];
+    const targets = resolveScheduled(event.cron, event.scheduledTime);
     // 깨어났다는 사실부터 남긴다. 이게 없으면 "cron이 안 울렸다"와 "울렸는데 아무것도 못 했다"를
     // 로그로 구분할 수 없다(2026-10-02 엔터·커뮤니티 미실행 때 실제로 구분이 안 됐다).
-    console.log(
-      `[cron] ${event.cron} (예정 ${new Date(event.scheduledTime).toISOString()}) -> ${workflowFile ?? "매핑 없음"}`
-    );
-    if (!workflowFile) {
-      console.error(`알 수 없는 cron 표현식: ${event.cron}`);
-      throw new Error(`알 수 없는 cron 표현식: ${event.cron}`);
+    const names = targets === null ? "매핑 없음" : targets.length === 0 ? "(할 일 없음)" : targets.map(describeTarget).join(", ");
+    console.log(`[cron] ${event.cron} (예정 ${new Date(event.scheduledTime).toISOString()}) -> ${names}`);
+    if (targets === null) {
+      console.error(`알 수 없는 cron 표현식/시각: ${event.cron} @ ${new Date(event.scheduledTime).toISOString()}`);
+      throw new Error(`알 수 없는 cron 표현식/시각: ${event.cron}`);
     }
-    ctx.waitUntil(dispatchWorkflow(env, workflowFile));
+    for (const target of targets) ctx.waitUntil(dispatchWorkflow(env, target));
   },
 };
+
+function describeTarget(target: ScheduledDispatch): string {
+  return target.inputs ? `${target.workflow} ${JSON.stringify(target.inputs)}` : target.workflow;
+}

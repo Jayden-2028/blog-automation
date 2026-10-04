@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creator Advisor 수집(launchd가 매일 17:30에 한 번 부른다). 브라우저를 띄우므로 caffeinate로 절전을 막는다.
+# Creator Advisor 수집(launchd가 매일 08:30, 17:30에 부른다 - 2026-10-05부터 하루 두 번). 브라우저를 띄우므로 caffeinate로 절전을 막는다.
 #
 # 왜 맥에서 도는가: Creator Advisor는 네이버 로그인 세션이 붙은 persistent 브라우저 프로필에
 # 의존해서 GitHub Actions 러너에서는 돌릴 수 없다(그래서 클라우드 이전 때 CREATOR_ADVISOR_ENABLED=false로
@@ -15,6 +15,7 @@
 # 그래서 18:00보다 확실히 먼저 끝나야 한다 - 30분 여유를 뒀다(실측 수집 약 5초).
 # 2026-10-01: 수집이 저녁으로 옮겨가면서 07:30 -> 17:30으로 같이 옮겼다. 30분 앞이라는 관계는
 # 그대로다. 늦게 수집할수록 그날 데이터가 반영될 여지가 크다는 점도 이 방향에 맞는다.
+# 2026-10-05 개편: 엔터가 09/13/18시 3회로 늘어 08:30 수집을 추가했다(09시 회차용, 설계서 §2.3).
 # **수집 시각을 바꿀 때는 이 값도 같이 봐야 한다**(cloudflare/telegram-relay/wrangler.toml).
 #
 # 최초 1회 준비: npm run debug:creator-advisor (headless:false로 브라우저가 떠서 사람이 로그인한다).

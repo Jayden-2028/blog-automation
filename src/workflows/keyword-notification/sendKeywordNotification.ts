@@ -47,7 +47,10 @@ export async function sendKeywordNotification(
 
   const payload: KeywordNotificationPayload = { run: fetched.run, items };
 
-  const chunks = formatNotificationMessage(payload, { headerTitle: options.headerTitle });
+  const chunks = formatNotificationMessage(payload, {
+    headerTitle: options.headerTitle,
+    communityQueries: options.communityQueries,
+  });
   const messages = chunks.map((chunk) => chunk.text);
   // 항목마다 메시지가 따로 가므로(formatNotificationMessage 참고) 각 메시지에 그 항목의
   // Go/Pass 버튼만 붙인다. 헤더는 ranks가 비어 있어 버튼 없이 나간다.
