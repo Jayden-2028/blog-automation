@@ -244,6 +244,7 @@ export async function collectWebImagesForJob(
               briefType: input.briefType ?? null,
               searchImages: false,
               verify: false,
+              userChosen: true,
               runCodex: async () => ({
                 ok: true as const,
                 durationMs: 0,
@@ -291,7 +292,15 @@ export async function collectWebImagesForJob(
     // 사용자가 지정한 자리와 검색으로 채운 자리를 합친다.
     const found = [...direct.found, ...result.found];
     const failures = [...direct.failures, ...result.failures];
-    const unfilled = [...direct.unfilled, ...result.unfilled];
+    // 사용자가 고른 이미지를 못 받은 자리는 **AI 대체로 넘기지 않는다**(2026-10-04). 사람이 특정 사진을
+    // 골랐는데 엉뚱한 생성 이미지로 채우면 안 된다 - 겨울왕국3 실측에서 그 자리가 AI 대체 단계로 넘어가
+    // "실존 대상이라 비운다"는 엉뚱한 사유가 붙었다. 받지 못한 이유를 남기고 비워 둔다.
+    for (const slot of direct.unfilled) {
+      failures.push(
+        `[자리 ${slot.index}] ⚠️ 고르신 이미지를 받지 못해 비워 둡니다: ${directUrls[String(slot.index)] ?? "(주소 없음)"}`
+      );
+    }
+    const unfilled = [...result.unfilled];
 
     const images: ManuscriptImage[] = found
       .filter((record) => record.storageUrl)

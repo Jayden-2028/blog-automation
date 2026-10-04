@@ -326,6 +326,12 @@ export type CollectWebImagesOptions = {
   /** false면 비전 검증을 건너뛴다(시간·호출을 아끼고 싶을 때). 기본 true. */
   verify?: boolean;
   /**
+   * 사용자가 직접 고른 이미지(주소 지정·`N번 후보M`)인가(2026-10-04). 그렇다면 **같은 컷 검사로 막지 않는다** -
+   * 등록만 해서 다른 자리가 이 컷을 다시 쓰지 않게 한다. 실측(겨울왕국3): 사용자가 "3번 후보1 반영"을
+   * 보냈는데 중복 검사가 "자리 7과 같은 컷"이라며 버리고 자리를 비웠다. 사람이 눈으로 보고 고른 것이다.
+   */
+  userChosen?: boolean;
+  /**
    * 주면 검증을 통과한 이미지를 여기에 넘겨 영구 저장한다(파이프라인은 Supabase Storage).
    * 주지 않으면 `dir`의 파일이 결과물이다(맥 보관함).
    */
@@ -1247,6 +1253,14 @@ export async function collectWebImages(
           candidate.contentType,
           { index: slot.index, filePath: candidate.filePath }
         );
+        if (verdict.duplicate && options.userChosen) {
+          // 사용자가 고른 것은 그대로 쓴다. 판단은 사람에게 맡기고 기록만 남긴다.
+          failures.push(
+            `[자리 ${slot.index}] ℹ️ 사용자가 고른 이미지라 그대로 씁니다(같은 컷 검사에서는 ${verdict.against}와 비슷하다고 봤습니다).`
+          );
+          accepted = candidate;
+          break;
+        }
         if (!verdict.duplicate) {
           accepted = candidate;
           if (candidate !== chosen) {

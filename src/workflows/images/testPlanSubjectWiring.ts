@@ -203,6 +203,43 @@ async function main(): Promise<void> {
     console.log("✅ 사용자 요구 - 기획 주의사항·검색어 폐기, 키워드 핵심 검색, 방송 캡처면 공식 스틸 제외, 후보 기록");
   }
 
+  // 8) 사용자가 고른 이미지는 같은 컷 검사로 막지 않는다(2026-10-04 겨울왕국3 실측).
+  //    "3번 후보1 반영"을 보냈는데 중복 검사가 "자리 7과 같은 컷"이라며 버리고 비웠다.
+  {
+    const alwaysDuplicate = {
+      planOrder: () => {},
+      releaseTurn: () => {},
+      claim: async () => ({ duplicate: true as const, against: "자리 7(이미 사용 중)" }),
+      close: async () => {},
+    };
+    const common = {
+      jobId: "test-job",
+      keyword: "겨울왕국3 안나 크리스토프 결혼 2027 개봉",
+      category: "entertainment",
+      body: "감독이 말했다.\n\n[IMAGE: 제니퍼 리 감독 — 웹 검색]\n[IMAGE PROMPT: 제니퍼 리]",
+      imagePrompts: [],
+      requirements: { "1": "후보1 반영" },
+      directUrls: { "1": "https://static.time.com/frozen.jpg" },
+    };
+    const opts = {
+      searchImages: false as const,
+      searchKinolights: false as const,
+      cropTall: false as const,
+      deduper: alwaysDuplicate as never,
+      readSize: () => ({ width: 3840, height: 2560 }),
+      upload: async ({ fileName }: { fileName: string }) => ({ ok: true as const, url: `https://storage/${fileName}` }),
+    };
+    const ok = await collectWebImagesForJob(common, { ...opts, fetchImage: async () => ({ ok: true, buffer: PNG, contentType: "image/png" }) });
+    assert(ok.images.length === 1 && ok.images[0].index === 1, `사용자가 고른 이미지는 들어가야 한다 (${JSON.stringify(ok.failures)})`);
+    assert(ok.failures.some((f) => f.includes("사용자가 고른 이미지라 그대로")), "같은 컷 판정은 기록만 남긴다");
+
+    // 못 받았을 때도 AI 대체로 넘기지 않는다 - 엉뚱한 생성 이미지가 사람이 고른 자리에 들어가면 안 된다.
+    const failed = await collectWebImagesForJob(common, { ...opts, fetchImage: async () => ({ ok: false, error: "403" }) });
+    assert(failed.unfilled.length === 0, `사용자가 고른 자리는 AI 대체로 넘기지 않는다 (${JSON.stringify(failed.unfilled)})`);
+    assert(failed.failures.some((f) => f.includes("고르신 이미지를 받지 못해")), "못 받은 이유를 남긴다");
+    console.log("✅ 사용자가 고른 이미지 - 같은 컷 검사로 막지 않고, 못 받아도 AI 대체로 넘기지 않음");
+  }
+
   console.log("\n✅ 기획 대상 배선 테스트 전부 통과");
 }
 
