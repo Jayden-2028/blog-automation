@@ -85,6 +85,7 @@
     "test:publish-blocks": "tsx src/services/publish/testRenderPublishBlocks.ts",
     "test:naver-html": "tsx src/services/publish/testConvertArticleToNaverHtml.ts",
     "test:naver-paste": "tsx src/services/publish/testNaverPasteCheck.ts",
+    "test:naver-markers": "tsx src/services/publish/testNaverImageMarkers.ts",
     "test:naver-publish": "tsx src/services/publish/testPublishArticleToNaver.ts",
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",

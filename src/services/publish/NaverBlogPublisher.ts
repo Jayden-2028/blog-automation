@@ -55,6 +55,7 @@ import { chromium, type Page } from "playwright";
 
 import { NAVER_DEFAULT_CATEGORY_NO } from "../../config/naverCategoryMapping.js";
 import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
+import { ANY_IMAGE_MARKER } from "./naverImageMarkers.js";
 import {
   describePasteGap,
   expectBodyFormat,
@@ -95,7 +96,15 @@ export class NaverPublishLoginRequiredError extends Error {
   }
 }
 
-export type NaverPublishImageInput = { url: string; alt?: string };
+export type NaverPublishImageInput = {
+  url: string;
+  alt?: string;
+  /**
+   * 본문에 박힌 자리 표식(`⟦IMG-1⟧`). 있으면 **그 표식을 찾아가 그 자리에** 업로드한다
+   * (naverImageMarkers.ts). 없으면 커서 위치(=본문 끝)에 차례로 붙는다 - 옛 동작.
+   */
+  marker?: string;
+};
 
 export type NaverDraftSaveInput = {
   title: string;
@@ -147,6 +156,8 @@ const FILE_CHOOSER_TIMEOUT_MS = 10_000;
 const RECOVERY_DIM_WAIT_MS = 8_000;
 const CLICK_TIMEOUT_MS = 10_000;
 const FAILURE_SNAPSHOT_DIR = ".local/dom-snapshots/naver-publish";
+/** 남은 이미지 표식을 지우는 시도 횟수 상한. 안 지워지는 표식에 걸려 무한 루프를 돌지 않게. */
+const MAX_LEFTOVER_MARKER_SWEEPS = 12;
 
 // 셀렉터 상수 (SPRINT_4_DESIGN.md §6-2 실측 기반, 2026-08-28). data-click-area는 네이버 자체
 // 클릭 추적 속성으로, CSS 모듈 해시 클래스(예: save_btn__bzc5B)보다 배포에 안정적이라 우선한다.
@@ -273,12 +284,16 @@ export class NaverBlogPublisher {
 
       if (input.images && input.images.length > 0) {
         try {
-          await this.uploadImages(page, input.images);
+          warnings = warnings.concat(await this.insertImages(page, input.images));
         } catch (error) {
           await this.saveFailureSnapshot(page, "image");
           return { ok: false, stage: "image", error: this.errorMessage(error) };
         }
       }
+
+      // 업로드가 실패했거나 표식을 못 찾은 자리가 남으면 독자에게 `⟦IMG-2⟧` 글자가 그대로 보인다.
+      // 이미지가 빠지는 것보다 글자가 노출되는 쪽이 더 나쁘므로 무조건 지운다.
+      warnings = warnings.concat(await this.removeLeftoverMarkers(page));
 
       try {
         const draftUrl = await finish(page);
@@ -476,7 +491,7 @@ export class NaverBlogPublisher {
    * `font-size:19px`를 자기 크기 등급(se-fs-fsNN 클래스)으로 바꿔 넣기 때문에, 인라인 style만
    * 보면 서식이 살아 있어도 못 찾는다. 실제로 렌더된 크기를 본다.
    */
-  private async readBodyState(page: Page): Promise<BodyFormatObserved> {
+  private async readBodyState(page: Page): Promise<BodyFormatObserved & { text: string }> {
     return page
       .evaluate((minPx: number) => {
         // tsconfig에 "dom" lib이 없어(Node 전용 프로젝트) document를 직접 참조할 수 없다 -
@@ -510,29 +525,127 @@ export class NaverBlogPublisher {
           images: Math.max(imageComponents, inlineImages),
           bold,
           large,
+          text,
         };
       }, LARGE_FONT_MIN_PX)
-      .catch(() => ({ chars: 0, images: 0, bold: 0, large: 0 }));
+      .catch(() => ({ chars: 0, images: 0, bold: 0, large: 0, text: "" }));
   }
 
   /**
-   * 이미지 업로드. .se-toolbar-item-image 클릭 시 네이티브 파일 선택 대화상자가 뜬다는 가정으로
-   * Playwright의 filechooser 이벤트를 기다린다(§6-2에서 라이브 클릭까지는 검증 못함).
+   * 이미지를 **에디터에 직접 업로드**한다(2026-10-04). 외부 URL `<img>`를 붙여넣던 옛 방식은
+   * 네이버 서버에 파일이 올라가지 않아 대표이미지가 안 잡히고 핫링크가 된다
+   * (naverImageMarkers.ts 상단 설명).
+   *
+   * 순서가 중요하다: **파일을 먼저 전부 받아 둔다.** 에디터를 건드리기 시작한 뒤에 다운로드가
+   * 실패하면 본문이 반쯤 망가진 채로 남는다.
+   *
+   * 돌려주는 값은 경고 목록이다 - 이미지 한 장이 실패해도 발행을 막지 않는다(본문·서식은 이미
+   * 정상이므로, 글을 통째로 못 올리는 쪽이 손해다).
    */
-  private async uploadImages(page: Page, images: ReadonlyArray<NaverPublishImageInput>): Promise<void> {
+  private async insertImages(page: Page, images: ReadonlyArray<NaverPublishImageInput>): Promise<string[]> {
+    const warnings: string[] = [];
+
+    const prepared: { image: NaverPublishImageInput; localPath: string }[] = [];
     for (const image of images) {
-      const localPath = await this.downloadToTempFile(image.url);
-      // filechooser 대기와 클릭을 동시에 걸어야 하므로 safeClick을 그대로 못 쓴다 - 오버레이만
-      // 먼저 통과시켜 둔다(§12).
-      await this.dismissRecoveryOverlay(page);
-      const [fileChooser] = await Promise.all([
-        page.waitForEvent("filechooser", { timeout: FILE_CHOOSER_TIMEOUT_MS }),
-        page.click(SELECTORS.imageToolbarButton),
-      ]);
-      await fileChooser.setFiles(localPath);
-      // 업로드/리사이즈 완료 신호를 아직 몰라 보수적으로 고정 시간을 기다린다(§10 item 7에서 개선).
-      await page.waitForTimeout(IMAGE_UPLOAD_WAIT_MS);
+      try {
+        prepared.push({ image, localPath: await this.downloadToTempFile(image.url) });
+      } catch (error) {
+        warnings.push(`이미지를 내려받지 못했습니다(${this.errorMessage(error)}).`);
+      }
     }
+
+    let inserted = (await this.readBodyState(page)).images;
+    for (const { image, localPath } of prepared) {
+      // 표식이 있으면 그 자리로 커서를 옮긴다. 못 찾으면 커서가 있는 곳(보통 본문 끝)에 들어간다.
+      if (image.marker) {
+        const placed = await this.focusMarker(page, image.marker);
+        if (!placed) {
+          warnings.push(`본문에서 이미지 자리(${image.marker})를 찾지 못해 끝에 붙였습니다.`);
+        }
+      }
+
+      try {
+        await this.uploadAtCursor(page, localPath);
+        inserted += 1;
+        if (!(await this.waitForImageCount(page, inserted))) {
+          inserted -= 1; // 실제로 안 들어갔다 - 다음 장의 기대치가 어긋나지 않게 되돌린다.
+          warnings.push(`이미지 업로드가 확인되지 않았습니다(${image.alt || image.url}).`);
+        }
+      } catch (error) {
+        warnings.push(`이미지 업로드 실패(${this.errorMessage(error)}).`);
+      }
+    }
+
+    return warnings;
+  }
+
+  /**
+   * 본문에서 표식 문단을 찾아 **그 줄을 통째로 선택해 지우고** 커서를 그 자리에 둔다.
+   * 업로드가 실패하더라도 표식 글자는 이미 사라진 상태가 되므로 독자에게 노출되지 않는다.
+   */
+  private async focusMarker(page: Page, marker: string): Promise<boolean> {
+    const target = page.getByText(marker, { exact: false }).first();
+    if ((await target.count().catch(() => 0)) === 0) return false;
+
+    try {
+      await target.scrollIntoViewIfNeeded({ timeout: CLICK_TIMEOUT_MS });
+      await this.dismissRecoveryOverlay(page);
+      await target.click({ clickCount: 3, timeout: CLICK_TIMEOUT_MS }); // 문단 전체 선택
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(300);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 커서 자리에 파일을 올린다. `.se-toolbar-item-image` 클릭 → 파일 선택 대화상자 → setInputFiles.
+   * filechooser 대기와 클릭을 동시에 걸어야 하므로 safeClick을 그대로 못 쓴다 - 오버레이만 먼저
+   * 통과시켜 둔다(§12).
+   */
+  private async uploadAtCursor(page: Page, localPath: string): Promise<void> {
+    await this.dismissRecoveryOverlay(page);
+    const [fileChooser] = await Promise.all([
+      page.waitForEvent("filechooser", { timeout: FILE_CHOOSER_TIMEOUT_MS }),
+      page.click(SELECTORS.imageToolbarButton),
+    ]);
+    await fileChooser.setFiles(localPath);
+  }
+
+  /**
+   * 업로드가 끝나 이미지 컴포넌트가 실제로 생겼는지 기다린다. 고정 시간 대기를 쓰지 않는 이유는
+   * 티스토리 저장에서 배운 것과 같다 - 고정 대기는 느릴 때 거짓 실패, 빠를 때 낭비가 된다.
+   */
+  private async waitForImageCount(page: Page, want: number): Promise<boolean> {
+    const deadline = Date.now() + IMAGE_UPLOAD_WAIT_MS * 4;
+    while (Date.now() < deadline) {
+      if ((await this.readBodyState(page)).images >= want) return true;
+      await page.waitForTimeout(500);
+    }
+    return false;
+  }
+
+  /**
+   * 본문에 남은 표식 문단을 지운다. 업로드가 실패했거나 표식을 못 찾은 자리의 안전망이다.
+   * 표식이 없으면 아무 일도 하지 않는다(정상 경로에서는 여기서 걸리는 게 없다).
+   */
+  private async removeLeftoverMarkers(page: Page): Promise<string[]> {
+    const warnings: string[] = [];
+    // 표식 수만큼만 돌고 멈춘다 - 지워지지 않는 표식이 있을 때 무한 루프를 돌지 않게.
+    for (let attempt = 0; attempt < MAX_LEFTOVER_MARKER_SWEEPS; attempt += 1) {
+      const text = (await this.readBodyState(page)).text;
+      const found = text.match(ANY_IMAGE_MARKER);
+      if (!found || found.length === 0) return warnings;
+
+      const removed = await this.focusMarker(page, found[0]);
+      if (!removed) {
+        warnings.push(`본문에 이미지 자리 표식이 남았습니다(${found[0]}) - 발행본을 확인하세요.`);
+        return warnings;
+      }
+      warnings.push(`이미지가 들어가지 않은 자리를 비웠습니다(${found[0]}).`);
+    }
+    return warnings;
   }
 
   private async downloadToTempFile(url: string): Promise<string> {

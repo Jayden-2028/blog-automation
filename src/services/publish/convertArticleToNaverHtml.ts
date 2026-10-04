@@ -17,6 +17,8 @@
 // - 목록 / ![alt](url) 이미지 / 문단 사이 빈 줄 1개, 이미지 마커 앞뒤 빈 줄 2개(writer.md §6·§8,
 // 2026-09-06).
 
+import { extractImageMarkers } from "./naverImageMarkers.js";
+import type { MarkedImage } from "./naverImageMarkers.js";
 import { renderPublishBlocks } from "./renderPublishBlocks.js";
 import type { PublishRenderOptions } from "./renderPublishBlocks.js";
 
@@ -53,4 +55,22 @@ const NAVER_OPTIONS: PublishRenderOptions = {
 /** 원고 본문(마크다운 부분집합)을 SmartEditor 붙여넣기용 HTML로 변환한다. */
 export function convertArticleToNaverHtml(markdown: string): string {
   return renderPublishBlocks(markdown, NAVER_OPTIONS);
+}
+
+/**
+ * 발행 경로 전용 변환(2026-10-04). 이미지를 `<img src="외부URL">`로 넣지 않고 **자리 표식**만
+ * 남긴 HTML과, 그 자리에 업로드할 이미지 목록을 함께 돌려준다.
+ *
+ * 왜 나눴나: 외부 URL 이미지는 네이버 서버에 올라가지 않아 대표이미지가 안 잡히고 핫링크가 된다
+ * (naverImageMarkers.ts 상단 설명). 발행은 표식을 찾아가 툴바로 직접 업로드한다.
+ *
+ * `convertArticleToNaverHtml`(표식 없이 `<img>` 그대로)은 **뷰어 복사 버튼 등 사람이 직접 붙여넣는
+ * 경로**가 계속 쓴다 - 사람이 붙여넣을 때는 이미지가 눈에 보여야 한다.
+ */
+export function convertArticleToNaverPaste(markdown: string): {
+  html: string;
+  images: MarkedImage[];
+} {
+  const { markdown: marked, images } = extractImageMarkers(markdown);
+  return { html: renderPublishBlocks(marked, NAVER_OPTIONS), images };
 }

@@ -65,7 +65,12 @@ export function inlineToHtml(text: string, options: PublishRenderOptions): strin
   return result;
 }
 
-const IMAGE_LINE_PATTERN = new RegExp(`^!\\[([^\\]]*)\\]\\((${URL_SOURCE})\\)$`);
+/**
+ * `![alt](url)` 한 줄 블록. 네이버 마커 변환기(naverImageMarkers.ts)도 이 상수를 그대로 쓴다 -
+ * URL 안 괄호 규칙(위 URL_SOURCE)을 두 곳에서 따로 구현하면 2026-10-03 위키백과 404 버그가
+ * 한쪽에만 남는다.
+ */
+export const IMAGE_LINE_PATTERN = new RegExp(`^!\\[([^\\]]*)\\]\\((${URL_SOURCE})\\)$`);
 const IMAGE_PLACEHOLDER_PATTERN = /^\[IMAGE:[^\]]*\]$/;
 const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
 
