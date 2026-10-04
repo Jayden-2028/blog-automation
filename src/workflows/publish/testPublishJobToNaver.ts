@@ -142,6 +142,7 @@ async function main(): Promise<void> {
   // 4) 이미지는 Blogspot과 같은 것(job.metadata.images)을 쓰고, 남은 마커는 지운다.
   {
     let html = "";
+    let images: ReadonlyArray<{ url: string; marker?: string }> = [];
     const out = await publishJobToNaver("job-1", {
       ...baseDeps,
       loadJob: async () =>
@@ -157,11 +158,16 @@ async function main(): Promise<void> {
       ],
       publish: async (input) => {
         html = input.bodyHtml;
+        images = input.images;
         return okPublish();
       },
     });
     assert(out.ok, `발행이 성공해야 한다 (${JSON.stringify(out)})`);
-    assert(html.includes("https://img/1.png"), "확정된 이미지가 본문에 들어가야 한다");
+    // 2026-10-04(daa2c19)부터 본문에는 자리 표식(⟦IMG-n⟧)만 붙여넣고, 파일은 에디터에 직접 업로드한다.
+    // 외부 URL <img>를 본문에 넣지 않는다(핫링크 방지) - 그래서 URL은 images에, 표식은 본문에 있어야 한다.
+    assert(images.length === 1 && images[0].url === "https://img/1.png", "확정된 이미지가 images로 넘어가야 한다");
+    assert(!!images[0].marker && html.includes(images[0].marker), "본문에 그 이미지의 자리 표식(⟦IMG-n⟧)이 있어야 한다");
+    assert(!html.includes("https://img/1.png"), "외부 URL <img>가 본문에 남으면 안 된다(핫링크)");
     assert(!html.includes("웹 검색"), "못 채운 마커가 독자에게 보이면 안 된다");
     assert(!html.includes("[IMAGE:"), "마커 텍스트가 남으면 안 된다");
     console.log("✅ 이미지 - 확정분 삽입 + 남은 마커 제거");
