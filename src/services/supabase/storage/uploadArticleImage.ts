@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 
+import { optimizeImage } from "../../images/optimizeImage.js";
 import { supabase } from "../client.js";
 
 export const ARTICLE_IMAGES_BUCKET = "article-images";
@@ -19,6 +20,13 @@ export type UploadArticleImageInput = {
   variant?: string;
   imageBuffer: Buffer;
   mimeType: string;
+  /**
+   * 올리기 전에 WebP로 바꾸고 긴 변을 줄인다(2026-10-04, 저장소 용량 절감). **기본은 끈다** -
+   * 글자가 읽혀야 하는 캡처·표는 변환하면 뭉개질 수 있어 호출하는 쪽이 골라서 켠다.
+   * 객체를 주면 화질(`quality`, 0~1)·최대 변(`maxSide`)을 정한다. 변환은 best-effort라
+   * 실패하거나 더 커지면 원본으로 올린다.
+   */
+  optimize?: boolean | { quality?: number; maxSide?: number };
 };
 
 export type UploadArticleImageResult = { ok: true; url: string; path: string } | { ok: false; error: string };
@@ -43,12 +51,27 @@ function versionOf(buffer: Buffer): string {
 }
 
 export async function uploadArticleImage(input: UploadArticleImageInput): Promise<UploadArticleImageResult> {
+  let imageBuffer = input.imageBuffer;
+  let mimeType = input.mimeType;
+  if (input.optimize) {
+    const options = typeof input.optimize === "object" ? input.optimize : {};
+    const optimized = await optimizeImage({ buffer: imageBuffer, mimeType, ...options });
+    if (optimized.optimized) {
+      console.log(
+        `ℹ️ [images] ${input.jobId.slice(0, 8)}/${input.index} WebP 변환 ` +
+          `${Math.round(optimized.originalBytes / 1024)}KB → ${Math.round(optimized.buffer.length / 1024)}KB`
+      );
+      imageBuffer = optimized.buffer;
+      mimeType = optimized.mimeType;
+    }
+  }
+
   const name = input.variant ? `${input.index}-${input.variant}` : String(input.index);
-  const path = `${input.jobId}/${name}.${extensionFor(input.mimeType)}`;
+  const path = `${input.jobId}/${name}.${extensionFor(mimeType)}`;
 
   const { error: uploadError } = await supabase.storage
     .from(ARTICLE_IMAGES_BUCKET)
-    .upload(path, input.imageBuffer, { contentType: input.mimeType, upsert: true });
+    .upload(path, imageBuffer, { contentType: mimeType, upsert: true });
 
   if (uploadError) {
     return { ok: false, error: uploadError.message };
@@ -61,6 +84,6 @@ export async function uploadArticleImage(input: UploadArticleImageInput): Promis
 
   // 내용 해시를 쿼리로 붙인다. Storage는 이 파라미터를 무시하고 같은 파일을 주지만,
   // 브라우저·CDN에는 **다른 주소**라서 새 이미지를 받는다.
-  const url = `${data.publicUrl}?v=${versionOf(input.imageBuffer)}`;
+  const url = `${data.publicUrl}?v=${versionOf(imageBuffer)}`;
   return { ok: true, url, path };
 }

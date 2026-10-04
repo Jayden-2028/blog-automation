@@ -192,6 +192,8 @@ export async function collectWebImagesForJob(
           variant: "web",
           imageBuffer: buffer,
           mimeType,
+          // 웹에서 받은 원본은 13MB짜리도 있었다(2026-10-04). 본문 폭에 맞게 줄여 올린다.
+          optimize: true,
         });
         return uploaded.ok ? { ok: true as const, url: uploaded.url } : { ok: false as const, error: uploaded.error };
       });

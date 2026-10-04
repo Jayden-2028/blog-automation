@@ -208,9 +208,14 @@ export async function generateManuscriptImages(
         variant,
         imageBuffer: result.imageBuffer,
         mimeType: result.mimeType,
+        // PNG 원본이 장당 1.4MB라 저장소 용량의 절반을 차지했다(2026-10-04). WebP로 바꿔 올린다.
+        // 인포그래픽은 글자가 읽혀야 하므로 화질을 높인다.
+        optimize: block.acquisition === "infographic" ? { quality: 0.9 } : true,
       });
 
-      const fileName = `${stem}${variant ? `-${variant}` : ""}.${extensionFor(result.mimeType)}`;
+      // 변환되면 저장소 경로의 확장자가 바뀐다 - 로컬 미러 파일명도 실제 올라간 형식을 따른다.
+      const uploadedExt = uploaded.ok ? uploaded.path.match(/\.(png|jpe?g|webp)$/i)?.[1]?.toLowerCase() : undefined;
+      const fileName = `${stem}${variant ? `-${variant}` : ""}.${uploadedExt ?? extensionFor(result.mimeType)}`;
 
       if (!uploaded.ok) {
         failures.push(`[이미지 ${index}/${provider}] 업로드 실패: ${uploaded.error}`);
