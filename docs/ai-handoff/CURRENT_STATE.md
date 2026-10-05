@@ -2,6 +2,22 @@
 
 기준일: 2026-10-05 (Asia/Seoul)
 
+## 2026-10-06 — 인스타 변환기 링크의 트랙 선택(엔터/사회)
+
+인스타 링크도 엔터·사회가 갈리므로 사용자가 고른다(`src/workflows/instagram-capture/instagramTrack.ts`). 방법 둘: ① 링크와 같은 메시지에
+"사회"/"엔터"(네이버·티스토리·연예·시사도 인식)를 붙이면 바로 그 트랙 ② 없으면 접수 답장이 묻고, "엔터"/"사회"로 답장(또는 단어만 전송)한다.
+답은 기존 주제 답장과 같은 길(클라우드 수신함 → 맥 큐, 상태 `needs_track`)로 붙고, 기다리는 링크가 여럿이면 맥이 링크별로 다시 묻는다.
+트랙은 `job.metadata.track`으로 들어가 이후 알림 봇·뷰어·발행 버튼이 자동으로 갈린다(엔터=메인봇·네이버, 사회=사회 봇·티스토리).
+**트랙을 고를 때까지 캡처하지 않는다.** 맥미니 `instagram-capture-poll`은 prod pull 후 적용된다.
+
+## 2026-10-06 — 사회 트랙 티스토리 자동 발행 (설계·구현 `docs/ai-handoff/TISTORY_AUTO_PUBLISH_DESIGN.md`)
+
+전제가 바뀌어(사용자: 사회 트랙은 PC에서 보므로 로그인 풀림에 바로 개입 가능) 2026-09-15에 접은 티스토리를 **실제 발행**으로 되살렸다.
+네이버 경로의 복제: 🟠 버튼(텔레그램·뷰어 `social.html`) → `job.metadata.tistoryPublish` 큐 → 맥미니 `tistory-poll`(headless, TinyMCE API + 첨부>사진 업로드).
+**로그인 풀림은 실패가 아니라 대기(deferred)** - 사회 봇으로 알리고 재로그인 후 자동 재개, 3일 지나면 다시 눌러야 한다. 19:30 로그인 사전 점검.
+뷰어에서 고친 글은 "📤 수정본 반영" 후에만 발행 버튼이 열린다(옛 글 발행 방지). 첫 운영은 **비공개**(`TISTORY_PUBLISH_VISIBILITY`).
+맥미니 반영 완료(prod pull·.env·`tistory-poll` plist). **남은 것**: `setup:tistory` 카카오 로그인(사용자)과 비공개 발행 1건 실측.
+
 ## 2026-10-05 — 개편2: 사회 이슈 트랙 분리 (브랜치 `feat/restructure-2-social-track`, 워크트리 `restructure-2/`, 설계서 §3)
 
 상세·배포 순서·남은 승인 항목은 **`docs/ai-handoff/RESTRUCTURE_2_SOCIAL_TRACK.md`**. 요약:
