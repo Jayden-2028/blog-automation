@@ -8,6 +8,7 @@
 //   - `참고 자료` 링크아웃은 **남긴다**(티스토리는 바깥 링크가 문제 없다. 네이버만 뺀다).
 //   - Blogspot 내부 링크 "함께 보면 좋은 글"은 **뺀다**(다른 블로그로 가는 링크).
 //   - 이미지는 Blogspot·네이버와 **같은 것**(job.metadata.images)을 쓰고, 본문에는 표식만 두고 발행기가 업로드한다.
+//   - 본문 맨 아래 **해시태그 줄은 뺀다**(2026-10-06 사용자 결정, 엔터·네이버는 유지). 태그는 그 줄에서 뽑아 태그 입력으로만 넣는다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
@@ -101,7 +102,10 @@ export async function publishJobToTistory(
   const article = picked.final;
 
   const confirmedImages = readJobManuscriptImages(job);
-  const bodyWithImages = substituteConfirmedImages(removeRelatedPosts(article.content ?? ""), confirmedImages);
+  const content = article.content ?? "";
+  // 태그는 해시태그 줄을 떼기 **전** 본문에서 뽑는다(아래 tags) - 본문에서는 그 줄을 지운다.
+  const bodyWithoutHashtags = splitTrailingHashtags(content).body;
+  const bodyWithImages = substituteConfirmedImages(removeRelatedPosts(bodyWithoutHashtags), confirmedImages);
   const { html: bodyHtml, images } = convertArticleToTistoryHtml(manuscriptBodyWithoutImages(bodyWithImages));
   const imageInputs: TistoryPublishImageInput[] = images.map((image) => ({ url: image.url, alt: image.alt, marker: image.marker }));
 
@@ -111,7 +115,7 @@ export async function publishJobToTistory(
       title: article.title ?? job.keyword,
       bodyHtml,
       images: imageInputs,
-      tags: tistoryTagsFor(job, article.content ?? ""),
+      tags: tistoryTagsFor(job, content),
       categoryName: tistoryCategoryName(job.category),
     },
     visibility

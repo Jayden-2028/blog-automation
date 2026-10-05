@@ -67,6 +67,7 @@ async function main(): Promise<void> {
     assert(!input.bodyHtml.includes("함께 보면 좋은 글") && !input.bodyHtml.includes("blogspot"), "Blogspot 내부 링크는 뺀다");
     assert(input.bodyHtml.includes("<strong>"), "굵게는 strong");
     assert(JSON.stringify(input.tags) === JSON.stringify(["사회", "이슈"]), `태그는 본문 끝 해시태그 (${JSON.stringify(input.tags)})`);
+    assert(!input.bodyHtml.includes("#사회") && !input.bodyHtml.includes("#이슈"), "본문에는 해시태그 줄이 없어야 한다(2026-10-06)");
     assert(input.categoryName === "일상 생활 정보", `living -> 일상 생활 정보 (${input.categoryName})`);
     console.log("✅ 기본 비공개 + 표식 이미지 + 참고자료 유지/내부링크 제거 + 태그·카테고리");
   }
