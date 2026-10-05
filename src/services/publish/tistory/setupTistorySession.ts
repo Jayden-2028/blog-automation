@@ -13,7 +13,9 @@
 // 안전: DB/Telegram 쓰기 없음. 이 스크립트는 어떤 버튼도 자동으로 누르지 않는다. 스냅샷은
 // .local/dom-snapshots/tistory/(gitignore)에만 남는다.
 //
-// 실행: npm run setup:tistory   (맥미니에서 돌리면 그 프로필에 세션이 남아 폴러가 쓴다)
+// 실행: npm run setup:tistory                (실측 포함)
+//       npm run setup:tistory -- --login-only  (운영 재로그인: 로그인만 하고 자동 종료)
+// 맥미니에서 돌리면 그 프로필에 세션이 남아 폴러가 쓴다. 카카오 "로그인 상태 유지"를 켜야 세션이 오래 간다.
 import "dotenv/config";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium, type Page } from "playwright";
@@ -148,6 +150,13 @@ async function main(): Promise<void> {
     console.log(`\n▶ 현재 화면: ${page.url()}`);
     await saveSnapshot(page, "write-screen");
 
+    if (process.argv.includes("--login-only")) {
+      // 운영 재로그인 전용(실측 스냅샷 불필요). 로그인만 확인하고 바로 닫는다.
+      console.log("\n▶ --login-only: 실측 없이 로그인 세션만 저장합니다. 5초 뒤 브라우저를 닫습니다.");
+      await page.waitForTimeout(5_000);
+      return;
+    }
+
     const before = new Set(await visibleControlTexts(page));
     console.log("\n▶ 이제 브라우저에서 에디터 오른쪽 위 **[완료]** 버튼을 눌러 발행 설정 레이어를 열어주세요.");
     console.log("   ⚠️ 레이어 안의 발행/저장 버튼은 누르지 마세요. 열기만 하면 자동으로 스냅샷을 남깁니다 (10분 대기).");
@@ -162,10 +171,15 @@ async function main(): Promise<void> {
     await page.waitForTimeout(1500);
     await saveSnapshot(page, opened ? "publish-layer" : "timeout");
 
-    console.log("\n▶ 완료. 레이어는 닫고(취소) 창을 닫아도 됩니다. 종료는 Ctrl+C (세션은 프로필에 남습니다).");
-    await new Promise(() => {});
+    // 스스로 닫는다(2026-10-06). 전에는 Ctrl+C를 기다렸는데, 화면 공유에서는 Ctrl+C가 안 먹어 프로세스를 강제 종료했고
+    // 그러면 브라우저가 정상 종료되지 않아 **로그인 쿠키가 프로필에 저장되지 않았다**(맥미니 실측). 세션은 context.close()로
+    // 깔끔하게 닫혀야 다음 실행(폴러)이 이어받는다.
+    console.log("\n▶ 완료. 레이어를 취소로 닫고 10초 뒤 브라우저를 자동으로 닫습니다 (세션은 프로필에 저장됩니다).");
+    await page.waitForTimeout(10_000);
+    await page.keyboard.press("Escape").catch(() => {});
   } finally {
     await context.close().catch(() => {});
+    console.log("✅ 브라우저를 닫았습니다. 로그인 세션 저장 완료 - 폴러가 이 세션으로 발행합니다.");
   }
 }
 
