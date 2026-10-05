@@ -24,7 +24,7 @@ export async function sendKeywordNotification(
   const topN = options.topN ?? 10;
   const dryRun = options.dryRun ?? false;
 
-  const fetched = await fetchTopKeywordsForNotification(topN, options.runId);
+  const fetched = await fetchTopKeywordsForNotification(topN, options.runId, options.excludeItem);
   if (!fetched) {
     return { sent: false, reason: "no_data", payload: null, messages: [] };
   }

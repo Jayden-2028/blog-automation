@@ -1,6 +1,6 @@
 // 사회 데일리 리포트 섹션 분류 + 경제/정책 어휘 보강 + 섹션 모드 알림 포맷 테스트.
 import { classifyKeywordCategory } from "./keywordCategoryRules.js";
-import { classifySocialSection, formatSocialReportHeader, SOCIAL_REPORT_SECTION_CONFIG } from "./socialReportSections.js";
+import { classifySocialSection, formatSocialReportHeader, isEntertainmentLeak, SOCIAL_REPORT_SECTION_CONFIG } from "./socialReportSections.js";
 import { formatNotificationMessage } from "../workflows/keyword-notification/formatNotificationMessage.js";
 import type { KeywordNotificationPayload, NotificationKeywordItem } from "../types/keywordNotification.js";
 
@@ -62,5 +62,18 @@ assert(
 const flat = formatNotificationMessage(payload, {});
 assert(flat.length === 1 + payload.items.length && flat.slice(1).every((c) => c.ranks.length === 1), "sections 생략 시 기존 포맷 그대로");
 console.log("✅ 섹션 모드 포맷 - 제목은 버튼 없음, 빈 섹션 생략, 순서 고정, 생략 시 기존 동작");
+
+// 4) 엔터 제외: 2026-10-05 실제 리포트에 섞였던 4건은 걸러지고, 사회 이슈·연예인 얽힌 사건은 남는다
+const leak = (keyword: string, headline: string | null, category: string | null = "living") =>
+  isEntertainmentLeak({ keyword, headline, category });
+assert(leak("트롯 키친", "'트롯 키친' 김용빈·안성훈, 특별한 무대로 디너쇼 마무리"), "트롯 키친");
+assert(leak("암살자들", "유해진 자택 앞 시위 논란 영화 암살자들 흥행 뒤에 숨은 서늘한 풍경", "community"), "암살자들(영화)");
+assert(leak("이수영 아들", "이수영 아들 급성 백혈병 | 라디오 중단 이유"), "이수영 아들(가수·라디오)");
+assert(leak("안판석 감독 유작", "\"감독님 그리워\"…배우 김소현, 故 안판석 감독 유작 '연애박사'에 전한..."), "안판석 감독 유작");
+assert(!leak("금융감독원 보이스피싱 대책", "금융감독원 발표"), "금융감독원은 엔터가 아니다");
+assert(!leak("배우자 출산휴가 확대", null), "배우자는 배우가 아니다");
+assert(!leak("방송통신위원회 과징금", "방통위 제재"), "방송통신위원회는 엔터가 아니다");
+assert(!leak("가수 음주운전 적발", "가수 음주운전", "incident"), "연예인이 얽힌 사건(incident)은 사회 이슈로 남긴다");
+console.log("✅ isEntertainmentLeak - 실제 섞였던 4건 제외, 사회 뉴스·사건은 유지");
 
 console.log("\n✅ testSocialReportSections 전체 통과");

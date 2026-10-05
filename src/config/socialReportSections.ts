@@ -36,6 +36,28 @@ export function classifySocialSection(
   return "life";
 }
 
+/**
+ * 사회 리포트에 섞여 들어온 **엔터 키워드** 판정(2026-10-05 사용자 요청: 트롯 키친·암살자들·이수영 아들·안판석
+ * 감독 유작). category는 키워드 어휘만으로 정해져서 사람 이름·프로그램명뿐인 키워드("암살자들")는 엔터로
+ * 못 잡고 living/community로 떨어진다. 그래서 **제목(headline)까지** 보고 엔터 어휘로 거른다.
+ *
+ * 사건사고(incident)는 거르지 않는다 - 연예인이 얽힌 실제 사건(음주운전·폭행)은 사회 이슈이고, 엔터 알림은
+ * incident를 받지 않는다. 짧고 흔한 말("방송", "출연", "감독")은 일부러 뺐다: 금융감독원·방송통신위원회 같은
+ * 사회 뉴스를 잘못 지운다. "배우"는 "배우자"와 구분한다.
+ */
+const ENTERTAINMENT_TERMS: readonly string[] = [
+  "영화", "드라마", "예능", "가수", "아이돌", "트롯", "트로트", "디너쇼", "콘서트", "팬미팅", "뮤지컬",
+  "라디오", "시청률", "박스오피스", "개그맨", "코미디언", "연예인", "연예계", "소속사", "앨범", "컴백",
+  "유작", "넷플릭스", "티빙", "웨이브", "쿠팡플레이", "예고편", "출연진", "개봉", "OST", "팬덤",
+];
+const ENTERTAINMENT_PATTERNS: readonly RegExp[] = [/배우(?!자)/, /영화감독|드라마 ?감독|감독님/];
+
+export function isEntertainmentLeak(item: Pick<NotificationKeywordItem, "keyword" | "headline" | "category">): boolean {
+  if (item.category === "incident") return false;
+  const text = `${item.keyword} ${item.headline ?? ""}`;
+  return ENTERTAINMENT_TERMS.some((term) => text.includes(term)) || ENTERTAINMENT_PATTERNS.some((re) => re.test(text));
+}
+
 export const SOCIAL_REPORT_SECTION_CONFIG: KeywordSectionConfig = {
   sectionOf: (item, context) => classifySocialSection(item, context),
   sections: SOCIAL_SECTIONS,

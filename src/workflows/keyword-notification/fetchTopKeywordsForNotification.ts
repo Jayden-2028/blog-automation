@@ -18,7 +18,9 @@ export type FetchTopKeywordsResult = {
 
 export async function fetchTopKeywordsForNotification(
   topN = 10,
-  runId?: number
+  runId?: number,
+  /** true를 돌려주는 항목은 알림에서 뺀다. 빼고 나서 topN을 채우므로 저장된 순위가 topN보다 많아야 대체가 올라온다. */
+  exclude?: (item: NotificationKeywordItem) => boolean
 ): Promise<FetchTopKeywordsResult> {
   const run = runId !== undefined ? await getDiscoveryRunById(runId) : await getLatestCompletedDiscoveryRun();
   if (!run) return null;
@@ -26,7 +28,7 @@ export async function fetchTopKeywordsForNotification(
   const rankings = await listKeywordRankingsByRunId(run.id);
   if (rankings.length === 0) return null;
 
-  const items = rankings.slice(0, topN).map((row) => ({
+  const allItems = rankings.map((row) => ({
     rank: row.rank,
     keyword: row.keyword,
     headline: row.headline,
@@ -38,6 +40,8 @@ export async function fetchTopKeywordsForNotification(
     // sendKeywordNotification이 generateKeywordSummaries로 채운다(이 함수는 순수 DB 조회만 한다).
     summary: null,
   }));
+  const items = (exclude ? allItems.filter((item) => !exclude(item)) : allItems).slice(0, topN);
+  if (items.length === 0) return null;
 
   const categories = Array.from(
     new Set(items.map((item) => item.category).filter((category): category is string => Boolean(category)))

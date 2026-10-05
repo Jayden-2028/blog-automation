@@ -12,7 +12,7 @@
 // 개편1에서 엔터가 자체 수집으로 독립해 그 의존은 사라졌다.)
 import "dotenv/config";
 
-import { formatSocialReportHeader, SOCIAL_REPORT_SECTION_CONFIG } from "../config/socialReportSections.js";
+import { formatSocialReportHeader, isEntertainmentLeak, SOCIAL_REPORT_SECTION_CONFIG } from "../config/socialReportSections.js";
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
 import type { SchedulerJob } from "../scheduler/Scheduler.js";
@@ -35,11 +35,15 @@ const job: SchedulerJob = {
       communityOptions: { enabled: false },
       // community category = 인터넷 화제·논쟁(keywordCategoryRules). 사회 계열 커뮤니티 키워드가 여기 속한다.
       includeCategories: ["incident", "living", "community"],
+      // 엔터를 뺀 뒤에도 10건이 되도록 20위까지 저장해 둔다(알림에서 isEntertainmentLeak로 거른다).
+      rankOptions: { topN: 20 },
       metadata: { kind: "social_issue", track: "social" },
       notifyOptions: {
         track: "social",
         headerTitle: formatSocialReportHeader(),
         sections: SOCIAL_REPORT_SECTION_CONFIG,
+        excludeItem: isEntertainmentLeak,
+        topN: 10,
       },
     });
 

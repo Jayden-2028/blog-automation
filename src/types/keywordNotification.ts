@@ -56,6 +56,8 @@ export type SendKeywordNotificationOptions = {
   track?: Track;
   /** 섹션별로 묶어 보낼 때만. */
   sections?: KeywordSectionConfig;
+  /** true를 돌려주는 항목은 알림에서 뺀다(사회 리포트의 엔터 제외). 저장된 순위가 topN보다 많아야 대체가 올라온다. */
+  excludeItem?: (item: NotificationKeywordItem) => boolean;
   /** true면 Telegram으로 실제 발송하지 않고 메시지 내용만 만들어서 반환한다. 기본 false. */
   dryRun?: boolean;
   /** Top N. 기본 10. */
