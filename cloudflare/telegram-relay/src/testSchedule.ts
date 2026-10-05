@@ -13,6 +13,7 @@ assert(resolveScheduled(KEYWORD_CRON, at(12))?.length === 0, "12 UTC 할 일 없
 assert(resolveScheduled(KEYWORD_CRON, at(5)) === null, "등록 안 된 시각은 null");
 assert(JSON.stringify(wf("30 0 * * *", 0)) === '["analytics-search.yml"]', "analytics-search");
 assert(JSON.stringify(wf("0 1 * * 1", 1)) === '["analytics-index-health.yml"]', "index-health");
+assert(JSON.stringify(wf("0 18 * * 6", 18)) === '["storage-cleanup.yml"]', "storage-cleanup(주 1회, 개편2.5 D)");
 assert(resolveScheduled("0 9 * * *", at(9)) === null, "옛 cron 문자열은 알 수 없음");
 
 // wrangler.toml과 어긋나지 않는지(문자열 불일치가 가장 흔한 사고다)
@@ -20,5 +21,8 @@ const toml = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
 const crons = /crons\s*=\s*\[(.*?)\]/s.exec(toml)?.[1].match(/"([^"]+)"/g)?.map((x) => x.slice(1, -1)) ?? [];
 assert(crons.length <= 5, `cron은 5개 이하(현재 ${crons.length})`);
 assert(crons.includes(KEYWORD_CRON), "wrangler.toml에 KEYWORD_CRON 있음");
-for (const c of crons) assert(resolveScheduled(c, c === KEYWORD_CRON ? at(0) : c === "0 1 * * 1" ? at(1) : at(0)) !== null, `toml cron이 코드에 매핑됨: ${c}`);
+assert(crons.includes("0 18 * * 6"), "wrangler.toml에 storage-cleanup cron 있음");
+// 워크플로 파일이 실제로 있어야 dispatch가 404가 아니다.
+for (const file of ["storage-cleanup.yml"]) readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), "utf8");
+for (const c of crons) assert(resolveScheduled(c, c === KEYWORD_CRON ? at(0) : c === "0 1 * * 1" ? at(1) : c === "0 18 * * 6" ? at(18) : at(0)) !== null, `toml cron이 코드에 매핑됨: ${c}`);
 console.log(`✅ testSchedule 통과 (cron ${crons.length}개)`);

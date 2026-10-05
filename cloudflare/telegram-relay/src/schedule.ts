@@ -28,6 +28,8 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
 const SINGLE_CRONS: Record<string, ScheduledDispatch[]> = {
   "30 0 * * *": [{ workflow: "analytics-search.yml" }], // 09:30 KST - Search Console 일일 성과
   "0 1 * * 1": [{ workflow: "analytics-index-health.yml" }], // 월요일 10:00 KST - 색인 건강 점검
+  // 일요일 03:00 KST(토 18:00 UTC) - Storage 정리(개편2.5 D). 기본 dry-run이고 실삭제는 워크플로의 apply 게이트가 정한다.
+  "0 18 * * 6": [{ workflow: "storage-cleanup.yml" }],
 };
 
 /** 알 수 없는 cron이면 null(호출자가 던진다). 알지만 할 일이 없으면 빈 배열. */

@@ -1,0 +1,57 @@
+# Supabase Storage(article-images) 정리 주 1회(2026-10-06, 개편2.5 D).
+#
+# 왜: Storage가 1GB 중 51%(511MB)이고 10월 페이스가 하루 ~28MB라 2~3주 안에 한도에 닿는다. 발행이 끝나 14일이 지난
+# 원고의 이미지 원본은 맥 보관함 미러(manuscript-export)에 있으니 Storage에서 지운다. 규칙·안전장치는
+# src/workflows/storage/planStorageCleanup.ts(Blogspot 게시 원고는 이미지를 Storage URL로 직접 참조하므로 보존).
+#
+# **기본은 dry-run**이다(목록·용량만 산출해 텔레그램으로 보고). 실삭제는 아래 둘 중 하나일 때만:
+#   · 수동 실행의 apply 입력 = true
+#   · repo 변수 STORAGE_CLEANUP_APPLY = true (주간 cron도 지우게 된다 - 사용자 승인 뒤에 켠다)
+#
+# 발화는 Cloudflare Worker 크론(일요일 03:00 KST). 같은 상태를 두 번 처리해도 안전하다(이미 지운 객체는 목록에 없다).
+
+name: storage-cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "true면 실제로 삭제한다(기본 false = dry-run)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run storage:cleanup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          APPLY_INPUT: ${{ github.event.inputs.apply }}
+          APPLY_VAR: ${{ vars.STORAGE_CLEANUP_APPLY }}
+        run: |
+          if [ "$APPLY_INPUT" = "true" ] || [ "$APPLY_VAR" = "true" ]; then
+            npm run storage:cleanup -- --apply --notify
+          else
+            npm run storage:cleanup -- --notify
+          fi
