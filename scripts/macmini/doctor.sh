@@ -43,8 +43,22 @@ grep -qE '^CLAUDE_MODEL=.+' .env 2>/dev/null && pass "CLAUDE_MODEL 고정됨" ||
 N="$(grep -E '^NAVER_PUBLISH_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
 N="${N:-.local/naver-publish-profile}"; N="${N/#\~/$HOME}"
  [ -d "$N" ] && pass "네이버 세션 프로필 폴더 ($N)" || soft "네이버 세션 없음 -> npm run setup:naver-publish 로 로그인"
-T="${TISTORY_PROFILE_DIR:-.local/tistory-publish-profile}"; T="${T/#\~/$HOME}"
+T="$(grep -E '^TISTORY_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"
+T="${T:-.local/tistory-publish-profile}"; T="${T/#\~/$HOME}"
  [ -d "$T" ] && pass "티스토리 세션 프로필 폴더 ($T)" || soft "티스토리 세션 없음 -> npm run setup:tistory 로 로그인"
+# 개편2.5(C-3): 사회 트랙·티스토리·인스타 inbox 모드 설정. 값은 .env에서 읽고 출력하지 않는다(채워졌는지·꺼졌는지만 본다).
+if [ -f .env ]; then
+  for k in SOCIAL_TELEGRAM_BOT_TOKEN SOCIAL_TELEGRAM_CHAT_ID; do
+    grep -qE "^$k=.+" .env && pass "$k" || soft "$k 없음 -> 사회 트랙 알림이 안 간다"
+  done
+  grep -qE "^TISTORY_ENABLED=(true|1)" .env && pass "TISTORY_ENABLED=true" || soft "TISTORY_ENABLED가 켜져 있지 않음 -> 티스토리 폴러가 요청을 대기열에 둔 채 건너뛴다"
+  # IG_INBOX_MODE: 비어 있거나 true면 inbox(웹훅) 모드. false면 맥이 getUpdates로 받아 웹훅 봇에서 409로 멈춘다.
+  if grep -qE "^IG_INBOX_MODE=(false|0)\s*$" .env; then
+    fail "IG_INBOX_MODE=false -> 인스타 봇이 웹훅이면 getUpdates 409로 멈춘다(비우거나 true로)"
+  else
+    pass "IG_INBOX_MODE (inbox/웹훅 모드)"
+  fi
+fi
 # Creator Advisor는 클라우드에서 못 도는 유일한 수집 소스라 이 맥에만 있다. 프로필이 없으면
 # 매일 07:30 수집이 조용히 빈손으로 끝나고, 08:00 클라우드 job은 그 사실을 모른 채 진행한다.
 C="$(grep -E '^CREATOR_ADVISOR_PROFILE_DIR=' .env 2>/dev/null | tail -1 | cut -d= -f2- | tr -d "\"'")"

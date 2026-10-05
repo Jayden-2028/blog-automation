@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 로컬 launchd 5종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status]
-#   naver-poll(60초)  instagram-capture-poll(60초)  export-poll(60초)  manuscript-export(30분)
+# 로컬 launchd 6종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status]
+#   naver-poll(60초)  tistory-poll(60초)  instagram-capture-poll(60초)  export-poll(60초)  manuscript-export(30분)
 #   creator-advisor(매일 08:30, 17:30)
 # ⚠️ 옛 맥의 같은 job을 먼저 내려야 한다 - 둘이 동시에 돌면 네이버에 같은 글이 두 번 올라갈 수 있다.
 set -euo pipefail

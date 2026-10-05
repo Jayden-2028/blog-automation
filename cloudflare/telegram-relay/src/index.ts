@@ -195,8 +195,11 @@ export default {
     const isReplyMessage = Boolean(message) && typeof message === "object" && "reply_to_message" in (message as object);
 
     // 인스타 봇은 링크가 일반 메시지로 오므로 글자가 있는 메시지는 전부 넘긴다(2026-10-06). 다른 봇은 그대로다.
+    // 사진·영상에 캡션으로 붙어 온 링크도 받는다(`caption`, 2026-10-06 개편2.5 C-1) - text만 보면 유실된다.
     const isTextMessage =
-      Boolean(message) && typeof message === "object" && typeof (message as { text?: unknown }).text === "string";
+      Boolean(message) &&
+      typeof message === "object" &&
+      (typeof (message as { text?: unknown }).text === "string" || typeof (message as { caption?: unknown }).caption === "string");
     if (!isCallbackQuery && !isReplyMessage && !(forwardsPlainMessages(track) && isTextMessage)) {
       return new Response("OK", { status: 200 });
     }
