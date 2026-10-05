@@ -51,7 +51,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { chromium, type Page } from "playwright";
+import { chromium, type Locator, type Page } from "playwright";
 
 import { NAVER_DEFAULT_CATEGORY_NO } from "../../config/naverCategoryMapping.js";
 import { NAVER_PUBLISH_CONFIG } from "../../config/naverPublish.js";
@@ -172,8 +172,12 @@ const SELECTORS = {
   // 이미지 컴포넌트와 그 캡션 칸("사진 설명을 입력하세요."). SmartEditor ONE 구조 기준이며
   // 실측 전이다 - 어긋나면 writeCaption이 경고로 알리고 발행은 계속된다.
   imageComponent: ".se-component.se-image",
-  imageCaption: ".se-caption",
-  imageCaptionParagraph: ".se-caption .se-text-paragraph",
+  imageCaptionCandidates: [
+    ".se-caption .se-text-paragraph",
+    ".se-caption",
+    '[class*="caption"] .se-text-paragraph',
+    '[class*="caption"]',
+  ],
   // SPRINT_4_DESIGN.md §12 - 임시저장된 초안이 있는 상태로 글쓰기 화면에 들어가면(또는 이 파일이
   // 실행한 이전 세션이 저장 없이 중간에 끊겨 미저장 초안이 남으면) 이 클래스의 dim 오버레이가
   // 짧게 뜨며 클릭을 막는다. 정확한 트리거는 미확인이지만 셀렉터 자체는 §12 실측에서 확인됨.
@@ -614,18 +618,44 @@ export class NaverBlogPublisher {
   private async writeCaption(page: Page, index: number, caption: string): Promise<string | null> {
     const text = caption.replace(/\s+/g, " ").trim();
     if (!text) return null;
+    const component = page.locator(SELECTORS.imageComponent).nth(index);
     try {
-      const component = page.locator(SELECTORS.imageComponent).nth(index);
-      const paragraph = component.locator(SELECTORS.imageCaptionParagraph).first();
-      await paragraph.scrollIntoViewIfNeeded({ timeout: CLICK_TIMEOUT_MS });
-      await paragraph.click({ timeout: CLICK_TIMEOUT_MS });
+      await component.scrollIntoViewIfNeeded({ timeout: CLICK_TIMEOUT_MS });
+      // 캡션 칸은 이미지를 선택해야 나타나는 구조일 수 있다 - 먼저 이미지를 눌러 선택한다.
+      await component.locator("img").first().click({ timeout: CLICK_TIMEOUT_MS });
+      await page.waitForTimeout(500);
+
+      let target = null;
+      for (const selector of SELECTORS.imageCaptionCandidates) {
+        const candidate = component.locator(selector).first();
+        if ((await candidate.count().catch(() => 0)) > 0) {
+          target = candidate;
+          break;
+        }
+      }
+      if (!target) throw new Error("캡션 칸을 찾지 못했습니다");
+
+      await target.click({ timeout: CLICK_TIMEOUT_MS, force: true });
       await page.keyboard.insertText(text);
       await page.waitForTimeout(300);
-      const written = await component.locator(SELECTORS.imageCaption).first().innerText();
-      if (!written.includes(text.slice(0, 10))) return `이미지 캡션이 입력되지 않았습니다(${text.slice(0, 20)}).`;
+      const written = await component.innerText();
+      if (!written.includes(text.slice(0, 10))) throw new Error("입력한 캡션이 화면에 보이지 않습니다");
       return null;
     } catch (error) {
+      await this.saveComponentHtml(component, index);
       return `이미지 캡션 입력 실패: ${this.errorMessage(error).split("\n")[0]}`;
+    }
+  }
+
+  /** 캡션 셀렉터를 실측으로 맞추기 위해, 실패한 이미지 컴포넌트의 HTML을 남긴다. */
+  private async saveComponentHtml(component: Locator, index: number): Promise<void> {
+    try {
+      mkdirSync(FAILURE_SNAPSHOT_DIR, { recursive: true });
+      const html = await component.evaluate((el) => el.outerHTML);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      writeFileSync(`${FAILURE_SNAPSHOT_DIR}/${timestamp}_caption-component-${index}.html`, html, "utf-8");
+    } catch {
+      // 진단 저장 실패는 무시한다.
     }
   }
 
