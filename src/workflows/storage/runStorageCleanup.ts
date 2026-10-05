@@ -30,7 +30,7 @@ const PAGE = 1000;
 const IN_CHUNK = 200;
 const REMOVE_CHUNK = 100;
 
-async function loadJobPublicationsFromDb(): Promise<JobPublications[]> {
+export async function loadJobPublicationsFromDb(): Promise<JobPublications[]> {
   const publications: { article_id: number; platform: string | null; status: string; published_at: string | null; created_at: string }[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
@@ -62,7 +62,7 @@ async function loadJobPublicationsFromDb(): Promise<JobPublications[]> {
   return [...byJob].map(([jobId, list]) => ({ jobId, publications: list }));
 }
 
-async function listObjectsFromStorage(jobId: string): Promise<StorageObject[]> {
+export async function listObjectsFromStorage(jobId: string): Promise<StorageObject[]> {
   const objects: StorageObject[] = [];
   for (let offset = 0; ; offset += PAGE) {
     const { data, error } = await supabase.storage.from(ARTICLE_IMAGES_BUCKET).list(jobId, { limit: PAGE, offset });
