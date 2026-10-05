@@ -136,7 +136,8 @@ main().catch((error) => {
   if (rows[0]?.[0]?.url !== `https://pages.example.dev/social.html#${JOB}`) {
     throw new Error(`❌ 원고 페이지 링크는 social.html 딥링크여야 한다 (${rows[0]?.[0]?.url})`);
   }
-  if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 수동 발행 안내가 있어야 한다");
+  if (!all.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼이 있어야 한다");
+  if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 발행 안내가 있어야 한다");
   if (msg.text.includes("🟢 네이버")) throw new Error("❌ 사회 알림에 네이버 표기가 있으면 안 된다");
 
   // 엔터 job은 그대로다(트랙 값이 없으면 엔터).
@@ -147,5 +148,5 @@ main().catch((error) => {
   if (ent.replyMarkup?.inline_keyboard[0][0].url !== `https://pages.example.dev/#${JOB}`) {
     throw new Error("❌ 엔터 딥링크는 기존 루트 그대로여야 한다");
   }
-  console.log("✅ 사회 트랙 - 발행 버튼 없음, social.html 딥링크, 티스토리 수동 발행 안내 (엔터는 불변)");
+  console.log("✅ 사회 트랙 - 네이버·블로그 버튼 없음, 티스토리 버튼, social.html 딥링크 (엔터는 불변)");
 }

@@ -19,11 +19,12 @@ import { buildPublishDecisionCallbackData } from "../../notifications/publishDec
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
 /** 사회 트랙의 수동 발행 안내. 발행 버튼이 없으니 "그다음에 무엇을 하는지"를 문구가 대신 말해야 한다. */
-const SOCIAL_MANUAL_PUBLISH_GUIDE = "티스토리에 수동 발행하세요. 원고 페이지에서 제목·본문을 복사하고 이미지는 저장해 올립니다.";
+const SOCIAL_MANUAL_PUBLISH_GUIDE =
+  "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '📤 수정본 반영'을 누르세요.";
 
 /**
- * 사회 이슈 트랙(2026-10-05 §3.3): **자동 발행이 없다.** 네이버·Blogger 버튼 없이 원고 페이지 링크,
- * 이미지 수정, 맥으로 내려받기만 붙이고 티스토리 수동 발행을 안내한다.
+ * 사회 이슈 트랙(2026-10-05 §3.3 → 2026-10-06 TISTORY_AUTO_PUBLISH_DESIGN.md): 네이버·Blogger 버튼 없이
+ * **티스토리 발행** 버튼만 붙는다. 티스토리도 로그인된 브라우저가 필요해 맥미니 폴러가 처리한다.
  */
 function buildSocialReadyMessage(
   result: JobManuscriptsResult,
@@ -54,6 +55,7 @@ function buildSocialReadyMessage(
         { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
         { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
       ],
+      [{ text: "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }],
     ];
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.

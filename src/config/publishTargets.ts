@@ -4,8 +4,9 @@
 // 채널별 enabled 기준: "사람의 사전 준비 없이 자동으로 돌 수 있는가".
 // - blogspot: Blogger API v3. refresh token이 있어야 동작(setup:blogger 1회).
 //
-// 2026-09-15 티스토리 운영 중단(BLOGSPOT_ONLY_DESIGN.md) - TISTORY_CONFIG와 카테고리 매핑표를
-// 걷어냈다. .env의 TISTORY_* 값은 이제 아무도 읽지 않는다.
+// 2026-09-15 티스토리 운영 중단(BLOGSPOT_ONLY_DESIGN.md)으로 걷어냈던 TISTORY_CONFIG를
+// 2026-10-06 사회 이슈 트랙 자동 발행(TISTORY_AUTO_PUBLISH_DESIGN.md)으로 되살린다. 전제가 바뀌었다 -
+// 로그인이 풀리면 사용자가 바로 개입할 수 있는 트랙이라, 로그인 풀림을 "대기"로 두고 재개한다.
 
 function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined) return defaultValue;
@@ -82,3 +83,32 @@ export const BLOGSPOT_LABEL_BY_INTERNAL: Record<string, string> = {
   living: "생활정보",
   community: "이슈",
 };
+
+export type TistoryConfig = {
+  /** 마스터 게이트. false면 발행 요청은 큐에 남고 폴러가 처리하지 않는다. */
+  enabled: boolean;
+  blogUrl: string;
+  /** 티스토리(카카오) 로그인 세션을 담는 Playwright 프로필. 네이버·Creator Advisor 프로필과 분리한다. */
+  profileDir: string;
+  /** 첫 운영은 비공개로 눈으로 확인한 뒤 공개로 바꾼다(네이버와 같은 원칙). TISTORY_PUBLISH_VISIBILITY=public. */
+  visibility: "public" | "private";
+  /** 로그인 풀림으로 미뤄진 발행이 이 일수를 넘기면 자동 재개하지 않는다(2026-10-06 사용자 결정: 3일). */
+  deferredMaxDays: number;
+};
+
+export const TISTORY_CONFIG: TistoryConfig = {
+  enabled: parseBooleanEnv(process.env.TISTORY_ENABLED, false),
+  blogUrl: process.env.TISTORY_BLOG_URL || "https://wooahpapa.tistory.com/",
+  profileDir: process.env.TISTORY_PROFILE_DIR || ".local/tistory-publish-profile",
+  visibility: process.env.TISTORY_PUBLISH_VISIBILITY === "public" ? "public" : "private",
+  deferredMaxDays: parseIntEnv(process.env.TISTORY_DEFERRED_MAX_DAYS, 3),
+};
+
+/** https://wooahpapa.tistory.com/ -> wooahpapa. 주소가 이상하면 빈 문자열. */
+export function tistoryBlogName(blogUrl: string = TISTORY_CONFIG.blogUrl): string {
+  try {
+    return new URL(blogUrl).host.split(".")[0] ?? "";
+  } catch {
+    return "";
+  }
+}

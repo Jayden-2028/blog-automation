@@ -15,7 +15,9 @@ AGENTS="$HOME/Library/LaunchAgents"; UID_="$(id -u)"; PFX="com.blogautomation"
 # trend_candidates를 읽는다. 그 전에 신선한 행이 들어가 있어야 한다(collect-creator-advisor.sh 상단 주석).
 # 17:30은 18시 저녁 회차용(2026-10-01에 07:30에서 옮김), **08:30은 09시 오전 회차용**(2026-10-05 개편,
 # RESTRUCTURE-PLAN-2026-10.md §2.3). 13시 오후 회차는 08:30 값을 쓴다(TTL 24시간).
+# tistory-poll(2026-10-06, TISTORY_AUTO_PUBLISH_DESIGN.md): 사회 트랙 티스토리 발행. headless라 naver-poll과 겹쳐도 된다.
 JOBS=( "naver-poll|$REPO/scripts/macmini/poll-naver.sh|60"
+       "tistory-poll|$REPO/scripts/macmini/poll-tistory.sh|60"
        "instagram-capture-poll|$REPO/scripts/poll-instagram-capture.sh|60"
        "export-poll|$REPO/scripts/poll-manuscript-export.sh|60"
        "manuscript-export|$REPO/scripts/export-manuscripts.sh|1800"

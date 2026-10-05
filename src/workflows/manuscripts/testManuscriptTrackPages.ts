@@ -45,7 +45,9 @@ assert(socialHtml.includes("사회원고") && !socialHtml.includes("엔터원고
 assert(socialHtml.includes("티스토리에 수동 발행") && !socialHtml.includes("텔레그램 버튼으로 발행"), "사회 페이지는 수동 발행 안내");
 assert(entHtml.includes("--pen:#1B5E3A") && !entHtml.includes("#E8590C"), "엔터(네이버용) 강조색은 다크 그린");
 assert(socialHtml.includes("--pen:#1F3A68") && !socialHtml.includes("#E8590C"), "사회 강조색은 네이비");
-console.log("✅ 트랙별 페이지 분리 - 엔터/사회가 서로 섞이지 않는다");
+assert(socialHtml.includes('var TRACK = "social"') && entHtml.includes('var TRACK = "entertainment"'), "페이지 스크립트가 자기 트랙을 안다");
+assert(socialHtml.includes("/api/publish-request") && socialHtml.includes("publish-tistory"), "사회 페이지에 티스토리 발행 버튼 코드가 있어야 한다");
+console.log("✅ 트랙별 페이지 분리 - 엔터/사회가 서로 섞이지 않는다, 사회만 티스토리 발행 버튼");
 
 assert(viewerPageLink("https://p.dev", "entertainment", "j1") === "https://p.dev/#j1", "엔터 링크는 루트 그대로");
 assert(viewerPageLink("https://p.dev", "social", "j1") === "https://p.dev/social.html#j1", "사회 링크는 social.html");

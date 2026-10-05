@@ -21,7 +21,8 @@
 const PUBLISH_PREFIX = "publish";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const PUBLISH_ACTIONS = ["blogspot", "naver", "images", "export"] as const;
+//   tistory  — 티스토리 발행(2026-10-06, 사회 트랙). 네이버처럼 로그인된 브라우저가 필요해 맥미니 폴러가 집어 간다.
+export const PUBLISH_ACTIONS = ["blogspot", "naver", "tistory", "images", "export"] as const;
 export type PublishDecisionAction = (typeof PUBLISH_ACTIONS)[number];
 
 export type PublishDecisionCallback = { action: PublishDecisionAction; jobId: string };

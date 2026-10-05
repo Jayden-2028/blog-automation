@@ -316,6 +316,8 @@ export function renderManuscriptPage(
   <script>
     var DATA = JSON.parse(document.getElementById("manuscript-data").textContent);
     var TODAY = ${safeJson(todayKst)};
+    // 이 페이지의 트랙. 사회(social)만 🟠 티스토리 발행 버튼이 붙는다(TISTORY_AUTO_PUBLISH_DESIGN.md §5).
+    var TRACK = ${safeJson(track)};
     var wrap = document.getElementById("wrap");
     var toastEl = document.getElementById("toast");
 
@@ -845,6 +847,39 @@ export function renderManuscriptPage(
       });
     }
 
+    /**
+     * 🟠 티스토리 발행(사회 트랙, 2026-10-06). 텔레그램 버튼과 **같은 큐**로 간다 - 둘 다 눌러도 한 번만 올라간다.
+     * 반영 안 된 수정이 있으면 호출부가 버튼을 막는다(옛 글이 올라가는 사고 방지) - 여기서도 한 번 더 본다.
+     */
+    function submitPublish(topic, btn) {
+      var pending = Object.keys(pendingEdits(topic, loadEdits(topic.jobId) || {})).length;
+      if (pending > 0) { toast("먼저 📤 수정본 반영을 눌러주세요 (" + pending + "곳 미반영)"); return; }
+      if (loadSent(topic.jobId)) { toast("수정본 반영이 끝날 때까지 기다렸다가(1~2분) 새로고침 후 눌러주세요"); return; }
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 발행할 수 있습니다"); return; }
+      if (!window.confirm("이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 텔레그램(사회 봇)으로 결과를 알립니다. 계속할까요?")) return;
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "🟠 요청 중…";
+      function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
+      fetch("/api/publish-request", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobId: topic.jobId, channel: "tistory" }),
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (res.status === 202) {
+            btn.textContent = "🟠 발행 요청됨";
+            toast("발행을 요청했습니다 — 결과는 텔레그램으로 옵니다");
+            return;
+          }
+          fail((body && body.error) || ("발행 요청 실패(" + res.status + ")"));
+        });
+      }).catch(function () {
+        fail("발행 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+      });
+    }
+
     function render(jobId) {
       var topic = findTopic(jobId);
       if (!topic) return;
@@ -906,6 +941,11 @@ export function renderManuscriptPage(
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
       if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
+      // 사회 트랙만: 티스토리 발행. 반영 안 된 수정이 있으면 누를 수 없다 - 발행은 DB 원고(마지막 반영본)를 읽는다.
+      if (TRACK === "social") {
+        var blocked = pendingCount > 0 || !!sentAt;
+        h += '<button class="btn primary" id="publish-tistory"' + (blocked ? ' disabled title="먼저 📤 수정본 반영을 누르고 반영이 끝난 뒤 발행하세요"' : '') + '>🟠 티스토리 발행</button>';
+      }
       // 수정은 localStorage에만 남는다 - 발행 버튼은 DB 원고를 읽으므로 반영되지 않는다. 그 사실을 숨기면
       // 뷰어에서 고치고 발행 버튼을 눌렀는데 옛 글이 올라가는 사고가 난다.
       if (edits) {
@@ -1010,6 +1050,9 @@ export function renderManuscriptPage(
 
       var dlBtn = document.getElementById("dl-images");
       if (dlBtn) dlBtn.addEventListener("click", function () { downloadImages(topic, dlBtn); });
+
+      var pubBtn = document.getElementById("publish-tistory");
+      if (pubBtn) pubBtn.addEventListener("click", function () { submitPublish(topic, pubBtn); });
 
       var editing = false;
       var editBtn = document.getElementById("edit-toggle");

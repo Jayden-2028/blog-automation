@@ -1,0 +1,40 @@
+# 원고 뷰어의 발행 버튼(🟠 티스토리 발행) 요청 1건을 발행 큐에 넣는다(2026-10-06, TISTORY_AUTO_PUBLISH_DESIGN.md §5).
+# Pages Function(functions/api/publish-request.ts)이 Access 토큰을 검증한 뒤 repository_dispatch로 깨운다.
+# 여기서는 큐 등록 + 텔레그램 확인 메시지만 한다(수 초). 실제 발행은 맥미니 폴러(job:tistory-poll)가 한다.
+# 텔레그램 버튼과 같은 큐라 둘 다 눌러도 한 번만 올라간다.
+
+name: publish-request
+
+on:
+  repository_dispatch:
+    types: [publish_request]
+
+permissions:
+  contents: read
+
+jobs:
+  enqueue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run job:publish-request
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          PUBLISH_REQUEST_JSON: ${{ toJson(github.event.client_payload) }}
+        run: npm run job:publish-request

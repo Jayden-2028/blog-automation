@@ -27,6 +27,7 @@ import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } 
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
+import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.js";
 import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
 import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
@@ -173,6 +174,7 @@ export type TelegramInlineKeyboard = { text: string; callback_data: string }[][]
 const PUBLISH_RETRY_LABEL: Record<PublishDecisionAction, string> = {
   blogspot: "🔵 블로그 발행",
   naver: "🟢 네이버 발행",
+  tistory: "🟠 티스토리 발행",
   images: "🖼 이미지 수정",
   export: "⬇️ 맥으로 내려받기",
 };
@@ -247,6 +249,8 @@ export type TelegramBotOptions = {
    * GitHub Actions에서 못 돌린다. 맥의 로컬 폴러가 이 요청을 집어 간다.
    */
   requestNaverPublish?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
+  /** 티스토리 발행 **예약**(2026-10-06). 네이버와 같은 구조 - 맥미니 폴러(job:tistory-poll)가 집어 간다. */
+  requestTistoryPublish?: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   /**
    * 맥 보관함 내보내기 **요청**(2026-09-29). 네이버와 같은 이유로 여기서 끝낼 수 없다 -
    * 맥 디스크에 쓰는 일이라 맥의 폴러가 집어 간다.
@@ -327,6 +331,7 @@ export class TelegramBot {
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
   private readonly publishToBlogspot: (jobId: string) => Promise<PublishArticleToBlogspotResult>;
   private readonly requestNaverPublish: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
+  private readonly requestTistoryPublish: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   private readonly requestManuscriptExport: (job: ArticleJobRow) => Promise<{ queued: boolean; reason?: string }>;
   private readonly mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<ArticleJobRow | null>;
   private readonly findLatestArticleByJobId: (jobId: string) => Promise<ArticleRow | null>;
@@ -372,6 +377,8 @@ export class TelegramBot {
     this.publishToBlogspot =
       options.publishToBlogspot ?? ((jobId) => publishArticleToBlogspot(jobId, { asDraft: false }));
     this.requestNaverPublish = options.requestNaverPublish ?? ((job) => requestNaverPublish(job));
+    this.requestTistoryPublish =
+      options.requestTistoryPublish ?? ((job) => requestTistoryPublish(job, { source: "telegram" }));
     this.requestManuscriptExport =
       options.requestManuscriptExport ?? ((job) => requestManuscriptExport(job));
     this.mergeJobMetadata =
@@ -897,6 +904,23 @@ export class TelegramBot {
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
           queued.queued
             ? "맥이 켜져 있으면 곧 올라갑니다. 완료되면 주소를 보내드립니다."
+            : escapeTelegramHtml(queued.reason ?? ""),
+        ].join("\n"),
+      };
+    }
+
+    if (parsed.action === "tistory") {
+      // 티스토리도 공식 API가 없다 - 요청만 남기고 맥미니 폴러가 로그인된 브라우저로 올린다. 로그인이 풀려
+      // 있으면 폴러가 "대기"로 두고 알려 준다(tistoryPublishQueue.ts).
+      const queued = await this.requestTistoryPublish(job);
+      return {
+        outcome: { status: "queued", action: "tistory" },
+        message: [
+          queued.queued ? "🟠 <b>티스토리 발행을 예약했습니다</b>" : "ℹ️ <b>이미 예약돼 있습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          queued.queued
+            ? "맥미니가 켜져 있으면 곧 올라갑니다. 뷰어에서 고친 내용은 '📤 수정본 반영'을 누른 것까지만 들어갑니다. 완료되면 주소를 보내드립니다."
             : escapeTelegramHtml(queued.reason ?? ""),
         ].join("\n"),
       };
