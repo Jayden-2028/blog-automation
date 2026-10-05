@@ -38,14 +38,16 @@ async function main(): Promise<void> {
 
   // 2) 대기 중이면 덮어쓰지 않는다 / 완료 건은 다시 안 넣는다 / 실패 건은 다시 넣는다
   {
-    const counter = { merged: 0 };
-    const mergeMetadata = async () => { counter.merged += 1; return null; };
+    // 호출 횟수는 함수로 읽는다 - assert의 타입 좁힘이 closure 안의 += 를 못 봐서 리터럴 비교를 오류로 잡는다.
+    const calls: number[] = [];
+    const merged = (): number => calls.length;
+    const mergeMetadata = async () => { calls.push(1); return null; };
     const waiting = await requestTistoryPublish(job("b", { status: "requested", requestedAt: "x" }), { mergeMetadata });
-    assert(!waiting.queued && counter.merged === 0, "대기 중이면 덮어쓰지 않는다");
+    assert(!waiting.queued && merged() === 0, "대기 중이면 덮어쓰지 않는다");
     const done = await requestTistoryPublish(job("c", { status: "done", requestedAt: "" }), { mergeMetadata });
-    assert(!done.queued && counter.merged === 0, "완료 건은 다시 넣지 않는다");
+    assert(!done.queued && merged() === 0, "완료 건은 다시 넣지 않는다");
     const failed = await requestTistoryPublish(job("d", { status: "failed", requestedAt: "", error: "x" }), { mergeMetadata });
-    assert(failed.queued && counter.merged === 1, "실패 건은 다시 넣을 수 있다");
+    assert(failed.queued && merged() === 1, "실패 건은 다시 넣을 수 있다");
     console.log("✅ 중복 클릭·완료·실패 처리");
   }
 
@@ -80,9 +82,9 @@ async function main(): Promise<void> {
     assert(expired.length === 1 && expired[0].id === "expired", "만료된 보류 건만 골라낸다");
     assert(isDeferredExpired(readTistoryRequest(jobs[3])!, now, 3) && !isDeferredExpired(readTistoryRequest(jobs[2])!, now, 3), "만료 판정");
     // 만료된 건을 다시 누르면 새 요청으로 받는다
-    const c2 = { merged: 0 };
-    const re = await requestTistoryPublish(jobs[3], { mergeMetadata: async () => { c2.merged += 1; return null; }, now: () => now, deferredMaxDays: 3 });
-    assert(re.queued && c2.merged === 1, "만료된 보류 건은 다시 누르면 새 요청");
+    const reCalls: number[] = [];
+    const re = await requestTistoryPublish(jobs[3], { mergeMetadata: async () => { reCalls.push(1); return null; }, now: () => now, deferredMaxDays: 3 });
+    assert(re.queued && reCalls.length === 1, "만료된 보류 건은 다시 누르면 새 요청");
     console.log("✅ 대기열 - 순서, 3일 만료 제외, 만료 건 재요청");
   }
 

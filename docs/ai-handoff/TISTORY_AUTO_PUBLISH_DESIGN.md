@@ -9,6 +9,23 @@
 - 이미지: **처음부터 티스토리에 업로드**(핫링크 단계 없음). §4의 A안으로 바로 간다.
 - 로그인 풀림으로 미뤄진 발행: **3일 지나면 자동 재개하지 않고** 사람이 버튼을 다시 눌러야 한다.
 
+## 구현 상태 (2026-10-06)
+
+코드는 전부 main에 있다. **맥미니 반영(아래)과 비공개 발행 1건 실측만 남았다.**
+
+| 구성 | 파일 |
+|---|---|
+| 큐(requested/deferred/done/failed, 3일 만료) | `src/workflows/publish/tistoryPublishQueue.ts` |
+| 발행기(실제 발행·이미지 업로드·카테고리·태그, headless) | `src/services/publish/tistory/TistoryPublisher.ts` |
+| 오케스트레이션(최종 원고·중복 가드·publications) | `src/workflows/publish/publishJobToTistory.ts` |
+| 맥미니 폴러(로그인 대기·19:30 사전 점검·만료 알림) | `src/jobs/tistoryPublishPollJob.ts`, `scripts/macmini/poll-tistory.sh`, `install-launchd.sh`의 `tistory-poll` |
+| 텔레그램 🟠 버튼 | `publishDecisionCallbackData.ts`(`tistory`), `TelegramBot.ts`, `notifyManuscriptsReady.ts` |
+| 뷰어 🟠 버튼(사회만, 미반영 수정 있으면 잠김) | `renderManuscriptPage.ts` → `functions/api/publish-request.ts` → `publish-request.yml` → `src/jobs/publishRequestCli.ts` |
+| 실측·로그인 | `npm run setup:tistory` (`src/services/publish/tistory/setupTistorySession.ts`) |
+| 설정 | `TISTORY_*` (.env.example), `config/tistoryCategoryMapping.ts` |
+
+**맥미니 반영 순서**: ① `prod` main pull ② `.env`에 `TISTORY_ENABLED=true`, `TISTORY_PUBLISH_VISIBILITY=private` ③ 화면 공유로 `npm run setup:tistory` 실행해 카카오 로그인(창) ④ `tistory-poll` plist만 등록(install 전체 재실행 금지 - 네이버 폴러 재로드됨) ⑤ 사회 원고 1건 🟠 발행 → 비공개 글 확인 → `public` 전환.
+
 ## 0. 한 줄 요약
 
 네이버 발행 경로를 그대로 복제한다. **버튼(텔레그램·뷰어 어느 쪽이든) → `job.metadata.tistoryPublish` 큐 → 맥미니 폴러가 로그인된 브라우저로 발행.** 다른 점은 둘: ① 로그인 풀림을 "실패"가 아니라 **"대기(deferred)"** 로 두고 재로그인 후 자동 재개, ② 발행 전 로그인 상태를 **미리** 점검해 알린다.
