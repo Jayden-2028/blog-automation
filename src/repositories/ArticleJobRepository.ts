@@ -5,6 +5,8 @@
 // (TelegramBot의 callback 핸들러)가 하고, 이 repository는 주어진 값을 저장/조회/상태 전이만 한다.
 
 import { supabase } from "../services/supabase/client.js";
+import { pickJobForTrack } from "../notifications/telegramTracks.js";
+import type { Track } from "../notifications/telegramTracks.js";
 import type {
   ArticleJobInsert,
   ArticleJobRow,
@@ -29,6 +31,9 @@ export type CreateArticleJobResult = {
    */
   created: boolean;
 };
+
+/** message_id가 겹치는 job이 트랙별로 여럿일 수 있어 limit(1) 대신 몇 건을 받아 트랙으로 거른다. */
+const MESSAGE_MATCH_WINDOW = 10;
 
 export class ArticleJobRepository {
   /**
@@ -161,6 +166,10 @@ export class ArticleJobRepository {
    * 텔레그램에서 승인해도 job-publish-prepare가 13초 만에 아무 로그 없이 끝나고 원고가 뷰어에
    * 영영 안 나타났다(approved 22건 / limit 20에서 발생, 이후 승인은 전부 무음 유실).
    *
+   * **track**(2026-10-06 개편2.5): 세 봇이 같은 개인 채팅을 쓰고 message_id는 봇별로 따로 매겨져, 사회 봇 답장이 같은
+   * 번호의 엔터 job을 집을 수 있었다. track을 주면 job의 트랙(metadata.track, 없으면 엔터)과 같은 것만 매칭한다.
+   * track을 안 주면 예전처럼 트랙을 가리지 않는다(기존 호출 호환).
+   *
    * 필터를 DB로 내려 "준비 안 된 것"만 뽑으므로 승인 누적 건수와 무관하게 안전하다.
    * `metadata->>channelManuscriptsReadyAt is null`은 키가 아예 없는 경우와 JSON null 둘 다 잡는다.
    */
@@ -187,17 +196,17 @@ export class ArticleJobRepository {
    *
    * 필터를 DB로 내려 조회 창(50건) 밖으로 밀려나는 문제도 같이 없앤다 - message_id는 유일하다.
    */
-  static async findByEditRequestMessageId(messageId: number): Promise<ArticleJobRow | null> {
+  static async findByEditRequestMessageId(messageId: number, track?: Track): Promise<ArticleJobRow | null> {
     const { data, error } = await supabase
       .from("article_jobs")
       .select("*")
       .in("status", ["review", "approved"])
       .filter("metadata->>editRequestMessageId", "eq", String(messageId))
       .order("selected_at", { ascending: false })
-      .limit(1);
+      .limit(MESSAGE_MATCH_WINDOW);
 
     if (error) throw error;
-    return data?.[0] ?? null;
+    return pickJobForTrack(data ?? [], track);
   }
 
   /**
@@ -205,17 +214,17 @@ export class ArticleJobRepository {
    * findByEditRequestMessageId와 같은 방식이고 키만 다르다 - 두 요청이 동시에 떠 있어도
    * 서로를 집지 않게 별도 키를 쓴다.
    */
-  static async findByImageEditRequestMessageId(messageId: number): Promise<ArticleJobRow | null> {
+  static async findByImageEditRequestMessageId(messageId: number, track?: Track): Promise<ArticleJobRow | null> {
     const { data, error } = await supabase
       .from("article_jobs")
       .select("*")
       .in("status", ["review", "approved"])
       .filter("metadata->>imageEditRequestMessageId", "eq", String(messageId))
       .order("selected_at", { ascending: false })
-      .limit(1);
+      .limit(MESSAGE_MATCH_WINDOW);
 
     if (error) throw error;
-    return data?.[0] ?? null;
+    return pickJobForTrack(data ?? [], track);
   }
 
   /**

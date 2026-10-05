@@ -186,6 +186,7 @@
     "test:ig-capture-session": "tsx src/workflows/instagram-capture/testRunCaptureSession.ts",
     "test:ig-capture-queue": "tsx src/workflows/instagram-capture/testProcessPendingCaptures.ts",
     "test:ig-post-url": "tsx src/workflows/instagram-capture/testCanonicalPostUrl.ts",
+    "test:ig-queue-guard": "tsx src/workflows/instagram-capture/testInstagramQueueGuard.ts",
     "test:ig-track": "tsx src/workflows/instagram-capture/testInstagramTrack.ts",
     "test:ig-webhook": "tsx src/workflows/instagram-capture/testInstagramWebhookHandler.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",

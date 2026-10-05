@@ -1,5 +1,5 @@
 // 멀티봇 공통 레이어(telegramTracks.ts) 테스트. 네트워크·DB 없음 - env는 주입한다.
-import { TRACKS, DEFAULT_TRACK, TRACK_ENV_KEYS, parseTrack, resolveTrackCredentials, trackJobMetadata, trackOfJob } from "./telegramTracks.js";
+import { TRACKS, DEFAULT_TRACK, TRACK_ENV_KEYS, parseTrack, pickJobForTrack, resolveTrackCredentials, trackJobMetadata, trackOfJob } from "./telegramTracks.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -53,6 +53,19 @@ try {
 }
 assert(threwPartial, "토큰만 있고 채팅 ID가 없어도 던져야 한다");
 console.log("✅ resolveTrackCredentials - 트랙별 해석, 오배송 대신 실패");
+
+// 4-b) 답장 매칭 - message_id가 같은 job이 트랙별로 있어도 그 트랙 것만(개편2.5 A-3)
+const entJob = { id: "ent", metadata: {} };
+const legacyJob = { id: "legacy", metadata: { editRequestMessageId: 5 } };
+const socialJob = { id: "soc", metadata: { track: "social" } };
+const rows = [socialJob, entJob, legacyJob]; // 최신순
+assert(pickJobForTrack(rows, "social")?.id === "soc", "사회 봇 답장 -> 사회 job");
+assert(pickJobForTrack(rows, "entertainment")?.id === "ent", "엔터 봇 답장 -> 엔터 job(사회 job이 더 최신이어도)");
+assert(pickJobForTrack([legacyJob], "entertainment")?.id === "legacy", "track 없는 옛 레코드는 엔터로 매칭(호환)");
+assert(pickJobForTrack([entJob], "social") === null, "사회 봇이 엔터 job만 있는 번호에 답장 -> 매칭 없음");
+assert(pickJobForTrack(rows)?.id === "soc", "track을 안 주면 예전처럼 첫 job");
+assert(pickJobForTrack([], "social") === null, "빈 목록");
+console.log("✅ pickJobForTrack - 답장 매칭 트랙 분기");
 
 // 5) 모든 트랙에 env 키가 있다(트랙을 늘리고 표를 빼먹는 실수 방지)
 for (const track of TRACKS) {

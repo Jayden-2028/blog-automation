@@ -412,10 +412,10 @@ export class TelegramBot {
       options.triggerRevision ?? ((jobId, feedback) => spawnDetachedTask("job:revise", [jobId, feedback]));
     this.findJobByEditRequestMessageId =
       options.findJobByEditRequestMessageId ??
-      ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId));
+      ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId, this.track));
     this.findJobByImageEditRequestMessageId =
       options.findJobByImageEditRequestMessageId ??
-      ((messageId) => ArticleJobRepository.findByImageEditRequestMessageId(messageId));
+      ((messageId) => ArticleJobRepository.findByImageEditRequestMessageId(messageId, this.track));
     this.loadArticlesByJobId = options.loadArticlesByJobId ?? ((jobId) => listArticlesByJobId(jobId));
     this.updateArticleContent =
       options.updateArticleContent ?? ((articleId, content) => updateArticle(articleId, { content }));

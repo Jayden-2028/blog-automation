@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 
 import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
 import { listUnclaimed, markClaimed } from "../services/supabase/repositories/instagramInboxRepository.js";
-import { appendQueueEntry, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
+import { appendQueueEntry, applyTrackPick, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { parseTrackPick, resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
@@ -45,8 +45,14 @@ async function main(): Promise<void> {
         // 버튼 선택(웹훅 핸들러가 `track:<큐id>:<트랙>`으로 적는다)은 큐 id로 바로 붙인다(2026-10-06).
         const pick = parseTrackPick(row.replyText);
         if (pick) {
-          markEntry(pick.queueId, { status: "pending", track: pick.track });
-          topics += 1;
+          const applied = applyTrackPick(pick.queueId, pick.track);
+          if (applied === "applied") {
+            topics += 1;
+          } else if (applied === "already_handled") {
+            // 글자 답으로 이미 처리된 링크의 남은 버튼이다 - 되돌리지 않고 알려만 준다.
+            console.log(`· [ig-capture-poll] ${pick.queueId}: 이미 처리된 링크라 버튼 선택을 무시했습니다.`);
+            await bot.ask(row.telegramChatId, "이미 처리된 링크입니다. 트랙 선택은 반영하지 않았습니다.");
+          }
           continue;
         }
         // 글자 답("엔터"/"사회")인지 본다(instagramTrack.ts). 트랙 단어가 아니면 주제 답장이다.

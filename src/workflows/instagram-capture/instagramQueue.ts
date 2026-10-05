@@ -92,3 +92,21 @@ export function markEntry(
   entries[idx] = { ...entries[idx], ...patch };
   writeQueue(entries, path);
 }
+
+export type TrackPickResult = "applied" | "already_handled" | "not_found";
+
+/**
+ * 버튼으로 고른 트랙을 큐 항목에 적용한다. **needs_track일 때만** 받는다 - 글자 답("사회")으로 이미 처리가 끝났는데
+ * 남아 있던 버튼을 누르면 done/pending이 pending으로 되돌아가 재캡처 + 두 번째 job이 생기던 결함의 가드(2026-10-06 리뷰).
+ */
+export function applyTrackPick(
+  queueId: string,
+  track: NonNullable<InstagramQueueEntry["track"]>,
+  path: string = INSTAGRAM_QUEUE_PATH
+): TrackPickResult {
+  const entry = readQueue(path).find((e) => e.id === queueId);
+  if (!entry) return "not_found";
+  if (entry.status !== "needs_track") return "already_handled";
+  markEntry(queueId, { status: "pending", track }, path);
+  return "applied";
+}

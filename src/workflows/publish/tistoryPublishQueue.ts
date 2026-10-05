@@ -19,10 +19,11 @@ import type { ArticleJobRow } from "../../types/database.js";
 /** job.metadata 안의 키. 이름을 바꾸면 이미 쌓인 요청을 잃는다. */
 export const TISTORY_REQUEST_KEY = "tistoryPublish";
 
-export type TistoryPublishStatus = "requested" | "deferred" | "done" | "failed";
+export type TistoryPublishStatus = "requested" | "deferred" | "done" | "failed" | "published_unrecorded";
 
 export type TistoryPublishRequest = {
-  /** requested = 대기, deferred = 로그인 풀려 보류(재로그인 후 자동 재개), done = 완료, failed = 실패(사람이 보고 판단). */
+  /** requested = 대기, deferred = 로그인 풀려 보류(재로그인 후 자동 재개), done = 완료, failed = 실패(사람이 보고 판단),
+   * published_unrecorded = 티스토리에는 올라갔는데 publications 기록만 실패(폴러가 다시 집지 않는다 - 중복 발행 방지, 사람이 확인). */
   status: TistoryPublishStatus;
   requestedAt: string;
   /** 어디서 눌렀나. 알림 문구와 추적에만 쓴다. */
@@ -40,11 +41,10 @@ export function readTistoryRequest(job: ArticleJobRow): TistoryPublishRequest | 
   const raw = (job.metadata as Record<string, unknown> | null)?.[TISTORY_REQUEST_KEY];
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Partial<TistoryPublishRequest>;
-  if (value.status !== "requested" && value.status !== "deferred" && value.status !== "done" && value.status !== "failed") {
-    return null;
-  }
+  const known: readonly TistoryPublishStatus[] = ["requested", "deferred", "done", "failed", "published_unrecorded"];
+  if (!known.includes(value.status as TistoryPublishStatus)) return null;
   return {
-    status: value.status,
+    status: value.status as TistoryPublishStatus,
     requestedAt: String(value.requestedAt ?? ""),
     source: value.source,
     deferredAt: value.deferredAt,
@@ -90,6 +90,9 @@ export async function requestTistoryPublish(
     return { queued: false, reason: "로그인 대기 중입니다. 맥미니에서 티스토리에 다시 로그인하면 올라갑니다." };
   }
   if (existing?.status === "done") return { queued: false, reason: "이미 티스토리에 올라갔습니다." };
+  if (existing?.status === "published_unrecorded") {
+    return { queued: false, reason: "티스토리에는 올라갔지만 기록이 실패했습니다. 중복 발행을 막기 위해 다시 올리지 않습니다 - 티스토리를 직접 확인해 주세요." };
+  }
 
   const request: TistoryPublishRequest = {
     status: "requested",
@@ -103,14 +106,18 @@ export async function requestTistoryPublish(
 /** 처리 결과를 적는다(맥미니 폴러 쪽에서 호출). */
 export async function finishTistoryPublish(
   jobId: string,
-  outcome: { ok: true; url: string } | { ok: false; error: string },
+  outcome: { ok: true; url: string } | { ok: false; error: string } | { ok: "unrecorded"; url: string; error: string },
   options: TistoryQueueOptions = {}
 ): Promise<void> {
   const mergeMetadata = options.mergeMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
   const now = options.now ?? (() => new Date());
-  const request: TistoryPublishRequest = outcome.ok
-    ? { status: "done", requestedAt: "", finishedAt: now().toISOString(), url: outcome.url }
-    : { status: "failed", requestedAt: "", finishedAt: now().toISOString(), error: outcome.error };
+  const finishedAt = now().toISOString();
+  const request: TistoryPublishRequest =
+    outcome.ok === true
+      ? { status: "done", requestedAt: "", finishedAt, url: outcome.url }
+      : outcome.ok === "unrecorded"
+        ? { status: "published_unrecorded", requestedAt: "", finishedAt, url: outcome.url, error: outcome.error }
+        : { status: "failed", requestedAt: "", finishedAt, error: outcome.error };
   await mergeMetadata(jobId, { [TISTORY_REQUEST_KEY]: request });
 }
 

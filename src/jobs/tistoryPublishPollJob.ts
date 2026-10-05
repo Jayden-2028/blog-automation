@@ -79,12 +79,35 @@ async function notify(job: ArticleJobRow | null, text: string): Promise<void> {
 
 const LOGIN_GUIDE = "맥미니에서 <code>npm run setup:tistory</code>를 실행해 카카오 로그인하면 대기 중인 발행이 자동으로 이어집니다.";
 
+function failureMessage(job: ArticleJobRow, detail: string): string {
+  return [
+    "⚠️ <b>티스토리 발행에 실패했습니다</b>",
+    "",
+    `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+    escapeTelegramHtml(detail),
+    "",
+    "자동 재시도는 없습니다 - 티스토리 발행 버튼을 다시 눌러주세요.",
+  ].join("\n");
+}
+
 async function processPending(pending: ArticleJobRow[], state: PollState): Promise<void> {
   console.log(`▶ [tistory-poll] 대기 ${pending.length}건 중 ${Math.min(pending.length, MAX_PER_RUN)}건 처리`);
 
   for (const job of pending.slice(0, MAX_PER_RUN)) {
     console.log(`   · ${job.keyword}`);
-    const result = await publishJobToTistory(job.id);
+    let result: Awaited<ReturnType<typeof publishJobToTistory>>;
+    try {
+      result = await publishJobToTistory(job.id);
+    } catch (error) {
+      // 예외로 폴러가 죽으면 요청이 requested로 남아 60초마다 같은 글을 다시 집는다 - 실패로 기록하고 알린 뒤 다음 건으로.
+      // (발행 성공 후 기록 실패는 publishJobToTistory가 published_unrecorded로 따로 돌려준다 - 여기는 그 이전 단계의 예외다.)
+      const detail = error instanceof Error ? error.message : String(error);
+      await finishTistoryPublish(job.id, { ok: false, error: detail }).catch(() => {});
+      console.error(`   ❌ ${job.keyword} - 예외: ${detail}`);
+      process.exitCode = 1;
+      await notify(job, failureMessage(job, `예외: ${detail}`));
+      continue;
+    }
 
     if (result.ok) {
       await finishTistoryPublish(job.id, { ok: true, url: result.url });
@@ -135,19 +158,29 @@ async function processPending(pending: ArticleJobRow[], state: PollState): Promi
       return;
     }
 
+    if (result.reason === "published_unrecorded") {
+      // 이미 올라간 글이다 - 재시도 큐로 되돌리면 같은 글이 또 올라간다. 별도 상태로 남겨 폴러가 다시 집지 않게 한다.
+      await finishTistoryPublish(job.id, { ok: "unrecorded", url: result.url, error: result.detail }).catch(() => {});
+      console.error(`   ⚠️ ${job.keyword} - ${result.detail} (${result.url})`);
+      process.exitCode = 1;
+      await notify(
+        job,
+        [
+          "🚨 <b>티스토리에는 올라갔지만 기록에 실패했습니다</b>",
+          "",
+          `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+          escapeTelegramHtml(result.url),
+          escapeTelegramHtml(result.detail),
+          "",
+          "중복 발행을 막기 위해 자동으로 다시 올리지 않습니다 - 티스토리에 글이 있는지 직접 확인해 주세요.",
+        ].join("\n")
+      );
+      continue;
+    }
+
     await finishTistoryPublish(job.id, { ok: false, error: result.detail });
     console.error(`   ❌ ${job.keyword} - ${result.detail}`);
-    await notify(
-      job,
-      [
-        "⚠️ <b>티스토리 발행에 실패했습니다</b>",
-        "",
-        `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-        escapeTelegramHtml(result.detail),
-        "",
-        "자동 재시도는 없습니다 - 티스토리 발행 버튼을 다시 눌러주세요.",
-      ].join("\n")
-    );
+    await notify(job, failureMessage(job, result.detail));
   }
 }
 
@@ -199,7 +232,10 @@ async function main(): Promise<void> {
   if (pending.length > 0) {
     await processPending(pending, state);
   } else {
-    await dailyLoginCheck(state);
+    // 점검 단계의 예외(브라우저 기동·로그인 확인)가 만료 알림까지 막지 않게 따로 감싼다.
+    await dailyLoginCheck(state).catch((error) => {
+      console.warn(`⚠️ [tistory-poll] 로그인 점검 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
+    });
   }
   await remindExpired(state);
 }

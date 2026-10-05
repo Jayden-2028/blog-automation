@@ -41,6 +41,8 @@ export type PublishJobToTistoryResult =
   | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[] }
   /** 로그인이 풀렸다 - 실패가 아니라 **대기**다. 폴러가 deferred로 기록하고 재로그인 후 다시 시도한다. */
   | { ok: false; reason: "login_required"; detail: string }
+  /** 티스토리에는 올라갔는데 publications 기록이 실패했다. 다시 올리면 중복 발행이므로 재시도 큐로 되돌리지 않는다. */
+  | { ok: false; reason: "published_unrecorded"; detail: string; url: string }
   | { ok: false; reason: "disabled" | "job_not_found" | "job_not_approved" | "base_article_not_found" | "tistory_failed"; detail: string };
 
 export type PublishJobToTistoryOptions = {
@@ -127,6 +129,16 @@ export async function publishJobToTistory(
     return { ok: false, reason: "tistory_failed", detail: `[${result.stage}] ${result.error}` };
   }
 
-  const publication = await savePublication({ articleId: article.id, status: "published", publishedUrl: result.url });
+  let publication: PublicationRow;
+  try {
+    publication = await savePublication({ articleId: article.id, status: "published", publishedUrl: result.url });
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "published_unrecorded",
+      url: result.url,
+      detail: `티스토리 발행은 성공했지만 기록에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   return { ok: true, publicationId: publication.id, url: result.url, alreadyDone: false, warnings: result.warnings };
 }

@@ -56,6 +56,15 @@ export function trackOfJob(job: { metadata?: unknown } | null | undefined): Trac
 }
 
 /**
+ * 답장 매칭용: message_id가 같은 job이 여럿(트랙별)일 때 그 트랙의 것만 고른다. rows는 최신순.
+ * track이 없으면 예전처럼 첫 job(트랙을 가리지 않는다).
+ */
+export function pickJobForTrack<T extends { metadata?: unknown }>(rows: readonly T[], track?: Track): T | null {
+  if (!track) return rows[0] ?? null;
+  return rows.find((row) => trackOfJob(row) === track) ?? null;
+}
+
+/**
  * 이 트랙에서 만드는 job의 metadata 조각. 엔터는 비어 있다(값이 없으면 엔터로 읽힌다 - trackOfJob).
  * 봇이 Go 버튼으로 job을 만들 때 쓴다.
  */
