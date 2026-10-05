@@ -13,7 +13,8 @@
 //   npm run job:revise -- <jobId> <feedback>
 import "dotenv/config";
 
-import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
+import { notifierForJob, notifierForJobId } from "../../notifications/notifierForJob.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { dispatchGithubWorkflow } from "../../services/github/dispatchWorkflow.js";
 import { listArticlesByJobId, createArticle } from "../../services/supabase/repositories/articleRepository.js";
@@ -58,7 +59,7 @@ async function main(): Promise<void> {
 
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.error}`);
-    await TelegramNotifier.fromEnv()
+    await notifierForJob(job)
       .sendMessages([
         {
           text:
@@ -133,7 +134,7 @@ async function rePrepareFinalManuscript(jobId: string, keyword: string): Promise
       return false;
     });
 
-  await TelegramNotifier.fromEnv()
+  await (await notifierForJobId(jobId))
     .sendMessages([
       {
         text:

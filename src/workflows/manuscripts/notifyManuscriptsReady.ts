@@ -12,8 +12,64 @@ import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/Telegr
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
+import { manuscriptPagePath, viewerPageLink } from "../../config/manuscriptViewerPages.js";
+import { TRACK_LABEL, trackOfJob } from "../../notifications/telegramTracks.js";
+import type { Track } from "../../notifications/telegramTracks.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
+
+/** 사회 트랙의 수동 발행 안내. 발행 버튼이 없으니 "그다음에 무엇을 하는지"를 문구가 대신 말해야 한다. */
+const SOCIAL_MANUAL_PUBLISH_GUIDE = "티스토리에 수동 발행하세요. 원고 페이지에서 제목·본문을 복사하고 이미지는 저장해 올립니다.";
+
+/**
+ * 사회 이슈 트랙(2026-10-05 §3.3): **자동 발행이 없다.** 네이버·Blogger 버튼 없이 원고 페이지 링크,
+ * 이미지 수정, 맥으로 내려받기만 붙이고 티스토리 수동 발행을 안내한다.
+ */
+function buildSocialReadyMessage(
+  result: JobManuscriptsResult,
+  outcome: Extract<JobManuscriptsResult["result"], { status: "success" }>,
+  pagesUrl: string | null
+): TelegramOutgoingMessage {
+  const { job } = result;
+  const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
+  const markerCount = (outcome.topic.manuscript.body.match(/\[IMAGE:/g) ?? []).length;
+  const emptyCount = Math.max(0, markerCount - imageCount);
+  const summary = imageCount > 0 ? `🖼 이미지 ${imageCount}장` : "🖼 이미지 없음";
+  const detail = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
+
+  const lines = [
+    `📄 <b>원고 준비 완료</b> · ${TRACK_LABEL.social}`,
+    "",
+    `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+    detail,
+    "",
+    SOCIAL_MANUAL_PUBLISH_GUIDE,
+  ];
+
+  const jobId = outcome.topic.jobId;
+  let actionRows: TelegramInlineKeyboardButton[][] = [];
+  try {
+    actionRows = [
+      [
+        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
+      ],
+    ];
+  } catch {
+    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
+    actionRows = [];
+  }
+
+  const buttons: TelegramInlineKeyboardButton[][] = [];
+  if (pagesUrl) {
+    buttons.push([{ text: "📄 원고 페이지 열기", url: viewerPageLink(pagesUrl, "social", jobId) }]);
+  } else {
+    lines.push("", `<code>${escapeTelegramHtml(manuscriptPagePath("social"))}</code>`, "위 파일을 브라우저로 열어 확인·복사해 주세요.");
+  }
+  buttons.push(...actionRows);
+
+  return { text: lines.join("\n"), replyMarkup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined };
+}
 
 /** pagesUrl은 테스트 주입용. 생략하면 cloudflarePagesUrl()(환경변수 기반)을 쓴다. */
 export function buildManuscriptReadyMessage(
@@ -35,6 +91,10 @@ export function buildManuscriptReadyMessage(
       ].join("\n"),
     };
   }
+
+  // 트랙은 job이 정한다(metadata.track). 사회 트랙은 발행 버튼이 없는 별도 알림이다.
+  const track: Track = trackOfJob(job);
+  if (track === "social") return buildSocialReadyMessage(result, outcome, pagesUrl);
 
   const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
   // 빈 자리 수를 함께 알린다(2026-10-01). 전까지는 "이미지 N장"만 보여서, 자리 6개 중 2개가 빈
@@ -95,7 +155,21 @@ export async function notifyManuscriptsReady(
   results: JobManuscriptsResult[],
   options: NotifyManuscriptsReadyOptions = {}
 ): Promise<void> {
-  const sendMessages = options.sendMessages ?? ((messages) => TelegramNotifier.fromEnv().sendMessages(messages));
   if (results.length === 0) return;
-  await sendMessages(results.map((result) => buildManuscriptReadyMessage(result)));
+
+  // 주입된 발송 함수는 트랙을 모른다(테스트) - 기존처럼 한 번에 보낸다.
+  if (options.sendMessages) {
+    await options.sendMessages(results.map((result) => buildManuscriptReadyMessage(result)));
+    return;
+  }
+
+  // 트랙마다 봇이 다르다. 한 번의 준비 실행에 엔터·사회 원고가 섞여 있어도 각자 자기 봇으로 간다.
+  const byTrack = new Map<Track, TelegramOutgoingMessage[]>();
+  for (const result of results) {
+    const track = trackOfJob(result.job);
+    byTrack.set(track, [...(byTrack.get(track) ?? []), buildManuscriptReadyMessage(result)]);
+  }
+  for (const [track, messages] of byTrack) {
+    await TelegramNotifier.fromEnv(track).sendMessages(messages);
+  }
 }

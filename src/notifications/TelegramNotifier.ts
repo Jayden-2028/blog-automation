@@ -1,6 +1,9 @@
 // Telegram Bot API(https://core.telegram.org/bots/api) 발송 클래스.
 // credential(botToken/chatId)은 절대 로그로 출력하지 않는다.
 
+import { DEFAULT_TRACK, resolveTrackCredentials } from "./telegramTracks.js";
+import type { Track } from "./telegramTracks.js";
+
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 // Telegram 메시지 본문 최대 길이(4096자). 여유를 두고 이보다 낮은 값에서 chunk를 자른다.
 export const TELEGRAM_MESSAGE_CHAR_LIMIT = 4000;
@@ -78,17 +81,9 @@ export class TelegramNotifier {
     this.chatId = credentials.chatId;
   }
 
-  static fromEnv(): TelegramNotifier {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-
-    if (!botToken || !chatId) {
-      throw new Error(
-        "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID. Copy .env.example to .env and fill in your Telegram bot credentials."
-      );
-    }
-
-    return new TelegramNotifier({ botToken, chatId });
+  /** track를 생략하면 메인봇(엔터)이다 - 개편 전 호출부가 그대로 동작한다. */
+  static fromEnv(track: Track = DEFAULT_TRACK): TelegramNotifier {
+    return new TelegramNotifier(resolveTrackCredentials(track));
   }
 
   // 긴 메시지는 Telegram 글자 수 제한에 걸릴 수 있으므로 여러 건으로 나눠 순차 발송한다.

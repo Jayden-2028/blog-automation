@@ -2,6 +2,15 @@
 
 기준일: 2026-10-05 (Asia/Seoul)
 
+## 2026-10-05 — 개편2: 사회 이슈 트랙 분리 (브랜치 `feat/restructure-2-social-track`, 워크트리 `restructure-2/`, 설계서 §3)
+
+상세·배포 순서·남은 승인 항목은 **`docs/ai-handoff/RESTRUCTURE_2_SOCIAL_TRACK.md`**. 요약:
+- **멀티봇 공통 레이어**(개편3이 재사용): `notifications/telegramTracks.ts`(트랙→봇 토큰·채팅 ID), `TelegramNotifier.fromEnv(track)`, `TelegramBot.fromEnv(opts, track)`, Worker `/webhook/<track>` + dispatch payload `track`. track은 `job.metadata.track`(jsonb, **migration 없음**), 값이 없으면 엔터.
+- **사회 20:00 데일리 리포트**: 사건·정책·경제·커뮤니티·생활 섹션별 목록 + Go/Pass, 사회 봇으로 발송. 커뮤니티는 재크롤링 없이 엔터 회차가 채운 값을 수거.
+- **사회 원고 완료 알림**: 발행 버튼 없음, 티스토리 수동 발행 안내. 뷰어는 `social.html`(같은 Pages 프로젝트).
+- **미완료(승인 필요)**: GitHub secrets `SOCIAL_*`, main 병합, Worker 배포·secret, 사회 봇 `setWebhook`. 이게 끝나야 §6 10/8~10/10 실운영 검증(봇 왕복·리포트 수신·티스토리 리허설)을 할 수 있다.
+
+
 ## 2026-10-05 — 개편1: 엔터 트랙 일 3회 전환 (브랜치 `feat/restructure-1-entertainment-3x`, 설계서 `RESTRUCTURE-PLAN-2026-10.md` §2)
 
 **바뀐 것**

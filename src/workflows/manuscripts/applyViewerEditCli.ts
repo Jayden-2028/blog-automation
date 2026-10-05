@@ -8,24 +8,20 @@
 // 버튼을 눌렀을 때만 이 경로가 돈다(2026-10-03 사용자 승인 설계).
 import "dotenv/config";
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { listArticlesByJobId, updateArticle } from "../../services/supabase/repositories/articleRepository.js";
-import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { loadManifest, saveManifest } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
-import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
 import { applyViewerEditRequest, parseViewerEditRequest } from "./applyViewerEditRequest.js";
 
 /** buildManuscriptPageCli의 --refresh와 같은 순서: 페이지 -> 비용 스냅샷 -> 배포. */
 async function publishPage(manifest: ManuscriptManifest): Promise<void> {
-  const path = manuscriptIndexPagePath();
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, renderManuscriptPage(manifest), "utf8");
+  await writeManuscriptPages(manifest);
 
   // 배포 단위가 디렉터리 하나라 cost.json을 여기서 써야 함께 올라간다(없으면 배포본에서 사라진다).
   const cost = await writeCostSnapshot();

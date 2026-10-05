@@ -6,7 +6,8 @@ import { readFile } from "node:fs/promises";
 
 import { researchFilePath } from "../../config/pipelinePaths.js";
 import { buildResearchDecisionCallbackData } from "../../notifications/researchDecisionCallbackData.js";
-import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
+import { notifierForJob } from "../../notifications/notifierForJob.js";
 import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { describeShortage } from "../research/describeResearchShortage.js";
 
@@ -77,5 +78,5 @@ export async function notifyWriteFailed(
   error: string
 ): Promise<void> {
   const researchText = await loadResearchText(job);
-  await TelegramNotifier.fromEnv().sendMessages([buildWriteFailedMessage(job, error, researchText)]);
+  await notifierForJob(job).sendMessages([buildWriteFailedMessage(job, error, researchText)]);
 }

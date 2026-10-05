@@ -22,7 +22,25 @@
 
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
+import { topicTrack } from "./manuscriptManifest.js";
 import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord } from "./manuscriptManifest.js";
+import { DEFAULT_TRACK } from "../../notifications/telegramTracks.js";
+import type { Track } from "../../notifications/telegramTracks.js";
+
+/**
+ * 페이지 머리말·사이드바 문구. 엔터는 개편 전 문구 그대로다.
+ * 사회는 **발행 버튼이 없다**(티스토리 수동 발행) - 안내 문구가 달라야 "텔레그램 버튼으로 발행"을 찾지 않는다.
+ */
+const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: string }> = {
+  entertainment: { title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행" },
+  social: { title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 복사해서 티스토리에 수동 발행" },
+  kscene: { title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행" },
+};
+
+export type RenderManuscriptPageOptions = {
+  /** 이 트랙의 원고만 그린다. 생략하면 엔터(기존 index.html). */
+  track?: Track;
+};
 
 const CATEGORY_LABEL: Record<string, string> = {
   incident: "사건사고",
@@ -96,8 +114,16 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
   };
 }
 
-export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: Date = new Date()): string {
-  const topics = [...manifest.topics].sort(
+export function renderManuscriptPage(
+  manifest: ManuscriptManifest,
+  generatedAt: Date = new Date(),
+  options: RenderManuscriptPageOptions = {}
+): string {
+  const track = options.track ?? DEFAULT_TRACK;
+  const copy = TRACK_PAGE_COPY[track];
+  const topics = manifest.topics
+    .filter((topic) => topicTrack(topic) === track)
+    .sort(
     (a, b) => b.date.localeCompare(a.date) || b.readyAt.localeCompare(a.readyAt)
   );
   const pageTopics = topics.map(toPageTopic);
@@ -118,7 +144,7 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>원고 뷰어</title>
+<title>${copy.title}</title>
 <style>
   :root{color-scheme:light;
         --bg:#FAF7F2;--fg:#2B2621;--muted:#8C8178;--line:#E2D9CB;--card:#F3EDE2;
@@ -264,12 +290,12 @@ export function renderManuscriptPage(manifest: ManuscriptManifest, generatedAt: 
 <body>
   <div class="topbar">
     <button type="button" class="nav-toggle-btn" id="nav-toggle" aria-label="원고 목록 열기">☰</button>
-    <div class="topbar-title">원고 뷰어</div>
+    <div class="topbar-title">${copy.title}</div>
   </div>
   <div class="backdrop" id="backdrop"></div>
   <aside id="sidebar">
-    <h1>왜지금 NAVER &amp; Blogger</h1>
-    <p class="meta">원고 확인 → 텔레그램 버튼으로 발행<br>생성 ${escapeHtml(generated)} (KST)</p>
+    <h1>${copy.heading}</h1>
+    <p class="meta">${copy.meta}<br>생성 ${escapeHtml(generated)} (KST)</p>
     <div id="nav"></div>
   </aside>
   <main id="main"><div class="wrap" id="wrap"><div class="placeholder">${pageTopics.length === 0 ? "아직 준비된 원고가 없습니다." : "왼쪽에서 원고를 선택하세요."}</div></div></main>

@@ -19,6 +19,8 @@ import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import type { TelegramInlineKeyboardButton } from "./TelegramNotifier.js";
+import { DEFAULT_TRACK, resolveTrackCredentials, trackJobMetadata } from "./telegramTracks.js";
+import type { Track } from "./telegramTracks.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
@@ -219,6 +221,11 @@ export type TelegramBotOptions = {
   chatId: string;
   receiverId?: string;
   /**
+   * 이 봇이 속한 트랙(telegramTracks.ts). 이 봇의 Go 버튼으로 만든 job에 metadata.track으로 새겨,
+   * 이후 조사·집필·승인 알림이 같은 봇으로 나가게 한다. 생략하면 메인봇(엔터)이고 metadata는 건드리지 않는다.
+   */
+  track?: Track;
+  /**
    * job이 새로 생겼을 때만 호출된다(중복 클릭으로 토큰을 태우지 않기 위해). 추천 제목을 만들어
    * 반환하면 job.metadata.titleSuggestions에 저장하고 확인 메시지에 함께 보낸다.
    */
@@ -311,6 +318,7 @@ export class TelegramBot {
   private readonly botToken: string;
   private readonly chatId: string;
   private readonly receiverId: string;
+  readonly track: Track;
   private readonly generateTitles?: (job: ArticleJobRow) => Promise<string[]>;
   private readonly loadRanking: (runId: number, rank: number) => Promise<KeywordRankingRow | null>;
   private readonly createJob: (ranking: KeywordRankingRow, status: ArticleJobStatus) => Promise<CreateArticleJobResult>;
@@ -341,11 +349,17 @@ export class TelegramBot {
   constructor(options: TelegramBotOptions) {
     this.botToken = options.botToken;
     this.chatId = options.chatId;
-    this.receiverId = options.receiverId ?? DEFAULT_TELEGRAM_RECEIVER_ID;
+    this.track = options.track ?? DEFAULT_TRACK;
+    // 봇마다 getUpdates offset이 독립이다(폴링 경로). 엔터는 기존 값을 그대로 쓴다.
+    this.receiverId =
+      options.receiverId ??
+      (this.track === DEFAULT_TRACK ? DEFAULT_TELEGRAM_RECEIVER_ID : `${DEFAULT_TELEGRAM_RECEIVER_ID}:${this.track}`);
     this.generateTitles = options.generateTitles;
     this.loadRanking = options.loadRanking ?? getKeywordRankingByRunAndRank;
     this.createJob =
-      options.createJob ?? ((ranking, status) => ArticleJobRepository.createFromRanking(ranking, { status }));
+      options.createJob ??
+      ((ranking, status) =>
+        ArticleJobRepository.createFromRanking(ranking, { status, metadata: trackJobMetadata(this.track) }));
     this.saveTitles =
       options.saveTitles ??
       (async (jobId, titles) => {
@@ -427,17 +441,13 @@ export class TelegramBot {
       });
   }
 
-  static fromEnv(options: Omit<TelegramBotOptions, "botToken" | "chatId"> = {}): TelegramBot {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-
-    if (!botToken || !chatId) {
-      throw new Error(
-        "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID. Copy .env.example to .env and fill in your Telegram bot credentials."
-      );
-    }
-
-    return new TelegramBot({ ...options, botToken, chatId });
+  /** track를 생략하면 메인봇(엔터)이다. 받은 봇이 곧 그 트랙이므로 이 봇이 만드는 job에 track을 새긴다. */
+  static fromEnv(
+    options: Omit<TelegramBotOptions, "botToken" | "chatId" | "track"> = {},
+    track: Track = DEFAULT_TRACK
+  ): TelegramBot {
+    const { botToken, chatId } = resolveTrackCredentials(track);
+    return new TelegramBot({ ...options, botToken, chatId, track });
   }
 
   // ---------- 핵심 처리 ----------

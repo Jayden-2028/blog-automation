@@ -1,16 +1,18 @@
-// "매일 오전 9시 실행"의 실제 진입점 - 사회 이슈(사건사고·경제·정책) 카테고리, 티스토리용.
-// 외부 OS crontab/launchd가 이 스크립트를 하루 1회 실행시킨다(scheduler/LocalScheduler.ts 주석 참고
-// — 이 프로세스 자체는 시간을 감시하지 않는다).
+// 사회 이슈 트랙 데일리 리포트 - 매일 KST 20:00(Worker cron, UTC 11시), **사회 봇(@JaydensocialnewsBot)**으로 발송.
 //
-// 2026-09-07 채널 전담제 개편(사용자 결정): 하루 알림을 카테고리별 채널 3개로 완전히 분리해
-// 고정한다 - ① 이 job(사회이슈 -> 티스토리) ② entertainmentKeywordJob(연예·OTT -> 블로그스팟)
-// ③ communityKeywordJob(커뮤니티 화제, 오후 13:00). 예전엔 이 job이 카테고리 구분 없이 하루치
-// 키워드를 통째로 하나의 Top N으로 보냈는데, 이제 이 job만 실제 수집(Creator Advisor 크롤링 +
-// 구글 트렌드 조회)을 맡고 사회 이슈로만 필터링해 보낸다 - entertainmentKeywordJob은 이 job이 쌓아둔
-// trend_candidates를 재사용해 크롤링을 중복하지 않는다(그 job 상단 주석 참고). 그래서 이 job이
-// 먼저 끝나 있어야 한다 - launchd 스케줄이 09:00 / 09:10으로 순서를 보장한다.
+// 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §3.2): 키워드 목록 제안형이다. 그날의 사건사고·정책·경제·
+// 커뮤니티 화제 키워드를 섹션별로 묶어 한 번에 보내고, 사용자가 Go를 누른 건만 원고를 쓴다. 원고가 끝나도
+// **자동 발행은 없다** - 뷰어(social.html)에서 복사해 티스토리에 수동 발행한다.
+//
+// 수집 비용을 늘리지 않는다: 커뮤니티(더쿠·루리웹·에펨코리아)는 엔터 회차 3번이 낮 동안 이미
+// trend_candidates에 채워 뒀다. 여기서는 다시 크롤링하지 않고(communityOptions.enabled=false) 그 값을 읽어
+// 사회 계열 분류(incident/living/community)만 수거한다. 엔터·OTT로 분류된 것은 엔터 알림이 이미 가져갔다.
+//
+// (이전: 2026-09-07 채널 전담제에서 이 job이 수집 전담이었고 엔터 job이 결과를 재사용했다. 2026-10-05
+// 개편1에서 엔터가 자체 수집으로 독립해 그 의존은 사라졌다.)
 import "dotenv/config";
 
+import { formatSocialReportHeader, SOCIAL_REPORT_SECTION_CONFIG } from "../config/socialReportSections.js";
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
 import type { SchedulerJob } from "../scheduler/Scheduler.js";
@@ -24,18 +26,21 @@ import { runDailyKeywordWorkflow } from "../workflows/dailyKeywordWorkflow.js";
 // 이미 만들어진 Top 10 발송을 막으면 안 된다.
 const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 
-// 2026-09-16 사용자 요청: 알림 문구에서 매체명(과거 티스토리 담당 흔적)을 뺀다 - 지금은 전부
-// Blogspot 단일 채널로 가므로 채널명이 오해를 줄 뿐이다.
-const NOTIFICATION_HEADER = "🏛️ <b>오전 사회 이슈 키워드</b>";
-
 const job: SchedulerJob = {
   name: "social-issue-keyword",
   execute: async () => {
     const result = await runDailyKeywordWorkflow({
-      collectionSources: ["creator_advisor", "google_trends", "daum_realtime"],
-      includeCategories: ["incident", "living"],
-      metadata: { kind: "social_issue" },
-      notifyOptions: { headerTitle: NOTIFICATION_HEADER },
+      // community는 수집 목록에 두되 크롤링은 끈다 - 엔터 회차가 채워 둔 오늘치를 읽기만 한다(위 머리말).
+      collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community"],
+      communityOptions: { enabled: false },
+      // community category = 인터넷 화제·논쟁(keywordCategoryRules). 사회 계열 커뮤니티 키워드가 여기 속한다.
+      includeCategories: ["incident", "living", "community"],
+      metadata: { kind: "social_issue", track: "social" },
+      notifyOptions: {
+        track: "social",
+        headerTitle: formatSocialReportHeader(),
+        sections: SOCIAL_REPORT_SECTION_CONFIG,
+      },
     });
 
     console.log("\n▶ stage log");

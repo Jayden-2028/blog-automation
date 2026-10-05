@@ -119,3 +119,33 @@ main().catch((error) => {
   if (!legacy.text.includes("원고 준비 완료")) throw new Error("❌ 알림 본문은 그대로여야 한다");
   console.log("✅ 액션 버튼 - 이미지 수정/맥으로 내려받기/네이버 발행(블로그 발행 없음), UUID 아니면 생략");
 }
+
+// --- 사회 트랙(2026-10-05, §3.3): 자동 발행 없음 -> 발행 버튼 없이 수동 발행 안내 -------------------
+{
+  const JOB = "154bfe0b-1234-4abc-8def-0123456789ab";
+  const socialJob = { ...job(JOB), metadata: { track: "social" } } as ArticleJobRow;
+  const msg = buildManuscriptReadyMessage(successResult(socialJob), "https://pages.example.dev");
+  const rows = msg.replyMarkup?.inline_keyboard ?? [];
+  const all = rows.flat();
+
+  if (all.some((b) => b.callback_data?.startsWith("publish:naver:") || b.callback_data?.startsWith("publish:blogspot:"))) {
+    throw new Error("❌ 사회 트랙에는 네이버·블로그 발행 버튼이 없어야 한다");
+  }
+  if (!all.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 이미지 수정 버튼은 있어야 한다");
+  if (!all.some((b) => b.callback_data === `publish:export:${JOB}`)) throw new Error("❌ 맥으로 내려받기 버튼은 있어야 한다");
+  if (rows[0]?.[0]?.url !== `https://pages.example.dev/social.html#${JOB}`) {
+    throw new Error(`❌ 원고 페이지 링크는 social.html 딥링크여야 한다 (${rows[0]?.[0]?.url})`);
+  }
+  if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 수동 발행 안내가 있어야 한다");
+  if (msg.text.includes("🟢 네이버")) throw new Error("❌ 사회 알림에 네이버 표기가 있으면 안 된다");
+
+  // 엔터 job은 그대로다(트랙 값이 없으면 엔터).
+  const ent = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
+  if (!(ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`)) {
+    throw new Error("❌ 엔터 알림에는 네이버 발행 버튼이 그대로 있어야 한다");
+  }
+  if (ent.replyMarkup?.inline_keyboard[0][0].url !== `https://pages.example.dev/#${JOB}`) {
+    throw new Error("❌ 엔터 딥링크는 기존 루트 그대로여야 한다");
+  }
+  console.log("✅ 사회 트랙 - 발행 버튼 없음, social.html 딥링크, 티스토리 수동 발행 안내 (엔터는 불변)");
+}

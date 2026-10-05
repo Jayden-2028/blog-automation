@@ -39,6 +39,21 @@ export type KeywordCategoryRule = {
   terms: readonly string[];
 };
 
+// 사회 트랙 데일리 리포트의 "정책"·"경제" 어휘(2026-10-05, RESTRUCTURE-PLAN-2026-10.md §3.2). 새 category를
+// 만들지 않고 living에 편입한다 - category는 집필 스킬 선택·다양성 슬롯에 쓰이는 값이라 늘리면 하위 단계가
+// 줄줄이 바뀐다. 대신 리포트가 이 두 목록으로 섹션만 나눈다(config/socialReportSections.ts가 같은 목록을 쓴다).
+// 부분 문자열 매칭이므로 오탐이 큰 짧은 말은 넣지 않았다("시행"은 "시행착오", "고용"은 "고용노동부 연예 기사").
+export const SOCIAL_POLICY_TERMS: readonly string[] = [
+  "국회", "법안", "시행령", "개정안", "입법예고", "국정감사", "국감", "예산안",
+  "규제 완화", "정부 대책", "부동산 대책", "대책 발표", "헌법재판소", "탄핵",
+];
+
+export const SOCIAL_ECONOMY_TERMS: readonly string[] = [
+  "물가", "소비자물가", "기준금리", "환율", "최저임금", "집값", "아파트값", "부동산",
+  "종부세", "양도세", "취득세", "건강보험료", "건보료", "국민연금", "가계부채", "주담대",
+  "실업률", "고용률", "무역수지", "경기 침체", "전세", "월세",
+];
+
 // 순서가 곧 우선순위다. 위에서부터 첫 매칭이 이긴다.
 export const KEYWORD_CATEGORY_RULES: readonly KeywordCategoryRule[] = [
   {
@@ -103,6 +118,9 @@ export const KEYWORD_CATEGORY_RULES: readonly KeywordCategoryRule[] = [
       "근로장려금", "장려금", "지원금", "실업급여", "급여", "연금", "환급",
       "지급일", "바우처", "공제", "세금", "연말정산", "보조금", "멤버십",
       "요금", "날씨", "태풍", "한파", "폭염", "청약", "대출", "적금", "금리",
+      // 경제·정책 어휘(위 SOCIAL_*_TERMS). 사회 트랙 데일리 리포트가 이 키워드를 모은다.
+      ...SOCIAL_POLICY_TERMS,
+      ...SOCIAL_ECONOMY_TERMS,
     ],
   },
   {

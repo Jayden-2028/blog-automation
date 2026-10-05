@@ -22,6 +22,8 @@
 
 import { supabase } from "../../services/supabase/client.js";
 import type { ArticleJobRow, ManuscriptManifestTopicRow } from "../../types/database.js";
+import { DEFAULT_TRACK, parseTrack } from "../../notifications/telegramTracks.js";
+import type { Track } from "../../notifications/telegramTracks.js";
 
 /** 자동 생성된 이미지 1장. index는 본문 [IMAGE: ] 마커 순서(1부터)와 일치한다. */
 export type ManuscriptImage = {
@@ -96,6 +98,11 @@ export type ManuscriptEntry = {
   /** sourceTag가 있을 때만 의미 있다. 배지 클릭/표시에 쓸 원본 링크. */
   sourceUrl?: string | null;
   /**
+   * 이 원고가 속한 트랙(2026-10-08 사회 트랙 분리). 뷰어가 페이지를 가르는 기준이다. 전용 컬럼 대신 이미
+   * jsonb인 channels[0]에 싣는다 - 컬럼을 늘리면 migration(승인 게이트)이 필요하다. 없으면 엔터(과거 행 포함).
+   */
+  track?: Track | null;
+  /**
    * 마지막 "뷰어 수정본 반영" 결과(2026-10-03). 뷰어가 언제 무엇이 발행 원고에 들어갔고 무엇을 왜
    * 건너뛰었는지 보여준다 - 반영은 비동기(GitHub Actions)라 버튼을 누른 화면에서는 결과를 모른다.
    */
@@ -128,6 +135,11 @@ export type ManuscriptTopicEntry = {
   readyAt: string;
   manuscript: ManuscriptEntry;
 };
+
+/** topic이 속한 트랙. 값이 없거나 모르는 값이면 엔터다(개편 전 행). */
+export function topicTrack(topic: ManuscriptTopicEntry): Track {
+  return parseTrack(topic.manuscript.track) ?? DEFAULT_TRACK;
+}
 
 export type ManuscriptManifest = {
   topics: ManuscriptTopicEntry[];

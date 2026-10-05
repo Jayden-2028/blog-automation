@@ -1,7 +1,8 @@
 // reviseArticleWithFeedback() 성공 결과를 Telegram으로 알린다(notifyArticleReady.ts와 같은
 // 패턴 - 결정 버튼(승인/수정 필요/반려)을 재사용해, 재작성본도 최초 작성본과 동일한 검수를 거친다).
 
-import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
+import { notifierForJob } from "../../notifications/notifierForJob.js";
 import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { buildArticleBodyMessages, buildReviewDecisionButtons, buildReviewDecisionMessage } from "./notifyArticleReady.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -46,5 +47,5 @@ export async function notifyRevisedArticleReady(
     ? [header]
     : [header, ...buildArticleBodyMessages(article), buildReviewDecisionMessage(job.id)];
 
-  await TelegramNotifier.fromEnv().sendMessages(messages);
+  await notifierForJob(job).sendMessages(messages);
 }

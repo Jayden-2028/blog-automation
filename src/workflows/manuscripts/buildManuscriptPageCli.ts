@@ -13,23 +13,14 @@
 // LLM·이미지 생성을 전혀 호출하지 않으므로 비용이 들지 않고, DB 원고 데이터도 바꾸지 않는다.
 import "dotenv/config";
 
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
 import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
 import { prepareManuscript } from "./prepareManuscript.js";
-import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
-
-async function writePage(html: string): Promise<void> {
-  const path = manuscriptIndexPagePath();
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, html, "utf8");
-}
 
 /**
  * 배포 직전에 비용 스냅샷(cost.json)을 같은 디렉터리로 떨군다. 배포 단위가 디렉터리 하나라
@@ -65,7 +56,7 @@ async function buildOne(jobId: string): Promise<void> {
 
   const manifest = upsertTopicEntry(await loadManifest(), result.topic);
   await saveManifest(manifest);
-  await writePage(renderManuscriptPage(manifest));
+  await writeManuscriptPages(manifest);
   await ArticleJobRepository.mergeMetadata(job.id, { channelManuscriptsReadyAt: result.topic.readyAt });
 
   console.log(`✅ 준비 완료 - 이미지 ${result.topic.manuscript.images.length}장`);
@@ -101,7 +92,7 @@ async function refreshPage(): Promise<void> {
     return;
   }
 
-  await writePage(renderManuscriptPage(manifest));
+  await writeManuscriptPages(manifest);
   console.log(`✅ 페이지 재생성 - 원고 ${manifest.topics.length}건`);
   console.log(`   열기: open ${manuscriptIndexPagePath()}`);
 

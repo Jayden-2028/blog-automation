@@ -26,6 +26,7 @@
 // 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
 import { resolveScheduled, type ScheduledDispatch } from "./schedule.js";
+import { trackFromPath, type RelayTrack } from "./track.js";
 
 export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
@@ -34,6 +35,26 @@ export interface Env {
   GITHUB_REPO: string;
   /** 버튼 클릭 즉시 "접수됨" 토스트용(answerCallbackQuery). 없으면 토스트만 생략하고 나머지는 그대로 동작한다. */
   TELEGRAM_BOT_TOKEN?: string;
+  /** 사회 트랙 봇(2026-10). 경로 /webhook/social 로 들어온 update의 토스트·버튼 잠금에 쓴다. */
+  SOCIAL_TELEGRAM_BOT_TOKEN?: string;
+  /** 사용설명서 트랙 봇(개편3). 경로 /webhook/kscene. */
+  KSCENE_TELEGRAM_BOT_TOKEN?: string;
+}
+
+/**
+ * 트랙의 봇 토큰. **다른 트랙의 토큰으로 대신하지 않는다** - 사회 봇에서 온 콜백에 메인봇 토큰으로
+ * answerCallbackQuery를 부르면 텔레그램이 거부(콜백 쿼리는 그 봇 것)하고, 잠금 버튼도 엉뚱한 봇의
+ * 메시지를 고치려다 실패한다. 없으면 undefined -> 토스트만 생략(릴레이 자체는 계속 동작).
+ */
+function botTokenFor(env: Env, track: RelayTrack): string | undefined {
+  switch (track) {
+    case "social":
+      return env.SOCIAL_TELEGRAM_BOT_TOKEN;
+    case "kscene":
+      return env.KSCENE_TELEGRAM_BOT_TOKEN;
+    default:
+      return env.TELEGRAM_BOT_TOKEN;
+  }
 }
 
 /**
@@ -59,9 +80,10 @@ const CALLBACK_ACK_TEXT = "⏳ 접수됐습니다. 처리 결과는 곧 메시�
  */
 const PROCESSING_BUTTON = { text: "⏳ 처리 중…", callback_data: "noop" };
 
-async function telegramApi(env: Env, method: string, body: unknown): Promise<void> {
-  if (!env.TELEGRAM_BOT_TOKEN) return;
-  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
+async function telegramApi(env: Env, track: RelayTrack, method: string, body: unknown): Promise<void> {
+  const token = botTokenFor(env, track);
+  if (!token) return;
+  const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -73,22 +95,27 @@ async function telegramApi(env: Env, method: string, body: unknown): Promise<voi
 }
 
 /** 버튼을 "처리 중" 하나로 잠근다. 메시지 정보가 없으면(오래된 콜백 등) 조용히 건너뛴다. */
-async function lockButtons(env: Env, update: unknown): Promise<void> {
+async function lockButtons(env: Env, track: RelayTrack, update: unknown): Promise<void> {
   const message = (update as { callback_query?: { message?: { chat?: { id?: unknown }; message_id?: unknown } } })
     .callback_query?.message;
   const chatId = message?.chat?.id;
   const messageId = message?.message_id;
   if (typeof chatId !== "number" || typeof messageId !== "number") return;
 
-  await telegramApi(env, "editMessageReplyMarkup", {
+  await telegramApi(env, track, "editMessageReplyMarkup", {
     chat_id: chatId,
     message_id: messageId,
     reply_markup: { inline_keyboard: [[PROCESSING_BUTTON]] },
   });
 }
 
-async function answerCallbackQuery(env: Env, callbackQueryId: string, text = CALLBACK_ACK_TEXT): Promise<void> {
-  await telegramApi(env, "answerCallbackQuery", { callback_query_id: callbackQueryId, text });
+async function answerCallbackQuery(
+  env: Env,
+  track: RelayTrack,
+  callbackQueryId: string,
+  text = CALLBACK_ACK_TEXT
+): Promise<void> {
+  await telegramApi(env, track, "answerCallbackQuery", { callback_query_id: callbackQueryId, text });
 }
 
 /**
@@ -137,9 +164,17 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    // 인증을 먼저 한다 - 경로가 맞는지는 시크릿을 아는 호출자에게만 알려 준다(404와 403으로 구조를 캐내지 못하게).
     const secretHeader = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
     if (!env.TELEGRAM_WEBHOOK_SECRET || secretHeader !== env.TELEGRAM_WEBHOOK_SECRET) {
       return new Response("Forbidden", { status: 403 });
+    }
+
+    // 어느 봇에서 온 update인지는 **경로**로 안다(봇마다 setWebhook 경로가 다르다). update 본문에는 봇 식별자가
+    // 없다. 모르는 경로는 조용히 엔터로 보내지 않고 404 - 잘못 등록된 webhook이 엉뚱한 트랙을 움직이면 안 된다.
+    const track = trackFromPath(new URL(request.url).pathname);
+    if (!track) {
+      return new Response("Not Found", { status: 404 });
     }
 
     let update: unknown;
@@ -167,7 +202,7 @@ export default {
     // 잠금 버튼(위 PROCESSING_BUTTON)을 누른 것 - 처리 중이라는 뜻이니 GitHub Actions를 깨우지 않는다.
     if (callbackQuery?.data === "noop") {
       if (typeof callbackQueryId === "string" && callbackQueryId) {
-        ctx.waitUntil(answerCallbackQuery(env, callbackQueryId, "⏳ 앞서 누른 요청을 처리하고 있습니다."));
+        ctx.waitUntil(answerCallbackQuery(env, track, callbackQueryId, "⏳ 앞서 누른 요청을 처리하고 있습니다."));
       }
       return new Response("OK", { status: 200 });
     }
@@ -183,7 +218,8 @@ export default {
           "X-GitHub-Api-Version": "2022-11-28",
           "User-Agent": "blog-automation-telegram-relay",
         },
-        body: JSON.stringify({ event_type: "telegram_update", client_payload: update }),
+        // track은 update 뒤에 놓는다 - 본문에 같은 이름의 필드가 있어도 경로로 정한 값이 이긴다.
+        body: JSON.stringify({ event_type: "telegram_update", client_payload: { ...(update as object), track } }),
       }
     );
 
@@ -197,8 +233,8 @@ export default {
     // 디스패치가 실제로 성공한 뒤에만 알린다(실패면 위에서 502 → 텔레그램 재전송).
     // 버튼 잠금이 핵심이고 토스트는 보조다 - 잠가야 두 번째 탭이 물리적으로 막힌다.
     if (typeof callbackQueryId === "string" && callbackQueryId) {
-      ctx.waitUntil(answerCallbackQuery(env, callbackQueryId));
-      ctx.waitUntil(lockButtons(env, update));
+      ctx.waitUntil(answerCallbackQuery(env, track, callbackQueryId));
+      ctx.waitUntil(lockButtons(env, track, update));
     }
 
     return new Response("OK", { status: 200 });

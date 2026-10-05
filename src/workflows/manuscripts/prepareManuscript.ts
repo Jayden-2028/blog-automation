@@ -38,6 +38,7 @@ import { inferAcquisition } from "../images/imageEditRequest.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
+import { DEFAULT_TRACK, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { ImagePlan } from "../images/planImageSlots.js";
 import { routeImagePlan } from "../images/routeImagePlan.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
@@ -650,6 +651,8 @@ export async function prepareManuscript(
     naver,
     sourceTag,
     sourceUrl,
+    // 엔터는 값을 남기지 않는다(없으면 엔터) - 기존 행과 모양이 같아야 비교·되돌리기가 쉽다.
+    ...(trackOfJob(job) === DEFAULT_TRACK ? {} : { track: trackOfJob(job) }),
   };
 
   await writeManuscriptFile(

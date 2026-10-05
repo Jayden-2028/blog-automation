@@ -4,6 +4,7 @@
 // 그 1건에 대해서만 생성하기 때문이다(SPRINT_1_DESIGN.md 7절, TelegramBot이 담당).
 
 import type { KeywordRankingScoreBreakdownJson } from "./database.js";
+import type { Track } from "../notifications/telegramTracks.js";
 
 export type NotificationKeywordItem = {
   rank: number;
@@ -39,7 +40,22 @@ export type KeywordNotificationPayload = {
   items: NotificationKeywordItem[];
 };
 
+/**
+ * 알림을 섹션으로 묶는 설정(2026-10-05 사회 데일리 리포트). 항목마다 섹션 키를 정하고, 섹션 제목 메시지(버튼 없음)
+ * 아래에 그 섹션의 항목을 이어서 보낸다. 생략하면 기존처럼 순위대로 평평하게 보낸다.
+ */
+export type KeywordSectionConfig = {
+  /** 항목 -> 섹션 키. isCommunity는 커뮤니티 유래(📡) 여부. */
+  sectionOf: (item: NotificationKeywordItem, context: { isCommunity: boolean }) => string;
+  /** 표시 순서와 제목. 항목이 없는 섹션은 건너뛴다. 목록에 없는 키는 맨 뒤에 키 이름으로 붙는다. */
+  sections: readonly { key: string; title: string }[];
+};
+
 export type SendKeywordNotificationOptions = {
+  /** 어느 봇으로 보낼지(telegramTracks.ts). 생략하면 메인봇(엔터). Go/Pass로 만든 job은 이 트랙을 이어받는다. */
+  track?: Track;
+  /** 섹션별로 묶어 보낼 때만. */
+  sections?: KeywordSectionConfig;
   /** true면 Telegram으로 실제 발송하지 않고 메시지 내용만 만들어서 반환한다. 기본 false. */
   dryRun?: boolean;
   /** Top N. 기본 10. */

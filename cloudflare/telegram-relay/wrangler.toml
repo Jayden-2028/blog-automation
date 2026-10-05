@@ -12,6 +12,14 @@ GITHUB_REPO = "blog-automation"
 # 채 "Success"가 찍히니 반드시 파이프로 넣을 것(09-16 실측 사고).
 # TELEGRAM_BOT_TOKEN(2026-09-16 추가)은 버튼 클릭 즉시 "접수됨" 토스트(answerCallbackQuery)에만
 # 쓴다 - 없어도 릴레이 자체는 동작하고 토스트만 생략된다(src/index.ts 참고).
+#
+# 2026-10-05 멀티봇(RESTRUCTURE-PLAN-2026-10.md §3.1): 봇마다 webhook **경로**가 다르다.
+#   /  또는 /webhook/entertainment  메인봇(엔터)   - 개편 전 webhook URL(루트) 그대로라 재등록 불필요
+#   /webhook/social                 사회 봇        - SOCIAL_TELEGRAM_BOT_TOKEN secret 필요
+#   /webhook/kscene                 사용설명서 봇   - KSCENE_TELEGRAM_BOT_TOKEN secret 필요(개편3)
+# 모든 봇이 같은 TELEGRAM_WEBHOOK_SECRET을 쓴다(setWebhook의 secret_token을 봇마다 같은 값으로 등록).
+# 경로로 정한 track이 dispatch payload에 실려 telegram-update.yml -> runTelegramUpdateCli가 그 봇으로 응답한다.
+# 새 봇 secret은 위와 같은 규칙으로 파이프를 써서 넣는다: echo -n "<값>" | wrangler secret put SOCIAL_TELEGRAM_BOT_TOKEN
 
 # 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §2.1): 무료 플랜 cron 한도(5개)가 꽉 차서, 키워드 수집
 # 시각 5개를 cron 표현식 하나에 묶고 Worker가 발화 시(UTC hour)로 워크플로를 고른다

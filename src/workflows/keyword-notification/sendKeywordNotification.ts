@@ -50,6 +50,7 @@ export async function sendKeywordNotification(
   const chunks = formatNotificationMessage(payload, {
     headerTitle: options.headerTitle,
     communityQueries: options.communityQueries,
+    sections: options.sections,
   });
   const messages = chunks.map((chunk) => chunk.text);
   // 항목마다 메시지가 따로 가므로(formatNotificationMessage 참고) 각 메시지에 그 항목의
@@ -74,6 +75,6 @@ export async function sendKeywordNotification(
     return { sent: false, reason: "dry_run", payload, messages };
   }
 
-  await TelegramNotifier.fromEnv().sendMessages(outgoingMessages);
+  await TelegramNotifier.fromEnv(options.track).sendMessages(outgoingMessages);
   return { sent: true, payload, messages };
 }

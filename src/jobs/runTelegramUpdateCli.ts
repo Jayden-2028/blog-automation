@@ -21,6 +21,7 @@ import "dotenv/config";
 
 import { TelegramBot } from "../notifications/TelegramBot.js";
 import type { TelegramUpdate } from "../notifications/TelegramBot.js";
+import { DEFAULT_TRACK, parseTrack } from "../notifications/telegramTracks.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
 import { dispatchGithubWorkflow } from "../services/github/dispatchWorkflow.js";
 import { enqueueAndMaybeDispatch } from "../services/github/pipelineQueue.js";
@@ -36,6 +37,14 @@ async function main(): Promise<void> {
     update = JSON.parse(raw);
   } catch (error) {
     throw new Error(`TELEGRAM_UPDATE_JSON 파싱 실패: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Worker가 webhook 경로(/webhook/<track>)로 정한 값이다. 없으면(개편 전 dispatch·수동 실행) 메인봇.
+  // **모르는 값은 던진다** - 조용히 엔터로 처리하면 사회 봇에서 누른 버튼의 응답이 메인봇으로 간다.
+  const rawTrack = (update as { track?: unknown }).track;
+  const track = rawTrack === undefined ? DEFAULT_TRACK : parseTrack(rawTrack);
+  if (!track) {
+    throw new Error(`알 수 없는 track: ${JSON.stringify(rawTrack)}`);
   }
 
   const pendingDispatches: Promise<void>[] = [];
@@ -54,14 +63,17 @@ async function main(): Promise<void> {
     pendingDispatches.push(promise);
   };
 
-  const bot = TelegramBot.fromEnv({
-    generateTitles: (job) =>
-      generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
-    triggerResearch: (jobId) => enqueueHeavy(jobId, "job-research.yml"),
-    triggerWriting: (jobId) => enqueueHeavy(jobId, "job-write.yml"),
-    triggerPublishPrepare: () => dispatchPublishPrepare(),
-    triggerRevision: (jobId, feedback) => enqueueHeavy(jobId, "job-revise.yml", { feedback }),
-  });
+  const bot = TelegramBot.fromEnv(
+    {
+      generateTitles: (job) =>
+        generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
+      triggerResearch: (jobId) => enqueueHeavy(jobId, "job-research.yml"),
+      triggerWriting: (jobId) => enqueueHeavy(jobId, "job-write.yml"),
+      triggerPublishPrepare: () => dispatchPublishPrepare(),
+      triggerRevision: (jobId, feedback) => enqueueHeavy(jobId, "job-revise.yml", { feedback }),
+    },
+    track
+  );
 
   const result = await bot.processUpdate(update);
   await Promise.all(pendingDispatches);

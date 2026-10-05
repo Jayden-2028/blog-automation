@@ -1,4 +1,4 @@
-# 클라우드 이전 Phase 2 - 사회·경제 이슈 키워드 수집. KST 18:00에 Worker cron이 깨운다(2026-10-01 변경, 전에는 08:00).
+# 클라우드 이전 Phase 2 - 사회 이슈 데일리 리포트. KST 20:00에 Worker cron이 깨운다(2026-10-05 개편2, 사회 봇 발송 - 전에는 18:00).
 # docs/ai-handoff/CLOUD_MIGRATION.md 참고. 로컬 launchd(com.wooahpapa.blog-automation.
 # social-issue-keyword.plist)와 같은 npm 스크립트를 그대로 실행한다 - 로직 이원화 없음.
 #
@@ -59,6 +59,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 사회 트랙 봇(@JaydensocialnewsBot) - 데일리 리포트가 이 봇으로 나간다(2026-10-05).
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

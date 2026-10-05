@@ -6,7 +6,11 @@
 // 안 들어와 "3번이 뭐였지" 하며 스크롤로 대조해야 했다.
 
 import { escapeTelegramHtml, TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
-import type { KeywordNotificationPayload, NotificationKeywordItem } from "../../types/keywordNotification.js";
+import type {
+  KeywordNotificationPayload,
+  KeywordSectionConfig,
+  NotificationKeywordItem,
+} from "../../types/keywordNotification.js";
 
 function formatDateHeader(startedAt: string): string {
   const date = new Date(startedAt);
@@ -130,6 +134,8 @@ export type FormatNotificationMessageOptions = {
   headerTitle?: string;
   /** 커뮤니티 유래 seedQuery. 일치하는 항목 제목에 📡를 붙인다. */
   communityQueries?: readonly string[];
+  /** 섹션별로 묶기(사회 데일리 리포트). 생략하면 순위대로 평평하게. */
+  sections?: KeywordSectionConfig;
 };
 
 export function formatNotificationMessage(
@@ -155,12 +161,39 @@ export function formatNotificationMessage(
   const isCommunityItem = (item: NotificationKeywordItem): boolean =>
     communityQueries.has(item.keyword.trim().toLowerCase()) ||
     (item.seedQuery !== null && communityQueries.has(item.seedQuery.trim().toLowerCase()));
-  const items: NotificationMessageChunk[] = payload.items.map((item) => ({
+  const toChunk = (item: NotificationKeywordItem): NotificationMessageChunk => ({
     text: truncateForTelegram(formatItemBlock(item, isCommunityItem(item))),
     ranks: [item.rank],
-  }));
+  });
 
-  return [header, ...items];
+  if (!options.sections) {
+    return [header, ...payload.items.map(toChunk)];
+  }
+
+  // 섹션 모드: 섹션 제목(버튼 없음, ranks: []) 다음에 그 섹션 항목들. 항목이 없는 섹션은 제목도 내지 않는다.
+  // 제목 메시지가 따로 가는 이유는 버튼이 메시지 단위라서다(위 파일 머리말) - 항목 메시지에 제목을 섞으면 섹션
+  // 첫 항목만 제목이 붙어 나머지와 모양이 달라진다.
+  const { sectionOf, sections } = options.sections;
+  const grouped = new Map<string, NotificationKeywordItem[]>();
+  for (const item of payload.items) {
+    const key = sectionOf(item, { isCommunity: isCommunityItem(item) });
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+
+  const knownKeys = new Set(sections.map((section) => section.key));
+  const ordered = [
+    ...sections,
+    ...[...grouped.keys()].filter((key) => !knownKeys.has(key)).map((key) => ({ key, title: key })),
+  ];
+
+  const chunks: NotificationMessageChunk[] = [header];
+  for (const section of ordered) {
+    const members = grouped.get(section.key);
+    if (!members || members.length === 0) continue;
+    chunks.push({ text: `<b>${section.title}</b> · ${members.length}건`, ranks: [] });
+    chunks.push(...members.map(toChunk));
+  }
+  return chunks;
 }
 
 function truncateForTelegram(text: string): string {

@@ -19,13 +19,11 @@ import type { PrepareManuscriptResult } from "./prepareManuscript.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import type { DeployManuscriptsPageResult } from "./deployManuscriptsPage.js";
-import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
 import type { WriteCostSnapshotResult } from "../reports/writeCostSnapshot.js";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import type { ArticleJobRow } from "../../types/database.js";
 
 export type JobManuscriptsResult = {
@@ -39,19 +37,16 @@ export type PrepareApprovedManuscriptsOptions = {
   markPrepared?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
   loadManifest?: () => Promise<ManuscriptManifest>;
   saveManifest?: (manifest: ManuscriptManifest) => Promise<void>;
+  /** 테스트 주입: 엔터(index.html) 페이지 HTML만 받는다. 생략하면 writePages(트랙별 전부)를 쓴다. */
   writePage?: (html: string) => Promise<void>;
+  /** 트랙별 페이지를 전부 쓴다. 기본은 writeManuscriptPages. */
+  writePages?: (manifest: ManuscriptManifest) => Promise<unknown>;
   deploy?: () => Promise<DeployManuscriptsPageResult>;
   /** 비용 스냅샷(cost.json) 생성. 기본은 Supabase를 읽으므로 테스트에서는 반드시 주입한다. */
   writeCostSnapshot?: () => Promise<WriteCostSnapshotResult>;
   /** job당 처리 상한(배리에이션 LLM 호출이 오래 걸리므로). 기본 3. */
   maxJobsPerRun?: number;
 };
-
-async function defaultWritePage(html: string): Promise<void> {
-  const path = manuscriptIndexPagePath();
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, html, "utf8");
-}
 
 export async function prepareApprovedManuscripts(
   options: PrepareApprovedManuscriptsOptions = {}
@@ -65,7 +60,11 @@ export async function prepareApprovedManuscripts(
     options.markPrepared ?? ((jobId, patch) => ArticleJobRepository.mergeMetadata(jobId, patch));
   const loadManifestFn = options.loadManifest ?? (() => loadManifest());
   const saveManifestFn = options.saveManifest ?? ((manifest: ManuscriptManifest) => saveManifest(manifest));
-  const writePage = options.writePage ?? defaultWritePage;
+  const writePages =
+    options.writePages ??
+    (options.writePage
+      ? async (m: ManuscriptManifest) => options.writePage!(renderManuscriptPage(m))
+      : (m: ManuscriptManifest) => writeManuscriptPages(m));
   const deploy = options.deploy ?? (() => deployManuscriptsPage());
   const writeCostSnapshotFn = options.writeCostSnapshot ?? (() => writeCostSnapshot());
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
@@ -99,7 +98,7 @@ export async function prepareApprovedManuscripts(
 
   if (manifest) {
     await saveManifestFn(manifest);
-    await writePage(renderManuscriptPage(manifest));
+    await writePages(manifest);
     // 비용 스냅샷은 배포 직전에 같은 디렉터리로 떨군다(배포 단위가 디렉터리 하나라 여기서 써야
     // 같이 올라간다). 실패해도 원고 준비·배포에는 영향이 없다.
     const costSnapshot = await writeCostSnapshotFn();

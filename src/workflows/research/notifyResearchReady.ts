@@ -11,7 +11,8 @@
 
 import { readFile } from "node:fs/promises";
 
-import { escapeTelegramHtml, splitIntoChunks, TELEGRAM_MESSAGE_CHAR_LIMIT, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { escapeTelegramHtml, splitIntoChunks, TELEGRAM_MESSAGE_CHAR_LIMIT } from "../../notifications/TelegramNotifier.js";
+import { notifierForJob } from "../../notifications/notifierForJob.js";
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { buildResearchDecisionCallbackData } from "../../notifications/researchDecisionCallbackData.js";
 import { summarizeResearchFile } from "./summarizeResearchForReview.js";
@@ -112,5 +113,5 @@ export async function notifyResearchReady(
   }
 
   const messages = buildResearchPreviewMessages(job, sources, summary);
-  await TelegramNotifier.fromEnv().sendMessages(messages);
+  await notifierForJob(job).sendMessages(messages);
 }

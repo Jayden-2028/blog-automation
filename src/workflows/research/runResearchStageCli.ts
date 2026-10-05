@@ -14,7 +14,8 @@
 //   npm run job:research -- <jobId>
 import "dotenv/config";
 
-import { escapeTelegramHtml, TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
+import { notifierForJobId } from "../../notifications/notifierForJob.js";
 import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
 import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
 import { warnLocalFallback } from "../../jobs/lib/warnLocalFallback.js";
@@ -60,7 +61,7 @@ async function main(): Promise<void> {
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.error}`);
     // detached로 돌 때는 이 stderr를 아무도 안 보므로 Telegram으로도 알린다.
-    await TelegramNotifier.fromEnv()
+    await (await notifierForJobId(jobId))
       .sendMessages([{ text: `❌ <b>자료조사 실패</b>\n${escapeTelegramHtml(result.error)}\n\n다시 시도하려면 텔레그램에서 다시 선택하거나 <code>npm run job:research -- ${jobId}</code>` }])
       .catch(() => {});
     process.exitCode = 1;

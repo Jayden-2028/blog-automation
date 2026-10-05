@@ -24,8 +24,8 @@ import {
   escapeTelegramHtml,
   splitIntoChunks,
   TELEGRAM_MESSAGE_CHAR_LIMIT,
-  TelegramNotifier,
 } from "../../notifications/TelegramNotifier.js";
+import { notifierForJob } from "../../notifications/notifierForJob.js";
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { formatReviewLines } from "../review/runArticleReview.js";
 import type { ArticleRow } from "../../types/database.js";
@@ -122,5 +122,5 @@ export async function notifyArticleReady(result: RunArticleJobSuccess): Promise<
     ? [header]
     : [header, ...buildArticleBodyMessages(result.article), buildReviewDecisionMessage(result.job.id)];
 
-  await TelegramNotifier.fromEnv().sendMessages(messages);
+  await notifierForJob(result.job).sendMessages(messages);
 }
