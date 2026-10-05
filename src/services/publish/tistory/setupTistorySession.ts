@@ -21,6 +21,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { chromium, type Page } from "playwright";
 
 import { TISTORY_CONFIG, tistoryBlogName } from "../../../config/publishTargets.js";
+import { restoreSessionCookies, saveSessionCookies } from "./tistorySessionCookies.js";
 
 const OUT_DIR = ".local/dom-snapshots/tistory";
 const LOGIN_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
@@ -128,6 +129,8 @@ async function main(): Promise<void> {
 
   const context = await chromium.launchPersistentContext(TISTORY_CONFIG.profileDir, { headless: false });
   try {
+    const restored = await restoreSessionCookies(context, TISTORY_CONFIG.profileDir);
+    if (restored > 0) console.log(`· 보관된 로그인 쿠키 ${restored}개를 넣었습니다.`);
     const page = await context.newPage();
     const writeUrl = `https://${name}.tistory.com/manage/newpost/`;
     await page.goto(writeUrl, { waitUntil: "domcontentloaded" });
@@ -140,10 +143,17 @@ async function main(): Promise<void> {
         console.error("\n❌ 10분 내 로그인을 확인하지 못했습니다. 다시 실행해주세요.");
         return;
       }
-      console.log("\n✅ 로그인 성공 (세션이 프로필에 저장됨 - 다음부터 자동 재사용)");
       await page.goto(writeUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await page.waitForTimeout(1500);
+      if (isTistoryLoginUrl(page.url())) {
+        console.error("\n❌ 로그인 뒤에도 글쓰기 화면이 아니라 로그인 화면입니다. 다시 실행해 주세요.");
+        return;
+      }
+      const saved = await saveSessionCookies(context, TISTORY_CONFIG.profileDir);
+      console.log(`\n✅ 로그인 성공 - 로그인 쿠키 ${saved}개를 ${TISTORY_CONFIG.profileDir}/session-cookies.json에 보관했습니다 (폴러가 매번 다시 넣습니다).`);
     } else {
-      console.log("✅ 로그인 이미 확인됨 (persistent profile 재사용)");
+      const saved = await saveSessionCookies(context, TISTORY_CONFIG.profileDir);
+      console.log(`✅ 로그인 이미 확인됨 - 쿠키 ${saved}개 갱신`);
     }
 
     await page.waitForTimeout(4000);

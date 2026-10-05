@@ -27,6 +27,7 @@ import { chromium, type BrowserContext, type Frame, type Page } from "playwright
 
 import { TISTORY_CONFIG, tistoryBlogName } from "../../../config/publishTargets.js";
 import { ANY_IMAGE_MARKER } from "../naverImageMarkers.js";
+import { restoreSessionCookies, saveSessionCookies } from "./tistorySessionCookies.js";
 
 export type TistoryPublishStage =
   | "login"
@@ -172,8 +173,16 @@ export class TistoryPublisher {
     return error instanceof Error ? error.message : String(error);
   }
 
+  /** 프로필을 띄우고 따로 보관한 로그인 쿠키를 넣는다(tistorySessionCookies.ts - 세션 쿠키는 프로필만으로 안 남는다). */
   private async launch(): Promise<BrowserContext> {
-    return chromium.launchPersistentContext(this.profileDir, { headless: this.headless, viewport: { width: 1280, height: 900 } });
+    const context = await chromium.launchPersistentContext(this.profileDir, { headless: this.headless, viewport: { width: 1280, height: 900 } });
+    await restoreSessionCookies(context, this.profileDir).catch(() => 0);
+    return context;
+  }
+
+  /** 로그인된 채로 화면을 열었으면 쿠키를 최신으로 갈아 둔다(실패해도 발행에는 영향 없음). */
+  private async refreshSavedCookies(context: BrowserContext): Promise<void> {
+    await saveSessionCookies(context, this.profileDir).catch(() => 0);
   }
 
   /**
@@ -187,6 +196,7 @@ export class TistoryPublisher {
       await page.goto(this.writeUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
       await page.waitForTimeout(1500);
       if (isTistoryLoginUrl(page.url())) return { loggedIn: false, reason: "로그인 화면으로 이동됨" };
+      await this.refreshSavedCookies(context);
       return { loggedIn: true };
     } catch (error) {
       return { loggedIn: false, reason: this.errorMessage(error) };
@@ -213,6 +223,7 @@ export class TistoryPublisher {
         return { ok: false, stage: "login", error: "티스토리(카카오) 로그인이 풀렸습니다. 맥미니에서 npm run setup:tistory 로 다시 로그인하세요." };
       }
 
+      await this.refreshSavedCookies(context);
       await this.dismissRestorePopup(page);
 
       const editorReady = await this.waitForEditor(page);
