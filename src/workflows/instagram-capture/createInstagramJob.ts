@@ -10,6 +10,7 @@
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { markEntry } from "./instagramQueue.js";
+import { trackJobMetadata } from "../../notifications/telegramTracks.js";
 import type { InstagramCaptureResult } from "./types.js";
 
 export type CreateInstagramJobResult = { jobId: string };
@@ -24,6 +25,8 @@ export async function createInstagramJob(capture: InstagramCaptureResult): Promi
       instagramUrl: capture.instagramUrl,
       instagramCaption: capture.caption,
       instagramBurnedInText: capture.burnedInText,
+      // 사용자가 링크를 보낼 때 고른 트랙(instagramTrack.ts). 엔터면 값이 없다(=메인봇·네이버).
+      ...trackJobMetadata(capture.track ?? "entertainment"),
     },
   });
 

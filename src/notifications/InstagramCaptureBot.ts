@@ -8,6 +8,7 @@
 // 0이다. 그때만 사용자에게 주제를 묻고, 답을 이 봇이 받아 큐로 돌려보낸다.
 
 import { listAwaitingTopic, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
+import { ackMessage, isBareTrackWord, splitTrackWord } from "../workflows/instagram-capture/instagramTrack.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 /** 메시지 안에서 인스타그램 게시물/릴스 URL만 골라낸다(프로필 URL은 제외). */
@@ -46,7 +47,8 @@ export type InstagramCaptureBotOptions = {
     updateId: number;
     chatId: string;
     messageId: number;
-    replyToMessageId: number;
+    /** 답장이 아니라 "엔터"/"사회" 단어만 보낸 경우 null(2026-10-06 트랙 선택). */
+    replyToMessageId: number | null;
     text: string;
   }) => Promise<void>;
   /** 주제를 기다리는 항목들. 답장을 어디에 붙일지 고를 때 쓴다. */
@@ -205,6 +207,9 @@ export class InstagramCaptureBot {
       if (!allowed || !message || !chatId) {
         ignored += 1;
       } else if (parsed) {
+        // 캡션은 그대로 넘긴다(트랙 단어 포함) - 떼어 내는 건 맥 폴러가 한다(큐·수신함 모양을 바꾸지 않기 위해).
+        // 여기서는 접수 답장에 트랙이 정해졌는지만 알려 준다.
+        const { track } = splitTrackWord(parsed.caption);
         await this.enqueue({
           id: `tg-${update.update_id}`,
           instagramUrl: parsed.url,
@@ -215,7 +220,7 @@ export class InstagramCaptureBot {
           status: "pending",
         });
         enqueued += 1;
-        await this.sendMessage(chatId, "링크 접수했습니다. 원고 초안이 준비되면 알려드립니다.").catch(() => {
+        await this.sendMessage(chatId, ackMessage(track)).catch(() => {
           // 알림 실패는 큐 적재를 막지 않는다.
         });
       } else if (text.trim() && this.matchAwaitingEntry(message.reply_to_message?.message_id)) {
@@ -230,13 +235,14 @@ export class InstagramCaptureBot {
         } else {
           ignored += 1;
         }
-      } else if (text.trim() && message.reply_to_message?.message_id && this.onUnmatchedReply) {
+      } else if (text.trim() && (message.reply_to_message?.message_id || isBareTrackWord(text)) && this.onUnmatchedReply) {
         // 여기서 못 붙인 답장은 **버리지 않고 넘긴다**(2026-09-25). 붙일 큐를 가진 쪽이 맞춘다.
+        // 답장이 아니어도 "엔터"/"사회" 단어만 보낸 것은 트랙 답으로 넘긴다(2026-10-06).
         await this.onUnmatchedReply({
           updateId: update.update_id,
           chatId,
           messageId: message.message_id,
-          replyToMessageId: message.reply_to_message.message_id,
+          replyToMessageId: message.reply_to_message?.message_id ?? null,
           text: text.trim(),
         });
         topicsAnswered += 1;

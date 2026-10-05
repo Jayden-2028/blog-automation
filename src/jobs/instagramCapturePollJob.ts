@@ -11,7 +11,8 @@ import { resolve } from "node:path";
 
 import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
 import { listUnclaimed, markClaimed } from "../services/supabase/repositories/instagramInboxRepository.js";
-import { appendQueueEntry, listAwaitingTopic, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
+import { appendQueueEntry, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
+import { resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
@@ -39,6 +40,25 @@ async function main(): Promise<void> {
     let topics = 0;
     for (const row of inbox) {
       if (row.kind === "topic_reply") {
+        // 트랙 답("엔터"/"사회")인지 먼저 본다(2026-10-06, instagramTrack.ts). 트랙 단어가 아니면 주제 답장이다.
+        const trackOutcome = resolveTrackReply(listAwaitingTrack(), {
+          text: row.replyText ?? "",
+          replyToMessageId: row.replyToMessageId,
+        });
+        if (trackOutcome.status === "applied") {
+          markEntry(trackOutcome.entryId, { status: "pending", track: trackOutcome.track });
+          topics += 1;
+          continue;
+        }
+        if (trackOutcome.status === "ambiguous") {
+          // 기다리는 링크가 여럿이라 어느 것인지 모른다 - 링크별로 다시 묻고, 답장은 그 메시지에 붙는다.
+          for (const candidate of trackOutcome.candidates) {
+            if (candidate.askedTrackMessageId) continue; // 이미 물었다
+            const askedTrackMessageId = await bot.ask(candidate.telegramChatId, trackQuestion(candidate));
+            markEntry(candidate.id, { askedTrackMessageId: askedTrackMessageId ?? undefined });
+          }
+          continue;
+        }
         // 어느 항목에 대한 답인지는 **여기서만** 안다 - askedMessageId가 맥의 큐에 있다.
         const target = listAwaitingTopic().find((e) => e.askedMessageId === row.replyToMessageId);
         if (target && row.replyText) {
@@ -48,14 +68,18 @@ async function main(): Promise<void> {
         continue;
       }
       if (!row.instagramUrl) continue;
+      // 링크와 같은 메시지에 "사회"/"엔터"가 붙어 있으면 그 트랙으로 바로 간다. 없으면 답을 기다린다(needs_track) -
+      // 클라우드 접수 답장이 이미 물었으므로 여기서 또 묻지 않는다(기다리는 링크가 여럿일 때만 위에서 다시 묻는다).
+      const { track, caption } = splitTrackWord(row.rawCaption);
       await appendQueueEntry({
         id: row.id,
         instagramUrl: row.instagramUrl,
-        rawCaption: row.rawCaption,
+        rawCaption: caption,
         telegramChatId: row.telegramChatId,
         telegramMessageId: row.telegramMessageId,
         receivedAt: row.receivedAt,
-        status: "pending",
+        status: track ? "pending" : "needs_track",
+        ...(track ? { track } : {}),
         attempts: 0,
       });
       links += 1;

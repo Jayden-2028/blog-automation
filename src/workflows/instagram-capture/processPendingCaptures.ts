@@ -81,6 +81,7 @@ export function captureFromUserTopic(entry: InstagramQueueEntry): InstagramCaptu
     burnedInText: [],
     searchKeyword: topic.split("\n")[0].slice(0, 60).trim(),
     category: null,
+    ...(entry.track ? { track: entry.track } : {}),
   };
 }
 
@@ -150,7 +151,8 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
         continue;
       }
 
-      capture = session.capture;
+      // 트랙은 캡처가 아니라 큐 항목이 안다 - 잡 생성으로 가져간다(instagramTrack.ts).
+      capture = entry.track ? { ...session.capture, track: entry.track } : session.capture;
     }
 
     // 자동 경로도 수동 CLI(ig:create-job)와 **같은 검증**을 통과시킨다 - 자동이라고 검사를

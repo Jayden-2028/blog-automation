@@ -71,10 +71,18 @@ export function listAwaitingTopic(path: string = INSTAGRAM_QUEUE_PATH): Instagra
   return readQueue(path).filter((e) => e.status === "needs_topic");
 }
 
+/** 엔터/사회 트랙 답을 기다리는 항목(2026-10-06, instagramTrack.ts). */
+export function listAwaitingTrack(path: string = INSTAGRAM_QUEUE_PATH): InstagramQueueEntry[] {
+  return readQueue(path).filter((e) => e.status === "needs_track");
+}
+
 export function markEntry(
   id: string,
   patch: Partial<
-    Pick<InstagramQueueEntry, "status" | "jobId" | "attempts" | "lastError" | "askedMessageId" | "userTopic">
+    Pick<
+      InstagramQueueEntry,
+      "status" | "jobId" | "attempts" | "lastError" | "askedMessageId" | "userTopic" | "track" | "askedTrackMessageId"
+    >
   >,
   path: string = INSTAGRAM_QUEUE_PATH
 ): void {

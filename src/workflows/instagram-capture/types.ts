@@ -22,7 +22,12 @@ export type InstagramQueueEntry = {
    * 주제를 물어보고 답을 기다리는 상태. 답장이 오면 pending으로 돌아가되 재캡처는 하지 않는다
    * - 같은 게시물을 다시 열어도 또 비어 있을 것이기 때문이다.
    */
-  status: "pending" | "needs_topic" | "done" | "skipped";
+  // needs_track(2026-10-06): 엔터/사회 트랙을 아직 고르지 않아 캡처 전에 답을 기다리는 상태(instagramTrack.ts).
+  status: "pending" | "needs_track" | "needs_topic" | "done" | "skipped";
+  /** 엔터(네이버) / 사회(티스토리). job.metadata.track으로 옮겨져 알림 봇·뷰어·발행 채널을 가른다. */
+  track?: "entertainment" | "social";
+  /** 맥 폴러가 "어느 트랙?"을 다시 물은 메시지 id. 답장을 어느 링크에 붙일지 짚는다(askedMessageId와 같은 구실). */
+  askedTrackMessageId?: number;
   /** done/skipped로 바뀐 뒤 생성된 article_jobs.id. */
   jobId?: string;
   /**
@@ -54,4 +59,6 @@ export type InstagramCaptureResult = {
   /** 자료조사·원고 제목의 씨앗. 캡션과 번인 텍스트에서 뽑는다. */
   searchKeyword: string;
   category: string | null;
+  /** 큐 항목에서 이어받은 트랙. createInstagramJob이 job.metadata.track으로 남긴다. */
+  track?: "entertainment" | "social";
 };
