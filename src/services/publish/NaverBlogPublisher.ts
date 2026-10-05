@@ -149,6 +149,8 @@ export type NaverBlogPublisherOptions = {
 const SAVE_WAIT_MS = 3000;
 const IMAGE_UPLOAD_WAIT_MS = 3000;
 const FILE_CHOOSER_TIMEOUT_MS = 10_000;
+/** 이미지 한 장을 올린 뒤 다음 동작 전에 에디터가 가라앉기를 기다리는 시간. */
+const UPLOAD_SETTLE_MS = 1_000;
 // 재진입 dim 오버레이(아래 dismissRecoveryOverlay 참고)가 사라지길 기다리는 상한. §12에서
 // 관찰된 건 "몇 초"였다 - page.click()의 기본 30초 액션너빌리티 타임아웃보다 훨씬 짧게 잡아서,
 // 오버레이가 실제로 안 걷히는 다른 문제일 때 stage 전체가 30초씩 두 번(safeClick 1차+재시도)
@@ -167,6 +169,11 @@ const SELECTORS = {
   titleParagraph: ".se-component.se-documentTitle .se-text-paragraph",
   bodyParagraph: '.se-component.se-text[data-a11y-title="본문"] .se-text-paragraph',
   imageToolbarButton: ".se-toolbar-item-image",
+  // 이미지 컴포넌트와 그 캡션 칸("사진 설명을 입력하세요."). SmartEditor ONE 구조 기준이며
+  // 실측 전이다 - 어긋나면 writeCaption이 경고로 알리고 발행은 계속된다.
+  imageComponent: ".se-component.se-image",
+  imageCaption: ".se-caption",
+  imageCaptionParagraph: ".se-caption .se-text-paragraph",
   // SPRINT_4_DESIGN.md §12 - 임시저장된 초안이 있는 상태로 글쓰기 화면에 들어가면(또는 이 파일이
   // 실행한 이전 세션이 저장 없이 중간에 끊겨 미저장 초안이 남으면) 이 클래스의 dim 오버레이가
   // 짧게 뜨며 클릭을 막는다. 정확한 트리거는 미확인이지만 셀렉터 자체는 §12 실측에서 확인됨.
@@ -565,18 +572,61 @@ export class NaverBlogPublisher {
       }
 
       try {
-        await this.uploadAtCursor(page, localPath);
+        await this.uploadWithRetry(page, localPath, image.marker);
         inserted += 1;
         if (!(await this.waitForImageCount(page, inserted))) {
           inserted -= 1; // 실제로 안 들어갔다 - 다음 장의 기대치가 어긋나지 않게 되돌린다.
           warnings.push(`이미지 업로드가 확인되지 않았습니다(${image.alt || image.url}).`);
+        } else {
+          const captionWarning = await this.writeCaption(page, inserted - 1, image.alt ?? "");
+          if (captionWarning) warnings.push(captionWarning);
+          // 업로드 직후엔 방금 올린 이미지가 선택 상태라 곧바로 다음 툴바 클릭을 하면 파일 선택창이
+          // 안 뜨는 경우가 있었다(2026-10-05 실측: 글마다 한 장씩 filechooser 타임아웃).
+          await page.waitForTimeout(UPLOAD_SETTLE_MS);
         }
       } catch (error) {
-        warnings.push(`이미지 업로드 실패(${this.errorMessage(error)}).`);
+        warnings.push(`이미지 업로드 실패${image.marker ? `(${image.marker})` : ""}: ${this.errorMessage(error).split("\n")[0]}`);
       }
     }
 
     return warnings;
+  }
+
+  /**
+   * 파일 선택창이 안 뜨면 한 번 더 시도한다. 첫 시도 실패 시점의 화면을 스냅샷으로 남겨,
+   * 재발하면 어떤 레이어가 툴바 클릭을 막았는지 볼 수 있게 한다.
+   */
+  private async uploadWithRetry(page: Page, localPath: string, marker?: string): Promise<void> {
+    try {
+      await this.uploadAtCursor(page, localPath);
+    } catch (firstError) {
+      await this.saveFailureSnapshot(page, "image").catch(() => undefined);
+      console.warn(`[naver] 파일 선택창 대기 실패${marker ? `(${marker})` : ""} - 재시도: ${this.errorMessage(firstError).split("\n")[0]}`);
+      await page.waitForTimeout(UPLOAD_SETTLE_MS * 2);
+      await this.uploadAtCursor(page, localPath);
+    }
+  }
+
+  /**
+   * 방금 올린 이미지(문서 순서상 `index`번째 이미지 컴포넌트)의 캡션 칸에 글을 넣는다.
+   * 표식 순서대로 올리므로 문서 순서 = 업로드 순서다. 실패해도 발행은 막지 않고 경고만 돌려준다.
+   */
+  private async writeCaption(page: Page, index: number, caption: string): Promise<string | null> {
+    const text = caption.replace(/\s+/g, " ").trim();
+    if (!text) return null;
+    try {
+      const component = page.locator(SELECTORS.imageComponent).nth(index);
+      const paragraph = component.locator(SELECTORS.imageCaptionParagraph).first();
+      await paragraph.scrollIntoViewIfNeeded({ timeout: CLICK_TIMEOUT_MS });
+      await paragraph.click({ timeout: CLICK_TIMEOUT_MS });
+      await page.keyboard.insertText(text);
+      await page.waitForTimeout(300);
+      const written = await component.locator(SELECTORS.imageCaption).first().innerText();
+      if (!written.includes(text.slice(0, 10))) return `이미지 캡션이 입력되지 않았습니다(${text.slice(0, 20)}).`;
+      return null;
+    } catch (error) {
+      return `이미지 캡션 입력 실패: ${this.errorMessage(error).split("\n")[0]}`;
+    }
   }
 
   /**
