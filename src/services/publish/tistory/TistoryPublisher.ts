@@ -419,6 +419,8 @@ export class TistoryPublisher {
           inserted -= 1;
           warnings.push(`이미지 업로드가 확인되지 않았습니다(${image.alt || image.url}).`);
         } else {
+          const captionWarning = await this.writeCaption(page, image.alt ?? "");
+          if (captionWarning) warnings.push(captionWarning);
           await page.waitForTimeout(UPLOAD_SETTLE_MS);
         }
       } catch (error) {
@@ -450,6 +452,32 @@ export class TistoryPublisher {
       photoItem.click({ timeout: CLICK_TIMEOUT_MS }),
     ]);
     await fileChooser.setFiles(localPath);
+  }
+
+  /**
+   * 방금 올린 이미지(문서상 마지막 figure)의 캡션을 넣는다(2026-10-06 실측). 티스토리 에디터는 업로드한 이미지를
+   * `<figure data-ke-type="image"><img …><figcaption></figcaption></figure>`로 두고, figcaption 글자를 본문 저장 형식
+   * `[##_Image|…|{"caption":"…"}_##]`에 싣는다. 그래서 figcaption에 글자만 넣으면 된다(네이버처럼 UI를 클릭할 필요 없음).
+   * 실패해도 발행은 막지 않고 경고만 돌려준다.
+   */
+  private async writeCaption(page: Page, caption: string): Promise<string | null> {
+    const text = caption.replace(/\s+/g, " ").trim();
+    if (!text) return null;
+    const js = `(() => {
+      const ed = window.tinymce && window.tinymce.get("${SELECTORS.editorInstanceId}");
+      if (!ed) return "no-editor";
+      const figs = ed.getBody().querySelectorAll("figure[data-ke-type=image]");
+      if (figs.length === 0) return "no-figure";
+      const fig = figs[figs.length - 1];
+      let cap = fig.querySelector("figcaption");
+      if (!cap) { cap = ed.getDoc().createElement("figcaption"); fig.appendChild(cap); }
+      cap.textContent = ${JSON.stringify(text)};
+      if (ed.setDirty) ed.setDirty(true);
+      if (ed.fire) { ed.fire("change"); ed.fire("input"); }
+      return (ed.getContent() || "").includes(${JSON.stringify(text.slice(0, 20))}) ? "ok" : "not-serialized";
+    })()`;
+    const result = (await page.evaluate(js).catch((error: unknown) => `error:${error instanceof Error ? error.message : String(error)}`)) as string;
+    return result === "ok" ? null : `이미지 캡션 입력 실패(${result}): ${text.slice(0, 30)}`;
   }
 
   private async waitForImageCount(page: Page, want: number): Promise<boolean> {
