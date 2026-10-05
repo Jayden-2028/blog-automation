@@ -1,6 +1,23 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-05 (Asia/Seoul)
+기준일: 2026-10-06 (Asia/Seoul)
+
+## 2026-10-06 — 개편0 전체 리뷰 완료, 개편2.5(안정화) 발주
+
+개편1·2 머지분(1484eac..33a565a) 전체 리뷰를 마쳤다(설계검증 세션). **미병합·미배포 없음** - cron 3개 통합분 실발화
+(엔터 09/13/18시·사회 20시 전부 success), 웹훅 3개(메인·사회·인스타), 맥미니 폴러 6종·`.env`(IG_INBOX_MODE=true,
+TISTORY_*, SOCIAL_*)까지 실측 확인. 발견된 결함과 정리 과제는 **`RESTRUCTURE-2.5-STABILIZATION.md`**(저장소 밖
+`/Users/wooahpapa/blog-automation/`)로 발주했다 - 핵심 3건: 티스토리 폴러 예외 처리(기록 실패 시 중복 발행 위험),
+인스타 done→pending 역행(중복 job), 답장 매칭의 트랙 미구분(세 봇이 같은 개인 채팅이라 message_id 충돌 가능).
+
+**알려진 한계(수정 전까지 유효)**
+- `mergeMetadata`(ArticleJobRepository)는 read-merge-write라 원자적이지 않다. 폴러 2종 + Actions 동시 쓰기 때 키 유실
+  가능. 원자화(RPC)는 migration 승인이 필요해 보류.
+- 맥 폴러·watchdog 알림은 트랙 무관하게 메인봇으로 간다(같은 개인 채팅이라 수신은 됨).
+- watchdog은 GitHub cron(12 UTC)인데 10/5에 발화를 건너뛰었다. 개편3에서 Worker 12 UTC 슬롯(21:00 KST, kscene과
+  동시)으로 이전 예정.
+- **Supabase Storage 511MB/1GB(51%)**, 10월 페이스 일 ~28MB면 2~3주 내 한도. 개편2.5의 storage-cleanup(발행 14일
+  경과 이미지 정리, dry-run 기본)으로 대응.
 
 ## 2026-10-06 — 인스타 변환기 링크의 트랙 선택(엔터/사회)
 

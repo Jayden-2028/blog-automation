@@ -58,11 +58,19 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   (`research/[키워드].md`, `drafts/[키워드].md`).
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
   researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
-- **채널은 둘이다 - Blogspot과 네이버**(2026-09-22 사용자 결정으로 네이버 재개).
-  티스토리는 로그인이 자주 풀리고 공식 API가 없어 운영을 접었고 코드도 전부 삭제했다
-  (복구는 git revert). 카테고리→채널 배정(`config/channelRouting.ts`)은 없다 - **어느 채널에
-  올릴지는 라우팅이 아니라 사람이 버튼으로 정한다.** 둘 다 눌러도 되고 한쪽만 눌러도 된다.
+- **채널은 셋이다 - Blogspot, 네이버, 티스토리**(2026-10-05 개편2에서 티스토리 자동 발행 재개.
+  2026-09-15에 접었던 전제가 바뀌었다 - 사용자가 PC 앞에서 운영하므로 로그인 풀림에 바로 개입할
+  수 있다. 상세는 `docs/ai-handoff/TISTORY_AUTO_PUBLISH_DESIGN.md`). 카테고리→채널 배정
+  (`config/channelRouting.ts`)은 없다 - **어느 채널에 올릴지는 라우팅이 아니라 사람이 버튼으로
+  정한다.** 다만 2026-10 개편부터 **트랙이 버튼 구성을 정한다** - 엔터 트랙은 🟢 네이버,
+  사회 트랙은 🟠 티스토리 버튼이 뜬다(`job.metadata.track`, 없으면 엔터).
   - Blogspot(`whynowissue.blogspot.com`): 공식 API(Blogger v3). GitHub Actions에서 바로 끝난다.
+    2026-10 개편으로 엔터·사회 버튼에서는 빠졌고, 개편3부터 사용설명서 트랙
+    (`thekoreamanual.blogspot.com`, `KSCENE_BLOGGER_BLOG_ID`)이 쓴다.
+  - 티스토리(`wooahpapa.tistory.com`, 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
+    클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
+    Playwright(TinyMCE)로 발행한다. 로그인 풀림은 실패가 아니라 **대기(deferred)** - 재로그인하면
+    자동 재개, 3일 지나면 버튼을 다시 눌러야 한다. 첫 운영은 비공개(`TISTORY_PUBLISH_VISIBILITY`).
   - 네이버(`blog.naver.com/whyissuenow`): **공식 발행 API가 없다.** Playwright로 로그인된
     브라우저를 조작하므로 GitHub Actions에서 돌릴 수 없다 - 클라우드는 요청만 남기고
     **맥의 로컬 폴러**(`job:naver-poll`)가 집어 간다. 맥이 꺼져 있으면 켜질 때 처리된다.
@@ -107,9 +115,11 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   frontmatter로 남긴다(`rules/output-format.md` §9). 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
   (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
   (`job-publish-prepare.yml`)가 실행한다.
-- **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가). 원고 준비 완료
-  알림에 버튼 4개가 붙는다 - `📄 원고 페이지 열기` / `🖼 이미지 수정`(아직 미연결) /
-  `🔵 블로그 발행` / `🟢 네이버 발행`. **이미지까지 반영된 최종 원고를 뷰어에서 눈으로 본 뒤**
+- **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가, 2026-10-05 트랙별 구성).
+  원고 준비 완료 알림의 버튼은 공통 `📄 원고 페이지 열기` / `🖼 이미지 수정`(아직 미연결) /
+  `⬇️ 맥으로 내려받기`에 **트랙별 발행 버튼**이 붙는다 - 엔터는 `🟢 네이버 발행`,
+  사회는 `🟠 티스토리 발행`(🔵 블로그 발행은 2026-10 개편으로 두 트랙에서 제외).
+  **이미지까지 반영된 최종 원고를 뷰어에서 눈으로 본 뒤**
   누르는 것이고, 사람이 곧 품질 게이트다. 누르지 않은 원고는 올라가지 않는다.
   - **뷰어에서 고친 본문·캡션은 `📤 수정본 반영`을 눌러야 발행 원고(DB)에 들어간다**(2026-10-03). 누르기 전에는
     복사에만 쓰인다. 경로: Pages Function → `manuscript-edit.yml` → `applyViewerEditRequest.ts`.
