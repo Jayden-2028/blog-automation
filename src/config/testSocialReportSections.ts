@@ -48,7 +48,7 @@ const payload: KeywordNotificationPayload = {
 };
 const chunks = formatNotificationMessage(payload, { headerTitle: formatSocialReportHeader(new Date("2026-10-05T11:00:00Z")), sections: SOCIAL_REPORT_SECTION_CONFIG });
 
-assert(chunks[0].text.includes("데일리 사회 이슈 리포트") && chunks[0].text.includes("10/9"), `헤더 문구 (${chunks[0].text.split("\n")[0]})`);
+assert(chunks[0].text.includes("데일리 사회 이슈 리포트") && chunks[0].text.includes("10/5"), `헤더 문구 (${chunks[0].text.split("\n")[0]})`);
 const titles = chunks.filter((c) => c.ranks.length === 0 && c !== chunks[0]).map((c) => c.text);
 assert(titles.length === 4, `섹션 제목은 항목이 있는 4개만 (실제 ${titles.length}: ${titles.join(" | ")})`);
 assert(!titles.some((t) => t.includes("커뮤니티")), "항목 없는 커뮤니티 섹션은 제목도 내지 않는다");
