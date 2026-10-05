@@ -8,7 +8,9 @@
 - **멀티봇 공통 레이어**(개편3이 재사용): `notifications/telegramTracks.ts`(트랙→봇 토큰·채팅 ID), `TelegramNotifier.fromEnv(track)`, `TelegramBot.fromEnv(opts, track)`, Worker `/webhook/<track>` + dispatch payload `track`. track은 `job.metadata.track`(jsonb, **migration 없음**), 값이 없으면 엔터.
 - **사회 20:00 데일리 리포트**: 사건·정책·경제·커뮤니티·생활 섹션별 목록 + Go/Pass, 사회 봇으로 발송. 커뮤니티는 재크롤링 없이 엔터 회차가 채운 값을 수거.
 - **사회 원고 완료 알림**: 발행 버튼 없음, 티스토리 수동 발행 안내. 뷰어는 `social.html`(같은 Pages 프로젝트).
-- **미완료(승인 필요)**: GitHub secrets `SOCIAL_*`, main 병합, Worker 배포·secret, 사회 봇 `setWebhook`. 이게 끝나야 §6 10/8~10/10 실운영 검증(봇 왕복·리포트 수신·티스토리 리허설)을 할 수 있다.
+- **배포·검증 완료(2026-10-05)**: GitHub secrets·Worker secret·Worker 배포·`setWebhook`(웹훅 시크릿은 새로 교체, 메인봇도 재등록) 끝. 사회 봇 왕복, 20시 리포트 수동 실행 수신, Go → 원고 → 발행 버튼 없는 완료 알림 → 뷰어(`social.html`) → 티스토리 수동 발행 리허설까지 사용자가 확인했다. **§6 10/8~10/10 완료 기준 충족.**
+- 후속 수정: 리포트에서 엔터 제외(`isEntertainmentLeak`, 제목까지 봄·incident 유지), 뷰어 강조색(사회 네이비 / 엔터·네이버용 다크 그린).
+- **남은 관찰**: 구글 이미지 검색(Serper) 400 실패 지속(개편2와 무관), 20시 정규 회차 실수신(10-06 20:00) 확인.
 
 
 ## 2026-10-05 — 개편1: 엔터 트랙 일 3회 전환 (브랜치 `feat/restructure-1-entertainment-3x`, 설계서 `RESTRUCTURE-PLAN-2026-10.md` §2)
