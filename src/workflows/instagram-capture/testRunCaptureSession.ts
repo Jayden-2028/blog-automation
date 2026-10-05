@@ -81,6 +81,35 @@ const tests: Array<[string, () => Promise<void>]> = [
     },
   ],
   [
+    "릴스 링크는 캡션이 있으면 화면 판정을 건너뛴다 (2026-10-06 실측: 프레임이 다른 릴스로 넘어가 엉뚱한 주제가 나갔다)",
+    async () => {
+      let judged = false;
+      const r = await runCaptureSession(
+        entry({ instagramUrl: "https://www.instagram.com/reel/DeGQqIgSulS/?utm_source=x" }),
+        deps({
+          capture: async () => ({ ...CAPTURE, caption: "유도 정수진 계체 실격 논란\n둘째 줄" }),
+          judge: async () => {
+            judged = true;
+            return { ...JUDGEMENT, searchKeyword: "비행기 맨발 승객" };
+          },
+        })
+      );
+      assert.equal(r.status, "ready");
+      if (r.status !== "ready") return;
+      assert.equal(judged, false, "릴스는 캡션이 있으면 모델(화면 판정)을 부르지 않는다");
+      assert.deepEqual(r.capture.burnedInText, [], "화면 글자를 쓰지 않는다");
+      assert.ok(r.capture.searchKeyword.startsWith("유도 정수진"), `주제어는 캡션 첫 줄 (${r.capture.searchKeyword})`);
+      // 캡션이 없는 릴스는 화면 글자에 기댄다(없으면 no_material).
+      let judged2 = false;
+      const r2 = await runCaptureSession(
+        entry({ instagramUrl: "https://www.instagram.com/reel/XYZ/", rawCaption: "" }),
+        deps({ capture: async () => ({ ...CAPTURE, caption: "" }), judge: async () => { judged2 = true; return JUDGEMENT; } })
+      );
+      assert.equal(r2.status, "ready");
+      assert.equal(judged2, true, "캡션 없는 릴스는 화면 판정을 쓴다");
+    },
+  ],
+  [
     "슬라이드 0장이어도 캡션이 있으면 진행한다",
     async () => {
       // 2026-09-23 사용자 결정: 캡션은 og:description으로 따로 오므로 슬라이드가 깨져도 살아 있다.

@@ -65,6 +65,21 @@ function harness(session: RunCaptureSessionResult, entries: InstagramQueueEntry[
 
 const tests: Array<[string, () => Promise<void>]> = [
   [
+    "큐 항목의 트랙(엔터/사회)이 job 생성 입력까지 간다 (2026-10-06 실측: parseCaptureFile이 track을 떨어뜨렸다)",
+    async () => {
+      const h = harness(okSession, [entry({ track: "social" })]);
+      const received: Array<Record<string, unknown>> = [];
+      (h.deps as { createJob: (c: Record<string, unknown>) => Promise<{ jobId: string }> }).createJob = async (c) => {
+        received.push(c);
+        return { jobId: "job-1" };
+      };
+      await processPendingCaptures(h.deps);
+      assert.equal(received.length, 1);
+      assert.equal(received[0].track, "social", "createJob이 받는 capture에 track이 있어야 한다");
+      assert.equal(received[0].searchKeyword, "주제어", "규격 필드는 그대로");
+    },
+  ],
+  [
     "성공하면 job을 만들고 자료조사를 발화한다",
     async () => {
       const h = harness(okSession, [entry()]);

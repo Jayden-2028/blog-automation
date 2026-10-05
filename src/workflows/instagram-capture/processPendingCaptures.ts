@@ -171,7 +171,9 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
       continue;
     }
 
-    const created = await createJob(parsed.capture);
+    // parseCaptureFile은 규격 필드만 다시 조립하므로 track이 떨어진다(2026-10-06 실측: 사회로 골랐는데 job에 track이 없었다).
+    // 큐 항목의 트랙을 여기서 다시 붙인다.
+    const created = await createJob({ ...parsed.capture, ...(entry.track ? { track: entry.track } : {}) });
     result.created += 1;
     // createInstagramJob이 큐 항목을 done으로 바꾼다. attempts는 기록용으로 남긴다.
     mark(entry.id, { attempts });

@@ -40,8 +40,12 @@ export async function runCaptureSession(
     // 캡션은 살아 있는 경우가 많아, 그것만으로도 원고를 쓴다(2026-09-23 사용자 결정).
     const caption = cleanCaption(captured.caption) || cleanCaption(entry.rawCaption);
 
+    // 릴스(영상)는 슬라이드가 아니다(2026-10-06 실측): 영상 프레임 캡처가 **다른 릴스**로 넘어간 화면을 찍어, 캡션은
+    // "유도 계체 실격"인데 번인 글자는 "비행기 맨발"인 원고가 나갔다. 캡션(og:description)은 요청한 게시물 것이므로
+    // 릴스에 캡션이 있으면 캡션만 쓰고 화면 판정은 건너뛴다. 캡션이 없을 때만 화면 글자에 기댄다.
+    const isReel = /instagram\.com\/reel\//i.test(entry.instagramUrl);
     let judgement: CarouselJudgement | null = null;
-    if (captured.slides.length > 0) {
+    if (captured.slides.length > 0 && !(isReel && caption)) {
       judgement = await deps.judge(captured, entry);
     }
 
