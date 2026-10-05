@@ -16,6 +16,7 @@ import "dotenv/config";
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
 import { TISTORY_CONFIG } from "../config/publishTargets.js";
@@ -27,6 +28,7 @@ import { publishJobToTistory } from "../workflows/publish/publishJobToTistory.js
 import {
   deferTistoryPublish,
   finishTistoryPublish,
+  isDueForAttempt,
   listExpiredDeferred,
   listPendingTistoryRequests,
   readTistoryRequest,
@@ -41,7 +43,7 @@ const LOGIN_CHECK_WINDOW = { fromMinute: 19 * 60 + 25, toMinute: 19 * 60 + 55 };
 const REMINDER_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_FILE = resolve("logs/.tistory-poll-state.json");
 
-type PollState = { loginCheckedOn?: string; loginLostNotifiedAt?: string; expiredNotifiedOn?: string };
+export type PollState = { loginCheckedOn?: string; loginLostNotifiedAt?: string; expiredNotifiedOn?: string };
 
 function readState(): PollState {
   try {
@@ -70,6 +72,23 @@ function kstMinuteOfDay(now = new Date()): number {
   return get("hour") * 60 + get("minute");
 }
 
+/** 테스트가 브라우저·DB·텔레그램 없이 processPending을 돌리도록 바꿔 끼우는 지점. 기본은 실제 구현. */
+export type PollDeps = {
+  publish: typeof publishJobToTistory;
+  finish: typeof finishTistoryPublish;
+  defer: typeof deferTistoryPublish;
+  notify: (job: ArticleJobRow | null, text: string) => Promise<void>;
+  saveState: (state: PollState) => void;
+};
+
+const defaultDeps: PollDeps = {
+  publish: publishJobToTistory,
+  finish: finishTistoryPublish,
+  defer: deferTistoryPublish,
+  notify,
+  saveState: writeState,
+};
+
 async function notify(job: ArticleJobRow | null, text: string): Promise<void> {
   const notifier = job ? notifierForJob(job) : TelegramNotifier.fromEnv("social");
   await notifier.sendMessages([{ text }]).catch((error) => {
@@ -90,31 +109,31 @@ function failureMessage(job: ArticleJobRow, detail: string): string {
   ].join("\n");
 }
 
-async function processPending(pending: ArticleJobRow[], state: PollState): Promise<void> {
+export async function processPending(pending: ArticleJobRow[], state: PollState, deps: PollDeps = defaultDeps): Promise<void> {
   console.log(`▶ [tistory-poll] 대기 ${pending.length}건 중 ${Math.min(pending.length, MAX_PER_RUN)}건 처리`);
 
   for (const job of pending.slice(0, MAX_PER_RUN)) {
     console.log(`   · ${job.keyword}`);
     let result: Awaited<ReturnType<typeof publishJobToTistory>>;
     try {
-      result = await publishJobToTistory(job.id);
+      result = await deps.publish(job.id);
     } catch (error) {
       // 예외로 폴러가 죽으면 요청이 requested로 남아 60초마다 같은 글을 다시 집는다 - 실패로 기록하고 알린 뒤 다음 건으로.
       // (발행 성공 후 기록 실패는 publishJobToTistory가 published_unrecorded로 따로 돌려준다 - 여기는 그 이전 단계의 예외다.)
       const detail = error instanceof Error ? error.message : String(error);
-      await finishTistoryPublish(job.id, { ok: false, error: detail }).catch(() => {});
+      await deps.finish(job.id, { ok: false, error: detail }).catch(() => {});
       console.error(`   ❌ ${job.keyword} - 예외: ${detail}`);
       process.exitCode = 1;
-      await notify(job, failureMessage(job, `예외: ${detail}`));
+      await deps.notify(job, failureMessage(job, `예외: ${detail}`));
       continue;
     }
 
     if (result.ok) {
-      await finishTistoryPublish(job.id, { ok: true, url: result.url });
+      await deps.finish(job.id, { ok: true, url: result.url });
       console.log(`   ✅ ${job.keyword} -> ${result.url}`);
       const warnings = result.warnings ?? [];
       if (warnings.length > 0) console.warn(`   ⚠️ ${warnings.join(" / ")}`);
-      await notify(
+      await deps.notify(
         job,
         [
           result.alreadyDone ? "ℹ️ <b>이미 티스토리에 올라가 있습니다</b>" : `🟠 <b>티스토리에 발행했습니다</b>${TISTORY_CONFIG.visibility === "private" ? " (비공개)" : ""}`,
@@ -132,12 +151,12 @@ async function processPending(pending: ArticleJobRow[], state: PollState): Promi
       const request = readTistoryRequest(job);
       const lastNotified = request?.notifiedAt ?? state.loginLostNotifiedAt;
       const shouldNotify = !lastNotified || Date.now() - new Date(lastNotified).getTime() > REMINDER_INTERVAL_MS;
-      await deferTistoryPublish(job, { notified: shouldNotify });
+      await deps.defer(job, { notified: shouldNotify });
       console.log(`   ⏸ ${job.keyword} - 로그인 풀림, 대기로 전환`);
       if (shouldNotify) {
         state.loginLostNotifiedAt = new Date().toISOString();
-        writeState(state);
-        await notify(
+        deps.saveState(state);
+        await deps.notify(
           job,
           [
             "🔑 <b>티스토리 로그인이 풀려 발행을 미뤘습니다</b>",
@@ -149,7 +168,7 @@ async function processPending(pending: ArticleJobRow[], state: PollState): Promi
         );
       }
       // 로그인이 풀렸으면 뒤의 건도 같은 결과다 - 브라우저를 더 띄우지 않는다.
-      for (const rest of pending.slice(pending.indexOf(job) + 1, MAX_PER_RUN)) await deferTistoryPublish(rest);
+      for (const rest of pending.slice(pending.indexOf(job) + 1, MAX_PER_RUN)) await deps.defer(rest);
       return;
     }
 
@@ -160,10 +179,10 @@ async function processPending(pending: ArticleJobRow[], state: PollState): Promi
 
     if (result.reason === "published_unrecorded") {
       // 이미 올라간 글이다 - 재시도 큐로 되돌리면 같은 글이 또 올라간다. 별도 상태로 남겨 폴러가 다시 집지 않게 한다.
-      await finishTistoryPublish(job.id, { ok: "unrecorded", url: result.url, error: result.detail }).catch(() => {});
+      await deps.finish(job.id, { ok: "unrecorded", url: result.url, error: result.detail }).catch(() => {});
       console.error(`   ⚠️ ${job.keyword} - ${result.detail} (${result.url})`);
       process.exitCode = 1;
-      await notify(
+      await deps.notify(
         job,
         [
           "🚨 <b>티스토리에는 올라갔지만 기록에 실패했습니다</b>",
@@ -178,9 +197,9 @@ async function processPending(pending: ArticleJobRow[], state: PollState): Promi
       continue;
     }
 
-    await finishTistoryPublish(job.id, { ok: false, error: result.detail });
+    await deps.finish(job.id, { ok: false, error: result.detail });
     console.error(`   ❌ ${job.keyword} - ${result.detail}`);
-    await notify(job, failureMessage(job, result.detail));
+    await deps.notify(job, failureMessage(job, result.detail));
   }
 }
 
@@ -223,15 +242,28 @@ async function remindExpired(state: PollState): Promise<void> {
   );
 }
 
+/** 이번 주기에 처리할 건. 로그인 대기(deferred)는 재확인 간격 안이면 뺀다 - 브라우저를 띄우지 않는다(B-1). */
+export function selectDueRequests(waiting: ArticleJobRow[], now: Date): ArticleJobRow[] {
+  return waiting.filter((job) => {
+    const request = readTistoryRequest(job);
+    return !request || isDueForAttempt(request, now);
+  });
+}
+
 async function main(): Promise<void> {
   const lock = acquireSingleInstanceLock(resolve("logs/.tistory-poll.lock"));
   if (!lock) return;
 
   const state = readState();
-  const pending = await listPendingTistoryRequests();
+  const waiting = await listPendingTistoryRequests();
+  // 로그인 대기(deferred) 건은 재확인 간격 안이면 이번엔 건너뛴다 - 브라우저를 띄우지 않는다(B-1).
+  const pending = selectDueRequests(waiting, new Date());
+  if (waiting.length > pending.length) {
+    console.log(`· [tistory-poll] 로그인 대기 ${waiting.length - pending.length}건은 재확인 간격 전이라 건너뜁니다.`);
+  }
   if (pending.length > 0) {
     await processPending(pending, state);
-  } else {
+  } else if (waiting.length === 0) {
     // 점검 단계의 예외(브라우저 기동·로그인 확인)가 만료 알림까지 막지 않게 따로 감싼다.
     await dailyLoginCheck(state).catch((error) => {
       console.warn(`⚠️ [tistory-poll] 로그인 점검 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
@@ -240,7 +272,10 @@ async function main(): Promise<void> {
   await remindExpired(state);
 }
 
-main().catch((error) => {
-  console.error(`❌ [tistory-poll] 실패: ${error instanceof Error ? error.message : error}`);
-  process.exit(1);
-});
+// 테스트가 이 파일을 import해도 폴러가 돌지 않게 한다(npm run job:tistory-poll로 직접 실행할 때만).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`❌ [tistory-poll] 실패: ${error instanceof Error ? error.message : error}`);
+    process.exit(1);
+  });
+}

@@ -30,6 +30,8 @@ export type TistoryPublishRequest = {
   source?: "telegram" | "viewer";
   /** deferred가 처음 기록된 시각. 3일 만료의 기준이다(재시도마다 갱신하지 않는다). */
   deferredAt?: string;
+  /** 마지막으로 로그인 확인(브라우저 기동)을 한 시각. deferred 재확인 간격(30분)의 기준이다. */
+  lastCheckedAt?: string;
   /** 로그인 풀림 알림을 보낸 시각. 같은 사유로 폴링마다 알림이 쏟아지지 않게 한다. */
   notifiedAt?: string;
   finishedAt?: string;
@@ -49,6 +51,7 @@ export function readTistoryRequest(job: ArticleJobRow): TistoryPublishRequest | 
     source: value.source,
     deferredAt: value.deferredAt,
     notifiedAt: value.notifiedAt,
+    lastCheckedAt: value.lastCheckedAt,
     finishedAt: value.finishedAt,
     url: value.url,
     error: value.error,
@@ -139,9 +142,30 @@ export async function deferTistoryPublish(
     source: existing?.source,
     deferredAt: existing?.deferredAt ?? nowIso,
     notifiedAt: options.notified ? nowIso : existing?.notifiedAt,
+    lastCheckedAt: nowIso,
   };
   await mergeMetadata(job.id, { [TISTORY_REQUEST_KEY]: request });
   return request;
+}
+
+/** 로그아웃(deferred) 상태에서 브라우저를 다시 띄워 로그인을 확인하는 최소 간격. 60초 폴링마다 Chromium을 띄우지 않게 한다. */
+const DEFAULT_RECHECK_MINUTES = 30;
+
+function defaultRecheckMs(): number {
+  const raw = Number.parseInt(process.env.TISTORY_DEFERRED_RECHECK_MINUTES ?? "", 10);
+  return (Number.isNaN(raw) || raw < 0 ? DEFAULT_RECHECK_MINUTES : raw) * 60 * 1000;
+}
+
+/**
+ * 이번 주기에 이 건을 실제로 처리(=브라우저 기동)해도 되는가. requested(새 요청)는 항상 된다. deferred는 마지막 확인
+ * 후 recheck 간격이 지났을 때만 - 로그인이 풀린 채로 60초마다 브라우저를 띄우고 metadata를 다시 쓰던 비용을 줄인다(B-1).
+ */
+export function isDueForAttempt(request: TistoryPublishRequest, now: Date, recheckMs: number = defaultRecheckMs()): boolean {
+  if (request.status !== "deferred") return true;
+  if (!request.lastCheckedAt) return true;
+  const last = new Date(request.lastCheckedAt).getTime();
+  if (Number.isNaN(last)) return true;
+  return now.getTime() - last >= recheckMs;
 }
 
 export function isDeferredExpired(

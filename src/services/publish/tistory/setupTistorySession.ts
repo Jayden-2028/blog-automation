@@ -18,9 +18,11 @@
 // 맥미니에서 돌리면 그 프로필에 세션이 남아 폴러가 쓴다. 카카오 "로그인 상태 유지"를 켜야 세션이 오래 간다.
 import "dotenv/config";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { chromium, type Page } from "playwright";
 
 import { TISTORY_CONFIG, tistoryBlogName } from "../../../config/publishTargets.js";
+import { acquireSingleInstanceLock } from "../../../jobs/lib/singleInstanceLock.js";
 import { restoreSessionCookies, saveSessionCookies } from "./tistorySessionCookies.js";
 
 const OUT_DIR = ".local/dom-snapshots/tistory";
@@ -121,6 +123,14 @@ async function main(): Promise<void> {
   const name = tistoryBlogName();
   if (!name) {
     console.error("❌ TISTORY_BLOG_URL이 올바르지 않습니다(.env). 예: https://wooahpapa.tistory.com/");
+    process.exitCode = 1;
+    return;
+  }
+  // 폴러(tistory-poll)와 **같은 프로필**을 쓰므로 동시에 열면 서로의 세션·쿠키를 망친다. 폴러 락을 같이 잡아
+  // 폴러가 도는 중이면 시작하지 않고, setup이 도는 동안은 폴러가 조용히 건너뛴다(2026-10-06 개편2.5 B-1).
+  const lock = acquireSingleInstanceLock(resolve("logs/.tistory-poll.lock"), { staleMs: 30 * 60 * 1000 });
+  if (!lock) {
+    console.error("❌ 티스토리 폴러가 지금 브라우저를 쓰고 있습니다(logs/.tistory-poll.lock). 1~2분 뒤 다시 실행해 주세요.");
     process.exitCode = 1;
     return;
   }

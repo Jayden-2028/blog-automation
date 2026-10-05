@@ -1162,7 +1162,9 @@ main().catch((error) => {
       const bot = new TelegramBot({
         botToken: "test-token",
         chatId: CHAT_ID,
-        loadJobById: async () => ({ id: JOB, keyword: "이디야 상어점" }) as never,
+        // 블로그스팟 버튼은 엔터·사회 대체 키보드에서 빠졌다(개편2.5 B-2) - 블로그스팟이 버튼인 kscene 트랙으로 검증한다.
+        track: "kscene",
+        loadJobById: async () => ({ id: JOB, keyword: "이디야 상어점", metadata: { track: "kscene" } }) as never,
         publishToBlogspot: publish as never,
         sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {
           if (method === "editMessageReplyMarkup") edits.push(body);
@@ -1240,6 +1242,71 @@ main().catch((error) => {
       assert(publishCalls === 1 && out.outcome.status === "published", `blogspot 발행이 돌아야 한다 (${data})`);
     }
     console.log("✅ 네이버는 예약만 / 이미지도 발행 안 함 / blogspot은 옛 형식도 동작");
+    // 서버 측 트랙-채널 검증(개편2.5 B-2): 사회 job을 네이버·블로그스팟으로, 엔터 job을 티스토리로 못 올린다.
+    for (const [jobTrack, action] of [["social", "naver"], ["social", "blogspot"], ["entertainment", "tistory"]] as const) {
+      let touched = 0;
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "트랙 불일치", metadata: jobTrack === "social" ? { track: "social" } : {} }) as never,
+        publishToBlogspot: (async () => { touched += 1; return {} as never; }) as never,
+        requestNaverPublish: async () => { touched += 1; return { queued: true }; },
+        requestTistoryPublish: async () => { touched += 1; return { queued: true }; },
+        sendMessage: async () => {},
+        answerCallbackQuery: async () => {},
+      } as never);
+      const out = await bot.handlePublishDecisionCallback(query(`publish:${action}:${JOB}`));
+      assert(out.outcome.status === "channel_mismatch", `${jobTrack} job의 ${action} 요청은 거부해야 한다 (${JSON.stringify(out.outcome)})`);
+      assert(touched === 0, `${jobTrack} job의 ${action} 요청이 큐/발행에 닿으면 안 된다`);
+    }
+    // 맞는 조합은 통과한다.
+    {
+      let queued = 0;
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadJobById: async () => ({ id: JOB, keyword: "사회", metadata: { track: "social" } }) as never,
+        requestTistoryPublish: async () => { queued += 1; return { queued: true }; },
+        sendMessage: async () => {},
+        answerCallbackQuery: async () => {},
+      } as never);
+      const out = await bot.handlePublishDecisionCallback(query(`publish:tistory:${JOB}`));
+      assert(out.outcome.status === "queued" && queued === 1, "사회 job의 티스토리 요청은 통과");
+    }
+    console.log("✅ 트랙-채널 서버 검증 - 불일치 거부 / 일치 통과");
+    // 대체 키보드 + 예약 라벨(개편2.5 B-2): 원본 키보드를 잃어도 트랙 구성으로 되살리고, 티스토리 예약은 🟠.
+    for (const [botTrack, action, want, notWant, label] of [
+      ["social", "tistory", "publish:tistory:", "publish:naver:", "🟠 예약됨"],
+      ["entertainment", "naver", "publish:naver:", "publish:tistory:", "🟢 예약됨"],
+    ] as const) {
+      const edits: Record<string, unknown>[] = [];
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        track: botTrack,
+        loadJobById: async () => ({ id: JOB, keyword: "키보드", metadata: botTrack === "social" ? { track: "social" } : {} }) as never,
+        requestNaverPublish: async () => ({ queued: true }),
+        requestTistoryPublish: async () => ({ queued: true }),
+        sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {
+          if (method === "editMessageReplyMarkup") edits.push(body);
+          return null;
+        },
+      } as never);
+      await bot.processUpdate({
+        update_id: 1,
+        callback_query: {
+          id: "q1",
+          data: `publish:${action}:${JOB}`,
+          message: { chat: { id: Number(CHAT_ID) }, message_id: 7, reply_markup: { inline_keyboard: [[{ text: "⏳ 처리 중…", callback_data: "noop" }]] } },
+        },
+      } as never);
+      const kb = JSON.stringify(edits[0]?.reply_markup ?? {});
+      assert(kb.includes(label), `${botTrack} 예약 라벨은 ${label} (${kb})`);
+      assert(kb.includes("publish:images:") && !kb.includes("publish:blogspot:") && !kb.includes(notWant), `${botTrack} 대체 키보드에 다른 트랙·블로그스팟 버튼이 없어야 한다 (${kb})`);
+      assert(want.length > 0, "sanity");
+    }
+    console.log("✅ 트랙별 대체 키보드 / 🟠 티스토리 예약 라벨");
+
   }
 
   // 7) **누른 버튼 하나만** 바뀐다(2026-09-22 실측 버그).

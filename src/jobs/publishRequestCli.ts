@@ -9,6 +9,7 @@ import "dotenv/config";
 import { escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { notifierForJob } from "../notifications/notifierForJob.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
+import { isChannelAllowedForTrack, trackOfJob } from "../notifications/telegramTracks.js";
 import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -32,6 +33,11 @@ async function main(): Promise<void> {
   const job = await ArticleJobRepository.findById(jobId);
   if (!job) throw new Error(`job을 찾을 수 없습니다: ${jobId}`);
   if (job.status !== "approved") throw new Error(`승인된 원고만 발행할 수 있습니다(현재: ${job.status})`);
+
+  // 서버 측 트랙-채널 검증(개편2.5 B-2): 뷰어는 트랙을 모르고 요청을 보낸다 - 엔터 job을 티스토리로 올리면 안 된다.
+  if (!isChannelAllowedForTrack(trackOfJob(job), channel)) {
+    throw new Error(`${trackOfJob(job)} 트랙 원고는 ${channel}로 발행할 수 없습니다: ${job.keyword}`);
+  }
 
   const queued = await requestTistoryPublish(job, { source: "viewer" });
   console.log(`${queued.queued ? "✅" : "ℹ️"} [publish-request] ${channel} ${job.keyword}: ${queued.queued ? "예약" : queued.reason}`);

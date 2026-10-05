@@ -200,6 +200,7 @@
     "job:telegram-poll": "tsx src/jobs/telegramPollJob.ts",
     "job:telegram-update": "tsx src/jobs/runTelegramUpdateCli.ts",
     "job:naver-poll": "tsx src/jobs/naverPublishPollJob.ts",
+    "test:tistory-poll": "tsx src/jobs/testTistoryPublishPollJob.ts",
     "job:tistory-poll": "tsx src/jobs/tistoryPublishPollJob.ts",
     "job:publish-request": "tsx src/jobs/publishRequestCli.ts",
     "job:export-poll": "tsx src/jobs/manuscriptExportPollJob.ts",

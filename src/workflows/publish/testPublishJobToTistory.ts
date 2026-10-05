@@ -123,6 +123,17 @@ async function main(): Promise<void> {
     console.log("✅ TISTORY_ENABLED 게이트");
   }
 
+  // 발행은 성공했는데 publications 기록이 실패 -> 던지지 않고 published_unrecorded(URL 포함). 재시도하면 중복 발행이다.
+  {
+    const out = await publishJobToTistory("job-1", {
+      ...baseDeps,
+      savePublication: async () => { throw new Error("db down"); },
+    });
+    assert(!out.ok && out.reason === "published_unrecorded", `기록 실패는 published_unrecorded (${JSON.stringify(out)})`);
+    assert(!out.ok && out.reason === "published_unrecorded" && out.url.includes("/entry/t") && out.detail.includes("db down"), "URL과 사유를 돌려준다");
+    console.log("✅ 발행 성공 후 기록 실패 - published_unrecorded");
+  }
+
   console.log("\n✅ publishJobToTistory 테스트 전체 통과");
 }
 

@@ -1,5 +1,5 @@
 // 멀티봇 공통 레이어(telegramTracks.ts) 테스트. 네트워크·DB 없음 - env는 주입한다.
-import { TRACKS, DEFAULT_TRACK, TRACK_ENV_KEYS, parseTrack, pickJobForTrack, resolveTrackCredentials, trackJobMetadata, trackOfJob } from "./telegramTracks.js";
+import { TRACKS, DEFAULT_TRACK, TRACK_ENV_KEYS, isChannelAllowedForTrack, parseTrack, pickJobForTrack, publishActionRowsForTrack, resolveTrackCredentials, trackJobMetadata, trackOfJob } from "./telegramTracks.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -66,6 +66,15 @@ assert(pickJobForTrack([entJob], "social") === null, "사회 봇이 엔터 job�
 assert(pickJobForTrack(rows)?.id === "soc", "track을 안 주면 예전처럼 첫 job");
 assert(pickJobForTrack([], "social") === null, "빈 목록");
 console.log("✅ pickJobForTrack - 답장 매칭 트랙 분기");
+
+// 4-c) 트랙-채널 검증·대체 키보드(개편2.5 B-2)
+assert(isChannelAllowedForTrack("entertainment", "naver") && !isChannelAllowedForTrack("entertainment", "tistory"), "엔터: 네이버 허용, 티스토리 거부");
+assert(isChannelAllowedForTrack("social", "tistory") && !isChannelAllowedForTrack("social", "naver") && !isChannelAllowedForTrack("social", "blogspot"), "사회: 티스토리만");
+const flat = (t: "entertainment" | "social" | "kscene") => publishActionRowsForTrack(t).flat();
+assert(flat("entertainment").includes("naver") && !flat("entertainment").includes("blogspot") && !flat("entertainment").includes("tistory"), "엔터 키보드 = 네이버만(블로그스팟·티스토리 없음)");
+assert(flat("social").includes("tistory") && !flat("social").includes("naver") && !flat("social").includes("blogspot"), "사회 키보드 = 티스토리만");
+assert(flat("social").includes("images") && flat("social").includes("export"), "공통 버튼 유지");
+console.log("✅ 트랙-채널 검증 / 트랙별 대체 키보드");
 
 // 5) 모든 트랙에 env 키가 있다(트랙을 늘리고 표를 빼먹는 실수 방지)
 for (const track of TRACKS) {

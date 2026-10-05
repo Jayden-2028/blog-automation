@@ -55,6 +55,38 @@ export function trackOfJob(job: { metadata?: unknown } | null | undefined): Trac
   return DEFAULT_TRACK;
 }
 
+export type PublishChannel = "blogspot" | "naver" | "tistory";
+
+/**
+ * 트랙별 발행 채널(개편2.5 B-2). 엔터=네이버, 사회=티스토리. Blogspot은 엔터·사회에서 쓰지 않는다
+ * (콜백 처리 코드는 남아 있고 kscene 트랙의 K-Scene 블로그가 쓴다 - 개편3).
+ */
+export const TRACK_PUBLISH_CHANNELS: Readonly<Record<Track, readonly PublishChannel[]>> = {
+  entertainment: ["naver"],
+  social: ["tistory"],
+  kscene: ["blogspot"],
+};
+
+/**
+ * 서버가 받아 주는 채널. 버튼 구성(위)보다 한 칸 넓다 - 엔터의 Blogspot은 버튼만 뺐고 처리 코드는 남아 있다
+ * (2026-10-05 개편). 사회는 티스토리뿐이다(네이버·Blogspot 거부).
+ */
+const TRACK_ALLOWED_CHANNELS: Readonly<Record<Track, readonly PublishChannel[]>> = {
+  entertainment: ["naver", "blogspot"],
+  social: ["tistory"],
+  kscene: ["blogspot"],
+};
+
+/** 요청 채널이 job 트랙에 맞는가. 서버 측 검증(텔레그램 콜백·publishRequestCli)이 쓴다. */
+export function isChannelAllowedForTrack(track: Track, channel: string): boolean {
+  return (TRACK_ALLOWED_CHANNELS[track] as readonly string[]).includes(channel);
+}
+
+/** 발행 알림 키보드의 동작 구성(줄 단위). 원본 키보드를 잃어 다시 세울 때 쓴다. */
+export function publishActionRowsForTrack(track: Track): ("images" | "export" | PublishChannel)[][] {
+  return [["images", "export"], [...TRACK_PUBLISH_CHANNELS[track]]];
+}
+
 /**
  * 답장 매칭용: message_id가 같은 job이 여럿(트랙별)일 때 그 트랙의 것만 고른다. rows는 최신순.
  * track이 없으면 예전처럼 첫 job(트랙을 가리지 않는다).

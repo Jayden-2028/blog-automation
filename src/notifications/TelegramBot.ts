@@ -19,7 +19,16 @@ import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
 import type { TelegramInlineKeyboardButton } from "./TelegramNotifier.js";
-import { DEFAULT_TRACK, resolveTrackCredentials, trackJobMetadata } from "./telegramTracks.js";
+import {
+  DEFAULT_TRACK,
+  isChannelAllowedForTrack,
+  publishActionRowsForTrack,
+  resolveTrackCredentials,
+  TRACK_LABEL,
+  TRACK_PUBLISH_CHANNELS,
+  trackJobMetadata,
+  trackOfJob,
+} from "./telegramTracks.js";
 import type { Track } from "./telegramTracks.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
 import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
@@ -187,6 +196,8 @@ export type HandlePublishDecisionOutcome =
   | { status: "failed"; reason: string }
   /** 버튼은 붙었으나 처리 경로가 아직 연결되지 않았다(2026-09-22 네이버 재개 작업 중). */
   | { status: "not_wired"; action: PublishDecisionAction }
+  /** 요청 채널이 job 트랙과 맞지 않아 거부했다(엔터→티스토리, 사회→네이버·블로그스팟 등). 버튼은 건드리지 않는다. */
+  | { status: "channel_mismatch"; action: PublishDecisionAction }
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
@@ -890,6 +901,23 @@ export class TelegramBot {
       return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
     }
 
+    // 서버 측 트랙-채널 검증(개편2.5 B-2): 버튼은 트랙별로 다르게 붙지만, 오래된 알림의 버튼이나 다른 트랙 채팅의
+    // 콜백이 와도 job 트랙에 안 맞는 채널로는 발행하지 않는다.
+    if (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot") {
+      const jobTrack = trackOfJob(job);
+      if (!isChannelAllowedForTrack(jobTrack, parsed.action)) {
+        return {
+          outcome: { status: "channel_mismatch", action: parsed.action },
+          message: [
+            "🚫 <b>이 원고는 그 채널로 발행할 수 없습니다</b>",
+            "",
+            `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+            `${TRACK_LABEL[jobTrack]} 트랙 원고는 ${TRACK_PUBLISH_CHANNELS[jobTrack].map((c) => PUBLISH_RETRY_LABEL[c]).join(" / ")} 버튼으로만 발행합니다.`,
+          ].join("\n"),
+        };
+      }
+    }
+
     // 2026-09-22 네이버 재개로 버튼이 3개가 됐다. **분기가 없으면 어떤 버튼을 눌러도 Blogspot이
     // 발행된다** - 동작별로 확실히 갈라 놓는다.
     if (parsed.action === "naver") {
@@ -1373,8 +1401,9 @@ export class TelegramBot {
           if (action === "export") {
             return { text: "⬇️ 요청됨 (다시)", callback_data: buildPublishDecisionCallbackData(parsed.jobId, action) };
           }
-          return { text: "🟢 예약됨", callback_data: "noop" };
+          return { text: action === "tistory" ? "🟠 예약됨" : "🟢 예약됨", callback_data: "noop" };
         case "not_wired":
+        case "channel_mismatch":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
           return null;
         default:
@@ -1403,14 +1432,12 @@ export class TelegramBot {
         })
       );
     } else {
-      // Worker가 버튼을 "처리 중…" 하나로 덮어 원본이 없다 - 세 버튼을 다시 세운다.
+      // Worker가 버튼을 "처리 중…" 하나로 덮어 원본이 없다 - 버튼을 다시 세운다. **트랙에 맞는 구성**으로
+      // (엔터=네이버, 사회=티스토리, 블로그스팟 제외 - 개편2.5 B-2). 이 봇이 받은 콜백이므로 봇의 트랙을 쓴다.
       // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
       // 줄 나눔은 notifyManuscriptsReady의 배치와 같게 유지한다 - 한 줄에 4개를 몰면 텔레그램이
       // 글자를 잘라 무슨 버튼인지 안 보인다.
-      const rows: PublishDecisionAction[][] = [
-        ["images", "export"],
-        ["blogspot", "naver"],
-      ];
+      const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track);
       keyboard = rows.map((row) =>
         row.map(
           (action) =>
