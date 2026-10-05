@@ -44,6 +44,7 @@ console.log("✅ 삭제 계획 산출");
 
 async function main(): Promise<void> {
   const removed: string[][] = [];
+  const removeCalls = (): number => removed.length; // assert의 타입 좁힘이 closure 안의 push를 못 봐서 함수로 읽는다.
   const deps: StorageCleanupDeps = {
     loadJobPublications: async () => jobs,
     listObjects: async (jobId) => (jobId === "old-naver" ? [{ name: "1.webp", size: 2_097_152 }] : [{ name: "a.png", size: 1024 }]),
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
 
   // dry-run(기본): 지우지 않는다
   const dry = await runStorageCleanup({ now: NOW }, deps);
-  assert(!dry.apply && removed.length === 0, "dry-run은 removeObjects를 부르지 않는다");
+  assert(!dry.apply && removeCalls() === 0, "dry-run은 removeObjects를 부르지 않는다");
   assert(dry.plan.paths.length === 2 && dry.candidateJobs === 2 && dry.removed === 0, "dry-run 산출");
   const report = formatCleanupReport(dry);
   assert(report.includes("dry-run") && report.includes("지우지 않았습니다") && report.includes("--apply"), "dry-run 보고에 미삭제·승인 안내");
@@ -60,7 +61,7 @@ async function main(): Promise<void> {
 
   // apply
   const applied = await runStorageCleanup({ apply: true, now: NOW }, deps);
-  assert(applied.apply && removed.length === 1 && removed[0].length === 2 && applied.removed === 2 && applied.failed === 0, "apply만 지운다");
+  assert(applied.apply && removeCalls() === 1 && removed[0].length === 2 && applied.removed === 2 && applied.failed === 0, "apply만 지운다");
   assert(formatCleanupReport(applied).includes("삭제 2개"), "apply 보고");
 
   // 일부만 지워졌으면 실패로 센다

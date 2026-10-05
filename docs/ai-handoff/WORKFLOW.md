@@ -182,8 +182,8 @@ npm --prefix ~/blog-automation/prod run build
 
 **job의 두 가지 뜻**
 1. **워크플로우 job** — 예약/이벤트로 실행되는 작업 단위. 이제는 `.github/workflows/*.yml`
-   5종(`social-issue-keyword` 09:00 KST cron, `entertainment-keyword` 09:10 KST cron,
-   `community-keyword` 13:00 KST cron, `telegram-update`(텔레그램 웹훅 이벤트),
+   여럿(`entertainment-keyword` 09/13/18시 KST cron, `social-issue-keyword` 20:00 KST cron,
+   `storage-cleanup` 일요일 03:00 KST cron(2026-10-06), `telegram-update`(텔레그램 웹훅 이벤트),
    `job-research`/`job-write`(리서치·작성 요청 이벤트), `job-publish-prepare`(승인 콜백 이벤트))가
    맡는다. 예전엔 같은 이름의 launchd job이 이 자리를 대신했다(전부 disable됨,
    `docs/ai-handoff/CURRENT_STATE.md` 참고).

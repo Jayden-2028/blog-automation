@@ -7,11 +7,9 @@
 // 붙어 있어 여러 job을 한 번에 처리하면 오래 걸린다. publishApprovedArticles.ts와 같은 이유로
 // maxJobsPerRun 상한을 둔다. 성공한 job만 manifest에 반영하고 페이지를 한 번만 다시 그린다.
 //
-// 2026-09-15 재배선: 원고 준비(이미지까지) 직후 publishArticleToBlogspot을 이어서 호출한다.
-// BLOGGER_ENABLED=false인 동안은 그 함수가 즉시 { ok:false, reason:"disabled" }로 아무것도 안
-// 하고 돌아오므로(publishArticleToBlogspot.ts 참고) 지금 당장은 무해하다 - 나중에 사용자가
-// BLOGGER_ENABLED를 켜는 순간 별도 배선 없이 바로 동작하도록 미리 연결해 둔다. best-effort라
-// 실패해도 원고 준비 자체(파일/페이지/manifest)는 그대로 성공 유지 - 이미지 생성과 같은 원칙.
+// **여기서는 Blogspot을 호출하지 않는다.** 한때(2026-09-15) 원고 준비 직후 publishArticleToBlogspot을 이어서
+// 불렀으나, 2026-09-19부터 발행은 사람이 버튼으로 한다(채널은 트랙별: 엔터=네이버, 사회=티스토리). 이 함수는 원고·이미지·
+// 내부 링크 준비와 뷰어·알림까지만 맡고, 발행 호출은 텔레그램 버튼·뷰어 요청 경로(TelegramBot / publishRequestCli)에 있다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { prepareManuscript } from "./prepareManuscript.js";

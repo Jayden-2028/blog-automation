@@ -1,7 +1,7 @@
 # 엔터·OTT 키워드 수집. 2026-10-05부터 social-issue와 무관하게 자체 수집한다(entertainmentKeywordJob.ts
 # 상단 주석, RESTRUCTURE-PLAN-2026-10.md §2.2). 하루 3회(KST 09/13/18시) - 회차는 round 입력으로 받는다.
 #
-# 지금은 workflow_dispatch(수동)만 - social-issue-keyword.yml과 같은 이유로 schedule은 아직 안 넣음.
+# 트리거는 workflow_dispatch뿐이다 - schedule은 쓰지 않고 Worker cron이 dispatch한다(아래 메모).
 #
 # 필요한 repo secret: social-issue-keyword.yml과 동일(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 # TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, CLAUDE_CODE_OAUTH_TOKEN
@@ -10,8 +10,8 @@
 name: entertainment-keyword
 
 # 2026-09-16: schedule: 제거, Cloudflare Worker Cron Trigger가 대신 깨운다(social-issue-keyword.yml
-# 상단 메모와 같은 이유). social-issue-keyword.yml(KST 18:00)보다 1시간 뒤인 KST 19:00에 돌도록
-# Worker 쪽에 등록돼 있다 - social-issue가 채운 trend_candidates를 읽는 순서 의존이 유지된다.
+# 상단 메모와 같은 이유). 2026-10-05 개편 뒤로는 하루 3회 KST 09/13/18시에 Worker(cloudflare/telegram-relay
+# src/schedule.ts)가 round 입력을 실어 깨우고, social-issue(KST 20:00)와는 수집 순서 의존이 없다 - 각자 자체 수집한다.
 on:
   workflow_dispatch:
     inputs:

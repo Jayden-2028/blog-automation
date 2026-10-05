@@ -2,6 +2,25 @@
 
 기준일: 2026-10-06 (Asia/Seoul)
 
+## 2026-10-06 — 개편2.5 안정화 구현 (브랜치 `feat/restructure-2.5-stabilization`, 지시서 `RESTRUCTURE-2.5-STABILIZATION.md`)
+
+**상태: 코드·테스트 완료, main 병합·Worker 재배포·맥미니 반영은 사용자 승인 대기.**
+
+- **A-1** 티스토리 폴러 예외 처리: 폴러가 예외로 죽지 않고 `failed` 기록 + 사회 봇 알림 후 다음 건으로. 발행 성공 뒤 기록(`savePublication`)만 실패하면 `tistoryPublish.status = "published_unrecorded"`로 남기고 폴러가 다시 집지 않는다(다시 눌러도 거부 - 중복 발행 방지), 수동 확인 알림.
+- **A-2** 인스타 버튼 선택은 큐 항목이 `needs_track`일 때만 적용(`applyTrackPick`). 이미 처리된 링크는 무시하고 "이미 처리된 링크입니다" 안내. 글자 답으로 트랙이 정해질 때 클라우드가 보낸 버튼 메시지를 지우는 건 하지 않았다(클라우드는 맥 큐 상태를 모른다) - 상태 가드만으로 수용.
+- **A-3** 수정·이미지 수정 답장 매칭에 트랙 조건 추가(`pickJobForTrack`): 봇의 트랙과 job의 `metadata.track`(없으면 엔터)이 같을 때만 매칭. 저장 레코드 변경 없음.
+- **B-1** 로그아웃(deferred) 상태 재확인 간격 30분(`TISTORY_DEFERRED_RECHECK_MINUTES`, `lastCheckedAt`). `setup:tistory`가 폴러 락(`logs/.tistory-poll.lock`)을 잡는다 - 폴러가 도는 중이면 시작하지 않고, setup 중에는 폴러가 건너뛴다.
+- **B-2** 원본 키보드를 잃었을 때 대체 키보드는 트랙별(엔터=네이버, 사회=티스토리, 블로그스팟 제외). 티스토리 예약 라벨 🟠. 서버 측 트랙-채널 검증: 텔레그램 콜백·`publishRequestCli`(뷰어 경로)에서 사회→네이버/블로그스팟, 엔터→티스토리 거부. 엔터의 블로그스팟 콜백은 버튼만 없고 처리는 남아 있다(kscene이 쓴다).
+- **C-1** 릴레이 Worker가 인스타 경로에서 `caption`도 받는다(사진+캡션 링크). **Worker 재배포 필요.**
+- **C-2** `IG_INBOX_MODE` 기본값을 inbox(웹훅)로 뒤집음. 폴링은 `IG_INBOX_MODE=false` 명시 옵트인. 맥미니 실기기는 이미 `true`라 동작 변화 없음.
+- **C-3** `doctor.sh`: `TISTORY_PROFILE_DIR`를 `.env`에서 읽음, `IG_INBOX_MODE`·`SOCIAL_TELEGRAM_*`·`TISTORY_ENABLED` 점검 추가. `install-launchd.sh` 머리말 6종.
+- **D** `npm run storage:cleanup`(dry-run 기본, `--apply`로 실삭제, `--notify`로 텔레그램 보고) + `storage-cleanup.yml` + Worker 주 1회 cron(일요일 03:00 KST, cron 4/5개 사용). 워크플로는 `apply` 입력 또는 repo 변수 `STORAGE_CLEANUP_APPLY=true`일 때만 지운다. **Blogspot에 올라간(진행 중 포함) job은 보존** - 게시된 Blogspot 글의 `<img src>`가 Storage 공개 URL을 직접 가리킨다(2026-10-06 실글 2건에서 확인, 글당 7~8장). 첫 dry-run: 대상 0건 - Blogspot 게시 77건(316.7MB)이 보존되고 14일 미경과 18건(24.8MB). 네이버·티스토리 발행분이 14일을 넘기면 대상이 된다.
+- **E** 뷰어 문구(사회: "🟠 티스토리 발행 버튼으로 발행")·잔재 주석·문서 갱신. CLAUDE.md 채널 문단은 개편0 세션이 갱신해 건드리지 않았다.
+
+**알려진 한계(C-4)**: `ArticleJobRepository.mergeMetadata`는 read-merge-write라 같은 job에 두 프로세스가 동시에 쓰면 한쪽 변경이 유실될 수 있다(예: 폴러가 `tistoryPublish`를 쓰는 순간 뷰어 요청·답장 처리가 다른 키를 씀). 이번엔 B-1로 쓰기 빈도만 줄였다. 원자화 설계안(적용은 별도 승인·migration 필요): `merge_article_job_metadata(p_job_id uuid, p_patch jsonb)` RPC를 만들어 `UPDATE article_jobs SET metadata = coalesce(metadata,'{}'::jsonb) || p_patch WHERE id = p_job_id`를 한 문장으로 실행(Postgres가 행 잠금으로 직렬화) → `mergeMetadata`가 이 RPC를 호출하도록 교체. 키 삭제는 `null` 값을 `jsonb_strip_nulls`로 걸러내거나 `p_remove text[]` 인자를 `-` 연산자로 처리. `||`는 최상위 키만 합치므로 중첩 객체(`images` 등)를 부분 갱신하는 호출이 있는지 먼저 확인할 것.
+
+**승인 후 남은 일**: ① main 병합·push ② Worker 재배포(C-1, 새 cron 포함) ③ 맥미니 prod pull + `tistory-poll`·`instagram-capture-poll` 폴러 재로드 ④ 사회 트랙 티스토리 비공개 왕복 1건으로 A-1 경로 리허설 ⑤ storage-cleanup 첫 실삭제는 dry-run 결과 보고 후 승인.
+
 ## 2026-10-06 — 개편0 전체 리뷰 완료, 개편2.5(안정화) 발주
 
 개편1·2 머지분(1484eac..33a565a) 전체 리뷰를 마쳤다(설계검증 세션). **미병합·미배포 없음** - cron 3개 통합분 실발화

@@ -18,7 +18,7 @@ import type { Track } from "../../notifications/telegramTracks.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
-/** 사회 트랙의 수동 발행 안내. 발행 버튼이 없으니 "그다음에 무엇을 하는지"를 문구가 대신 말해야 한다. */
+/** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 반영)을 문구로 알린다. */
 const SOCIAL_MANUAL_PUBLISH_GUIDE =
   "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '📤 수정본 반영'을 누르세요.";
 
@@ -94,7 +94,7 @@ export function buildManuscriptReadyMessage(
     };
   }
 
-  // 트랙은 job이 정한다(metadata.track). 사회 트랙은 발행 버튼이 없는 별도 알림이다.
+  // 트랙은 job이 정한다(metadata.track). 사회 트랙은 🟠 티스토리 발행 버튼만 붙는 별도 알림이다(네이버·블로그스팟 버튼 없음).
   const track: Track = trackOfJob(job);
   if (track === "social") return buildSocialReadyMessage(result, outcome, pagesUrl);
 
@@ -111,7 +111,7 @@ export function buildManuscriptReadyMessage(
 
   // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤**
   // 누르는 공개 발행이다. 사람이 곧 품질 게이트다 - 누르지 않은 원고는 지금처럼 뷰어에서 복사해
-  // 수동 발행한다. 페이지 열기와 같은 줄에 둔다(먼저 보고 나서 누르는 순서라 시선이 왼→오른쪽).
+  // 올리지 않는다(발행 버튼은 엔터=🟢 네이버, 사회=🟠 티스토리). 페이지 열기와 같은 줄에 둔다(먼저 보고 나서 누르는 순서라 시선이 왼→오른쪽).
   // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다 - 여기서 예외를
   // 던지면 "원고 준비 완료" 알림 자체가 통째로 사라진다.
   // 2026-09-22 네이버 운영 재개: 버튼이 1개 -> 3개가 됐다. 한 줄에 몰면 텔레그램에서 글자가

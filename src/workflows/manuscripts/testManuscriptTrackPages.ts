@@ -42,7 +42,7 @@ assert(entHtml.includes("<title>원고 뷰어</title>") && entHtml.includes("텔
 
 const socialHtml = renderManuscriptPage(manifest, new Date(), { track: "social" });
 assert(socialHtml.includes("사회원고") && !socialHtml.includes("엔터원고"), "사회 페이지에는 사회 원고만");
-assert(socialHtml.includes("티스토리에 수동 발행") && !socialHtml.includes("텔레그램 버튼으로 발행"), "사회 페이지는 수동 발행 안내");
+assert(socialHtml.includes("🟠 티스토리 발행 버튼으로 발행") && !socialHtml.includes("수동 발행") && !socialHtml.includes("텔레그램 버튼으로 발행"), "사회 페이지는 🟠 티스토리 발행 버튼 안내(수동 발행 문구 없음)");
 assert(entHtml.includes("--pen:#1B5E3A") && !entHtml.includes("#E8590C"), "엔터(네이버용) 강조색은 다크 그린");
 assert(socialHtml.includes("--pen:#1F3A68") && !socialHtml.includes("#E8590C"), "사회 강조색은 네이비");
 assert(socialHtml.includes('var TRACK = "social"') && entHtml.includes('var TRACK = "entertainment"'), "페이지 스크립트가 자기 트랙을 안다");

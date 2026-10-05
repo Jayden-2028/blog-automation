@@ -29,7 +29,7 @@ import type { Track } from "../../notifications/telegramTracks.js";
 
 /**
  * 페이지 머리말·사이드바 문구. 엔터는 개편 전 문구 그대로다.
- * 사회는 **발행 버튼이 없다**(티스토리 수동 발행) - 안내 문구가 달라야 "텔레그램 버튼으로 발행"을 찾지 않는다.
+ * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 🟠 티스토리 발행 버튼(뷰어·텔레그램)으로 올리므로 안내 문구가 엔터와 다르다.
  */
 // pen/penSoft는 강조색(--pen, --pen-soft)이다. 트랙을 한눈에 구분하려고 페이지마다 다르게 둔다(2026-10-05 사용자 요청):
 // 엔터(네이버용) 다크 그린, 사회 네이비. 사용설명서는 기존 오렌지를 유지한다.
@@ -39,7 +39,7 @@ const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: str
     pen: "#1B5E3A", penSoft: "#E4F0E8",
   },
   social: {
-    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 복사해서 티스토리에 수동 발행",
+    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 🟠 티스토리 발행 버튼으로 발행",
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {

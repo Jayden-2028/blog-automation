@@ -13,7 +13,7 @@
 | 러너가 update의 track으로 봇 생성 | `src/jobs/runTelegramUpdateCli.ts` |
 | 20:00 데일리 리포트(섹션별 목록 + Go/Pass) | `src/jobs/socialIssueKeywordJob.ts`, `src/config/socialReportSections.ts` |
 | 경제·정책 어휘(living 편입) | `src/config/keywordCategoryRules.ts` (`SOCIAL_POLICY_TERMS`/`SOCIAL_ECONOMY_TERMS`) |
-| 사회용 원고 완료 알림(발행 버튼 없음) | `src/workflows/manuscripts/notifyManuscriptsReady.ts` |
+| 사회용 원고 완료 알림(🟠 티스토리 발행 버튼만, 2026-10-06 자동 발행 재개) | `src/workflows/manuscripts/notifyManuscriptsReady.ts` |
 | 사회 전용 뷰어 `social.html` | `src/config/manuscriptViewerPages.ts`, `writeManuscriptPages.ts`, `renderManuscriptPage.ts` |
 
 ## 설계 결정
@@ -41,7 +41,7 @@
 3. **Worker secret**: `echo -n "<사회 봇 토큰>" | npx wrangler secret put SOCIAL_TELEGRAM_BOT_TOKEN` (파이프 필수 - wrangler.toml 주석의 09-16 사고).
 4. **사회 봇 webhook 등록**(외부 설정 변경): 메인봇과 같은 `secret_token`·`allowed_updates`로 `https://<worker>/webhook/social`을 `setWebhook`. 메인봇은 건드리지 않는다.
 5. **Pages 재배포**: `npm run manuscripts:build -- --refresh` (사회 원고가 생긴 뒤 `social.html`이 올라간다).
-6. 확인: 사회 봇에 테스트 메시지·버튼 왕복 → 20:00 리포트 → Go → 원고 → 알림에 발행 버튼이 없는지 → 뷰어 복사 → 티스토리 수동 발행.
+6. 확인: 사회 봇에 테스트 메시지·버튼 왕복 → 20:00 리포트 → Go → 원고 → 알림에 🟠 티스토리 발행 버튼만 있는지(네이버·블로그스팟 버튼 없음) → 버튼 → 맥미니 폴러가 비공개로 티스토리 발행.
 
 ## 알려 둔 한계
 
