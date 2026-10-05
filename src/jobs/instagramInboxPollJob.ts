@@ -1,3 +1,7 @@
+// ⚠️ 2026-10-06 웹훅 전환으로 **더 이상 cron으로 돌지 않는다**(instagram-inbox-poll.yml 삭제). 수신은 Worker 웹훅 →
+// telegram-update.yml → instagramWebhookHandler.ts가 한다. 이 파일은 되돌릴 때를 위해 남긴다 - 웹훅이 걸린 봇은
+// getUpdates가 409로 실패하므로, 쓰려면 deleteWebhook부터 해야 한다.
+//
 // 인스타 링크 **수신**만 한다(2026-09-25). GitHub Actions에서 돈다.
 //
 // 왜 갈랐나(실측): 링크를 받는 폴러가 맥에서만 돌았는데, 맥이 네트워크 장애·절전으로 39시간

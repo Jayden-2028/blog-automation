@@ -22,6 +22,9 @@ import "dotenv/config";
 import { TelegramBot } from "../notifications/TelegramBot.js";
 import type { TelegramUpdate } from "../notifications/TelegramBot.js";
 import { DEFAULT_TRACK, parseTrack } from "../notifications/telegramTracks.js";
+import { handleInstagramUpdate } from "../workflows/instagram-capture/instagramWebhookHandler.js";
+import { insertInboxEntry } from "../services/supabase/repositories/instagramInboxRepository.js";
+import { TelegramNotifier } from "../notifications/TelegramNotifier.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
 import { dispatchGithubWorkflow } from "../services/github/dispatchWorkflow.js";
 import { enqueueAndMaybeDispatch } from "../services/github/pipelineQueue.js";
@@ -42,6 +45,32 @@ async function main(): Promise<void> {
   // Worker가 webhook 경로(/webhook/<track>)로 정한 값이다. 없으면(개편 전 dispatch·수동 실행) 메인봇.
   // **모르는 값은 던진다** - 조용히 엔터로 처리하면 사회 봇에서 누른 버튼의 응답이 메인봇으로 간다.
   const rawTrack = (update as { track?: unknown }).track;
+
+  // 인스타 변환기 봇(2026-10-06 웹훅 전환): 잡 트랙이 아니라 봇 경로다. 수신함에 넣고 끝낸다 - 캡처는 맥이 한다.
+  if (rawTrack === "instagram") {
+    const botToken = process.env.INSTAGRAM_BOT_TOKEN;
+    if (!botToken) throw new Error("INSTAGRAM_BOT_TOKEN이 없습니다.");
+    const api = async (method: string, body: Record<string, unknown>): Promise<unknown> => {
+      const res = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Telegram ${method} 실패: ${res.status}`);
+      return res.json();
+    };
+    const outcome = await handleInstagramUpdate(update as Parameters<typeof handleInstagramUpdate>[0], {
+      allowedChatId: process.env.INSTAGRAM_BOT_CHAT_ID || null,
+      insertInbox: (row) => insertInboxEntry(row),
+      sendMessage: (chatId, text, replyMarkup) =>
+        new TelegramNotifier({ botToken, chatId }).sendMessages([{ text, replyMarkup }]),
+      editReplyMarkup: (chatId, messageId, replyMarkup) =>
+        api("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: replyMarkup }),
+    });
+    console.log(`✅ [telegram-update] instagram: ${JSON.stringify(outcome)}`);
+    return;
+  }
+
   const track = rawTrack === undefined ? DEFAULT_TRACK : parseTrack(rawTrack);
   if (!track) {
     throw new Error(`알 수 없는 track: ${JSON.stringify(rawTrack)}`);

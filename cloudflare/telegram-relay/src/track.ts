@@ -4,7 +4,9 @@
 // 트랙 목록은 src/notifications/telegramTracks.ts의 TRACKS와 **같아야 한다** - Worker 번들이 저장소 루트
 // src/를 import하지 않게 해 둔 터라 여기에 사본을 둔다. testTrack.ts가 둘이 어긋나면 실패하게 한다.
 
-export const RELAY_TRACKS = ["entertainment", "social", "kscene"] as const;
+// instagram(2026-10-06): 인스타 변환기 봇. 잡 트랙이 아니라 **봇 경로**다 - 잡은 사용자가 버튼으로 고른 트랙(엔터/사회)을
+// 따른다. 이 봇은 링크(일반 메시지)도 받아야 하므로 index.ts가 답장이 아닌 메시지도 넘긴다.
+export const RELAY_TRACKS = ["entertainment", "social", "kscene", "instagram"] as const;
 export type RelayTrack = (typeof RELAY_TRACKS)[number];
 
 /**
@@ -27,4 +29,10 @@ export const RELAY_BOT_TOKEN_KEYS: Readonly<Record<RelayTrack, string>> = {
   entertainment: "TELEGRAM_BOT_TOKEN",
   social: "SOCIAL_TELEGRAM_BOT_TOKEN",
   kscene: "KSCENE_TELEGRAM_BOT_TOKEN",
+  instagram: "INSTAGRAM_BOT_TOKEN",
 };
+
+/** 이 경로는 답장이 아닌 일반 메시지(링크)도 GitHub Actions로 넘긴다. */
+export function forwardsPlainMessages(track: RelayTrack): boolean {
+  return track === "instagram";
+}

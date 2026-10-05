@@ -4,9 +4,11 @@
 
 ## 2026-10-06 — 인스타 변환기 링크의 트랙 선택(엔터/사회)
 
-인스타 링크도 엔터·사회가 갈리므로 사용자가 고른다(`src/workflows/instagram-capture/instagramTrack.ts`). 방법 둘: ① 링크와 같은 메시지에
-"사회"/"엔터"(네이버·티스토리·연예·시사도 인식)를 붙이면 바로 그 트랙 ② 없으면 접수 답장이 묻고, "엔터"/"사회"로 답장(또는 단어만 전송)한다.
-답은 기존 주제 답장과 같은 길(클라우드 수신함 → 맥 큐, 상태 `needs_track`)로 붙고, 기다리는 링크가 여럿이면 맥이 링크별로 다시 묻는다.
+인스타 링크도 엔터·사회가 갈리므로 사용자가 **버튼**으로 고른다. 그러려고 인스타 봇을 **웹훅으로 전환**했다(`/webhook/instagram` →
+`telegram-update.yml` → `instagramWebhookHandler.ts` → 수신함). 5분 cron(`instagram-inbox-poll.yml`)은 지웠다 - 맥은 `IG_INBOX_MODE=true`여야
+한다(getUpdates를 부르면 409). 링크를 보내면 ~1분 안에 [🎬 엔터][🏛 사회] 버튼이 오고, 누르면 Worker가 즉시 ⏳, 1분 안에 ✅로 바뀐다.
+버튼 선택은 수신함 topic_reply에 `track:<큐id>:<트랙>`로 적힌다(migration 없음). 글자 길("사회 https://..." / "사회" 답장)도 그대로 된다
+(`instagramTrack.ts`). 트랙 전까지 큐 상태 `needs_track`.
 트랙은 `job.metadata.track`으로 들어가 이후 알림 봇·뷰어·발행 버튼이 자동으로 갈린다(엔터=메인봇·네이버, 사회=사회 봇·티스토리).
 **트랙을 고를 때까지 캡처하지 않는다.** 맥미니 `instagram-capture-poll`은 prod pull 후 적용된다.
 

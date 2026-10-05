@@ -14,6 +14,15 @@ const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 /** 메시지 안에서 인스타그램 게시물/릴스 URL만 골라낸다(프로필 URL은 제외). */
 const INSTAGRAM_POST_URL_RE = /https?:\/\/(?:www\.)?instagram\.com\/(?:p|reel)\/[A-Za-z0-9_-]+\/?[^\s]*/;
 
+/** 텍스트에서 인스타 URL을 빼고 나머지를 캡션 후보로 돌려준다. URL이 없으면 null. 웹훅 핸들러도 같은 규칙을 쓴다. */
+export function splitInstagramUrlAndCaption(text: string): { url: string; caption: string } | null {
+  const match = text.match(INSTAGRAM_POST_URL_RE);
+  if (!match) return null;
+  const url = match[0].replace(/[),.]+$/, "");
+  const caption = text.replace(match[0], "").trim();
+  return { url, caption };
+}
+
 export type TelegramUpdateLike = {
   update_id: number;
   message?: {
@@ -152,11 +161,7 @@ export class InstagramCaptureBot {
 
   /** 텍스트에서 인스타 URL을 빼고 나머지를 캡션 후보로 돌려준다. URL이 없으면 null. */
   private static splitUrlAndCaption(text: string): { url: string; caption: string } | null {
-    const match = text.match(INSTAGRAM_POST_URL_RE);
-    if (!match) return null;
-    const url = match[0].replace(/[),.]+$/, "");
-    const caption = text.replace(match[0], "").trim();
-    return { url, caption };
+    return splitInstagramUrlAndCaption(text);
   }
 
   /**

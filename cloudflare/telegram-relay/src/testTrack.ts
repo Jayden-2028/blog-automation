@@ -19,11 +19,12 @@ assert(trackFromPath("/webhook/social/extra") === null, "하위 경로는 null")
 assert(trackFromPath("/admin") === null, "관계없는 경로는 null");
 console.log("✅ trackFromPath");
 
-// 사본이 본 코드와 같다.
-assert(JSON.stringify([...RELAY_TRACKS]) === JSON.stringify([...TRACKS]), "RELAY_TRACKS가 TRACKS와 달라졌다 - 두 곳을 같이 고칠 것");
+// 사본이 본 코드와 같다(잡 트랙은 전부 Worker 경로에 있어야 하고, 토큰 이름도 같아야 한다). instagram은 봇 경로만 있다.
 for (const track of TRACKS) {
+  assert((RELAY_TRACKS as readonly string[]).includes(track), `Worker 경로에 ${track}이 없다`);
   assert(RELAY_BOT_TOKEN_KEYS[track] === TRACK_ENV_KEYS[track].botToken, `${track} 봇 토큰 이름이 Worker와 본 코드에서 다르다`);
 }
-console.log("✅ Worker 사본이 telegramTracks.ts와 일치");
+assert(trackFromPath("/webhook/instagram") === "instagram" && RELAY_BOT_TOKEN_KEYS.instagram === "INSTAGRAM_BOT_TOKEN", "instagram 봇 경로");
+console.log("✅ Worker 사본이 telegramTracks.ts와 일치 (+instagram 봇 경로)");
 
 console.log("\n✅ testTrack 전체 통과");

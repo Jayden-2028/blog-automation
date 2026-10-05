@@ -99,6 +99,14 @@ try {
   assert(!calls.some((c) => c.url.includes("api.telegram.org")), "사회 토큰이 없으면 다른 봇 토큰으로 대신 호출하지 않는다");
   console.log("✅ 사회 봇 토큰 없음 -> 토스트 생략, 메인봇 토큰으로 대체하지 않음");
 
+  // 7) 인스타 봇: 답장이 아닌 일반 메시지(링크)도 넘긴다. 다른 봇은 여전히 안 넘긴다.
+  const plain = { update_id: 2, message: { message_id: 11, chat: { id: 99 }, text: "https://www.instagram.com/p/ABC/" } };
+  res = await post("/webhook/instagram", plain);
+  assert(res.status === 200 && dispatchOf().client_payload.track === "instagram", "인스타 일반 메시지는 dispatch(track=instagram)");
+  res = await post("/webhook/social", plain);
+  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "사회 봇의 일반 메시지는 그대로 무시");
+  console.log("✅ 인스타 봇만 일반 메시지(링크) 전달");
+
   console.log("\n✅ testFetch 전체 통과");
 } finally {
   globalThis.fetch = realFetch;

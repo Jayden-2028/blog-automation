@@ -26,7 +26,7 @@
 // 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
 import { resolveScheduled, type ScheduledDispatch } from "./schedule.js";
-import { trackFromPath, type RelayTrack } from "./track.js";
+import { forwardsPlainMessages, trackFromPath, type RelayTrack } from "./track.js";
 
 export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
@@ -39,6 +39,8 @@ export interface Env {
   SOCIAL_TELEGRAM_BOT_TOKEN?: string;
   /** 사용설명서 트랙 봇(개편3). 경로 /webhook/kscene. */
   KSCENE_TELEGRAM_BOT_TOKEN?: string;
+  /** 인스타 변환기 봇(2026-10-06 웹훅 전환). 경로 /webhook/instagram. */
+  INSTAGRAM_BOT_TOKEN?: string;
 }
 
 /**
@@ -52,6 +54,8 @@ function botTokenFor(env: Env, track: RelayTrack): string | undefined {
       return env.SOCIAL_TELEGRAM_BOT_TOKEN;
     case "kscene":
       return env.KSCENE_TELEGRAM_BOT_TOKEN;
+    case "instagram":
+      return env.INSTAGRAM_BOT_TOKEN;
     default:
       return env.TELEGRAM_BOT_TOKEN;
   }
@@ -190,7 +194,10 @@ export default {
     const message = Boolean(update) && typeof update === "object" ? (update as Record<string, unknown>).message : undefined;
     const isReplyMessage = Boolean(message) && typeof message === "object" && "reply_to_message" in (message as object);
 
-    if (!isCallbackQuery && !isReplyMessage) {
+    // 인스타 봇은 링크가 일반 메시지로 오므로 글자가 있는 메시지는 전부 넘긴다(2026-10-06). 다른 봇은 그대로다.
+    const isTextMessage =
+      Boolean(message) && typeof message === "object" && typeof (message as { text?: unknown }).text === "string";
+    if (!isCallbackQuery && !isReplyMessage && !(forwardsPlainMessages(track) && isTextMessage)) {
       return new Response("OK", { status: 200 });
     }
 

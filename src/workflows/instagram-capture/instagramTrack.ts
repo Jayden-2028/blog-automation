@@ -64,6 +64,20 @@ export function trackQuestion(entry: Pick<InstagramQueueEntry, "instagramUrl">):
   return ["📌 이 링크는 어느 트랙으로 쓸까요? 이 메시지에 엔터 또는 사회로 답장해 주세요.", "", entry.instagramUrl].join("\n");
 }
 
+/** 버튼 선택을 수신함 topic_reply 행의 reply_text에 담는 형식. 수신함 모양을 안 바꾸려고 글자로 싣는다. */
+const TRACK_PICK_PREFIX = "track:";
+
+export function encodeTrackPick(queueId: string, track: InstagramTrack): string {
+  return `${TRACK_PICK_PREFIX}${queueId}:${track}`;
+}
+
+export function parseTrackPick(text: string | null | undefined): { queueId: string; track: InstagramTrack } | null {
+  if (!text || !text.startsWith(TRACK_PICK_PREFIX)) return null;
+  const [queueId, track] = text.slice(TRACK_PICK_PREFIX.length).split(":");
+  if (!queueId || (track !== "entertainment" && track !== "social")) return null;
+  return { queueId, track };
+}
+
 export type TrackReplyInput = {
   text: string;
   /** 답장이면 원 메시지 id, 그냥 보낸 단어면 null. */

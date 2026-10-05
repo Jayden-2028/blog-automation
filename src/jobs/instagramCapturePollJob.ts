@@ -12,7 +12,7 @@ import { resolve } from "node:path";
 import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
 import { listUnclaimed, markClaimed } from "../services/supabase/repositories/instagramInboxRepository.js";
 import { appendQueueEntry, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
-import { resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
+import { parseTrackPick, resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
@@ -38,9 +38,18 @@ async function main(): Promise<void> {
     const inbox = await listUnclaimed();
     let links = 0;
     let topics = 0;
-    for (const row of inbox) {
+    // 링크를 먼저 큐에 넣고 답(버튼 선택·답장)을 붙인다 - 같은 배치에 링크와 그 답이 함께 오면 순서가 중요하다.
+    const ordered = [...inbox].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "link" ? -1 : 1));
+    for (const row of ordered) {
       if (row.kind === "topic_reply") {
-        // 트랙 답("엔터"/"사회")인지 먼저 본다(2026-10-06, instagramTrack.ts). 트랙 단어가 아니면 주제 답장이다.
+        // 버튼 선택(웹훅 핸들러가 `track:<큐id>:<트랙>`으로 적는다)은 큐 id로 바로 붙인다(2026-10-06).
+        const pick = parseTrackPick(row.replyText);
+        if (pick) {
+          markEntry(pick.queueId, { status: "pending", track: pick.track });
+          topics += 1;
+          continue;
+        }
+        // 글자 답("엔터"/"사회")인지 본다(instagramTrack.ts). 트랙 단어가 아니면 주제 답장이다.
         const trackOutcome = resolveTrackReply(listAwaitingTrack(), {
           text: row.replyText ?? "",
           replyToMessageId: row.replyToMessageId,

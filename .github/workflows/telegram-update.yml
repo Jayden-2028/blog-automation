@@ -62,6 +62,9 @@ jobs:
           SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
           KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
           KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          # 인스타 변환기 봇(2026-10-06 웹훅 전환) - 링크 수신·트랙 버튼 처리가 여기서 돈다.
+          INSTAGRAM_BOT_TOKEN: ${{ secrets.INSTAGRAM_BOT_TOKEN }}
+          INSTAGRAM_BOT_CHAT_ID: ${{ secrets.INSTAGRAM_BOT_CHAT_ID }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_UPDATE_JSON: ${{ toJson(github.event.client_payload) }}
