@@ -238,6 +238,103 @@ async function main(): Promise<void> {
     console.log("✅ 일일 상한의 \"오늘\" - 한국시간 자정 기준");
   }
 
+  // ---- 사용설명서(kscene) 트랙(개편3): 블로그 ID·라벨·이미지 복사 ----
+  {
+    const ksceneJob = (metadata: Record<string, unknown> = {}) =>
+      job({ category: "kscene", seed_query: "korean bbq", metadata: { track: "kscene", ...metadata } });
+    const enBody = "Intro.\n\n[IMAGE: Grilling meat — 웹 검색]\n\nBody text.";
+    const imgs = [
+      { index: 1, description: "Grilling meat", prompt: null, url: "https://sb.example/a/1.webp", provider: "openai", fileName: "1.webp" },
+      { index: 2, description: "Side dishes", prompt: null, url: "https://sb.example/a/2.webp", provider: "openai", fileName: "2.webp" },
+    ];
+    const enArticles = [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette", content: `${enBody}\n\n[IMAGE: Side dishes — AI 생성]` })];
+
+    // 대상 해석(순수)
+    const t1 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(ksceneJob(), "506709987398630214");
+    assert(t1.track === "kscene" && t1.blogId === "506709987398630214" && t1.label === "Food & Dining", `사용설명서는 K-Scene blogId와 시드 라벨 (${JSON.stringify(t1)})`);
+    const t2 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "living" }), "506709987398630214");
+    assert(t2.track === "entertainment" && t2.blogId === BLOGGER_CONFIG.blogId && t2.label === "생활정보", "엔터·사회 job은 기존 blogId·한글 라벨 그대로");
+    const t3 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(ksceneJob(), undefined);
+    assert(t3.blogId === undefined, "blogId가 없으면 undefined(whynowissue로 폴백하지 않는다)");
+    const t4 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "예전 시드", metadata: { track: "kscene" } }), "1");
+    assert(t4.label === "Living in Korea", "시드를 모르는 옛 job은 기본 라벨");
+    console.log("✅ kscene 대상 해석 - K-Scene blogId·영문 라벨, 다른 트랙은 불변, 폴백 없음");
+
+    // blogId 미설정이면 발행 호출 없이 disabled
+    let called = 0;
+    const noId = await publishArticleToBlogspot("job-1", {
+      ...baseDeps, loadJob: async () => ksceneJob(), loadArticles: async () => enArticles, ksceneBlogId: undefined,
+      insertPost: async () => { called += 1; return baseDeps.insertPost(); },
+    });
+    assert(noId.ok === false && noId.reason === "disabled" && noId.detail.includes("KSCENE_BLOGGER_BLOG_ID") && called === 0, "KSCENE_BLOGGER_BLOG_ID 없으면 발행하지 않는다");
+
+    // 영어 라벨·이미지 복사 치환·기록
+    let inserted: { contentHtml: string; labels?: string[] } | null = null;
+    const saved: Record<string, unknown>[] = [];
+    const rehostCalls: number[] = [];
+    const run = (metadata: Record<string, unknown>, rehost: NonNullable<Parameters<typeof publishArticleToBlogspot>[1]>["rehostImages"]) =>
+      publishArticleToBlogspot("job-1", {
+        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false,
+        loadJob: async () => ksceneJob({ images: imgs, ...metadata }),
+        loadArticles: async () => enArticles,
+        insertPost: async (input) => { inserted = input; return { ok: true as const, postId: "p", url: "https://thekoreamanual.blogspot.com/p.html", isDraft: false }; },
+        rehostImages: rehost,
+        saveJobMetadata: async (_id, patch) => { saved.push(patch); },
+      });
+    const pages = (i: number) => `https://img.pages.dev/abcd/${i}-aaaa.webp`;
+    const done = await run({}, async ({ images }) => {
+      rehostCalls.push(...images.map((image) => image.index));
+      return { images: images.map((image) => ({ ...image, url: pages(image.index) })), rehosted: images.length, complete: true, deployed: true, failures: [] };
+    });
+    assert(done.ok === true && inserted !== null, `kscene 발행 성공 (${JSON.stringify(done)})`);
+    const html = (inserted as unknown as { contentHtml: string; labels?: string[] }).contentHtml;
+    assert((inserted as unknown as { labels?: string[] }).labels?.join() === "Food & Dining", "영문 라벨");
+    assert(html.includes(pages(1)) && html.includes(pages(2)) && !html.includes("sb.example"), `본문 이미지가 Pages 주소로 치환된다 (${html})`);
+    const patch = saved[0] as { rehostedBySource: Record<string, string>; imagesRehostedAt?: string };
+    assert(patch.rehostedBySource["https://sb.example/a/1.webp"] === pages(1) && typeof patch.imagesRehostedAt === "string", "원본->Pages 대응과 imagesRehostedAt(전부 옮겼을 때) 기록");
+    console.log("✅ kscene 발행 - 영문 라벨, 이미지 Pages 치환, 복사 기록(imagesRehostedAt)");
+
+    // 이미 옮긴 이미지는 다시 옮기지 않는다(재발행)
+    saved.length = 0; rehostCalls.length = 0; inserted = null;
+    const republish = await run({ rehostedBySource: { "https://sb.example/a/1.webp": pages(1), "https://sb.example/a/2.webp": pages(2) }, imagesRehostedAt: "x" }, async () => {
+      rehostCalls.push(-1);
+      throw new Error("호출되면 안 된다");
+    });
+    assert(republish.ok === true && rehostCalls.length === 0 && saved.length === 0, "대응이 있으면 복사를 다시 하지 않고 기록도 다시 쓰지 않는다");
+    assert((inserted as unknown as { contentHtml: string }).contentHtml.includes(pages(2)), "저장된 대응으로 치환");
+
+    // 일부만 새 이미지(이미지 수정): 새 것만 복사
+    saved.length = 0; rehostCalls.length = 0;
+    await run({ rehostedBySource: { "https://sb.example/a/1.webp": pages(1) } }, async ({ images }) => {
+      rehostCalls.push(...images.map((image) => image.index));
+      return { images: images.map((image) => ({ ...image, url: pages(image.index) })), rehosted: 1, complete: true, deployed: true, failures: [] };
+    });
+    assert(rehostCalls.join() === "2", "아직 안 옮긴 이미지만 복사한다");
+
+    // 복사 실패/부분 성공: 발행은 계속(Supabase URL), imagesRehostedAt은 남기지 않는다(핫링크 보호 유지)
+    saved.length = 0;
+    const failedRehost = await run({}, async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: ["x"] }));
+    assert(failedRehost.ok === true && (inserted as unknown as { contentHtml: string }).contentHtml.includes("sb.example"), "복사에 실패해도 발행은 Supabase URL로 계속한다");
+    assert(saved.length === 0, "아무것도 못 옮겼으면 기록하지 않는다");
+    saved.length = 0;
+    const thrown = await run({}, async () => { throw new Error("wrangler 없음"); });
+    assert(thrown.ok === true && saved.length === 0, "복사 단계가 던져도 발행은 계속한다");
+    saved.length = 0;
+    await run({}, async ({ images }) => ({ images: images.map((image) => (image.index === 1 ? { ...image, url: pages(1) } : image)), rehosted: 1, complete: false, deployed: true, failures: ["이미지 2"] }));
+    const partial = saved[0] as { rehostedBySource: Record<string, string>; imagesRehostedAt?: string };
+    assert(partial.rehostedBySource["https://sb.example/a/1.webp"] === pages(1) && partial.imagesRehostedAt === undefined, "부분 성공은 대응만 기록하고 imagesRehostedAt은 남기지 않는다");
+    console.log("✅ 재발행 멱등 / 새 이미지만 복사 / 실패·부분 성공 시 발행 계속 + 핫링크 보호 유지");
+
+    // 엔터 job은 이미지 복사를 타지 않는다
+    let touched = 0;
+    await publishArticleToBlogspot("job-1", {
+      ...baseDeps, loadJob: async () => job({ metadata: { images: imgs } }), asDraft: false,
+      rehostImages: async ({ images }) => { touched += 1; return { images, rehosted: 0, complete: false, deployed: false, failures: [] }; },
+    });
+    assert(touched === 0, "엔터·사회 job은 Supabase URL 그대로(복사 없음)");
+    console.log("✅ 다른 트랙은 이미지 복사를 타지 않는다");
+  }
+
   console.log("\n✅ 전체 테스트 통과");
 }
 
