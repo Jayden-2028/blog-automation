@@ -115,6 +115,10 @@ async function main(): Promise<void> {
     id: 9, started_at: "2026-12-01T00:05:00Z", completed_at: "2026-12-01T00:10:00Z", status: "completed",
     candidates_count: 1, clusters_count: 1, inserted_count: 1, error_count: 0, source: "naver", seed_queries: null,
     metadata: { kind: "social_issue", round: undefined as unknown as string }, created_at: "2026-12-01T00:05:00Z",
+  }, {
+    id: 10, started_at: "2026-12-01T00:05:00Z", completed_at: "2026-12-01T00:10:00Z", status: "completed",
+    candidates_count: 1, clusters_count: 1, inserted_count: 1, error_count: 0, source: "naver", seed_queries: null,
+    metadata: { kind: "kscene_topic" }, created_at: "2026-12-01T00:05:00Z",
   }]) as unknown as DiscoveryRunRow[];
   const now = new Date("2026-12-01T03:00:00Z");
 
