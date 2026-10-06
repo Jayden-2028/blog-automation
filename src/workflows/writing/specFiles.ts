@@ -11,6 +11,8 @@ export type SpecFile = { path: string; purpose: string };
 export function pickStyleFile(category: string | null): string {
   // incident(사건·사고)는 반드시 맨 앞이다. 다른 카테고리로 폴백되면 사망 사건에 개인 블로거 톤이 적용된다.
   if (category === "incident") return "prompts/writing/style/incident.md";
+  // 사용설명서 트랙(개편3): 해외 독자 대상 에버그린 안내. 한글 초고를 쓰고 승인 뒤 영어로 번역된다.
+  if (category === "kscene") return "prompts/writing/style/kscene.md";
   if (category === "parenting") return "prompts/writing/style/parenting.md";
   if (category === "entertainment" || category === "ott") return "prompts/writing/style/entertainment.md";
   return "prompts/writing/style/trend.md";
