@@ -126,7 +126,7 @@ async function main(): Promise<void> {
       calls.push(`save:${input.source}:${(input.metadata as { kind: string }).kind}:${input.ranked.length}`);
       return { runId: 77, persisted: true };
     },
-    notify: async (opts) => {
+    notify: async (opts = {}) => {
       calls.push(`notify:${opts.track}:${opts.runId}:${opts.evergreen}`);
       return { sent: true, payload: null, messages: [] };
     },
