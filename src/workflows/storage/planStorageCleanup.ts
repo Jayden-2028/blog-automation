@@ -5,6 +5,8 @@
 //   · Blogspot에 올라갔거나 올라가는 중인 job - Blogspot 글은 본문 <img src>가 **Storage 공개 URL을 직접 가리킨다**
 //     (convertArticleToHtml.ts). 지우면 게시된 글의 이미지가 깨진다. 네이버·티스토리는 발행기가 이미지를 자기 쪽에 올리므로
 //     Storage 원본이 없어도 글은 멀쩡하다.
+//     **예외(개편3, 2026-10-06 사용자 확정)**: 사용설명서 트랙은 발행 시점에 이미지를 공개 Cloudflare Pages로 복사하고 본문
+//     URL을 치환한다(`job.metadata.imagesRehostedAt`). 그 job은 Storage 원본이 더 이상 참조되지 않으므로 Blogspot이어도 대상이다.
 //   · 플랫폼이 비어 있는(옛) 기록이 있는 job - 어디로 나갔는지 모르니 보수적으로 남긴다.
 //   · 아직 N일이 안 지난 job, 발행 기록이 없는 job(승인 대기·실패 포함).
 
@@ -14,7 +16,12 @@ export const DEFAULT_RETENTION_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** job 한 건의 발행 기록 묶음. article_id가 아니라 job 단위다(수정 반영으로 article이 여러 개일 수 있다). */
-export type JobPublications = { jobId: string; publications: Pick<PublicationRow, "platform" | "status" | "published_at" | "created_at">[] };
+export type JobPublications = {
+  jobId: string;
+  publications: Pick<PublicationRow, "platform" | "status" | "published_at" | "created_at">[];
+  /** 발행 본문 이미지를 Pages로 옮긴 job(metadata.imagesRehostedAt). Blogspot 직접 참조가 없어 정리해도 글이 안 깨진다. */
+  imagesRehosted?: boolean;
+};
 
 export type CleanupSkipReason = "blogspot_hotlink" | "unknown_platform" | "not_published" | "too_recent";
 
@@ -33,13 +40,15 @@ export function selectCleanupJobs(
   const skipped: CleanupSkip[] = [];
   const cutoff = now.getTime() - retentionDays * DAY_MS;
 
-  for (const { jobId, publications } of jobs) {
-    // 진행 중·완료를 가리지 않고 Blogspot 흔적이 하나라도 있으면 남긴다.
-    if (publications.some((p) => p.platform === "blogspot")) {
+  for (const { jobId, publications, imagesRehosted } of jobs) {
+    // 진행 중·완료를 가리지 않고 Blogspot 흔적이 하나라도 있으면 남긴다(이미지를 Pages로 옮긴 job은 예외).
+    if (!imagesRehosted && publications.some((p) => p.platform === "blogspot")) {
       skipped.push({ jobId, reason: "blogspot_hotlink" });
       continue;
     }
-    if (publications.some((p) => !p.platform || !SAFE_PLATFORMS.has(p.platform))) {
+    const isSafe = (platform: string | null): boolean =>
+      Boolean(platform) && (SAFE_PLATFORMS.has(platform as string) || (imagesRehosted === true && platform === "blogspot"));
+    if (publications.some((p) => !isSafe(p.platform))) {
       skipped.push({ jobId, reason: "unknown_platform" });
       continue;
     }

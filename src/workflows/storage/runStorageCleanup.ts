@@ -59,7 +59,18 @@ export async function loadJobPublicationsFromDb(): Promise<JobPublications[]> {
     list.push({ platform: p.platform, status: p.status as never, published_at: p.published_at, created_at: p.created_at });
     byJob.set(jobId, list);
   }
-  return [...byJob].map(([jobId, list]) => ({ jobId, publications: list }));
+  // 이미지를 Pages로 옮긴 job(사용설명서)만 Blogspot이어도 정리 대상이다 - planStorageCleanup.ts 머리말.
+  const rehosted = new Set<string>();
+  const jobIds = [...byJob.keys()];
+  for (let i = 0; i < jobIds.length; i += IN_CHUNK) {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("id, rehostedAt:metadata->>imagesRehostedAt")
+      .in("id", jobIds.slice(i, i + IN_CHUNK));
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as { id: string; rehostedAt: string | null }[]) if (row.rehostedAt) rehosted.add(row.id);
+  }
+  return [...byJob].map(([jobId, list]) => ({ jobId, publications: list, imagesRehosted: rehosted.has(jobId) }));
 }
 
 export async function listObjectsFromStorage(jobId: string): Promise<StorageObject[]> {

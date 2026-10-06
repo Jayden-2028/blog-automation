@@ -35,6 +35,25 @@ assert(why["legacy-null"] === "unknown_platform", "플랫폼 불명은 보존");
 assert(why["two-channels-late"] === "too_recent", "두 채널이면 늦게 나간 쪽 기준");
 console.log("✅ 대상 선정 규칙 / 보존 사유");
 
+// 사용설명서(개편3): 이미지를 Pages로 옮긴 Blogspot job은 Supabase 원본이 참조되지 않으므로 정리 대상이다.
+{
+  const rehostedJobs: JobPublications[] = [
+    { jobId: "k-old", imagesRehosted: true, publications: [pub("blogspot", "published", 20)] },
+    { jobId: "k-recent", imagesRehosted: true, publications: [pub("blogspot", "published", 5)] },
+    { jobId: "k-draft", imagesRehosted: true, publications: [pub("blogspot", "pending", 30)] },
+    { jobId: "k-unmarked", publications: [pub("blogspot", "published", 40)] },
+    { jobId: "k-false", imagesRehosted: false, publications: [pub("blogspot", "published", 40)] },
+    { jobId: "k-null-platform", imagesRehosted: true, publications: [pub(null, "published", 40)] },
+  ];
+  const result = selectCleanupJobs(rehostedJobs, NOW, 14);
+  assert(result.candidates.map((c) => c.jobId).join() === "k-old", `이미지를 옮긴 Blogspot 게시만 대상 (${result.candidates.map((c) => c.jobId)})`);
+  const reasons = Object.fromEntries(result.skipped.map((x) => [x.jobId, x.reason]));
+  assert(reasons["k-recent"] === "too_recent" && reasons["k-draft"] === "not_published", "옮겼어도 기간·발행 완료 규칙은 그대로");
+  assert(reasons["k-unmarked"] === "blogspot_hotlink" && reasons["k-false"] === "blogspot_hotlink", "표식이 없거나 false면 기존대로 보존(whynowissue 옛 글)");
+  assert(reasons["k-null-platform"] === "unknown_platform", "옮겼어도 플랫폼 불명은 보존");
+  console.log("✅ Pages로 이미지를 옮긴 사용설명서 글은 정리 대상(옛 Blogspot 글은 계속 보존)");
+}
+
 const plan = buildCleanupPlan(new Map([
   ["old-naver", [{ name: "1.webp", size: 1000 }, { name: "2.png", size: 3000 }]],
   ["old-tistory", []],
