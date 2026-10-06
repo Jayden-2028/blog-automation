@@ -51,6 +51,7 @@ export async function sendKeywordNotification(
     headerTitle: options.headerTitle,
     communityQueries: options.communityQueries,
     sections: options.sections,
+    evergreen: options.evergreen,
   });
   const messages = chunks.map((chunk) => chunk.text);
   // 항목마다 메시지가 따로 가므로(formatNotificationMessage 참고) 각 메시지에 그 항목의

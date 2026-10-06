@@ -54,9 +54,12 @@ export type WatchdogVerdict =
 /** 최신 completed run이 "이번 수집일" 것인지 판정한다. DB 조회 결과만 받는 순수 함수. */
 export function evaluateWatchdog(
   latest: DiscoveryRunRow | null,
-  now: Date
+  now: Date,
+  dayOffset = 0
 ): WatchdogVerdict {
-  const today = collectionDayString(now);
+  // dayOffset가 음수면 "그 수집일 이후" run이면 충분하다(같은 시각에 도는 job 대응 - WATCHED_JOBS 참고).
+  // 0이면 예전처럼 오늘 수집일과 정확히 같아야 한다.
+  const today = collectionDayString(dayOffset === 0 ? now : new Date(now.getTime() + dayOffset * 24 * 60 * 60 * 1000));
 
   if (!latest) {
     return { ok: false, reason: "no_completed_run", lastRun: null };
@@ -64,7 +67,7 @@ export function evaluateWatchdog(
 
   // started_at을 기준으로 본다(completed_at이 null인 채로 completed 표시된 과거 데이터 방어).
   const runDate = collectionDayString(new Date(latest.started_at));
-  if (runDate === today) {
+  if (dayOffset === 0 ? runDate === today : runDate >= today) {
     return { ok: true, run: latest, runDate };
   }
 
@@ -81,7 +84,12 @@ export function evaluateWatchdog(
  * 봐야 한다.
  *
  * 2026-10-05 개편: 엔터는 회차(오전/오후/저녁)마다 따로 본다. 커뮤니티는 엔터 회차에 통합돼 독립 job이
- * 아니므로 목록에서 뺐다. 사용설명서(21시)는 3순위에서 job이 생길 때 여기 추가한다.
+ * 아니므로 목록에서 뺐다.
+ *
+ * 2026-10-06 개편3: 사용설명서(kscene_topic, 21시)를 추가했다. watchdog이 Worker 12 UTC 슬롯에서 kscene 수집과
+ * **같은 시각에** 깨어나므로 오늘 수집일의 kscene run은 아직 없다 - `dayOffset: -1`로 **전날 수집일 이후**의
+ * 완료 run을 요구한다(하루 늦게 잡히는 대신 거짓 경보가 없다). 도입 첫날은 전날 run이 없어 한 번 경보가 날 수
+ * 있다(알려진 한계).
  *
  * **job을 없애거나 이름을 바꾸면 여기도 같이 고쳐야 한다.** 목록에 남은 job은 매일 돌아야 하는
  * 것으로 보고 안 돌면 경보를 보낸다.
@@ -91,7 +99,8 @@ export const WATCHED_JOBS = [
   { kind: "entertainment", round: "noon", label: "엔터 오후(13시)" },
   { kind: "entertainment", round: "evening", label: "엔터 저녁(18시)" },
   { kind: "social_issue", label: "사회" },
-] as const satisfies readonly { kind: string; round?: string; label: string }[];
+  { kind: "kscene_topic", label: "사용설명서(21시, 전날분)", dayOffset: -1 },
+] as const satisfies readonly { kind: string; round?: string; label: string; dayOffset?: number }[];
 
 export type WatchedJob = (typeof WATCHED_JOBS)[number];
 
@@ -134,7 +143,7 @@ export function evaluateWatchdogByJob(
       completed
         .filter((run) => runKind(run) === job.kind && (!("round" in job) || runRound(run) === job.round))
         .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))[0] ?? null;
-    return { job, verdict: evaluateWatchdog(latest, now) };
+    return { job, verdict: evaluateWatchdog(latest, now, "dayOffset" in job ? job.dayOffset : 0) };
   });
 
   const failed = checks.filter((check) => !check.verdict.ok);

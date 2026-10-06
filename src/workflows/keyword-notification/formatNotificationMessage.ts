@@ -98,7 +98,7 @@ export function expiryRiskWarning(item: {
 }
 
 /** 주제·시드쿼리·카테고리만 보여준다 - 원문(headline)과 항목별 배점표(scoreBreakdown)는 뺀다(2026-09-04 사용자 요청, 폰 화면에서 항목당 너무 길었다). */
-function formatItemBlock(item: NotificationKeywordItem, isCommunity = false): string {
+function formatItemBlock(item: NotificationKeywordItem, isCommunity = false, evergreen = false): string {
   const keyword = escapeTelegramHtml(item.keyword);
 
   const lines: string[] = [`<b>${item.rank}. ${isCommunity ? "📡 " : ""}${keyword}</b>`];
@@ -110,12 +110,13 @@ function formatItemBlock(item: NotificationKeywordItem, isCommunity = false): st
   if (item.summary) {
     lines.push(`   ${escapeTelegramHtml(item.summary)}`);
   }
-  const warning = thinSourceWarning(item.scoreBreakdown);
+  // 에버그린(사용설명서) 주제는 뉴스 건수·마감 개념이 없어 두 경고를 붙이지 않는다.
+  const warning = evergreen ? null : thinSourceWarning(item.scoreBreakdown);
   if (warning) {
     lines.push(`   ${escapeTelegramHtml(warning)}`);
   }
 
-  const expiry = expiryRiskWarning(item);
+  const expiry = evergreen ? null : expiryRiskWarning(item);
   if (expiry) {
     lines.push(`   ${escapeTelegramHtml(expiry)}`);
   }
@@ -134,6 +135,8 @@ export type FormatNotificationMessageOptions = {
   headerTitle?: string;
   /** 커뮤니티 유래 seedQuery. 일치하는 항목 제목에 📡를 붙인다. */
   communityQueries?: readonly string[];
+  /** 에버그린 주제 제안(사용설명서). 뉴스·마감 경고를 붙이지 않는다. */
+  evergreen?: boolean;
   /** 섹션별로 묶기(사회 데일리 리포트). 생략하면 순위대로 평평하게. */
   sections?: KeywordSectionConfig;
 };
@@ -162,7 +165,7 @@ export function formatNotificationMessage(
     communityQueries.has(item.keyword.trim().toLowerCase()) ||
     (item.seedQuery !== null && communityQueries.has(item.seedQuery.trim().toLowerCase()));
   const toChunk = (item: NotificationKeywordItem): NotificationMessageChunk => ({
-    text: truncateForTelegram(formatItemBlock(item, isCommunityItem(item))),
+    text: truncateForTelegram(formatItemBlock(item, isCommunityItem(item), options.evergreen ?? false)),
     ranks: [item.rank],
   });
 
