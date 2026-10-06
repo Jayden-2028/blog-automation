@@ -2,6 +2,20 @@
 
 기준일: 2026-10-06 (Asia/Seoul)
 
+## 2026-10-06 — Serper 재가동·계측 (브랜치 `feat/serper-revival`, 워크트리 `serper-revival/`, 지시서 `SERPER-REVIVAL-2026-10.md`)
+
+**상태: 코드·단위 테스트·빌드 완료(커밋됨, push 전). A의 실호출 검증과 main 병합은 승인 대기.**
+
+- **사실**: 2026-10-06 사용자가 Serper 50,000크레딧($50, 유효 6개월 → 2027-04-06) 구매. API 키는 기존 그대로. 크레딧 소진(잔액 -15)으로 400이 이어지던 구글 이미지 색인이 되살아난다.
+- **계측(B)**: Serper 호출 지점 전부가 `recordSerperUsage`(fire-and-forget, 기록 실패는 검색에 무영향)로 `api_usage`에 적재 - `searchSerperImages`(429 재시도는 시도마다 1행), `searchKinolightsStills`의 `/search`. provider `serper`, model `serper-images`/`serper-search`, operation `image.search`/`web.search`, **실패(400·429·네트워크)는 `.failed` + cost 0**. 단가 $0.001/쿼리(`config/apiPricing.ts`의 `API_QUERY_PRICING`). `job_id`는 `collectWebImagesForJob → collectWebImages(options.jobId) → createSearchImagesMerged(jobId)`로 흘려 원고당 단가(`perManuscript`)에 잡힌다. 수동 CLI(`collectWebImagesCli`)는 job을 몰라 job_id 없음.
+  - 지시서의 "최신순 재검색"은 실제로 **Serper가 아니라 네이버**(`searchNaverImages(q, undefined, "date")`)라 계측 대상이 아니다. 완화 재검색(`broadenQuery`)은 `searchImages`를 타므로 자동으로 잡힌다.
+- **조회 한계 수정**: Serper가 호출 1건당 1행이라 하루 수백 행이 쌓인다. 기존 `ApiUsageRepository.listSince`는 `limit(5000)`뿐이라 PostgREST 요청당 1000행에서 조용히 잘렸을 것 - 1000행 페이지네이션(상한 50,000)으로 고쳤다. 구매 이후 누적은 행 대신 `countBilledSerperSince`(head count)로 센다.
+- **게이지(D-2)**: `cost.json`에 `serperCredits {purchased, purchasedAt, expiresAt, usedEst, remainingEst, remainingPct, runwayDays, daysSincePurchase}`. 계산은 `workflows/reports/serperCredits.ts`(순수 함수), `buildCostSummary`에는 인자로 전달. 환경값이 없으면 `null`. 구매 후 7일 미만이면 평균을 7이 아니라 경과일로 나눈다(초반 과소평가 방지). notes에 "월 비용이 아니라 크레딧 게이지로 볼 것" 추가. 아티팩트(차트 UI)는 이 세션 범위 밖 - 메인(개편0) 세션이 `serperCredits`를 읽어 게이지를 붙인다.
+- **경보(C)**: 신규 워크플로 없이 `watchdogJob`에 체크 추가(job 판정과 독립, 실패해도 job 감시를 가리지 않음). 잔여 추정 < 5,000 **또는** 최근 7일 평균 기준 < 30일치 **또는** 구매 150일 이후 잔여 ≥ 40% → 텔레그램(메인봇). 조건이 유지되는 동안 매일 울린다. 환경값 `SERPER_CREDITS_PURCHASED=50000`, `SERPER_CREDITS_PURCHASED_AT=2026-10-06`은 `.env.example`에 추가, **GitHub는 variables**(secrets 아님)이며 cost.json을 쓰는 워크플로 전부(`job-publish-prepare`·`manuscripts-refresh`·`manuscript-edit`)와 `watchdog`에 배선했다.
+- **이중 계상 금지(D)**: `fixedCosts.ts`에는 금액 항목을 넣지 않고 주석만 남겼다. 사용분은 `api_usage` 계측으로 이미 집계된다.
+- **검증**: `npm run test:serper-usage`, `npm run test:serper-credits`(watchdog 경고 포함), 기존 watchdog·비용·이미지 수집·prepare 회귀 테스트, `npm run build` 통과.
+- **남은 것**: 머지 전에 GitHub variables 2개 등록 필요(안 하면 게이지·경보는 조용히 꺼진 채 배포된다). E(1주 뒤 Serper Usage와 대조)는 메인 세션 일정. 1호출=1크레딧은 **추정**이다.
+
 ## 2026-10-06 — 개편2.5 안정화 구현 (브랜치 `feat/restructure-2.5-stabilization`, 지시서 `RESTRUCTURE-2.5-STABILIZATION.md`)
 
 **상태: 코드·테스트 완료, main 병합·Worker 재배포·맥미니 반영은 사용자 승인 대기.**
