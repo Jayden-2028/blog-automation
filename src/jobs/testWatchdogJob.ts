@@ -84,7 +84,9 @@ async function main(): Promise<void> {
   const entNoon = kindRun("entertainment", "2026-10-05T04:01:00Z", 202, "noon"); // KST 13:01
   const entEvening = kindRun("entertainment", "2026-10-05T09:01:00Z", 203, "evening"); // KST 18:01
   const social = kindRun("social_issue", "2026-10-05T11:01:00Z", 204); // KST 20:01
-  const all = [social, entEvening, entNoon, entMorning];
+  // 사용설명서는 watchdog과 같은 21:00에 도므로 오늘 run은 아직 없다 - 전날(10-04 21:05 KST) run만 있어도 정상이다(dayOffset -1).
+  const kscenePrev = kindRun("kscene_topic", "2026-10-04T12:05:00Z", 190);
+  const all = [social, entEvening, entNoon, entMorning, kscenePrev];
 
   // 5) 네 job이 모두 이번 수집일에 돌았으면 ok, 발송 없음
   const okSends: string[] = [];
@@ -96,14 +98,14 @@ async function main(): Promise<void> {
     },
   });
   assert(okResult.verdict.ok && okResult.alerted === false && okSends.length === 0, "네 job이 다 돌았으면 알림 없음");
-  assert(okResult.verdict.checks.length === 4, "감시 대상은 엔터 3회 + 사회 = 4개");
-  console.log("  ✅ 엔터 3회 + 사회 모두 정상 → 발송 없음");
+  assert(okResult.verdict.checks.length === 5, "감시 대상은 엔터 3회 + 사회 + 사용설명서 = 5개");
+  console.log("  ✅ 엔터 3회 + 사회 + 사용설명서(전날분) 모두 정상 → 발송 없음");
 
   // 6) 오후 회차만 빠졌다: 오전·저녁이 돌았다는 이유로 가려지면 안 된다(회차별로 본다).
   const noNoonSends: string[] = [];
   const noNoon = await runWatchdog({
     now: JOB_NOW,
-    fetchRecent: async () => [social, entEvening, entMorning],
+    fetchRecent: async () => [social, entEvening, entMorning, kscenePrev],
     send: async (text) => {
       noNoonSends.push(text);
     },
@@ -116,26 +118,37 @@ async function main(): Promise<void> {
   // 7) 이전 사고 재현: 사회만 돌고 엔터는 며칠 전 run뿐이다.
   const oldEnt = kindRun("entertainment", "2026-10-02T10:00:00Z", 100, "evening");
   const incident = evaluateWatchdogByJob([social, oldEnt], JOB_NOW);
-  assert(!incident.ok && incident.failed.length === 3, "엔터 3회 모두 stale이어야 한다");
+  assert(!incident.ok && incident.failed.length === 4, "엔터 3회 + 사용설명서가 stale이어야 한다");
   console.log("  ✅ 엔터가 통째로 안 돎 → 3회차 모두 감지");
 
   // 8) 실패했거나 진행 중인 run은 돌았다고 치지 않는다.
   const failedEnt = kindRun("entertainment", "2026-10-05T09:01:00Z", 203, "evening", { status: "failed" });
-  const failedVerdict = evaluateWatchdogByJob([social, entNoon, entMorning, failedEnt], JOB_NOW);
+  const failedVerdict = evaluateWatchdogByJob([social, entNoon, entMorning, failedEnt, kscenePrev], JOB_NOW);
   assert(!failedVerdict.ok && failedVerdict.failed.length === 1 && failedVerdict.failed[0].job.label === "엔터 저녁(18시)", "failed run은 돌았다고 치면 안 된다");
   console.log("  ✅ 실패한 run은 정상으로 안 침");
 
   // 9) kind(또는 round)가 없는 run이 누락을 가리면 안 된다.
   const anonymous = kindRun(null, "2026-10-05T10:30:00Z", 300);
   const noRound = kindRun("entertainment", "2026-10-05T10:40:00Z", 301); // round 없음 - 옛 형식
-  const masked = evaluateWatchdogByJob([social, entMorning, entNoon, anonymous, noRound], JOB_NOW);
+  const masked = evaluateWatchdogByJob([social, entMorning, entNoon, anonymous, noRound, kscenePrev], JOB_NOW);
   assert(!masked.ok && masked.failed.length === 1 && masked.failed[0].job.label === "엔터 저녁(18시)", "kind/round 없는 run이 저녁 누락을 가리면 안 된다");
   console.log("  ✅ kind·round 없는 run은 어느 job으로도 안 침");
 
   // 10) 기록이 아예 없으면 전부 no_completed_run
   const none = evaluateWatchdogByJob([], JOB_NOW);
-  assert(none.failed.length === 4 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
-  console.log("  ✅ 기록 없음 → 네 job 모두 no_completed_run");
+  assert(none.failed.length === 5 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
+  console.log("  ✅ 기록 없음 → 다섯 job 모두 no_completed_run");
+
+  // 10-2) 사용설명서(dayOffset -1): 오늘 run이 있어도(watchdog이 늦게 돌 때) 전날 run이 없어도 안 되고,
+  //       전날 run이 없고 이틀 전 run뿐이면 경보여야 한다. 실패한 전날 run도 돌았다고 치지 않는다.
+  const kscenePrevPrev = kindRun("kscene_topic", "2026-10-03T12:05:00Z", 180);
+  const staleKscene = evaluateWatchdogByJob([social, entEvening, entNoon, entMorning, kscenePrevPrev], JOB_NOW);
+  assert(!staleKscene.ok && staleKscene.failed.length === 1 && staleKscene.failed[0].job.kind === "kscene_topic", "전날 kscene 수집이 없으면 사용설명서만 경보");
+  const ksceneToday = kindRun("kscene_topic", "2026-10-05T12:05:00Z", 205);
+  assert(evaluateWatchdogByJob([social, entEvening, entNoon, entMorning, ksceneToday], JOB_NOW).ok, "오늘 kscene run이 이미 있어도(지연 실행) 정상");
+  const ksceneFailed = kindRun("kscene_topic", "2026-10-04T12:05:00Z", 191, undefined, { status: "failed" });
+  assert(!evaluateWatchdogByJob([social, entEvening, entNoon, entMorning, ksceneFailed], JOB_NOW).ok, "실패한 kscene run은 돌았다고 치지 않는다");
+  console.log("  ✅ 사용설명서는 전날 수집일 이후 완료 run을 요구(같은 시각 발화라 오늘분은 기다리지 않음)");
 
   // 11) 예약이 지연돼 자정을 넘겨 돌아도(02:42 KST) 전날 run은 같은 수집일이라 ok여야 한다. 실제 사고 값 기준.
   const delayed = new Date("2026-10-05T17:42:25Z"); // KST 10-06 02:42

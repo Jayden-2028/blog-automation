@@ -21,7 +21,12 @@
 //    변환 전에 substituteConfirmedImages로 마커를 실제 `![설명](url)`로 바꿔 넣는다. A/B 비교로
 //    후보가 2장이라 아직 사람이 고르지 않았으면(또는 전부 실패했으면) 마커를 그대로 둔다.
 
-import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL } from "../../config/publishTargets.js";
+import { KSCENE_DEFAULT_LABEL, KSCENE_LABEL_BY_SEED } from "../../config/ksceneSeeds.js";
+import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
+import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KSCENE_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
+import { trackOfJob } from "../../notifications/telegramTracks.js";
+import { defaultRehostDeps, rehostImagesToPages } from "../../services/images/rehostImagesToPages.js";
+import type { RehostResult } from "../../services/images/rehostImagesToPages.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
 import type { BloggerPublishResult } from "../../services/publish/blogger/BloggerClient.js";
@@ -39,6 +44,7 @@ import {
 import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
 import { splitTrailingHashtags } from "../manuscripts/articleContentParts.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
+import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { manuscriptBodyWithoutImages, substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
 import type {
   BloggerInsertInput,
@@ -104,7 +110,33 @@ export type PublishArticleToBlogspotOptions = {
   insertPost?: (input: BloggerInsertInput) => Promise<BloggerInsertResult>;
   /** enabled override (테스트). 생략하면 BLOGGER_CONFIG.enabled. */
   enabled?: boolean;
+  /** 테스트 주입: 사용설명서 blogId override. 생략하면 KSCENE_BLOGGER_BLOG_ID. */
+  ksceneBlogId?: string | undefined;
+  /**
+   * 테스트 주입: 사용설명서 발행 이미지를 Pages로 복사한다. 기본은 rehostImagesToPages(설정이 없으면 건너뛴다).
+   * 반환의 images는 url이 치환된 목록이고, complete가 true여야 job에 `imagesRehostedAt`이 남는다.
+   */
+  rehostImages?: (input: { jobId: string; images: ManuscriptImage[] }) => Promise<RehostResult>;
+  /** 테스트 주입: job.metadata 병합(복사 결과 기록). 기본은 ArticleJobRepository.mergeMetadata. */
+  saveJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
 };
+
+/** 어느 블로그·라벨로 올릴지. 사용설명서 트랙은 K-Scene blogId와 영문 라벨, 그 밖은 기존(BLOGGER_BLOG_ID·한글 라벨). */
+export function resolveBloggerTarget(
+  job: Pick<ArticleJobRow, "category" | "seed_query" | "metadata">,
+  ksceneBlogId: string | undefined = KSCENE_BLOGGER_BLOG_ID
+): { track: ReturnType<typeof trackOfJob>; blogId: string | undefined; label: string | undefined } {
+  const track = trackOfJob(job);
+  if (track === "kscene") {
+    return {
+      track,
+      blogId: ksceneBlogId,
+      // 라벨은 글을 낳은 시드가 정한다(ksceneSeeds.ts) - 시드가 바뀐 옛 job은 기본 라벨.
+      label: KSCENE_LABEL_BY_SEED[job.seed_query ?? ""] ?? KSCENE_DEFAULT_LABEL,
+    };
+  }
+  return { track, blogId: BLOGGER_CONFIG.blogId, label: job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined };
+}
 
 /**
  * 초안 편집 URL에서 postId를 뽑는다: `https://www.blogger.com/blog/post/edit/{blogId}/{postId}`.
@@ -142,11 +174,15 @@ export async function publishArticleToBlogspot(
     (({ articleId, status, publishedUrl }) =>
       createPublication({ article_id: articleId, platform: BLOGSPOT_PLATFORM, status, published_url: publishedUrl }));
   const countToday = options.countToday ?? countTodayPublicationsByPlatform;
-  const insertPost = options.insertPost ?? ((input) => new BloggerClient().insertPost(input));
-  const publishPost = options.publishPost ?? ((postId: string) => new BloggerClient().publishPost(postId));
+  // 어느 블로그로 올릴지는 job 트랙이 정한다. job을 읽은 뒤에 채운다(아래 target) - 기본 구현은 그때 만든 클라이언트를 쓴다.
+  let bloggerClient: BloggerClient | null = null;
+  const client = (): BloggerClient => (bloggerClient ??= new BloggerClient(target.blogId ? { blogId: target.blogId } : {}));
+  let target: ReturnType<typeof resolveBloggerTarget>;
+  const insertPost = options.insertPost ?? ((input) => client().insertPost(input));
+  const publishPost = options.publishPost ?? ((postId: string) => client().publishPost(postId));
   const updatePost =
-    options.updatePost ?? ((postId: string, input: BloggerUpdateInput) => new BloggerClient().updatePost(postId, input));
-  const findPostIdByPath = options.findPostIdByPath ?? ((path: string) => new BloggerClient().getPostIdByPath(path));
+    options.updatePost ?? ((postId: string, input: BloggerUpdateInput) => client().updatePost(postId, input));
+  const findPostIdByPath = options.findPostIdByPath ?? ((path: string) => client().getPostIdByPath(path));
   const loadJobPublications = options.loadJobPublications ?? listPublicationsByArticleIds;
   const markPublished =
     options.markPublished ??
@@ -161,13 +197,66 @@ export async function publishArticleToBlogspot(
     return { ok: false, reason: "job_not_approved", detail: `job 상태가 approved가 아닙니다 (현재: ${job.status})` };
   }
 
+  target = resolveBloggerTarget(job, "ksceneBlogId" in options ? options.ksceneBlogId : KSCENE_BLOGGER_BLOG_ID);
+  if (target.track === "kscene" && !target.blogId) {
+    // BLOGGER_BLOG_ID로 폴백하지 않는다 - 영어 글이 whynowissue(한국어 블로그)에 올라간다.
+    return { ok: false, reason: "disabled", detail: "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 The Korea Manual 블로그 ID가 있어야 발행합니다" };
+  }
+
   const articles = await loadArticles(jobId);
   const picked = pickFinalArticle(articles);
   if (!picked) {
     return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 기준 원고가 없습니다: ${jobId}` };
   }
 
-  const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
+  const label = target.label;
+
+  // 사용설명서: 발행 이미지를 공개 Pages로 복사하고 본문 URL을 치환한다(개편3 §4.3-4). 실패·미설정이면 Supabase URL 그대로
+  // 발행한다(발행을 막지 않는다). 원본 URL -> Pages URL 대응을 job.metadata.rehostedBySource에 남겨 재발행·이미지 수정 때
+  // 이미 옮긴 것은 다시 옮기지 않는다. 전부 옮겨졌을 때만 `imagesRehostedAt`을 남긴다 - 그 표식이 있어야 storage-cleanup이
+  // Supabase 원본을 지운다(없으면 핫링크 보호로 보존).
+  let imagesForHtml: ManuscriptImage[] | null = null;
+  const resolveImages = async (): Promise<ManuscriptImage[]> => {
+    if (imagesForHtml) return imagesForHtml;
+    const original = readJobManuscriptImages(job);
+    if (target.track !== "kscene") return (imagesForHtml = original);
+
+    const saved = (job.metadata?.rehostedBySource ?? {}) as Record<string, string>;
+    const pending = original.filter((image) => image.url && !saved[image.url]);
+    const rehost =
+      options.rehostImages ??
+      ((input) => rehostImagesToPages({ ...input, config: loadKsceneImagesConfig() }, defaultRehostDeps()));
+    const saveJobMetadata = options.saveJobMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
+
+    let result: RehostResult | null = null;
+    if (pending.length > 0) {
+      try {
+        result = await rehost({ jobId, images: pending });
+      } catch (error) {
+        console.warn(`⚠️ [publish] 이미지 복사 실패(Supabase URL로 발행): ${error instanceof Error ? error.message : String(error)}`);
+      }
+      for (const failure of result?.failures ?? []) console.warn(`⚠️ [publish] 이미지 복사: ${failure}`);
+    }
+
+    const bySource: Record<string, string> = { ...saved };
+    for (const image of result?.images ?? []) {
+      const source = pending.find((candidate) => candidate.index === image.index)?.url;
+      if (source && image.url && image.url !== source) bySource[source] = image.url;
+    }
+    imagesForHtml = original.map((image) => (image.url && bySource[image.url] ? { ...image, url: bySource[image.url] } : image));
+
+    const hasImages = original.some((image) => image.url);
+    const allMapped = hasImages && original.every((image) => !image.url || Boolean(bySource[image.url]));
+    const grew = Object.keys(bySource).length > Object.keys(saved).length;
+    const needsMark = allMapped && !job.metadata?.imagesRehostedAt;
+    if (grew || needsMark) {
+      await saveJobMetadata(jobId, {
+        rehostedBySource: bySource,
+        ...(allMapped ? { imagesRehostedAt: new Date().toISOString() } : {}),
+      }).catch((error) => console.warn(`⚠️ [publish] 이미지 복사 기록 실패: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    return imagesForHtml;
+  };
 
   /**
    * 발행할 본문 HTML을 만든다. prepareManuscript.ts가 job.metadata.images에 저장해 둔 이미지를
@@ -178,8 +267,8 @@ export async function publishArticleToBlogspot(
    *  - 공개: **반드시 지운다.** 안 지우면 `[IMAGE: ... — 웹 검색]`이라는 글자가 독자에게 그대로
    *    보인다(convertArticleToHtml의 placeholder 경로가 <p>로 렌더한다).
    */
-  const buildContentHtml = (article: ArticleRow, draft: boolean): string => {
-    const confirmedImages = readJobManuscriptImages(job);
+  const buildContentHtml = async (article: ArticleRow, draft: boolean): Promise<string> => {
+    const confirmedImages = await resolveImages();
     const bodyWithImages = substituteConfirmedImages(splitTrailingHashtags(article.content ?? "").body, confirmedImages);
     return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages));
   };
@@ -206,7 +295,7 @@ export async function publishArticleToBlogspot(
     if (postId && shouldRefresh) {
       const refreshed = await updatePost(postId, {
         title: finalArticle.title ?? job.keyword,
-        contentHtml: buildContentHtml(finalArticle, false),
+        contentHtml: await buildContentHtml(finalArticle, false),
         labels: label ? [label] : undefined,
       });
       if (!refreshed.ok) {
@@ -266,7 +355,7 @@ export async function publishArticleToBlogspot(
     null;
 
   const isDraft = options.asDraft ?? BLOGGER_CONFIG.publishAsDraft;
-  const contentHtml = buildContentHtml(finalArticle, isDraft);
+  const contentHtml = await buildContentHtml(finalArticle, isDraft);
 
   const inserted = await insertPost({
     title: finalArticle.title ?? job.keyword,

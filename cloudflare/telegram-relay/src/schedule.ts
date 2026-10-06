@@ -20,8 +20,11 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
   4: [{ workflow: "entertainment-keyword.yml", inputs: { round: "noon" } }], // 13:00 KST 엔터 오후
   9: [{ workflow: "entertainment-keyword.yml", inputs: { round: "evening" } }], // 18:00 KST 엔터 저녁
   11: [{ workflow: "social-issue-keyword.yml" }], // 20:00 KST 사회(2순위에서 데일리 리포트로 개편)
-  // 12 UTC(21:00 KST) 사용설명서 주제 수집은 3순위에서 신설 - 그때까지 발화해도 할 일이 없다.
-  12: [],
+  // 21:00 KST 사용설명서(kscene) 주제 수집 + watchdog(개편3). watchdog은 원래 GitHub 네이티브 cron
+  // (`0 12 * * *`)이었는데 10/5에 발화하지 않았다(알려진 지연·누락) - Worker 슬롯으로 옮겼다. 두 워크플로는
+  // 동시에 깨어나므로 watchdog은 **이 시각의 kscene run을 기다리지 않는다**(watchdogJob.ts WATCHED_JOBS의
+  // dayOffset - 전날 kscene 수집을 확인한다).
+  12: [{ workflow: "kscene-topic.yml" }, { workflow: "watchdog.yml" }],
 };
 
 /** 키워드 수집 외 단독 cron. 문자열이 곧 키다. */

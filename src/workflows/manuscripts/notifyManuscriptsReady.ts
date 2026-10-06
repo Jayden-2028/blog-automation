@@ -73,6 +73,57 @@ function buildSocialReadyMessage(
   return { text: lines.join("\n"), replyMarkup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined };
 }
 
+/**
+ * 사용설명서 트랙(개편3): **영어본**이 최종 원고다(한글 승인 -> 영어본 생성 -> 영어본 재승인을 거쳤다). 🔵 Blogger 발행 버튼만 붙는다 -
+ * The Korea Manual(K-Scene blogId)로 **공개 발행**되고, 그 순간 발행 이미지가 공개 이미지 서버(Pages)로 옮겨진다.
+ */
+function buildKsceneReadyMessage(
+  result: JobManuscriptsResult,
+  outcome: Extract<JobManuscriptsResult["result"], { status: "success" }>,
+  pagesUrl: string | null
+): TelegramOutgoingMessage {
+  const { job } = result;
+  const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
+  const markerCount = (outcome.topic.manuscript.body.match(/\[IMAGE:/g) ?? []).length;
+  const emptyCount = Math.max(0, markerCount - imageCount);
+  const summary = imageCount > 0 ? `🖼 이미지 ${imageCount}장` : "🖼 이미지 없음";
+  const detail = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
+
+  const lines = [
+    `📄 <b>원고 준비 완료</b> · ${TRACK_LABEL.kscene} (영어본)`,
+    "",
+    `<b>${escapeTelegramHtml(outcome.topic.manuscript.title || job.keyword)}</b>`,
+    detail,
+    "",
+    "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '📤 수정본 반영'을 누르세요.",
+  ];
+
+  const jobId = outcome.topic.jobId;
+  let actionRows: TelegramInlineKeyboardButton[][] = [];
+  try {
+    actionRows = [
+      [
+        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
+      ],
+      [{ text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }],
+    ];
+  } catch {
+    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
+    actionRows = [];
+  }
+
+  const buttons: TelegramInlineKeyboardButton[][] = [];
+  if (pagesUrl) {
+    buttons.push([{ text: "📄 원고 페이지 열기", url: viewerPageLink(pagesUrl, "kscene", jobId) }]);
+  } else {
+    lines.push("", `<code>${escapeTelegramHtml(manuscriptPagePath("kscene"))}</code>`, "위 파일을 브라우저로 열어 확인해 주세요.");
+  }
+  buttons.push(...actionRows);
+
+  return { text: lines.join("\n"), replyMarkup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined };
+}
+
 /** pagesUrl은 테스트 주입용. 생략하면 cloudflarePagesUrl()(환경변수 기반)을 쓴다. */
 export function buildManuscriptReadyMessage(
   result: JobManuscriptsResult,
@@ -97,6 +148,7 @@ export function buildManuscriptReadyMessage(
   // 트랙은 job이 정한다(metadata.track). 사회 트랙은 🟠 티스토리 발행 버튼만 붙는 별도 알림이다(네이버·블로그스팟 버튼 없음).
   const track: Track = trackOfJob(job);
   if (track === "social") return buildSocialReadyMessage(result, outcome, pagesUrl);
+  if (track === "kscene") return buildKsceneReadyMessage(result, outcome, pagesUrl);
 
   const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
   // 빈 자리 수를 함께 알린다(2026-10-01). 전까지는 "이미지 N장"만 보여서, 자리 6개 중 2개가 빈

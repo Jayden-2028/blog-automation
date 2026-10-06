@@ -37,7 +37,9 @@ env:
 jobs:
   process:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 2026-10-06 개편3: 5분 -> 15분. 사용설명서 "🔵 Blogger 발행" 버튼이 여기서 발행 이미지를 공개 Pages로 복사한다
+    # (원본 내려받기 + wrangler pages deploy + 서비스 확인 최대 60초 - rehostImagesToPages.ts). 평소 클릭은 여전히 ~40초면 끝난다.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -75,6 +77,14 @@ jobs:
           BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          # 사용설명서 트랙(The Korea Manual, 개편3): 같은 구글 계정이라 refresh token은 그대로, blogId만 다르다. 비밀이 아니라
+          # secret/variable 어느 쪽에 둬도 읽힌다. **비어 있으면 사용설명서 글은 발행하지 않는다**(whynowissue로 폴백 금지).
+          KSCENE_BLOGGER_BLOG_ID: ${{ secrets.KSCENE_BLOGGER_BLOG_ID || vars.KSCENE_BLOGGER_BLOG_ID }}
+          # 사용설명서 발행 이미지 호스팅(전용 공개 Cloudflare Pages 프로젝트). 비어 있으면 Supabase URL로 발행한다.
+          KSCENE_IMAGES_PAGES_PROJECT: ${{ vars.KSCENE_IMAGES_PAGES_PROJECT }}
+          KSCENE_IMAGES_BASE_URL: ${{ vars.KSCENE_IMAGES_BASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           # 버튼 경로는 호출 인자로 공개(asDraft:false)를 명시하므로 이 값에 영향받지 않는다.
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
           # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.

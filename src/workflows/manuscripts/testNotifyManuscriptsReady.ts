@@ -150,3 +150,34 @@ main().catch((error) => {
   }
   console.log("✅ 사회 트랙 - 네이버·블로그 버튼 없음, 티스토리 버튼, social.html 딥링크 (엔터는 불변)");
 }
+
+// --- 사용설명서 트랙(2026-10-06, 개편3): 영어본 -> 🔵 Blogger 발행 버튼만, kscene.html 딥링크 -------------------------------
+{
+  const JOB = "254bfe0b-1234-4abc-8def-0123456789ab";
+  const ksceneJob = { ...job(JOB), category: "kscene", metadata: { track: "kscene" } } as ArticleJobRow;
+  const base = successResult(ksceneJob);
+  if (base.result.status !== "success") throw new Error("❌ 테스트 준비 실패");
+  const result: JobManuscriptsResult = {
+    ...base,
+    result: {
+      ...base.result,
+      topic: { ...base.result.topic, manuscript: { ...base.result.topic.manuscript, title: "How to Use a T-money Card in Korea" } },
+    },
+  };
+  const msg = buildManuscriptReadyMessage(result, "https://pages.example.dev");
+  const rows = msg.replyMarkup?.inline_keyboard ?? [];
+  const all = rows.flat();
+
+  if (all.some((b) => b.callback_data?.startsWith("publish:naver:") || b.callback_data?.startsWith("publish:tistory:"))) {
+    throw new Error("❌ 사용설명서 트랙에는 네이버·티스토리 발행 버튼이 없어야 한다");
+  }
+  if (!all.some((b) => b.callback_data === `publish:blogspot:${JOB}` && b.text.includes("Blogger"))) throw new Error("❌ 🔵 Blogger 발행 버튼이 있어야 한다");
+  if (!all.some((b) => b.callback_data === `publish:images:${JOB}`) || !all.some((b) => b.callback_data === `publish:export:${JOB}`)) {
+    throw new Error("❌ 이미지 수정·맥으로 내려받기 버튼은 공통으로 있어야 한다");
+  }
+  if (rows[0]?.[0]?.url !== `https://pages.example.dev/kscene.html#${JOB}`) throw new Error(`❌ 원고 페이지 링크는 kscene.html 딥링크여야 한다 (${rows[0]?.[0]?.url})`);
+  if (!msg.text.includes("How to Use a T-money Card in Korea") || !msg.text.includes("영어본") || msg.text.includes("🟢 네이버")) {
+    throw new Error(`❌ 영어 제목과 영어본 표기가 있어야 하고 네이버 표기는 없어야 한다 (${msg.text})`);
+  }
+  console.log("✅ 사용설명서 트랙 - 🔵 Blogger 발행 버튼만, 영어 제목, kscene.html 딥링크");
+}

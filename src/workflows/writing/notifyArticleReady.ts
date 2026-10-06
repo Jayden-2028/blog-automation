@@ -26,8 +26,10 @@ import {
   TELEGRAM_MESSAGE_CHAR_LIMIT,
 } from "../../notifications/TelegramNotifier.js";
 import { notifierForJob } from "../../notifications/notifierForJob.js";
+import { trackOfJob } from "../../notifications/telegramTracks.js";
 import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { formatReviewLines } from "../review/runArticleReview.js";
+import type { Track } from "../../notifications/telegramTracks.js";
 import type { ArticleRow } from "../../types/database.js";
 import type { RunWritingStageResult } from "./runArticleJob.js";
 
@@ -38,9 +40,12 @@ export type RunArticleJobSuccess = Extract<RunWritingStageResult, { status: "suc
 export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoingMessage {
   const { job, article } = result;
 
+  // 사용설명서 트랙(개편3): 이 승인은 **한글 초고 승인**이고, 누르면 영어본을 만들어 한 번 더 승인받는다.
+  const isKscene = trackOfJob(job) === "kscene";
   const lines = result.requiresMedicalReview
     ? ["⚕️ <b>의학 주제 — 원고와 출처를 직접 확인해주세요</b>"]
-    : ["📝 <b>원고 초안 준비됨</b>"];
+    : [isKscene ? "📝 <b>한글 초고 준비됨 (사용설명서)</b>" : "📝 <b>원고 초안 준비됨</b>"];
+  if (isKscene) lines.push("승인하면 영어본을 만들어 한글 대역 요약과 함께 한 번 더 확인받습니다.");
 
   // 2026-08-28 사용자 피드백으로 제목/카테고리만 남겼다: 키워드는 제목과 거의 겹치고, 근거
   // 건수와 작성 소요 시간은 이 시점에 사람이 내릴 결정(승인/수정/반려)에 쓰이지 않는다.
@@ -78,7 +83,7 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
   const buttons: TelegramInlineKeyboardButton[][] = [];
   if (result.telegraphUrl) {
     buttons.push([{ text: "📄 원고 보기", url: result.telegraphUrl }]);
-    buttons.push(buildReviewDecisionButtons(job.id));
+    buttons.push(buildReviewDecisionButtons(job.id, trackOfJob(job)));
   }
 
   return buttons.length > 0 ? { text: lines.join("\n"), replyMarkup: { inline_keyboard: buttons } } : { text: lines.join("\n") };
@@ -95,19 +100,20 @@ export function buildArticleBodyMessages(article: ArticleRow): TelegramOutgoingM
 // export하는 이유: notifyRevisedArticleReady.ts(수정 피드백 재작성, 2026-09-15)가 같은 결정
 // 버튼(승인/수정 필요/반려)을 재사용한다 - 원고가 최초 작성이든 재작성이든 검수 결정은 동일해야
 // 하므로 버튼 정의를 두 곳에 따로 두지 않는다.
-export function buildReviewDecisionButtons(jobId: string): TelegramInlineKeyboardButton[] {
+export function buildReviewDecisionButtons(jobId: string, track?: Track): TelegramInlineKeyboardButton[] {
   return [
-    { text: "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
+    // 사용설명서는 한글 승인이 최종이 아니다 - 누르면 영어본 생성으로 넘어간다(TelegramBot.handleArticleReviewCallback).
+    { text: track === "kscene" ? "✅ 한글 승인 → 영어본" : "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
     { text: "✏️ 수정 필요", callback_data: buildArticleReviewCallbackData("edit", jobId) },
     { text: "🗑 반려", callback_data: buildArticleReviewCallbackData("discard", jobId) },
   ];
 }
 
 /** Telegraph 폴백 경로에서만 쓴다 - 본문을 dump한 뒤에는 결정 버튼을 별도 메시지로 붙여야 한다. */
-export function buildReviewDecisionMessage(jobId: string): TelegramOutgoingMessage {
+export function buildReviewDecisionMessage(jobId: string, track?: Track): TelegramOutgoingMessage {
   return {
     text: "위 원고를 확인하셨다면 아래에서 결정해주세요.",
-    replyMarkup: { inline_keyboard: [buildReviewDecisionButtons(jobId)] },
+    replyMarkup: { inline_keyboard: [buildReviewDecisionButtons(jobId, track)] },
   };
 }
 
@@ -120,7 +126,7 @@ export async function notifyArticleReady(result: RunArticleJobSuccess): Promise<
   // requiresMedicalReview 여부와 무관하게 항상 결정 메시지를 보낸다.
   const messages: TelegramOutgoingMessage[] = result.telegraphUrl
     ? [header]
-    : [header, ...buildArticleBodyMessages(result.article), buildReviewDecisionMessage(result.job.id)];
+    : [header, ...buildArticleBodyMessages(result.article), buildReviewDecisionMessage(result.job.id, trackOfJob(result.job))];
 
   await notifierForJob(result.job).sendMessages(messages);
 }

@@ -366,7 +366,13 @@ export async function prepareManuscript(
   // 저장돼 있다. 번호로만 짝지으면 통째로 밀려 "검색은 A, 판정은 B"가 된다 - 2026-09-21 지창욱
   // 원고에서 6자리 중 5자리가 이렇게 어긋나 웹 검색이 전부 실패했다. 재배열을 막는 대신(그건
   // 배리에이션의 일이다) 설명을 보고 검색어가 제 마커를 따라가게 맞춘다.
-  const aligned = alignImagePrompts(baseArticle.content ?? "", content, imagePrompts);
+  // 사용설명서 영어본(job.metadata.translation.articleId가 이 원고)은 번역 단계가 마커 개수·순서·획득 방식을 보존하도록
+  // 검증한다(translation/parseTranslationOutput.ts). 설명이 영어라 한글 설명과 토큰이 안 겹쳐 짝짓기가 전부 "대응 없음"이
+  // 되므로, 이 경우에는 번호순 그대로 쓴다.
+  const translatedVariant =
+    existing !== null &&
+    (job.metadata?.translation as { articleId?: unknown } | undefined)?.articleId === existing.id;
+  const aligned = translatedVariant ? null : alignImagePrompts(baseArticle.content ?? "", content, imagePrompts);
   const slotPrompts = aligned ? aligned.prompts : imagePrompts;
   if (aligned?.reordered) {
     console.log(`· [manuscripts] ${job.keyword}: 마커 순서가 기준 원고와 달라 검색어를 다시 맞췄습니다.`);

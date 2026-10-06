@@ -71,6 +71,15 @@ export const BLOGGER_CONFIG: BloggerConfig = {
 };
 
 /**
+ * 사용설명서 트랙(The Korea Manual)의 Blogger blogId(개편3, 2026-10-05 확정: thekoreamanual.blogspot.com).
+ * whynowissue와 **같은 구글 계정**이라 OAuth refresh token(BLOGGER_REFRESH_TOKEN)은 그대로 쓰고 blogId만 다르다.
+ *
+ * ⚠️ 이 값이 비어 있으면 사용설명서 글은 **발행하지 않는다**(BLOGGER_BLOG_ID로 폴백하지 않는다) - 폴백하면 영어 글이
+ * whynowissue(한국어 블로그)에 올라간다. publishArticleToBlogspot.ts가 이 경우 `disabled`로 돌려준다.
+ */
+export const KSCENE_BLOGGER_BLOG_ID: string | undefined = process.env.KSCENE_BLOGGER_BLOG_ID?.trim() || undefined;
+
+/**
  * 내부 category -> Blogspot 라벨 (SPRINT_5_DESIGN.md §9-2).
  * 2026-09-15 단독 운영 전환으로 사회 이슈(incident)·생활(living)도 여기로 오므로 라벨을 추가했다 -
  * 예전엔 이 두 카테고리가 티스토리 담당이라 이 표에 없었다.

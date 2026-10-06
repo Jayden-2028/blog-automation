@@ -48,6 +48,7 @@ import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
+import { isTranslationInProgress, ksceneStageOf } from "../workflows/translation/ksceneStage.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
 import type { ResearchDecisionAction } from "./researchDecisionCallbackData.js";
@@ -304,6 +305,12 @@ export type TelegramBotOptions = {
    */
   triggerRevision?: (jobId: string, feedback: string) => void;
   /**
+   * 사용설명서 트랙(개편3): 한글 원고 승인(✅) 직후, 또는 영어본 재승인에서 "수정 필요" 답장이 오면 영어본 생성(job-translate)을
+   * 띄운다. feedback이 있으면 직전 영어본을 그 방향으로 다시 쓴다. 기본은 job:translate CLI를 detached로 띄운다.
+   * 클라우드 진입점(runTelegramUpdateCli.ts)은 job-translate.yml을 workflow_dispatch로 발화한다.
+   */
+  triggerTranslation?: (jobId: string, feedback?: string) => void;
+  /**
    * 답장(reply_to_message.message_id)으로 "수정 필요" 요청 메시지를 역매칭해 그 job을 찾는다.
    * 기본 구현은 ArticleJobRepository.findByEditRequestMessageId - status가 review이거나
    * **approved**인 job을 jsonb 필터로 직접 찾는다(승인 후 최종본을 보고 고치는 경우가 있다).
@@ -352,6 +359,7 @@ export class TelegramBot {
   private readonly triggerResearch: (jobId: string) => void;
   private readonly triggerPublishPrepare: () => void;
   private readonly triggerRevision: (jobId: string, feedback: string) => void;
+  private readonly triggerTranslation: (jobId: string, feedback?: string) => void;
   private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
   private readonly findJobByImageEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
   private readonly loadArticlesByJobId: (jobId: string) => Promise<ArticleRow[]>;
@@ -421,6 +429,9 @@ export class TelegramBot {
     this.triggerPublishPrepare = options.triggerPublishPrepare ?? (() => {});
     this.triggerRevision =
       options.triggerRevision ?? ((jobId, feedback) => spawnDetachedTask("job:revise", [jobId, feedback]));
+    this.triggerTranslation =
+      options.triggerTranslation ??
+      ((jobId, feedback) => spawnDetachedTask("job:translate", feedback ? [jobId, feedback] : [jobId]));
     this.findJobByEditRequestMessageId =
       options.findJobByEditRequestMessageId ??
       ((messageId) => ArticleJobRepository.findByEditRequestMessageId(messageId, this.track));
@@ -723,6 +734,40 @@ export class TelegramBot {
       };
     }
 
+    // 사용설명서 트랙(개편3): 한글 원고 ✅는 **최종 승인이 아니다** - 영어본을 만들어 한 번 더 승인받는다
+    // (RESTRUCTURE-PLAN-2026-10.md §4.3 "한글 승인 -> 영어본 생성 -> 영어본+한글 대역 요약 재승인 -> 발행").
+    // 영어본 단계(english_review)의 ✅만 아래 공통 승인 경로를 탄다.
+    const isKscene = trackOfJob(job) === "kscene";
+    const ksceneStage = ksceneStageOf(job);
+    if (parsed.action === "confirm" && isKscene && ksceneStage !== "english_review") {
+      if (isTranslationInProgress(job)) {
+        return {
+          outcome: { status: "already_reviewed", action: "confirm", job },
+          message: `⏳ 이미 영어본을 만드는 중입니다.\n${escapeTelegramHtml(job.keyword)}\n\n완료되면 영어본 재승인 메시지가 도착합니다.`,
+        };
+      }
+      const startedAt = new Date().toISOString();
+      await this.mergeJobMetadata(job.id, {
+        reviewDecision: "confirmed",
+        reviewedAt: startedAt,
+        koreanApprovedAt: (job.metadata.koreanApprovedAt as string | undefined) ?? startedAt,
+        ksceneStage: "translating",
+        translateStartedAt: startedAt,
+      });
+      // 영어본 수정 요청 뒤에 생성이 실패했다면 "다시 만들기"가 그 수정 방향을 이어받는다.
+      const pendingFeedback =
+        ksceneStage === "translation_failed" && typeof job.metadata.translationFeedback === "string"
+          ? job.metadata.translationFeedback
+          : undefined;
+      this.triggerTranslation(job.id, pendingFeedback);
+      return {
+        outcome: { status: "reviewed", action: "confirm", job },
+        message:
+          `✅ <b>한글 원고 승인됨</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+          `🌏 영어본을 만듭니다(약 3~8분). 완료되면 영어본과 한글 대역 요약으로 한 번 더 승인을 요청합니다.`,
+      };
+    }
+
     // confirm: 승인이다. job.status와 최신 article.status를 approved로 전이시킨다.
     const timestamp = new Date().toISOString();
     const wasMedical = Boolean(job.metadata.requiresMedicalReview);
@@ -730,6 +775,7 @@ export class TelegramBot {
     await this.mergeJobMetadata(job.id, {
       reviewDecision: "confirmed",
       reviewedAt: timestamp,
+      ...(isKscene ? { englishApprovedAt: timestamp } : {}),
       ...(wasMedical
         ? { requiresMedicalReview: false, medicalReviewDecision: "confirmed", medicalReviewedAt: timestamp }
         : {}),
@@ -750,9 +796,10 @@ export class TelegramBot {
 
     return {
       outcome: { status: "reviewed", action: "confirm", job: updated },
-      message:
-        `✅ <b>승인됨</b>\n${escapeTelegramHtml(job.keyword)}` +
-        (wasMedical ? "\n의학 정보 교차확인도 함께 완료됐습니다." : ""),
+      message: isKscene
+        ? `✅ <b>영어본 승인됨</b>\n${escapeTelegramHtml(job.keyword)}\n\n이미지를 준비한 뒤 🔵 Blogger 발행 버튼을 보내드립니다.`
+        : `✅ <b>승인됨</b>\n${escapeTelegramHtml(job.keyword)}` +
+          (wasMedical ? "\n의학 정보 교차확인도 함께 완료됐습니다." : ""),
     };
   }
 
@@ -785,6 +832,20 @@ export class TelegramBot {
     // 같은 요청에 두 번째 답장이 와도 재작성을 두 번 트리거하지 않도록 즉시 지운다 - 다음
     // "수정 필요" 클릭이 새 editRequestMessageId를 다시 채운다.
     await this.mergeJobMetadata(job.id, { editRequestMessageId: null, lastEditFeedback: feedback });
+
+    // 사용설명서 트랙의 영어본 재승인 단계에서 온 수정 요청은 **한글 원고를 다시 쓰지 않고** 영어본만 다시 만든다
+    // (사실의 기준은 한글 원고 그대로). 한글 검수 단계의 수정 요청은 기존처럼 재작성(job:revise)이다.
+    if (trackOfJob(job) === "kscene" && ksceneStageOf(job) === "english_review") {
+      // 영어본 재생성이 실패해도 "다시 만들기"가 이 수정 방향을 잃지 않게 남겨 둔다(성공하면 번역 단계가 지운다).
+      await this.mergeJobMetadata(job.id, { translationFeedback: feedback });
+      this.triggerTranslation(job.id, feedback);
+      return {
+        outcome: { status: "accepted", job },
+        message:
+          `🔄 <b>영어본 수정 반영 중</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+          `말씀하신 방향으로 영어본을 다시 만들고 있습니다. 완료되면 새 영어본으로 다시 승인을 요청합니다.`,
+      };
+    }
     this.triggerRevision(job.id, feedback);
 
     return {

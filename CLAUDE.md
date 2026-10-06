@@ -63,10 +63,13 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   수 있다. 상세는 `docs/ai-handoff/TISTORY_AUTO_PUBLISH_DESIGN.md`). 카테고리→채널 배정
   (`config/channelRouting.ts`)은 없다 - **어느 채널에 올릴지는 라우팅이 아니라 사람이 버튼으로
   정한다.** 다만 2026-10 개편부터 **트랙이 버튼 구성을 정한다** - 엔터 트랙은 🟢 네이버,
-  사회 트랙은 🟠 티스토리 버튼이 뜬다(`job.metadata.track`, 없으면 엔터).
+  사회 트랙은 🟠 티스토리, 사용설명서 트랙은 🔵 Blogger 버튼이 뜬다(`job.metadata.track`, 없으면 엔터).
   - Blogspot(`whynowissue.blogspot.com`): 공식 API(Blogger v3). GitHub Actions에서 바로 끝난다.
-    2026-10 개편으로 엔터·사회 버튼에서는 빠졌고, 개편3부터 사용설명서 트랙
-    (`thekoreamanual.blogspot.com`, `KSCENE_BLOGGER_BLOG_ID`)이 쓴다.
+    2026-10 개편으로 엔터·사회 버튼에서는 빠졌고, 사용설명서 트랙(개편3, 2026-10-06)이 쓴다 - 트랙 버튼은
+    `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다** -
+    `BLOGGER_BLOG_ID`로 폴백하지 않는다). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
+    영어본 재승인 ✅ → 이미지·발행** 2단계 승인이고, 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
+    (`docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`).
   - 티스토리(`wooahpapa.tistory.com`, 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
     Playwright(TinyMCE)로 발행한다. 로그인 풀림은 실패가 아니라 **대기(deferred)** - 재로그인하면

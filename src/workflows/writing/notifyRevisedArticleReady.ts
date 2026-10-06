@@ -3,6 +3,7 @@
 
 import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
 import { notifierForJob } from "../../notifications/notifierForJob.js";
+import { trackOfJob } from "../../notifications/telegramTracks.js";
 import type { TelegramOutgoingMessage } from "../../notifications/TelegramNotifier.js";
 import { buildArticleBodyMessages, buildReviewDecisionButtons, buildReviewDecisionMessage } from "./notifyArticleReady.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
@@ -30,7 +31,7 @@ export function buildRevisedHeaderMessage(
   return {
     text: lines.join("\n"),
     replyMarkup: {
-      inline_keyboard: [[{ text: "📄 원고 보기", url: telegraphUrl }], buildReviewDecisionButtons(job.id)],
+      inline_keyboard: [[{ text: "📄 원고 보기", url: telegraphUrl }], buildReviewDecisionButtons(job.id, trackOfJob(job))],
     },
   };
 }
@@ -45,7 +46,7 @@ export async function notifyRevisedArticleReady(
 
   const messages: TelegramOutgoingMessage[] = telegraphUrl
     ? [header]
-    : [header, ...buildArticleBodyMessages(article), buildReviewDecisionMessage(job.id)];
+    : [header, ...buildArticleBodyMessages(article), buildReviewDecisionMessage(job.id, trackOfJob(job))];
 
   await notifierForJob(job).sendMessages(messages);
 }
