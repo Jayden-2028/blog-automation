@@ -179,8 +179,8 @@ export function formatWatchdogAlert(verdict: JobWatchdogVerdict, now: Date): str
   return lines.join("\n");
 }
 
-/** 한 번에 읽을 최근 run 수. 하루 4건이므로 열흘이다 - 한 job이 오래 멈췄다면 어차피 경보 대상이다. */
-const RECENT_RUNS_LIMIT = 40;
+/** 한 번에 읽을 최근 run 수. 하루 5건(엔터 3 + 사회 1 + 사용설명서 1)이므로 열이틀이다 - 한 job이 오래 멈췄다면 어차피 경보 대상이다. */
+const RECENT_RUNS_LIMIT = 60;
 
 export type RunWatchdogOptions = {
   /** true면 알림을 실제로 보내지 않고 결과만 반환한다. */
