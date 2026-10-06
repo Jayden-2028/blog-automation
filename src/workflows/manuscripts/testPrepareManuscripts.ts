@@ -756,6 +756,41 @@ async function main(): Promise<void> {
     console.log("✅ 기획 off - 예전 경로 그대로");
   }
 
+  // 사용설명서 영어본(job.metadata.translation.articleId === 영어 article): 마커 설명이 영어라 한글 기준 원고와 토큰이
+  // 안 겹친다. alignImagePrompts에 맡기면 전부 "대응 없음"으로 검색어가 비워지므로, 번역 단계가 순서를 보존한다는 전제로
+  // 번호순 그대로 넘겨야 한다. 일반 배리에이션(영어본 표식 없음)은 기존 정렬 경로를 그대로 탄다.
+  {
+    const koBase = baseArticle("도입\n\n[IMAGE: 편의점 계산대 — 웹 검색]\n\n본문\n\n[IMAGE: T-money card — AI 생성]");
+    const enVariant = {
+      ...variantArticle(2),
+      title: "English title",
+      content: "Intro\n\n[IMAGE: T-money card counter — 웹 검색]\n\nBody\n\n[IMAGE: Top-up machine screen — AI 생성]",
+    } as ArticleRow;
+    const seen: Record<string, string[]> = {};
+    const run = async (label: string, metadata: Record<string, unknown>) =>
+      prepareManuscript(job("kscene", "kscene", { imagePrompts: ["T-money 편의점", "topup machine screen, no text"], ...metadata }), {
+        loadArticles: async () => [koBase, enVariant],
+        writeManuscriptFile: async () => {},
+        mergeJobMetadata: async () => {},
+        collectWebImages: false,
+        loadPublishedPosts: false,
+        capturePages: false,
+        planSlots: false,
+        generateImages: async (input) => {
+          seen[label] = [...input.imagePrompts];
+          return { images: [], failures: [] };
+        },
+      });
+    const translated = await run("translated", { translation: { articleId: 2 }, channelMeta: { blogspot: { searchDescription: "x", slug: "s", tags: ["a"] } } });
+    assert(translated.status === "success" && translated.topic.manuscript.title === "English title", "영어본을 최종 원고로 쓴다");
+    assert(seen.translated.join("|") === "T-money 편의점|topup machine screen, no text", `영어본은 검색어를 번호순 그대로 넘긴다 (${JSON.stringify(seen.translated)})`);
+    await run("plain", {});
+    // 대조군: 영어 설명 1번이 한글 2번 설명과 토큰("money", "card")을 공유해 자카드 0.3을 넘는다 - 표식이 없으면 기존 정렬이 둘을 짝지어
+    // 검색어가 뒤바뀐다(이게 우회하려는 사고다).
+    assert(seen.plain.join("|") === "topup machine screen, no text|", `영어본 표식이 없으면 기존 정렬 경로를 그대로 탄다 - 공유 토큰으로 검색어가 뒤바뀌고 한 자리는 비워진다 (${JSON.stringify(seen.plain)})`);
+    console.log("✅ 사용설명서 영어본 - 이미지 검색어를 번호순으로 보존(한글 설명과의 토큰 정렬 우회)");
+  }
+
   console.log("\n✅ 전체 통과");
 }
 

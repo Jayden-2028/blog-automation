@@ -159,7 +159,7 @@ async function main(): Promise<void> {
   const success = await runTranslateJob(JOB_ID, ok.options);
   assert(success.status === "success" && success.attempts === 1, "정상 번역 성공");
   assert(ok.calls.saved.length === 1 && ok.calls.saved[0].title === "How to Use a T-money Card in Korea", "영어 article 저장");
-  assert(ok.calls.saved[0].content.endsWith("#TMoney #KoreaTravel #subway"), "영어 태그 줄이 본문 끝에 붙는다(발행 변환이 다시 뗀다)");
+  assert(ok.calls.saved[0].content === parsed.body && !/^#\w/m.test(ok.calls.saved[0].content.split("\n").at(-1) ?? ""), "영어 원고는 본문만 저장한다(태그는 channelMeta에)");
   const final = ok.calls.merges.at(-1)!;
   assert(final.ksceneStage === "english_review" && final.reviewDecision === null && final.editRequestMessageId === null, "영어본 재승인 단계로 전이");
   const meta = (final.channelMeta as Record<string, { searchDescription: string; slug: string; tags: string[]; shortName: string }>);

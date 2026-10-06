@@ -153,10 +153,9 @@ export async function runTranslateJob(jobId: string, options: RunTranslateJobOpt
     }
     if (!parsed) return await failWith(lastError || "번역 결과를 받지 못했습니다");
 
-    // 영어 원고 저장: 본문 + 영어 태그 줄(발행 변환이 splitTrailingHashtags로 다시 뗀다).
-    const hashtagLine = parsed.tags.map((tag) => `#${tag}`).join(" ");
-    const content = [parsed.body, hashtagLine].filter(Boolean).join("\n\n");
-    const article = await saveArticle({ jobId, title: parsed.title, content });
+    // 영어 원고 저장: **본문만**(해시태그 줄 없음). 태그는 channelMeta.blogspot.tags에 둔다 - prepareManuscript의
+    // "배리에이션 재사용" 경로가 content를 그대로 뷰어 본문으로 쓰므로, 줄 끝 태그가 본문에 섞여 보이면 안 된다.
+    const article = await saveArticle({ jobId, title: parsed.title, content: parsed.body });
 
     const telegraph = await publishTelegraph(parsed.title, buildEnglishReviewMarkdown(parsed.body, parsed.koSummary));
     const telegraphUrl = telegraph.ok ? telegraph.url : null;
