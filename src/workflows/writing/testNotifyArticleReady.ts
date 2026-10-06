@@ -259,3 +259,22 @@ try {
   console.log("✅ 마커/프롬프트 짝 불일치 - 불일치일 때만 경고");
 }
 
+
+// --- 사용설명서 트랙(2026-10-06, 개편3): 한글 초고 승인은 영어본 생성으로 이어진다는 걸 승인 전에 알린다 ---------------
+{
+  const ksceneJob = makeJob({ category: "kscene", metadata: { track: "kscene" } });
+  const header = buildHeaderMessage(makeResult({ job: ksceneJob, telegraphUrl: "https://telegra.ph/x" }));
+  const buttons = (header.replyMarkup?.inline_keyboard ?? []).flat();
+  if (!header.text.includes("한글 초고") || !header.text.includes("영어본")) throw new Error(`❌ 한글 초고·영어본 안내가 있어야 한다: ${header.text}`);
+  if (!buttons.some((b) => b.text.includes("한글 승인") && b.callback_data === `review:confirm:${ksceneJob.id}`)) {
+    throw new Error("❌ 승인 버튼은 '한글 승인 → 영어본'이고 콜백은 공통 review:confirm이어야 한다");
+  }
+  const fallback = buildReviewDecisionMessage(ksceneJob.id, "kscene");
+  if (!fallback.replyMarkup?.inline_keyboard[0][0].text.includes("한글 승인")) throw new Error("❌ Telegraph 폴백 결정 메시지도 같은 라벨이어야 한다");
+
+  // 엔터·사회는 그대로
+  const plain = buildHeaderMessage(makeResult({ telegraphUrl: "https://telegra.ph/x" }));
+  const plainButtons = (plain.replyMarkup?.inline_keyboard ?? []).flat();
+  if (plain.text.includes("한글 초고") || !plainButtons.some((b) => b.text === "✅ 승인")) throw new Error("❌ 엔터 알림은 기존 문구·버튼 그대로여야 한다");
+  console.log("✅ 사용설명서 - 한글 초고 승인 안내·라벨(엔터는 불변)");
+}

@@ -60,6 +60,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   parenting: "육아",
   living: "생활정보",
   community: "이슈",
+  kscene: "사용설명서",
 };
 
 type PageTopic = {
