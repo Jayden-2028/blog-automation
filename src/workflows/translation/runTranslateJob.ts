@@ -18,6 +18,7 @@ import { describeError } from "../../services/describeError.js";
 import { createArticleForJob, listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { splitTrailingHashtags } from "../manuscripts/articleContentParts.js";
+import { ksceneStageOf } from "./ksceneStage.js";
 import { buildTranslationPrompt } from "./buildTranslationPrompt.js";
 import { buildEnglishReviewMarkdown, notifyEnglishReview, notifyTranslationFailed } from "./notifyEnglishReview.js";
 import { parseTranslationOutput, validateTranslation } from "./parseTranslationOutput.js";
@@ -32,12 +33,8 @@ export const MAX_TRANSLATE_ATTEMPTS = 2;
 /** 영어 원고를 담는 article의 platform 값. pickFinalArticle의 LEGACY_BLOGSPOT_PLATFORM과 같다. */
 export const ENGLISH_ARTICLE_PLATFORM = "blogspot";
 
-export type KsceneStage = "translating" | "english_review" | "translation_failed";
-
-export function ksceneStageOf(job: { metadata?: unknown } | null | undefined): KsceneStage | null {
-  const stage = (job?.metadata as Record<string, unknown> | null | undefined)?.ksceneStage;
-  return stage === "translating" || stage === "english_review" || stage === "translation_failed" ? stage : null;
-}
+export { ksceneStageOf } from "./ksceneStage.js";
+export type { KsceneStage } from "./ksceneStage.js";
 
 export type RunTranslateJobOptions = {
   /** 영어본 재승인 단계의 "수정 필요" 답장. 있으면 직전 영어본을 이 방향으로 다시 쓴다. */
