@@ -29,7 +29,7 @@ import { WEB_IMAGES_FILE, readImageSize, readWebImages } from "../manuscripts/ex
 import type { WebImageRecord } from "../manuscripts/exportManuscript.js";
 import type { ImageCandidateRecord } from "../manuscripts/manuscriptManifest.js";
 import { broadenQuery } from "./broadenQuery.js";
-import { searchImagesMerged } from "./searchImagesMerged.js";
+import { createSearchImagesMerged } from "./searchImagesMerged.js";
 import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 import { ImageDeduper } from "./imageFingerprint.js";
@@ -262,6 +262,8 @@ export type CollectWebImagesOptions = {
    * "검색창에 친 결과 중 고르기"를 하고, 없으면 예전처럼 web_search로 직접 찾는다. false면 생략.
    */
   searchImages?: false | SearchImages;
+  /** 비용 원장(api_usage)에 Serper 호출을 이 원고에 묶는다(2026-10-06). 없으면 원고당 단가에 안 잡힌다. */
+  jobId?: string | null;
   /**
    * 최신순 이미지 검색(2026-10-02). 기획이 `recency: today|recent`로 정한 자리에서만 한 번 더 돌려
    * **맨 앞에** 섞는다. 기본은 네이버 `sort=date`. false면 생략(테스트).
@@ -905,7 +907,7 @@ export async function collectWebImages(
   if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
-  const searchImages = options.searchImages === undefined ? searchImagesMerged : options.searchImages;
+  const searchImages = options.searchImages === undefined ? createSearchImagesMerged(options.jobId) : options.searchImages;
   const searchRecent =
     options.searchRecentImages === undefined
       ? (q: string) => searchNaverImages(q, undefined, "date")
@@ -923,7 +925,7 @@ export async function collectWebImages(
   const kinolights = options.searchKinolights === undefined ? searchKinolightsStills : options.searchKinolights;
   let officialStills: ImageCandidate[] = [];
   if (kinolights && ARTWORK_CATEGORIES.has(options.category ?? "")) {
-    const stills = await kinolights(input.keyword).catch(() => []);
+    const stills = await kinolights(input.keyword, { jobId: options.jobId }).catch(() => []);
     officialStills = stills.map((still) => ({
       title: `${input.keyword} 공식 스틸컷`,
       link: still.imageUrl,

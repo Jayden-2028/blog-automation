@@ -15,7 +15,7 @@
 //   (같은 문서에 명시돼 있다). 인상일을 밴드로 넣어 두지 않으면 새해 첫날부터 실제 지출의 절반만
 //   잡히는데, 그런 오차는 아무도 눈치채지 못한 채 몇 달을 간다.
 
-export type ApiUsageProvider = "openai" | "gemini";
+export type ApiUsageProvider = "openai" | "gemini" | "serper";
 
 /** 한 모델의 특정 기간 단가. 전부 USD / 1M tokens. */
 export type ApiPriceBand = {
@@ -57,6 +57,38 @@ export const API_PRICING: Record<string, ApiModelPricing> = {
     note: "자료조사(RESEARCH_PROVIDER=gemini일 때만). 2027-01-01 단가 2배 인상 예정이 밴드에 반영돼 있다.",
   },
 };
+
+/**
+ * 쿼리 단위로 과금되는 API의 단가(토큰 단가와 별개). 지금은 Serper뿐이다.
+ *
+ * Serper는 **선지불 크레딧 차감**이다(2026-10-06 50,000크레딧/$50 구매, 유효 6개월). 1,000쿼리 $1이므로
+ * 쿼리당 $0.001. 10건 이하 조회는 1크레딧이라 우리 호출(num=10)은 1호출=1크레딧으로 본다 -
+ * **추정이다.** 가동 1주 뒤 Serper 대시보드 Usage와 대조해 보정한다(SERPER-REVIVAL E).
+ */
+export const SERPER_PRICE_PER_QUERY_USD = 0.001;
+
+export const SERPER_IMAGES_MODEL = "serper-images";
+export const SERPER_SEARCH_MODEL = "serper-search";
+
+export const API_QUERY_PRICING: Record<string, { provider: ApiUsageProvider; perQueryUsd: number; note: string }> = {
+  [SERPER_IMAGES_MODEL]: {
+    provider: "serper",
+    perQueryUsd: SERPER_PRICE_PER_QUERY_USD,
+    note: "구글 이미지 검색(/images). 1호출=1쿼리=1크레딧(추정, 1주 뒤 대조).",
+  },
+  [SERPER_SEARCH_MODEL]: {
+    provider: "serper",
+    perQueryUsd: SERPER_PRICE_PER_QUERY_USD,
+    note: "구글 웹 검색(/search, 키노라이츠 작품 페이지 찾기). 1호출=1쿼리=1크레딧(추정).",
+  },
+};
+
+/** 쿼리 과금 모델의 금액. 성공한 호출만 크레딧을 쓴다 - 실패(400·429)는 0으로 적는다(모름이 아니라 안 나갔다). */
+export function estimateQueryCostUsd(model: string, queries: number): number | null {
+  const pricing = API_QUERY_PRICING[model];
+  if (!pricing) return null;
+  return round6(pricing.perQueryUsd * queries);
+}
 
 function resolveBand(pricing: ApiModelPricing, occurredAt: Date): ApiPriceBand | null {
   for (const band of pricing.bands) {
@@ -112,9 +144,16 @@ export function estimateCostUsd(input: EstimateCostInput): EstimateCostResult {
 
 /** 대시보드 각주용. 지금 어떤 모델의 단가를 알고 있는지 그대로 보여준다. */
 export function listPricedModels(): Array<{ model: string; provider: ApiUsageProvider; note: string }> {
-  return Object.entries(API_PRICING).map(([model, pricing]) => ({
-    model,
-    provider: pricing.provider,
-    note: pricing.note,
-  }));
+  return [
+    ...Object.entries(API_PRICING).map(([model, pricing]) => ({
+      model,
+      provider: pricing.provider,
+      note: pricing.note,
+    })),
+    ...Object.entries(API_QUERY_PRICING).map(([model, pricing]) => ({
+      model,
+      provider: pricing.provider,
+      note: pricing.note,
+    })),
+  ];
 }

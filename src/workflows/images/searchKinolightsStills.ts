@@ -15,6 +15,9 @@
 
 import { parse } from "node-html-parser";
 
+import { recordSerperUsage } from "../../services/usage/recordSerperUsage.js";
+import type { recordApiUsage } from "../../services/usage/recordApiUsage.js";
+
 /** 미디어 섹션의 스틸 버튼. 이 라벨이 이 작품의 스틸임을 보증하는 유일한 표식이다. */
 const STILL_BUTTON_LABEL = /^스틸컷\s*\d+/;
 /** 썸네일·원본 어느 쪽 URL에서든 원본 경로를 되뽑는다. */
@@ -39,6 +42,10 @@ export type SearchKinolightsOptions = {
   findWorkUrl?: (title: string) => Promise<string | null>;
   /** 테스트 주입. 기본은 모바일 UA로 fetch. */
   fetchPage?: (url: string) => Promise<string | null>;
+  /** 이 호출이 어느 원고 때문인지(비용 원장 job_id). 없으면 원고당 단가에 안 잡힌다. */
+  jobId?: string | null;
+  /** 테스트 주입. 기본은 실제 원장 기록. */
+  record?: typeof recordApiUsage;
 };
 
 /** `https://m.kinolights.com/season/152343/media`처럼 미디어 탭 주소로 정규화한다. */
@@ -120,33 +127,43 @@ export function workTitleCandidates(keyword: string): string[] {
  * `site:` 한정을 먼저 걸고, 결과가 없으면 `키노라이츠 <제목>`으로 한 번 더 본다 - 색인에 따라
  * 한쪽만 걸리는 경우가 있다(실측 두 질의 모두 같은 작품을 찾았다).
  */
-async function findWorkUrlForTitle(title: string): Promise<string | null> {
+async function findWorkUrlForTitle(
+  title: string,
+  usage: { jobId?: string | null; record?: typeof recordApiUsage } = {}
+): Promise<string | null> {
   const key = process.env.SERPER_API_KEY;
   if (!key) return null;
 
   for (const q of [`site:kinolights.com ${title}`, `키노라이츠 ${title}`]) {
+    let responded = false;
     try {
       const res = await fetch(SEARCH_ENDPOINT, {
         method: "POST",
         headers: { "X-API-KEY": key, "Content-Type": "application/json" },
         body: JSON.stringify({ q, gl: "kr", hl: "ko", num: 10 }),
       });
+      responded = true;
+      recordSerperUsage({ endpoint: "search", ok: res.ok, status: res.status, jobId: usage.jobId, record: usage.record });
       if (!res.ok) continue;
       const json = (await res.json()) as { organic?: { link?: string }[] };
       for (const item of json.organic ?? []) {
         if (item.link && WORK_URL.test(item.link)) return item.link;
       }
     } catch {
-      // 한 질의가 실패해도 다음 질의로 넘어간다.
+      // 한 질의가 실패해도 다음 질의로 넘어간다. 응답을 못 받은 네트워크 실패만 여기서 기록한다.
+      if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
     }
   }
   return null;
 }
 
 /** 후보 제목을 짧은 것부터 시도한다. 하나라도 걸리면 거기서 멈춘다. */
-async function defaultFindWorkUrl(keyword: string): Promise<string | null> {
+async function defaultFindWorkUrl(
+  keyword: string,
+  usage: { jobId?: string | null; record?: typeof recordApiUsage } = {}
+): Promise<string | null> {
   for (const title of workTitleCandidates(keyword)) {
-    const url = await findWorkUrlForTitle(title);
+    const url = await findWorkUrlForTitle(title, usage);
     if (url) return url;
   }
   return null;
@@ -223,7 +240,8 @@ export async function searchKinolightsStills(
   const trimmed = title.trim();
   if (!trimmed) return [];
 
-  const findWorkUrl = options.findWorkUrl ?? defaultFindWorkUrl;
+  const findWorkUrl =
+    options.findWorkUrl ?? ((keyword: string) => defaultFindWorkUrl(keyword, { jobId: options.jobId, record: options.record }));
   const fetchPage = options.fetchPage ?? defaultFetchPage;
 
   const workUrl = await findWorkUrl(trimmed).catch(() => null);

@@ -16,12 +16,33 @@ import { dirname } from "node:path";
 
 import { listFixedCosts } from "../../config/fixedCosts.js";
 import { manuscriptCostSnapshotPath } from "../../config/pipelinePaths.js";
+import type { ApiUsageRow } from "../../types/database.js";
 import { ApiUsageRepository } from "../../repositories/ApiUsageRepository.js";
 import { buildCostSummary } from "./buildCostSummary.js";
+import { computeSerperCredits, purchaseStart, readSerperCreditsConfig } from "./serperCredits.js";
+import type { SerperCreditsBlock } from "./serperCredits.js";
 import type { CostSummary } from "./buildCostSummary.js";
 
 /** 이번 달 + 최근 7일을 모두 덮으려면 40일이면 충분하다(달 초에도 7일 창이 온전히 들어온다). */
 const LOOKBACK_DAYS = 40;
+
+/** 구매일 이후 serper 누적과 최근 7일 행으로 크레딧 블록을 만든다. 환경값이 없거나 조회가 실패하면 null. */
+export async function loadSerperCredits(
+  now: Date = new Date(),
+  rows?: ApiUsageRow[]
+): Promise<SerperCreditsBlock | null> {
+  const config = readSerperCreditsConfig();
+  if (!config) return null;
+  try {
+    const usedEst = await ApiUsageRepository.countBilledSerperSince(purchaseStart(config));
+    const recentRows =
+      rows ?? (await ApiUsageRepository.listSince(new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000)));
+    return computeSerperCredits({ config, usedEst, recentRows, now });
+  } catch (error) {
+    console.warn(`⚠️ Serper 크레딧 계산 실패(게이지 생략): ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
 
 export type WriteCostSnapshotResult =
   | { status: "success"; path: string; summary: CostSummary }
@@ -31,7 +52,8 @@ export async function writeCostSnapshot(now: Date = new Date()): Promise<WriteCo
   try {
     const since = new Date(now.getTime() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
     const rows = await ApiUsageRepository.listSince(since);
-    const summary = buildCostSummary({ rows, fixedCosts: listFixedCosts(), now });
+    const serperCredits = await loadSerperCredits(now, rows);
+    const summary = buildCostSummary({ rows, fixedCosts: listFixedCosts(), serperCredits, now });
 
     const path = manuscriptCostSnapshotPath();
     await mkdir(dirname(path), { recursive: true });

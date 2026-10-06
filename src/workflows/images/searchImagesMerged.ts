@@ -36,10 +36,15 @@ export function interleave(a: ImageCandidate[], b: ImageCandidate[]): ImageCandi
  * 두 색인을 **동시에** 친다. 한쪽이 실패해도(키 없음·한도 초과·네트워크) 나머지로 계속 간다 -
  * 이미지 수집이 검색 한 곳의 사정으로 통째로 멈추면 안 된다.
  */
-export const searchImagesMerged: SearchImages = async (query) => {
-  const [naver, google] = await Promise.all([
-    searchNaverImages(query).catch(() => [] as ImageCandidate[]),
-    searchSerperImages(query).catch(() => [] as ImageCandidate[]),
-  ]);
-  return interleave(naver, google);
-};
+export function createSearchImagesMerged(jobId?: string | null): SearchImages {
+  return async (query) => {
+    const [naver, google] = await Promise.all([
+      searchNaverImages(query).catch(() => [] as ImageCandidate[]),
+      searchSerperImages(query, { jobId }).catch(() => [] as ImageCandidate[]),
+    ]);
+    return interleave(naver, google);
+  };
+}
+
+/** job을 모르는 호출용(수동 CLI). 원고당 단가에는 잡히지 않는다. */
+export const searchImagesMerged: SearchImages = createSearchImagesMerged();

@@ -215,6 +215,8 @@
     "ig:install-browser": "playwright install chromium",
     "ig:create-job": "tsx src/workflows/instagram-capture/createInstagramJobCli.ts",
     "test:watchdog": "tsx src/jobs/testWatchdogJob.ts",
+    "test:serper-usage": "tsx src/workflows/images/testSerperUsage.ts",
+    "test:serper-credits": "tsx src/workflows/reports/testSerperCredits.ts",
     "setup:tistory": "tsx src/services/publish/tistory/setupTistorySession.ts",
     "test:relay-schedule": "tsx cloudflare/telegram-relay/src/testSchedule.ts",
     "test:relay-track": "tsx cloudflare/telegram-relay/src/testTrack.ts",

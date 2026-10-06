@@ -18,6 +18,8 @@
 // 요금: 가입 시 2,500건 무료, 이후 1,000건당 $1(10건 이하 조회는 1크레딧). 키가 없거나 한도를
 // 넘으면 **조용히 빈 배열**을 돌려준다 - 네이버 후보만으로 계속 돈다.
 
+import { recordSerperUsage } from "../../services/usage/recordSerperUsage.js";
+import type { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import type { ImageCandidate } from "./searchNaverImages.js";
 
 const ENDPOINT = "https://google.serper.dev/images";
@@ -95,7 +97,7 @@ export function isRateLimited(status: number): boolean {
 
 export async function searchSerperImages(
   query: string,
-  options: { fetchImpl?: typeof fetch; retries?: number } = {}
+  options: { fetchImpl?: typeof fetch; retries?: number; jobId?: string | null; record?: typeof recordApiUsage } = {}
 ): Promise<ImageCandidate[]> {
   const apiKey = process.env.SERPER_API_KEY;
   const trimmed = query.trim();
@@ -116,8 +118,11 @@ export async function searchSerperImages(
       });
     } catch {
       // 네트워크 실패로 수집 전체를 멈추지 않는다 - 네이버 후보로 계속 간다.
+      recordSerperUsage({ endpoint: "images", ok: false, status: 0, jobId: options.jobId, record: options.record });
       return [];
     }
+    // 429 재시도도 **시도마다** 1건이다 - 실패 시도는 크레딧 0으로 적힌다.
+    recordSerperUsage({ endpoint: "images", ok: res.ok, status: res.status, jobId: options.jobId, record: options.record });
 
     // 429는 잠깐 쉬고 다시 던진다. 한 번 걸렸다고 그 자리를 포기할 이유가 없다.
     if (res.status === 429 && attempt < maxRetries) {

@@ -240,6 +240,7 @@ export async function collectWebImagesForJob(
             { keyword: input.keyword, dir, slots: directSlots },
             {
               ...options,
+              jobId: input.jobId,
               upload: uploader,
               deduper,
               category: input.category ?? null,
@@ -275,6 +276,7 @@ export async function collectWebImagesForJob(
       { keyword: input.keyword, dir, slots: searchSlots },
       {
         ...options,
+        jobId: input.jobId,
         upload: uploader,
         deduper,
         category: input.category ?? null,

@@ -28,15 +28,36 @@ export class ApiUsageRepository {
    * "오늘/이번 달/원고당" 같은 집계 축이 자주 바뀌는데, 그때마다 DB 함수를 고치면 migration
    * 승인 게이트를 매번 통과해야 한다. 개인 규모(하루 수십 건)라 전부 읽어도 부담이 없다.
    */
-  static async listSince(since: Date, limit = 5000): Promise<ApiUsageRow[]> {
-    const { data, error } = await supabase
-      .from("api_usage")
-      .select("*")
-      .gte("occurred_at", since.toISOString())
-      .order("occurred_at", { ascending: false })
-      .limit(limit);
+  static async listSince(since: Date, limit = 50_000): Promise<ApiUsageRow[]> {
+    // PostgREST는 요청당 최대 1000행(hosted 기본 max_rows)이라 limit만 올려서는 조용히 잘린다 -
+    // Serper가 호출 1건당 1행을 쌓으면서 하루 수백 행이 되었다(2026-10-06). 페이지로 나눠 읽는다.
+    const PAGE = 1000;
+    const rows: ApiUsageRow[] = [];
+    for (let from = 0; from < limit; from += PAGE) {
+      const { data, error } = await supabase
+        .from("api_usage")
+        .select("*")
+        .gte("occurred_at", since.toISOString())
+        .order("occurred_at", { ascending: false })
+        .range(from, Math.min(from + PAGE, limit) - 1);
 
-    if (error) throw new Error(`api_usage 조회 실패: ${error.message}`);
-    return data ?? [];
+      if (error) throw new Error(`api_usage 조회 실패: ${error.message}`);
+      rows.push(...(data ?? []));
+      if (!data || data.length < PAGE) break;
+    }
+    return rows;
+  }
+
+  /** 구매일 이후 **크레딧을 쓴** serper 호출 수(실패 행 제외). 행이 많아 count만 받는다. */
+  static async countBilledSerperSince(since: Date): Promise<number> {
+    const { count, error } = await supabase
+      .from("api_usage")
+      .select("*", { count: "exact", head: true })
+      .eq("provider", "serper")
+      .not("operation", "like", "%.failed")
+      .gte("occurred_at", since.toISOString());
+
+    if (error) throw new Error(`api_usage serper 집계 실패: ${error.message}`);
+    return count ?? 0;
   }
 }

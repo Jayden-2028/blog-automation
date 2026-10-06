@@ -41,5 +41,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          # Serper 선지불 크레딧 게이지·소진 경보(2026-10-06). 비면 게이지·경보가 꺼진다 - cost.json을 쓰는
+          # 워크플로 전부에 같은 값을 넣어야 게이지가 번갈아 사라지지 않는다.
+          SERPER_CREDITS_PURCHASED: ${{ vars.SERPER_CREDITS_PURCHASED }}
+          SERPER_CREDITS_PURCHASED_AT: ${{ vars.SERPER_CREDITS_PURCHASED_AT }}
           MANUSCRIPT_EDIT_JSON: ${{ toJson(github.event.client_payload) }}
         run: npm run manuscripts:apply-edit

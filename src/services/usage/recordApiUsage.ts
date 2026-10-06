@@ -8,7 +8,7 @@
 // (generateImage 등) 안에서 직접 부르지 않는 이유는 그 함수를 DB에 묶지 않기 위해서다 -
 // 지금은 순수하게 fetch만 해서 테스트에서 Supabase 없이 돌릴 수 있다.
 
-import { estimateCostUsd } from "../../config/apiPricing.js";
+import { API_QUERY_PRICING, estimateCostUsd, estimateQueryCostUsd } from "../../config/apiPricing.js";
 import type { ApiUsageProvider } from "../../config/apiPricing.js";
 import { ApiUsageRepository } from "../../repositories/ApiUsageRepository.js";
 
@@ -32,6 +32,11 @@ export type RecordApiUsageInput = {
   jobId?: string | null;
   /** 이미지 장수 등. 금액 계산에는 쓰지 않는다(참고용). */
   quantity?: number;
+  /**
+   * 쿼리 단위 과금 모델(Serper)에서 **크레딧을 실제로 쓴 쿼리 수**. 실패한 호출은 0이다.
+   * 주면 토큰 대신 이 값으로 금액을 낸다.
+   */
+  billedQueries?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -39,13 +44,16 @@ export async function recordApiUsage(input: RecordApiUsageInput): Promise<void> 
   const occurredAt = new Date();
   const usage = input.usage ?? {};
 
-  const { costUsd, reason } = estimateCostUsd({
-    model: input.model,
-    inputTokens: usage.inputTokens,
-    imageInputTokens: usage.imageInputTokens,
-    outputTokens: usage.outputTokens,
-    occurredAt,
-  });
+  const { costUsd, reason } =
+    input.billedQueries != null && API_QUERY_PRICING[input.model]
+      ? { costUsd: estimateQueryCostUsd(input.model, input.billedQueries), reason: undefined }
+      : estimateCostUsd({
+          model: input.model,
+          inputTokens: usage.inputTokens,
+          imageInputTokens: usage.imageInputTokens,
+          outputTokens: usage.outputTokens,
+          occurredAt,
+        });
 
   const result = await ApiUsageRepository.record({
     occurred_at: occurredAt.toISOString(),

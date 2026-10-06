@@ -51,4 +51,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Serper 선지불 크레딧 게이지·소진 경보(2026-10-06). 비면 게이지·경보가 꺼진다 - cost.json을 쓰는
+          # 워크플로 전부에 같은 값을 넣어야 게이지가 번갈아 사라지지 않는다.
+          SERPER_CREDITS_PURCHASED: ${{ vars.SERPER_CREDITS_PURCHASED }}
+          SERPER_CREDITS_PURCHASED_AT: ${{ vars.SERPER_CREDITS_PURCHASED_AT }}
         run: npm run job:watchdog

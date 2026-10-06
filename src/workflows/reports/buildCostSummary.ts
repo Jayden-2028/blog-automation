@@ -10,6 +10,7 @@
 import type { FixedCostEntry } from "../../config/fixedCosts.js";
 import { listPricedModels } from "../../config/apiPricing.js";
 import type { ApiUsageRow } from "../../types/database.js";
+import type { SerperCreditsBlock } from "./serperCredits.js";
 
 const TIME_ZONE = "Asia/Seoul";
 
@@ -41,6 +42,8 @@ export type CostSummary = {
   fixed: { entries: FixedCostEntry[]; knownMonthlyUsd: number; missingCount: number };
   /** 대시보드에 그대로 띄울 한계·주의사항. 숫자만 보고 오해하지 않도록 함께 내려보낸다. */
   notes: string[];
+  /** Serper 선지불 크레딧 게이지(2026-10-06). 환경값이 없으면 null. 월 비용이 아니라 잔량으로 본다. */
+  serperCredits: SerperCreditsBlock | null;
   pricedModels: ReturnType<typeof listPricedModels>;
 };
 
@@ -68,6 +71,8 @@ export type BuildCostSummaryInput = {
   /** 최소 최근 7일 + 이번 달을 덮는 구간. 정렬 순서는 상관없다. */
   rows: ApiUsageRow[];
   fixedCosts: FixedCostEntry[];
+  /** 순수 함수 유지를 위해 계산된 블록을 인자로 받는다(computeSerperCredits). */
+  serperCredits?: SerperCreditsBlock | null;
   now?: Date;
 };
 
@@ -123,6 +128,7 @@ export function buildCostSummary(input: BuildCostSummaryInput): CostSummary {
     "금액은 호출 시점에 우리가 직접 계측한 값이다(공급자 청구액 API가 아니다). 공급자 최종 청구서와 소수점 단위 차이가 날 수 있다.",
     "Claude는 정액 구독이라 호출당 금액이 존재하지 않는다 - 아래 고정비에만 잡힌다.",
   ];
+  notes.push("Serper는 선지불 크레딧 차감이라 월 비용이 아니라 크레딧 게이지(serperCredits)로 볼 것 - 사용분은 위 집계에 쿼리당 $0.001로 잡힌다.");
   if (month.unknownCostCalls > 0) {
     notes.push(
       `이번 달 ${month.unknownCostCalls}건은 단가 미등록이거나 공급자가 usage를 주지 않아 금액을 모른다 - 표시 금액은 하한이다.`
@@ -150,6 +156,7 @@ export function buildCostSummary(input: BuildCostSummaryInput): CostSummary {
       missingCount: input.fixedCosts.length - knownFixed.length,
     },
     notes,
+    serperCredits: input.serperCredits ?? null,
     pricedModels: listPricedModels(),
   };
 }

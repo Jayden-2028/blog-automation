@@ -16,6 +16,9 @@ import "dotenv/config";
 
 import { listRecentDiscoveryRuns } from "../services/supabase/repositories/discoveryRunRepository.js";
 import { TelegramNotifier } from "../notifications/TelegramNotifier.js";
+import { loadSerperCredits } from "../workflows/reports/writeCostSnapshot.js";
+import { evaluateSerperCredits, formatSerperCreditAlert } from "../workflows/reports/serperCredits.js";
+import type { SerperCreditsBlock } from "../workflows/reports/serperCredits.js";
 import type { DiscoveryRunRow } from "../types/database.js";
 
 const SEOUL_TZ = "Asia/Seoul";
@@ -182,6 +185,15 @@ export type RunWatchdogOptions = {
   send?: (text: string) => Promise<void>;
   /** 테스트 주입 지점. 생략하면 현재 시각. */
   now?: Date;
+  /** 테스트 주입 지점. 생략하면 api_usage에서 계산한다. 환경값이 없으면 null(검사 생략). */
+  fetchSerperCredits?: (now: Date) => Promise<SerperCreditsBlock | null>;
+};
+
+export type SerperCreditCheckResult = {
+  block: SerperCreditsBlock;
+  alerted: boolean;
+  message?: string;
+  sendError?: string;
 };
 
 export type RunWatchdogResult = {
@@ -191,7 +203,35 @@ export type RunWatchdogResult = {
   message?: string;
   /** 발송 실패 사유. 이 함수는 알림 발송 실패로 예외를 던지지 않는다. */
   sendError?: string;
+  /** Serper 크레딧 점검 결과(2026-10-06). 환경값이 없어 검사를 건너뛰면 없다. job 판정과 독립이다. */
+  serper?: SerperCreditCheckResult;
 };
+
+/**
+ * Serper 선지불 크레딧 사전 경고. job 누락 판정과 **독립**이다 - job이 정상이어도 크레딧은 줄어든다.
+ * 신규 워크플로 없이 매일 도는 이 감시인에 얹었다. 실패해도 job 감시 결과를 가리지 않도록 예외를 삼킨다.
+ */
+async function checkSerperCredits(options: RunWatchdogOptions, now: Date): Promise<SerperCreditCheckResult | undefined> {
+  try {
+    const block = await (options.fetchSerperCredits ?? loadSerperCredits)(now);
+    if (!block) return undefined;
+    const alerts = evaluateSerperCredits(block);
+    if (alerts.length === 0) return { block, alerted: false };
+
+    const message = formatSerperCreditAlert(block, alerts);
+    if (options.dryRun) return { block, alerted: false, message };
+    const send = options.send ?? ((text: string) => TelegramNotifier.fromEnv().send(text));
+    try {
+      await send(message);
+      return { block, alerted: true, message };
+    } catch (error) {
+      return { block, alerted: false, message, sendError: error instanceof Error ? error.message : String(error) };
+    }
+  } catch (error) {
+    console.warn(`⚠️ [watchdog] Serper 크레딧 점검 실패(무시): ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
 
 export async function runWatchdog(options: RunWatchdogOptions = {}): Promise<RunWatchdogResult> {
   const now = options.now ?? new Date();
@@ -200,25 +240,28 @@ export async function runWatchdog(options: RunWatchdogOptions = {}): Promise<Run
   const recent = await fetchRecent();
   const verdict = evaluateWatchdogByJob(recent, now);
 
+  const serper = await checkSerperCredits(options, now);
+
   if (verdict.ok) {
-    return { verdict, alerted: false };
+    return { verdict, alerted: false, serper };
   }
 
   const message = formatWatchdogAlert(verdict, now);
 
   if (options.dryRun) {
-    return { verdict, alerted: false, message };
+    return { verdict, alerted: false, message, serper };
   }
 
   const send = options.send ?? ((text: string) => TelegramNotifier.fromEnv().send(text));
   try {
     await send(message);
-    return { verdict, alerted: true, message };
+    return { verdict, alerted: true, message, serper };
   } catch (error) {
     return {
       verdict,
       alerted: false,
       message,
+      serper,
       sendError: error instanceof Error ? error.message : String(error),
     };
   }
@@ -230,6 +273,14 @@ if (isDirectRun) {
   const dryRun = process.argv.includes("--dry-run");
   runWatchdog({ dryRun })
     .then((result) => {
+      if (result.serper) {
+        const b = result.serper.block;
+        console.log(
+          `ℹ️ [watchdog] Serper 잔여 추정 ${b.remainingEst}/${b.purchased} (${b.remainingPct}%)${b.runwayDays != null ? `, ${b.runwayDays}일치` : ""}${
+            result.serper.message ? (result.serper.alerted ? " - 경고 발송" : result.serper.sendError ? " - 경고 발송 실패" : " - 경고(dry-run)") : ""
+          }`
+        );
+      }
       if (result.verdict.ok) {
         const runs = result.verdict.checks
           .map((check) => (check.verdict.ok ? `${check.job.label} #${check.verdict.run.id}` : check.job.label))
