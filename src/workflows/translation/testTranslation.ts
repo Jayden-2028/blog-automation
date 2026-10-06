@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   assert(ok.calls.saved.length === 1 && ok.calls.saved[0].title === "How to Use a T-money Card in Korea", "영어 article 저장");
   assert(ok.calls.saved[0].content === parsed.body && !/^#\w/m.test(ok.calls.saved[0].content.split("\n").at(-1) ?? ""), "영어 원고는 본문만 저장한다(태그는 channelMeta에)");
   const final = ok.calls.merges.at(-1)!;
-  assert(final.ksceneStage === "english_review" && final.reviewDecision === null && final.editRequestMessageId === null, "영어본 재승인 단계로 전이");
+  assert(final.ksceneStage === "english_review" && final.reviewDecision === null && final.editRequestMessageId === null && final.translationFeedback === null, "영어본 재승인 단계로 전이(대기 중이던 수정 방향은 비운다)");
   const meta = (final.channelMeta as Record<string, { searchDescription: string; slug: string; tags: string[]; shortName: string }>);
   assert(meta.other && (meta.other as unknown as { x: number }).x === 1, "기존 channelMeta 키를 지우지 않는다");
   assert(meta.blogspot.slug === "how-to-use-a-t-money-card" && meta.blogspot.shortName === "티머니" && meta.blogspot.searchDescription.startsWith("Where to buy"), "영어 발행 메타(검색 설명·slug·태그)를 channelMeta.blogspot에");

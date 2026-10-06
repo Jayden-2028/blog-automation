@@ -118,6 +118,16 @@ async function main(): Promise<void> {
     assert(out.outcome.status === "accepted" && english.calls.translation[0]?.feedback === "Make the intro shorter" && english.calls.revision.length === 0, "영어본 수정 요청은 한글을 다시 쓰지 않고 영어본만 재번역");
     assert(out.message.includes("영어본 수정 반영 중"), "안내 문구");
 
+    assert(english.calls.merges.some((m) => m.translationFeedback === "Make the intro shorter"), "수정 방향을 translationFeedback으로 남긴다(생성 실패 후 다시 만들기가 이어받게)");
+
+    // 영어본 수정 후 생성이 실패 -> '다시 만들기'(✅ 콜백)가 그 수정 방향으로 재시도
+    const retry = setup(makeJob({ track: "kscene", ksceneStage: "translation_failed", translationFeedback: "Make the intro shorter" }));
+    await retry.bot.handleArticleReviewCallback(query("confirm"));
+    assert(retry.calls.translation[0]?.feedback === "Make the intro shorter", "실패 후 다시 만들기는 대기 중인 수정 방향을 이어받는다");
+    const plainRetry = setup(makeJob({ track: "kscene", ksceneStage: "translation_failed" }));
+    await plainRetry.bot.handleArticleReviewCallback(query("confirm"));
+    assert(plainRetry.calls.translation[0]?.feedback === undefined, "수정 방향이 없던 실패는 그냥 다시 만든다");
+
     const korean = setup(makeJob({ track: "kscene", editRequestMessageId: 7001 }));
     await korean.bot.handleEditFeedbackMessage(reply("제목을 바꿔주세요"));
     assert(korean.calls.revision.length === 1 && korean.calls.translation.length === 0, "한글 검수 단계 수정 요청은 기존 재작성");

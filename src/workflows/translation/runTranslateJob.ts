@@ -169,6 +169,7 @@ export async function runTranslateJob(jobId: string, options: RunTranslateJobOpt
       reviewDecision: null,
       reviewedAt: null,
       editRequestMessageId: null,
+      translationFeedback: null,
       lastError: null,
       channelMeta: {
         ...channelMeta,

@@ -754,7 +754,12 @@ export class TelegramBot {
         ksceneStage: "translating",
         translateStartedAt: startedAt,
       });
-      this.triggerTranslation(job.id);
+      // 영어본 수정 요청 뒤에 생성이 실패했다면 "다시 만들기"가 그 수정 방향을 이어받는다.
+      const pendingFeedback =
+        ksceneStage === "translation_failed" && typeof job.metadata.translationFeedback === "string"
+          ? job.metadata.translationFeedback
+          : undefined;
+      this.triggerTranslation(job.id, pendingFeedback);
       return {
         outcome: { status: "reviewed", action: "confirm", job },
         message:
@@ -831,6 +836,8 @@ export class TelegramBot {
     // 사용설명서 트랙의 영어본 재승인 단계에서 온 수정 요청은 **한글 원고를 다시 쓰지 않고** 영어본만 다시 만든다
     // (사실의 기준은 한글 원고 그대로). 한글 검수 단계의 수정 요청은 기존처럼 재작성(job:revise)이다.
     if (trackOfJob(job) === "kscene" && ksceneStageOf(job) === "english_review") {
+      // 영어본 재생성이 실패해도 "다시 만들기"가 이 수정 방향을 잃지 않게 남겨 둔다(성공하면 번역 단계가 지운다).
+      await this.mergeJobMetadata(job.id, { translationFeedback: feedback });
       this.triggerTranslation(job.id, feedback);
       return {
         outcome: { status: "accepted", job },
