@@ -2,6 +2,16 @@
 
 기준일: 2026-10-06 (Asia/Seoul)
 
+## 2026-10-06 — 개편3 사용설명서 트랙(The Korea Manual) 구현 (브랜치 `feat/restructure-3-kscene-track`)
+
+**상태: 코드·테스트 완료, main 병합·Worker 재배포·봇 C 웹훅 등록·Pages 프로젝트 생성은 사용자 승인 대기.** 상세·체크리스트는 `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`.
+
+- 21:00 KST 주제 제안(`kscene-topic.yml`): 영문 자동완성 + 기본 시드 60개, 기발행·기제안 중복 제거, 사용설명서 봇 Go/Pass. Worker 12 UTC 슬롯이 **watchdog과 함께** 깨운다(GitHub cron 폐지). watchdog은 kscene을 전날분 기준으로 본다.
+- 한→영 2단계 승인: 한글 ✅ → `job-translate`(영어본 + 한글 대역 요약, 마커·링크·한글 잔존 검증) → 영어본 재승인 → 이미지·🔵 Blogger 발행. 상태는 `metadata.ksceneStage`.
+- Blogger 발행 타깃 분기(`KSCENE_BLOGGER_BLOG_ID`, 비면 발행 안 함) + 영문 라벨 + 발행 시 이미지를 공개 Cloudflare Pages로 복사·URL 치환(설정 없으면 Supabase 링크로 발행). 옮긴 글은 storage-cleanup 대상.
+- **번역 지침(`prompts/translation/kscene-ko-en.md`)과 시드(`ksceneSeeds.ts`)는 임시 기본본** - 기획 세션(⑤) 산출물로 교체.
+- 알려진 한계: `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md` "알려 둔 한계".
+
 ## 2026-10-06 — 개편2.5 안정화 구현 (브랜치 `feat/restructure-2.5-stabilization`, 지시서 `RESTRUCTURE-2.5-STABILIZATION.md`)
 
 **상태: 코드·테스트 완료, main 병합·Worker 재배포·맥미니 반영은 사용자 승인 대기.**
