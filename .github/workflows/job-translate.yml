@@ -1,0 +1,66 @@
+# 사용설명서 트랙(The Korea Manual) 한→영 번역 단계(개편3 §4.3-2). 한글 원고가 승인(✅)되면 TelegramBot이 이 워크플로를
+# workflow_dispatch로 발화하고(runTelegramUpdateCli.ts triggerTranslation), 영어본 재승인에서 "수정 필요" 답장이 오면
+# 같은 워크플로를 feedback과 함께 다시 띄운다.
+#
+# heavy-pipeline(조사·집필·수정) 큐를 타지 않는다: 도구 없이 텍스트만 변환하는 가벼운 호출이라 그 큐에 넣으면 20~45분짜리 집필
+# 뒤에 줄을 서고 반대로 집필을 막는다. 대신 job별 concurrency 그룹으로 **같은 job의 중복 실행만** 직렬화한다
+# (그룹이 job_id를 포함하므로 서로 다른 job끼리 대기 1개 한도에 걸려 취소되는 일이 없다).
+#
+# 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, KSCENE_TELEGRAM_BOT_TOKEN, KSCENE_TELEGRAM_CHAT_ID,
+# CLAUDE_CODE_OAUTH_TOKEN. 번역 지침은 prompts/translation/kscene-ko-en.md(기획 세션 ⑤가 교체).
+name: job-translate
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "article_jobs.id (UUID)"
+        required: true
+        type: string
+      feedback:
+        description: "영어본 재승인 단계에서 사용자가 답장으로 보낸 수정 방향(없으면 비운다)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: job-translate-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+# 헤드리스 claude 모델 고정(2026-09-30 사용자 결정) - 다른 원고 단계와 같은 값.
+env:
+  CLAUDE_MODEL: claude-sonnet-5-5
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run job:translate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 사용자가 텔레그램에 입력한 원문이 들어올 수 있어 셸 명령에 직접 끼우지 않고 환경변수로 넘긴다.
+          JOB_ID: ${{ inputs.job_id }}
+          FEEDBACK: ${{ inputs.feedback }}
+        run: npm run job:translate -- "$JOB_ID" "$FEEDBACK"
