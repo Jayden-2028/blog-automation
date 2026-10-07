@@ -28,6 +28,31 @@ export function isPoliticalKeyword(keyword: string): boolean {
   return POLITICAL_EXCLUSION_TERMS.some((term) => normalized.includes(term.toLowerCase()));
 }
 
+// 스포츠(2026-10-07 사용자 결정): 엔터 트랙에 야구 기사(예: "키움 하현승 계약금")가 섞여 들어왔다.
+// 종목명·리그명·구단 별칭으로 판정한다. 구단은 "두산·롯데·삼성·한화"처럼 기업명과 겹치는 단어를
+// 피하고 별칭("트윈스" 등)만 쓴다. "키움"은 증권사와 겹쳐 예외를 둔다.
+export const SPORTS_EXCLUSION_TERMS: readonly string[] = [
+  "스포츠", "야구", "프로야구", "kbo", "mlb", "메이저리그", "축구", "k리그", "프리미어리그", "월드컵",
+  "농구", "kbl", "wkbl", "nba", "배구", "v리그", "골프", "kpga", "klpga", "lpga", "pga", "테니스",
+  "올림픽", "아시안게임", "ufc", "격투기", "마라톤", "컬링", "쇼트트랙", "피겨스케이팅",
+  "트윈스", "자이언츠", "라이온즈", "이글스", "타이거즈", "랜더스", "다이노스", "베어스", "히어로즈", "키움",
+  "손흥민", "이강인", "김민재", "오타니", "류현진", "김하성", "이정후", "김연아",
+];
+
+/** 스포츠 어휘를 포함하더라도 연예 프로그램 제목이라 통과시킬 표현. */
+const SPORTS_EXCEPTION_TERMS: readonly string[] = [
+  "최강야구", "골 때리는 그녀들", "골때녀", "뭉쳐야 찬다", "키움증권", "키움 증권",
+];
+
+export function isSportsKeyword(keyword: string): boolean {
+  let normalized = keyword.trim().toLowerCase();
+  if (!normalized) return false;
+  for (const exception of SPORTS_EXCEPTION_TERMS) {
+    normalized = normalized.split(exception.toLowerCase()).join(" ");
+  }
+  return SPORTS_EXCLUSION_TERMS.some((term) => normalized.includes(term.toLowerCase()));
+}
+
 export function isExcludedCategory(category: string | null | undefined): boolean {
   if (!category) return false;
   return EXCLUDED_CATEGORIES.includes(category as KeywordCategory);
@@ -35,5 +60,5 @@ export function isExcludedCategory(category: string | null | undefined): boolean
 
 /** 이 후보(키워드+분류된 카테고리)를 수집 단계에서 버릴지 판정한다. */
 export function shouldExcludeCandidate(keyword: string, category: string | null | undefined): boolean {
-  return isExcludedCategory(category) || isPoliticalKeyword(keyword);
+  return isExcludedCategory(category) || isPoliticalKeyword(keyword) || isSportsKeyword(keyword);
 }
