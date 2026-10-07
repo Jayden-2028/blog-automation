@@ -217,6 +217,27 @@ async function main(): Promise<void> {
     assert((await tab.evaluate("!document.querySelector('#submit-edits')")) === true, "제목을 원래대로 두면 수정으로 세지 않는다");
     console.log("✅ 브라우저 - 제목 편집: 수정 모드·한 줄·from/to·안내");
 
+    // ⑩ 제목 옆 수정 버튼(2026-10-08) - 누르면 제목만 편집, 확인하면 수정으로 남고, 저장 전에는 "저장 안 됨" 경고가 눈에 띈다.
+    servedHtml = html;
+    await tab.evaluate("localStorage.clear()");
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    posted.length = 0;
+    assert((await tab.evaluate("!document.querySelector('.edited-badge.unsaved')")) === true, "수정이 없으면 경고도 없다");
+    await tab.click(".title-edit");
+    const titleBoxState = await tab.evaluate("[document.querySelector('.doc-title').getAttribute('contenteditable'), document.querySelector('.title-edit').textContent, document.querySelector('.cap[data-cap=\"1\"]').getAttribute('contenteditable')]") as [string, string, string | null];
+    assert(titleBoxState[0] === "true" && titleBoxState[1] === "확인" && titleBoxState[2] !== "true", `제목 수정 버튼은 제목만 편집 상태로 만든다 (${JSON.stringify(titleBoxState)})`);
+    await tab.evaluate("document.querySelector('.doc-title').innerText = '버튼으로 고친 제목'");
+    await tab.click(".title-edit");
+    const afterTitleBtn = await tab.evaluate("({ title: document.querySelector('.doc-title').textContent, warn: (document.querySelector('.edited-badge.unsaved') || {}).textContent || '', submit: (document.querySelector('#submit-edits') || {}).textContent || '' })") as { title: string; warn: string; submit: string };
+    assert(afterTitleBtn.title === "버튼으로 고친 제목" && afterTitleBtn.submit.includes("1곳"), `확인하면 수정 1곳으로 남는다 (${JSON.stringify(afterTitleBtn)})`);
+    assert(afterTitleBtn.warn.includes("저장 안 됨") && afterTitleBtn.warn.includes("발행에 반영"), `저장 전에는 '저장 안 됨' 경고가 뜬다 (${afterTitleBtn.warn})`);
+    assert(posted.length === 0, "확인만으로는 서버로 보내지 않는다");
+    await tab.click("#submit-edits");
+    await tab.waitForFunction("document.querySelector('.edited-badge') && document.querySelector('.edited-badge').textContent.indexOf('저장 요청') >= 0");
+    assert((await tab.evaluate("!document.querySelector('.edited-badge.unsaved')")) === true, "저장 요청을 보내면 경고가 풀린다");
+    assert(JSON.parse(posted[0]).edits.title.to === "버튼으로 고친 제목", "저장하면 title로 간다");
+    console.log("✅ 브라우저 - 제목 옆 수정 버튼·저장 안 됨 경고");
+
     // ⑦ 후보 클릭 교체(2026-10-07) - 채택본은 안 눌리고, 다른 후보를 누르면 서버 번호 기준 요청이 가며, 처리 중 표식이 선다.
     servedHtml = html;
     await tab.evaluate("localStorage.clear()");

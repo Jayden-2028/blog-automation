@@ -7,7 +7,7 @@ import type { EditPendingState } from "../../workflows/manuscripts/viewerEditGua
 
 export type StaleEntry = { job: { id: string; keyword?: string }; state: Extract<EditPendingState, { state: "stale" }> };
 
-const KIND_LABEL = { viewerEdit: "수정본 반영", imagePick: "이미지 교체" } as const;
+const KIND_LABEL = { viewerEdit: "수정본 저장", imagePick: "이미지 교체" } as const;
 
 export function staleWarningText(entry: StaleEntry): string {
   return [

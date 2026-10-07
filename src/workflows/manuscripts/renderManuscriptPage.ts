@@ -278,6 +278,10 @@ export function renderManuscriptPage(
   .cand .cand-pick:hover img{outline:2px solid var(--pen);outline-offset:1px}
   .cand .cand-pick:disabled{cursor:progress;opacity:.55}
   .doc-title.editable[contenteditable="true"]{outline-offset:2px}
+  .title-row{display:flex;align-items:flex-start;gap:8px}
+  .title-row .doc-title{flex:1;min-width:0}
+  .title-row .title-edit{flex:none;margin-top:3px}
+  .edited-badge.unsaved{font-weight:700;background:var(--warn-soft,#FFF4D6);padding:4px 8px;border-radius:6px}
   .title-note{display:none;font-size:12px;color:var(--muted,#666);margin:0 0 6px}
   body.editing .title-note,.title-note.on{display:block}
   .pub-hint{font-size:12px;color:var(--muted,#666);align-self:center}
@@ -968,8 +972,8 @@ export function renderManuscriptPage(
       }
       // 제목은 편집 키 "title"을 쓴다(2026-10-07). 수정 모드(✏️)에서 글자를 직접 고친다 - 한 줄이라 Enter는 막는다.
       var shownTitle = edits && edits.title != null ? edits.title : (topic.title || topic.keyword);
-      h += '<div class="doc-title editable' + (topic.sourceTag === "instagram" ? " ig" : "") + '" data-title="1">'
-        + esc(shownTitle) + '</div>';
+      h += '<div class="title-row"><div class="doc-title editable' + (topic.sourceTag === "instagram" ? " ig" : "") + '" data-title="1">'
+        + esc(shownTitle) + '</div><button type="button" class="mini title-edit">수정</button></div>';
       h += '<div class="title-note' + (edits && edits.title != null ? ' on' : '') + '">제목 변경은 저장 후 발행하는 글부터 적용됩니다 — 이미 발행된 글의 제목은 바뀌지 않습니다.</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
       h += viewerEditHtml(topic);
@@ -1006,9 +1010,9 @@ export function renderManuscriptPage(
       if (edits) {
         h += '<button class="btn primary" id="submit-edits">💾 수정본 저장(' + pendingCount + '곳)</button>';
         h += '<button class="btn" id="revert">↩️ 원본으로</button>';
-        h += '<span class="edited-badge">' + (sentAt
+        h += '<span class="edited-badge' + (sentAt ? '' : ' unsaved') + '">' + (sentAt
           ? '저장 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 저장본이 보입니다(발행되지 않음)'
-          : '이 브라우저에서 수정됨 · 저장 전까지 복사에만 적용') + '</span>';
+          : '⚠️ 저장 안 됨 — 💾 저장해야 발행에 반영됩니다 · 저장 전까지 복사에만 적용') + '</span>';
       }
       h += '<span class="pub-hint">' + esc(PUBLISH_HINT) + '</span>';
       h += '</div>';
@@ -1128,6 +1132,25 @@ export function renderManuscriptPage(
         if (!editing) { saveEdits(topic.jobId, Object.assign({}, loadEdits(topic.jobId) || {}, currentTexts())); render(topic.jobId); }
       });
 
+      // 제목 옆 수정 버튼(2026-10-08) - 캡션 수정과 같다: 누르면 제목만 편집 상태가 되고, 다시 누르면 수정으로 남긴다(저장은 💾로).
+      var titleBtn = wrap.querySelector(".title-edit");
+      var titleBox = wrap.querySelector(".doc-title[data-title]");
+      if (titleBtn && titleBox) {
+        titleBtn.addEventListener("click", function () {
+          if (titleBox.getAttribute("contenteditable") !== "true") {
+            titleBox.setAttribute("contenteditable", "true");
+            titleBox.classList.add("editing");
+            titleBox.focus();
+            titleBtn.textContent = "확인";
+            document.querySelector(".title-note").classList.add("on");
+            return;
+          }
+          var merged = loadEdits(topic.jobId) || {};
+          merged.title = titleBox.innerText.replace(/\\s*\\n+\\s*/g, " ").trim();
+          saveEdits(topic.jobId, merged);
+          render(topic.jobId);
+        });
+      }
       var titleEl = wrap.querySelector(".doc-title[data-title]");
       if (titleEl) titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") ev.preventDefault(); });
 

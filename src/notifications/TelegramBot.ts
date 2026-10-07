@@ -1028,7 +1028,7 @@ export class TelegramBot {
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
           queued.queued
-            ? "맥미니가 켜져 있으면 곧 올라갑니다. 뷰어에서 고친 내용은 '📤 수정본 반영'을 누른 것까지만 들어갑니다. 완료되면 주소를 보내드립니다."
+            ? "맥미니가 켜져 있으면 곧 올라갑니다. 뷰어에서 고친 내용은 '💾 수정본 저장'을 누른 것까지만 들어갑니다. 완료되면 주소를 보내드립니다."
             : escapeTelegramHtml(queued.reason ?? ""),
         ].join("\n"),
       };
