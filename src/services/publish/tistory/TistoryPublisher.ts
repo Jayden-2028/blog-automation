@@ -20,6 +20,7 @@
 // page.evaluate에 넘기는 코드는 **문자열**로 둔다. tsx(esbuild)가 함수에 `__name(...)`을 끼워 넣어 브라우저에서
 // "ReferenceError: __name is not defined"로 죽는다(setupTistorySession.ts 2026-10-06 실측).
 
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -426,6 +427,10 @@ export class TistoryPublisher {
         if (!(await this.waitForImageCount(page, inserted))) {
           inserted -= 1;
           warnings.push(`이미지 업로드가 확인되지 않았습니다(${image.alt || image.url}).`);
+          // 실패한 업로드가 에디터의 첨부 위젯을 꼬아 두면 다음 이미지까지 연쇄로 실패한다
+          // (2026-10-08 우크라 글: 2번 실패 후 3~5번 전부 유실). 상태를 털고 다음으로 넘어간다.
+          await page.keyboard.press("Escape").catch(() => {});
+          await page.waitForTimeout(UPLOAD_SETTLE_MS * 2);
         } else {
           const captionWarning = await this.writeCaption(page, image.alt ?? "");
           if (captionWarning) warnings.push(captionWarning);
@@ -516,16 +521,33 @@ export class TistoryPublisher {
     }
   }
 
+  /**
+   * 이미지를 받아 임시 파일로 저장한다. 확장자는 URL이 아니라 **실제 바이트**로 정한다 - 웹 수집 단계가
+   * AVIF를 `.png` 이름으로 저장한 사례가 있었고(2026-10-08 우크라 글), 티스토리 에디터는 AVIF를 받으면
+   * 업로드 위젯이 꼬여 **그 뒤의 정상 이미지까지 연쇄로 실패**했다. AVIF는 macOS 내장 sips로 JPEG로
+   * 변환해 올리고, 변환이 안 되면 던진다 - 이 한 장을 건너뛰는 것이(경고 1건) 에디터를 꼬이게 두는
+   * 것(나머지 전부 유실)보다 낫다.
+   */
   private async downloadToTempFile(url: string): Promise<string> {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`이미지 다운로드 실패(HTTP ${response.status}): ${url}`);
     const buffer = Buffer.from(await response.arrayBuffer());
     const dir = mkdtempSync(path.join(tmpdir(), "tistory-publish-"));
-    const extMatch = url.split("?")[0].match(/\.([a-zA-Z0-9]+)$/);
-    const ext = extMatch ? extMatch[1] : "png";
+
+    const sniffed = sniffImageFormat(buffer);
+    const urlExt = url.split("?")[0].match(/\.([a-zA-Z0-9]+)$/)?.[1];
+    const ext = sniffed ?? urlExt ?? "png";
     const filePath = path.join(dir, `image.${ext}`);
     writeFileSync(filePath, buffer);
-    return filePath;
+
+    if (sniffed !== "avif") return filePath;
+    const converted = path.join(dir, "image.jpg");
+    try {
+      execFileSync("sips", ["-s", "format", "jpeg", filePath, "--out", converted], { stdio: "pipe" });
+    } catch (error) {
+      throw new Error(`AVIF 이미지를 JPEG로 변환하지 못해 건너뜁니다(${this.errorMessage(error).split("\n")[0]}): ${url}`);
+    }
+    return converted;
   }
 
   /** 발행 직후 RSS에서 같은 제목의 글을 찾아 실제 주소를 돌려준다. 반영이 늦을 수 있어 짧게 재시도한다. */
@@ -581,6 +603,24 @@ export function matchRssLink(rssXml: string, title: string): string | null {
   if (!want) return null;
   for (const match of rssXml.matchAll(/<item>.*?<title>(.*?)<\/title>.*?<link>(.*?)<\/link>/gs)) {
     if (normalizeTitle(match[1]) === want) return decodeEntities(match[2]).trim();
+  }
+  return null;
+}
+
+/**
+ * 이미지 버퍼의 실제 형식(확장자 문자열). URL 확장자는 믿지 않는다 - 웹 수집 이미지가 AVIF를
+ * `.png` 이름으로 저장한 실측(2026-10-08)이 계기. 모르는 형식이면 null.
+ */
+export function sniffImageFormat(buffer: Buffer): "jpg" | "png" | "gif" | "webp" | "avif" | null {
+  if (buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "jpg";
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "png";
+  if (buffer.subarray(0, 4).toString("latin1") === "GIF8") return "gif";
+  if (buffer.subarray(0, 4).toString("latin1") === "RIFF" && buffer.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
+  // ISO BMFF: [4바이트 크기]["ftyp"][브랜드]. avif(정지)·avis(시퀀스) 둘 다 AVIF다.
+  if (buffer.subarray(4, 8).toString("latin1") === "ftyp") {
+    const brand = buffer.subarray(8, 12).toString("latin1");
+    if (brand === "avif" || brand === "avis") return "avif";
   }
   return null;
 }
