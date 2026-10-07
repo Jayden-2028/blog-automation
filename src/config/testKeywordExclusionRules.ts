@@ -28,6 +28,13 @@ function main(): void {
   assert(isSportsKeyword("한지민 이준혁 재회 SBS 특별출연") === false, "연예 키워드는 통과해야 한다");
   console.log("✅ 스포츠 키워드 제외, 예능·증권사는 통과");
 
+  assert(
+    shouldExcludeCandidate("투타겸업 하현승의 가치? 역대 최고 계약금 16억", "entertainment", "키움 하현승 계약금") === true,
+    "제목에 어휘가 없어도 시드 검색어가 스포츠면 제외돼야 한다"
+  );
+  assert(shouldExcludeCandidate("한지민 이준혁 재회", "entertainment", "한지민 이준혁") === false, "시드가 연예면 통과해야 한다");
+  console.log("✅ 시드 검색어 기준 제외");
+
   console.log("\n✅ 전체 통과");
 }
 

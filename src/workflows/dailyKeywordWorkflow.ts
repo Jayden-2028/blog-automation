@@ -76,13 +76,21 @@ export async function collectCandidates(
   queries: string[],
   options: CollectCandidatesOptions = {}
 ): Promise<CollectNaverCandidatesResult> {
-  const result = await collectNaverCandidates(queries, options);
+  // 스포츠·정치 시드 검색어는 수집 전에 뺀다(API 호출도 아낀다). 이미 쌓인 시드가 후보를 계속 만들어
+  // 내므로(2026-10-07 "키움 하현승 계약금") 후보 필터만으로는 제목에 어휘가 없는 기사를 못 거른다.
+  const allowedQueries = queries.filter((query) => !shouldExcludeCandidate(query, null));
+  const result = await collectNaverCandidates(allowedQueries, options);
 
   // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편). seed_queries에
   // 등록된 상시 검색어(예: "육아지원금")가 아직 남아 있어도 여기서 걸러지므로 Top N/알림까지
   // 올라가지 않는다 - trend_candidates 경로(excludeCandidateInserts.ts)와 같은 규칙을 쓴다.
   const filtered = result.candidates.filter(
-    (candidate) => !shouldExcludeCandidate(candidate.keyword, candidate.category)
+    (candidate) =>
+      !shouldExcludeCandidate(
+        candidate.keyword,
+        candidate.category,
+        typeof candidate.metadata?.query === "string" ? candidate.metadata.query : null
+      )
   );
   const excludedCount = result.candidates.length - filtered.length;
   if (excludedCount > 0) {

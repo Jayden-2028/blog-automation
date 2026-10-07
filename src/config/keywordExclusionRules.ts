@@ -59,6 +59,17 @@ export function isExcludedCategory(category: string | null | undefined): boolean
 }
 
 /** 이 후보(키워드+분류된 카테고리)를 수집 단계에서 버릴지 판정한다. */
-export function shouldExcludeCandidate(keyword: string, category: string | null | undefined): boolean {
-  return isExcludedCategory(category) || isPoliticalKeyword(keyword) || isSportsKeyword(keyword);
+export function shouldExcludeCandidate(
+  keyword: string,
+  category: string | null | undefined,
+  seedQuery?: string | null
+): boolean {
+  // 기사 제목에는 구단·종목이 안 나와도(예: "투타겸업 하현승의 가치?") 찾아낸 시드 검색어에 있으면
+  // 스포츠 기사다(2026-10-07) - 제목과 시드 검색어를 모두 본다.
+  return (
+    isExcludedCategory(category) ||
+    isPoliticalKeyword(keyword) ||
+    isSportsKeyword(keyword) ||
+    (!!seedQuery && (isPoliticalKeyword(seedQuery) || isSportsKeyword(seedQuery)))
+  );
 }
