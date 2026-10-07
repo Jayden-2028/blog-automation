@@ -660,7 +660,7 @@ async function fetchOnce(
   }
 }
 
-async function defaultFetchImage(input: {
+export async function defaultFetchImage(input: {
   url: string;
   referer: string;
 }): Promise<{ ok: boolean; buffer?: Buffer; contentType?: string; error?: string }> {

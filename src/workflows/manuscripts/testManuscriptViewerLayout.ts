@@ -82,11 +82,16 @@ async function main(): Promise<void> {
     // /api/manuscript-edit은 Pages Function 자리다 - 여기서는 받은 내용을 적어 두고 202로 답한다.
     let servedHtml = html;
     const posted: string[] = [];
+    const pickPosted: string[] = [];
     await tab.route("**/*", (route) => {
       const url = route.request().url();
       if (url === "https://viewer.test/") return route.fulfill({ body: servedHtml, contentType: "text/html" });
       if (url === "https://viewer.test/api/manuscript-edit") {
         posted.push(route.request().postData() ?? "");
+        return route.fulfill({ status: 202, body: JSON.stringify({ ok: true }), contentType: "application/json" });
+      }
+      if (url === "https://viewer.test/api/image-pick") {
+        pickPosted.push(route.request().postData() ?? "");
         return route.fulfill({ status: 202, body: JSON.stringify({ ok: true }), contentType: "application/json" });
       }
       // 가짜 주소의 나머지(파비콘 등)와 외부 이미지는 바깥 네트워크로 내보내지 않는다.
@@ -184,6 +189,58 @@ async function main(): Promise<void> {
     ) as { submit: boolean; badge: boolean; stored: string | null; result: string };
     assert(!afterDeploy.submit && !afterDeploy.badge && afterDeploy.stored === null, `반영본이 배포되면 수정 기록이 비어야 한다 (${JSON.stringify(afterDeploy)})`);
     assert(afterDeploy.result.includes("2곳 반영") && afterDeploy.result.includes("이미지 2 캡션"), `반영 결과와 건너뛴 사유가 보여야 한다 (${afterDeploy.result})`);
+
+    // ⑦ 후보 클릭 교체(2026-10-07) - 채택본은 안 눌리고, 다른 후보를 누르면 서버 번호 기준 요청이 가며, 처리 중 표식이 선다.
+    servedHtml = html;
+    await tab.evaluate("localStorage.clear()");
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    const pickUi = await tab.evaluate(
+      "({ buttons: document.querySelectorAll('.cand-pick').length, pickedHasButton: !!document.querySelector('.cand.picked .cand-pick'), origLinks: Array.from(document.querySelectorAll('.cand a')).filter(function (a) { return a.textContent === '원본 보기'; }).length })"
+    ) as { buttons: number; pickedHasButton: boolean; origLinks: number };
+    assert(pickUi.buttons === 1 && !pickUi.pickedHasButton, `채택된 후보는 눌러서 교체할 수 없다 (${JSON.stringify(pickUi)})`);
+    assert(pickUi.origLinks === 2, `원본 보기는 클릭 교체와 분리된 링크로 남는다 (${pickUi.origLinks})`);
+    await tab.click('.cand-pick[data-cand="2"]');
+    await tab.waitForFunction("document.querySelector('.cand-note.busy')");
+    assert(pickPosted.length === 1, `교체 요청 1건 (${pickPosted.length})`);
+    const pick = JSON.parse(pickPosted[0]) as Record<string, unknown>;
+    assert(pick.jobId === ENTRY.jobId && pick.index === 1 && pick.candidateNumber === 2 && pick.fromUrl === "https://x/1.jpg", `교체 요청 내용 (${pickPosted[0]})`);
+    assert(!("url" in pick), "후보 주소(URL)는 보내지 않는다 - 서버가 번호로 찾는다");
+    const locked = await tab.evaluate("document.querySelector('.cand-pick').disabled");
+    assert(locked === true, "처리 중에는 그 자리의 후보 버튼이 잠긴다");
+    // 새로고침해도(서버 기록 전) 처리 중 표식이 남는다.
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    assert((await tab.evaluate("!!document.querySelector('.cand-note.busy')")) === true, "새로고침 후에도 교체 중 표식이 남는다");
+
+    // 교체가 끝나 재배포된 페이지(imagePick.at이 보낸 시각 뒤 + 새 채택본)면 표식이 풀리고 캡션 확인 안내가 뜬다.
+    servedHtml = renderManuscriptPage(
+      {
+        topics: [
+          {
+            ...ENTRY,
+            manuscript: {
+              ...ENTRY.manuscript,
+              images: [{ ...ENTRY.manuscript.images[0], url: "https://x/2.jpg" }],
+              imageCandidates: { "1": [{ number: 1, url: "https://x/1.jpg", sourcePage: "https://x" }, { number: 2, url: "https://x/2.jpg", sourcePage: "https://x", picked: true }] },
+              imagePick: { at: "2099-01-01T00:00:00.000Z", index: 1, candidateNumber: 2, status: "done" },
+            },
+          },
+        ],
+      },
+      new Date("2026-10-03T09:00:00Z")
+    );
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    const done = await tab.evaluate("({ busy: !!document.querySelector('.cand-note.busy'), note: (document.querySelector('.cand-note') || {}).textContent || '', stored: Object.keys(localStorage).filter(function (k) { return k.indexOf('image-pick-sent') === 0; }).length })") as { busy: boolean; note: string; stored: number };
+    assert(!done.busy && done.stored === 0 && done.note.includes("캡션") && done.note.includes("교체됨"), `교체가 끝나면 표식이 풀리고 캡션 확인 안내가 뜬다 (${JSON.stringify(done)})`);
+
+    // 실패 기록은 사유와 대체 수단(다른 후보·텔레그램 이미지 수정)을 보여준다.
+    servedHtml = renderManuscriptPage(
+      { topics: [{ ...ENTRY, manuscript: { ...ENTRY.manuscript, imagePick: { at: "2099-01-01T00:00:00.000Z", index: 1, candidateNumber: 2, status: "failed", error: "HTTP 403" } } }] },
+      new Date("2026-10-03T09:00:00Z")
+    );
+    await tab.goto("https://viewer.test/", { waitUntil: "load" });
+    const failedNote = (await tab.evaluate("(document.querySelector('.cand-note.bad') || {}).textContent || ''")) as string;
+    assert(failedNote.includes("HTTP 403") && failedNote.includes("이미지 수정"), `실패 사유와 대체 수단이 보여야 한다 (${failedNote})`);
+    console.log("✅ 브라우저 - 후보 클릭 교체: 채택본 잠금·요청 내용·처리 중 표식·완료/실패 안내");
 
     assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
   } finally {

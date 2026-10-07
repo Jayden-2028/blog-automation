@@ -1,0 +1,61 @@
+# 원고 뷰어 후보 이미지 클릭 교체 1건을 적용하고 원고 페이지를 다시 배포한다(2026-10-07, VIEWER-REFINE §3).
+#
+# 발화: 뷰어 후보 클릭 -> Pages Function(functions/api/image-pick.ts, Access 토큰 검증) ->
+#       repository_dispatch(image_pick). client_payload = { jobId, index, candidateNumber, fromUrl }.
+#
+# 그 슬롯만 바꾼다: 후보 내려받기 -> Storage 업로드 -> job.metadata.images/imageCandidates -> manifest -> 배포.
+# 원고 준비(job-publish-prepare)는 다시 돌리지 않고 준비 완료 알림도 다시 보내지 않는다. 실패하면 텔레그램으로 알린다.
+# repository_dispatch 전용이라 cron에 영향이 없다.
+#
+# concurrency를 **걸지 않는다**: manuscript-edit.yml과 같은 이유다(큐가 대기분을 경고 없이 취소하면 요청이 유실된다).
+# 서로 다른 슬롯은 서로 다른 자리를 쓴다. 같은 시각 두 실행의 페이지 배포가 겹치면 먼저 끝난 쪽 화면에서 다른 쪽 교체가
+# 빠질 수 있지만 DB는 둘 다 맞고 다음 배포에서 맞춰진다.
+
+name: image-pick
+
+on:
+  repository_dispatch:
+    types: [image_pick]
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # 1:2보다 긴 세로 후보를 자를 때만 쓴다(Chromium canvas + Claude로 자를 위치 판단). 드문 경로지만 러너가 매번 새로라
+      # 미리 깔아 둔다 - 안 깔면 그 경우만 "자르지 못해 원본을 씁니다"로 떨어진다.
+      - name: Chromium + Claude Code CLI 설치 (긴 세로 이미지 자르기용)
+        run: |
+          npx playwright install --with-deps chromium
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Run manuscripts:image-pick
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          SERPER_CREDITS_PURCHASED: ${{ vars.SERPER_CREDITS_PURCHASED }}
+          SERPER_CREDITS_PURCHASED_AT: ${{ vars.SERPER_CREDITS_PURCHASED_AT }}
+          IMAGE_PICK_JSON: ${{ toJson(github.event.client_payload) }}
+        run: npm run manuscripts:image-pick

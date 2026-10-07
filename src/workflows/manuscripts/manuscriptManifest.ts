@@ -107,6 +107,20 @@ export type ManuscriptEntry = {
    * 건너뛰었는지 보여준다 - 반영은 비동기(GitHub Actions)라 버튼을 누른 화면에서는 결과를 모른다.
    */
   viewerEdit?: ViewerEditRecord | null;
+  /** 마지막 "후보 이미지 클릭 교체" 결과(2026-10-07). 실패 사유도 여기 남아 뷰어가 보여준다. */
+  imagePick?: ImagePickRecord | null;
+};
+
+/** 후보 클릭 교체 1건의 처리 결과. */
+export type ImagePickRecord = {
+  /** 처리가 **끝난** 시각(성공이든 실패든). 발행 가드가 imagePickPendingAt과 비교한다. */
+  at: string;
+  index: number;
+  candidateNumber: number;
+  status: "done" | "failed";
+  error?: string;
+  /** 이미 발행된 글이라 이번 교체가 발행본에는 반영되지 않는다. */
+  alreadyPublished?: boolean;
 };
 
 export type ViewerEditRecord = {

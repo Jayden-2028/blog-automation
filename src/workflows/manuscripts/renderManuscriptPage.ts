@@ -23,7 +23,7 @@
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import { topicTrack } from "./manuscriptManifest.js";
-import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord } from "./manuscriptManifest.js";
+import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord, ImagePickRecord } from "./manuscriptManifest.js";
 import { DEFAULT_TRACK } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 
@@ -85,6 +85,8 @@ type PageTopic = {
   charCount: number;
   /** 마지막 "수정본 반영" 결과(2026-10-03). 없으면 null. */
   viewerEdit: ViewerEditRecord | null;
+  /** 마지막 후보 클릭 교체 결과(2026-10-07). 없으면 null. */
+  imagePick: ImagePickRecord | null;
   // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
   // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
@@ -123,6 +125,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     imageCandidates: m.imageCandidates ?? {},
     charCount: m.body.replace(/\s/g, "").length,
     viewerEdit: m.viewerEdit ?? null,
+    imagePick: m.imagePick ?? null,
   };
 }
 
@@ -270,6 +273,12 @@ export function renderManuscriptPage(
   .candgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:8px}
   .cand img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid #ddd;background:#f3f3f3}
   .cand.picked img{border:2px solid #2e7d32}
+  .cand .cand-pick{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;position:relative}
+  .cand .cand-pick:hover img{outline:2px solid var(--pen);outline-offset:1px}
+  .cand .cand-pick:disabled{cursor:progress;opacity:.55}
+  .cand-note{margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted,#666)}
+  .cand-note.bad{color:#b3261e}
+  .cand-note.busy{color:var(--pen);font-weight:600}
   .candlab{margin-top:2px;line-height:1.4}
   .missing{border:1px dashed var(--pen);border-radius:8px;background:var(--pen-soft);
            padding:11px 14px;font-size:12.5px;color:var(--pen)}
@@ -657,16 +666,88 @@ export function renderManuscriptPage(
     function candidatesHtml(topic, n) {
       var list = (topic.imageCandidates || {})[String(n)] || [];
       if (list.length === 0) return "";
+      var busy = pickBusy(topic, n);
       var items = list.map(function (c) {
         var size = c.width && c.height ? c.width + "×" + c.height : "";
-        return '<div class="cand' + (c.picked ? ' picked' : '') + '">'
-          + '<a href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">'
-          + '<img src="' + esc(c.url) + '" alt="후보 ' + c.number + '" loading="lazy" referrerpolicy="no-referrer"></a>'
+        // 썸네일 클릭 = 이 자리를 그 후보로 교체(2026-10-07). 원본 보기는 아래 별도 링크라 클릭과 섞이지 않는다.
+        // 이미 채택된 후보는 누를 수 없다. 교체 요청이 가 있는 동안엔 모두 잠근다(같은 자리에 두 요청이 겹치지 않게).
+        var img = '<img src="' + esc(c.url) + '" alt="후보 ' + c.number + '" loading="lazy" referrerpolicy="no-referrer">';
+        var thumb = c.picked
+          ? img
+          : '<button type="button" class="cand-pick" data-slot="' + n + '" data-cand="' + c.number + '"'
+            + (busy ? ' disabled' : '') + ' title="클릭하면 ' + n + '번 이미지를 이 후보로 교체합니다">' + img + '</button>';
+        return '<div class="cand' + (c.picked ? ' picked' : '') + '">' + thumb
           + '<div class="candlab">후보 ' + c.number + (c.picked ? ' ✅ 채택' : '') + (size ? ' · ' + esc(size) : '')
+          + ' · <a href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">원본 보기</a>'
           + ' · <a href="' + esc(c.sourcePage) + '" target="_blank" rel="noopener noreferrer">출처</a></div></div>';
       }).join("");
-      return '<details class="cands" open><summary>후보 ' + list.length + '장 — 바꾸려면 이미지 수정에서 <code>'
-        + n + '번 후보N</code></summary><div class="candgrid">' + items + '</div></details>';
+      return '<details class="cands" open><summary>후보 ' + list.length + '장 — 마음에 드는 후보를 클릭하면 이 자리 이미지가 교체됩니다</summary>'
+        + '<div class="candgrid">' + items + '</div>' + pickNoteHtml(topic, n, busy) + '</details>';
+    }
+
+    /** 자리별 교체 요청 표식(localStorage). 값은 {at, from} - from은 보낼 때 본 채택 이미지 주소. */
+    function pickKey(jobId, n) { return "image-pick-sent:" + jobId + ":" + n; }
+    function loadPickSent(jobId, n) {
+      try { var raw = localStorage.getItem(pickKey(jobId, n)); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    }
+    function markPickSent(jobId, n, from) {
+      try { localStorage.setItem(pickKey(jobId, n), JSON.stringify({ at: new Date().toISOString(), from: from })); } catch (e) {}
+    }
+    function clearPickSent(jobId, n) { try { localStorage.removeItem(pickKey(jobId, n)); } catch (e) {} }
+
+    /**
+     * 그 자리가 교체 처리 중인가. 서버가 끝낸 기록(imagePick.at, 성공이든 실패든)이 보낸 시각 뒤이거나, 채택 이미지 주소가
+     * 보낼 때와 달라졌으면(= 재배포로 교체가 보임) 표식을 지운다. 10분이 지나도 안 풀리면 포기하고 푼다.
+     */
+    function pickBusy(topic, n) {
+      var sent = loadPickSent(topic.jobId, n);
+      if (!sent) return false;
+      var rec = topic.imagePick;
+      var shots = imagesFor(topic, n);
+      var nowUrl = shots[0] && shots[0].url ? shots[0].url : "";
+      var finished = rec && rec.index === n && rec.at >= sent.at;
+      if (finished || nowUrl !== sent.from || Date.now() - Date.parse(sent.at) > 600000) { clearPickSent(topic.jobId, n); return false; }
+      return true;
+    }
+
+    function pickNoteHtml(topic, n, busy) {
+      if (busy) return '<div class="cand-note busy">⏳ 교체 중 — 1~2분 뒤 새로고침하세요</div>';
+      var rec = topic.imagePick;
+      if (!rec || rec.index !== n) return "";
+      if (rec.status === "failed") {
+        return '<div class="cand-note bad">⚠️ 마지막 교체 실패(후보 ' + rec.candidateNumber + '): ' + esc(rec.error || "알 수 없는 오류")
+          + ' — 다른 후보를 고르거나, 후보가 다 마음에 안 들면 텔레그램 🖼 이미지 수정으로 다시 수집하세요.</div>';
+      }
+      return '<div class="cand-note">✅ 후보 ' + rec.candidateNumber + '번으로 교체됨 · 캡션은 그대로입니다 — 위 캡션을 확인하고 필요하면 수정하세요.'
+        + (rec.alreadyPublished ? ' <b>이미 발행된 글에는 반영되지 않았습니다.</b>' : '') + '</div>';
+    }
+
+    function submitPick(topic, n, candNumber, btn) {
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 교체할 수 있습니다"); return; }
+      if (pickBusy(topic, n)) { toast(n + "번 이미지 교체가 진행 중입니다 — 1~2분 뒤 새로고침하세요"); return; }
+      var shots = imagesFor(topic, n);
+      var from = shots[0] && shots[0].url ? shots[0].url : "";
+      if (!window.confirm(n + "번 이미지를 후보 " + candNumber + "번으로 교체합니다.\\n캡션은 그대로 남으니 교체 후 확인해 주세요.\\n이미 발행된 글에는 반영되지 않습니다. 계속할까요?")) return;
+      btn.disabled = true;
+      function fail(msg) { btn.disabled = false; toast(msg); }
+      fetch("/api/image-pick", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobId: topic.jobId, index: n, candidateNumber: candNumber, fromUrl: from }),
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (res.status === 202) {
+            markPickSent(topic.jobId, n, from);
+            toast("교체 요청을 보냈습니다 — 1~2분 뒤 새로고침하세요");
+            render(topic.jobId);
+            return;
+          }
+          fail((body && body.error) || ("교체 요청 실패(" + res.status + ")"));
+        });
+      }).catch(function () {
+        fail("교체 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+      });
     }
 
     /** 캡션 수정의 localStorage 키(자리 번호별). 본문 수정(블록 인덱스 키)과 같은 객체에 산다. */
@@ -1043,6 +1124,12 @@ export function renderManuscriptPage(
           merged[captionKey(n)] = span.innerText.trim();
           saveEdits(topic.jobId, merged);
           render(topic.jobId);
+        });
+      });
+
+      wrap.querySelectorAll(".cand-pick").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          submitPick(topic, Number(btn.getAttribute("data-slot")), Number(btn.getAttribute("data-cand")), btn);
         });
       });
 
