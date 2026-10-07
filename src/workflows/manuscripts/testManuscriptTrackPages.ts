@@ -46,8 +46,15 @@ assert(socialHtml.includes("🟠 티스토리 발행 버튼으로 발행") && !s
 assert(entHtml.includes("--pen:#1B5E3A") && !entHtml.includes("#E8590C"), "엔터(네이버용) 강조색은 다크 그린");
 assert(socialHtml.includes("--pen:#1F3A68") && !socialHtml.includes("#E8590C"), "사회 강조색은 네이비");
 assert(socialHtml.includes('var TRACK = "social"') && entHtml.includes('var TRACK = "entertainment"'), "페이지 스크립트가 자기 트랙을 안다");
-assert(socialHtml.includes("/api/publish-request") && socialHtml.includes("publish-tistory"), "사회 페이지에 티스토리 발행 버튼 코드가 있어야 한다");
-console.log("✅ 트랙별 페이지 분리 - 엔터/사회가 서로 섞이지 않는다, 사회만 티스토리 발행 버튼");
+// 발행 진입점은 텔레그램 하나다(2026-10-07) - 어느 트랙 페이지에도 발행 버튼·발행 API 호출이 없고, 트랙별 안내만 있다.
+for (const [name, html] of [["엔터", entHtml], ["사회", socialHtml]] as const) {
+  assert(!html.includes("/api/publish-request") && !html.includes("publish-tistory"), `${name} 페이지에 뷰어 발행 버튼 코드가 없어야 한다`);
+}
+assert(socialHtml.includes("텔레그램의 🟠 티스토리 발행 버튼으로만 됩니다") && entHtml.includes("텔레그램의 🟢 네이버 발행 버튼으로만 됩니다"), "트랙별 발행 안내(텔레그램 버튼)");
+const kHtml = renderManuscriptPage(manifest, new Date(), { track: "kscene" });
+assert(kHtml.includes("텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다") && kHtml.includes("/api/image-pick"), "사용설명서 페이지도 발행 안내와 후보 교체 코드가 있다");
+assert(socialHtml.includes("/api/image-pick") && entHtml.includes("/api/image-pick"), "후보 클릭 교체 코드는 전 트랙 페이지가 공유한다");
+console.log("✅ 트랙별 페이지 분리 - 엔터/사회가 서로 섞이지 않는다, 발행 버튼은 없고 트랙별 텔레그램 안내만");
 
 assert(viewerPageLink("https://p.dev", "entertainment", "j1") === "https://p.dev/#j1", "엔터 링크는 루트 그대로");
 assert(viewerPageLink("https://p.dev", "social", "j1") === "https://p.dev/social.html#j1", "사회 링크는 social.html");

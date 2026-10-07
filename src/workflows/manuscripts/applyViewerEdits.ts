@@ -24,10 +24,12 @@ import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "./manuscriptManifest.js";
 
 export type ViewerEdit = { from: string; to: string };
-/** 키: `"3"`(본문 블록 3), `"3:h"`/`"3:b"`(소제목 블록 3의 제목/본문), `"cap:2"`(이미지 자리 2의 캡션). */
+/** 키: `"3"`(본문 블록 3), `"3:h"`/`"3:b"`(소제목 블록 3의 제목/본문), `"cap:2"`(이미지 자리 2의 캡션), `"title"`(글 제목, 2026-10-07). */
 export type ViewerEdits = Record<string, ViewerEdit>;
 
-export const VIEWER_EDIT_KEY_RE = /^(?:\d{1,4}(?::[hb])?|cap:\d{1,3})$/;
+export const VIEWER_EDIT_KEY_RE = /^(?:title|\d{1,4}(?::[hb])?|cap:\d{1,3})$/;
+/** 제목 한 줄의 상한. 검색 결과 제목은 어차피 잘리고, 이보다 길면 붙여넣기 사고(본문 통째 등)다. */
+export const MAX_TITLE_LENGTH = 200;
 
 export type ApplyViewerEditsInput = {
   /** manifest에 저장된 본문 - 뷰어가 블록 번호를 매긴 바로 그 본문. */
@@ -37,6 +39,8 @@ export type ApplyViewerEditsInput = {
   articleContent: string;
   /** job.metadata.images. manifest의 images도 같은 값이다. */
   images: ManuscriptImage[];
+  /** manifest에 저장된 제목 - 뷰어가 "수정 전" 값으로 본 것. 없으면 title 수정은 건너뛴다. */
+  manifestTitle?: string;
   edits: ViewerEdits;
 };
 
@@ -50,6 +54,9 @@ export type ApplyViewerEditsResult = {
   skipped: { key: string; reason: string }[];
   articleChanged: boolean;
   imagesChanged: boolean;
+  /** 반영된 제목(수정이 없으면 입력 그대로). */
+  title: string;
+  titleChanged: boolean;
 };
 
 /** 비교용 정규화 - 브라우저 innerText가 넣는 nbsp·CRLF·앞뒤 공백 차이를 무시한다. */
@@ -130,6 +137,7 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
   // ---- 1) 키를 블록 단위로 묶는다(소제목 블록은 :h와 :b가 함께 한 블록을 바꾼다) ----
   const byBlock = new Map<number, { keys: string[]; heading?: string; body?: string; content?: string }>();
   const captionEdits: { key: string; index: number; to: string }[] = [];
+  let titleEdit: string | null = null;
 
   for (const [key, edit] of Object.entries(input.edits)) {
     if (!VIEWER_EDIT_KEY_RE.test(key) || !edit || typeof edit.from !== "string" || typeof edit.to !== "string") {
@@ -139,6 +147,26 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     const from = normalizeEditText(edit.from);
     const to = normalizeEditText(edit.to);
     if (from === to) continue; // 바뀐 게 없다 - 조용히 넘긴다.
+
+    if (key === "title") {
+      // 제목은 한 줄이다 - 브라우저가 넣은 줄바꿈은 공백으로 접는다.
+      const nextTitle = to.replace(/\s*\n+\s*/g, " ").trim();
+      const nowTitle = normalizeEditText(input.manifestTitle ?? "");
+      if (input.manifestTitle === undefined) {
+        skipped.push({ key, reason: "제목을 고칠 수 없는 원고입니다" });
+      } else if (nowTitle === nextTitle) {
+        // 이미 그 제목이다(반영 직후 한 번 더 누른 경우) - 조용히 넘긴다.
+      } else if (nowTitle !== from) {
+        skipped.push({ key, reason: "페이지를 연 뒤 제목이 바뀌었습니다 - 새로고침 후 다시 고치세요" });
+      } else if (!nextTitle) {
+        skipped.push({ key, reason: "제목을 비울 수는 없습니다" });
+      } else if (nextTitle.length > MAX_TITLE_LENGTH) {
+        skipped.push({ key, reason: `제목이 너무 깁니다(${nextTitle.length}자, 최대 ${MAX_TITLE_LENGTH}자)` });
+      } else {
+        titleEdit = nextTitle;
+      }
+      continue;
+    }
 
     if (key.startsWith("cap:")) {
       const n = Number(key.slice(4));
@@ -234,6 +262,8 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     applied.push(...captionEdits.map((c) => c.key));
   }
 
+  if (titleEdit !== null) applied.push("title");
+
   const articleContent = byBlock.size > 0 ? joinSegments(articleSegments) : input.articleContent;
   const manifestBody = byBlock.size > 0 ? joinSegments(manifestSegments) : input.manifestBody;
 
@@ -245,5 +275,7 @@ export function applyViewerEdits(input: ApplyViewerEditsInput): ApplyViewerEdits
     skipped,
     articleChanged: articleContent !== input.articleContent,
     imagesChanged: captionEdits.length > 0,
+    title: titleEdit ?? input.manifestTitle ?? "",
+    titleChanged: titleEdit !== null,
   };
 }

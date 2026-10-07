@@ -29,21 +29,22 @@ import type { Track } from "../../notifications/telegramTracks.js";
 
 /**
  * 페이지 머리말·사이드바 문구. 엔터는 개편 전 문구 그대로다.
- * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 🟠 티스토리 발행 버튼(뷰어·텔레그램)으로 올리므로 안내 문구가 엔터와 다르다.
+ * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 텔레그램의 🟠 티스토리 발행 버튼으로 올리므로 안내 문구가 엔터와 다르다.
+ * 발행 진입점은 텔레그램 버튼 하나다(2026-10-07) - 뷰어에는 발행 버튼이 없고 `hint`만 안내한다.
  */
 // pen/penSoft는 강조색(--pen, --pen-soft)이다. 트랙을 한눈에 구분하려고 페이지마다 다르게 둔다(2026-10-05 사용자 요청):
 // 엔터(네이버용) 다크 그린, 사회 네이비. 사용설명서는 기존 오렌지를 유지한다.
-const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: string; pen: string; penSoft: string }> = {
+const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: string; hint: string; pen: string; penSoft: string }> = {
   entertainment: {
-    title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행",
+    title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행", hint: "발행은 텔레그램의 🟢 네이버 발행 버튼으로만 됩니다",
     pen: "#1B5E3A", penSoft: "#E4F0E8",
   },
   social: {
-    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 🟠 티스토리 발행 버튼으로 발행",
+    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 텔레그램의 🟠 티스토리 발행 버튼으로 발행", hint: "발행은 텔레그램의 🟠 티스토리 발행 버튼으로만 됩니다",
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
-    title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행",
+    title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
     pen: "#E8590C", penSoft: "#FDF0E6",
   },
 };
@@ -276,6 +277,10 @@ export function renderManuscriptPage(
   .cand .cand-pick{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;position:relative}
   .cand .cand-pick:hover img{outline:2px solid var(--pen);outline-offset:1px}
   .cand .cand-pick:disabled{cursor:progress;opacity:.55}
+  .doc-title.editable[contenteditable="true"]{outline-offset:2px}
+  .title-note{display:none;font-size:12px;color:var(--muted,#666);margin:0 0 6px}
+  body.editing .title-note,.title-note.on{display:block}
+  .pub-hint{font-size:12px;color:var(--muted,#666);align-self:center}
   .cand-note{margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted,#666)}
   .cand-note.bad{color:#b3261e}
   .cand-note.busy{color:var(--pen);font-weight:600}
@@ -328,6 +333,7 @@ export function renderManuscriptPage(
     var TODAY = ${safeJson(todayKst)};
     // 이 페이지의 트랙. 사회(social)만 🟠 티스토리 발행 버튼이 붙는다(TISTORY_AUTO_PUBLISH_DESIGN.md §5).
     var TRACK = ${safeJson(track)};
+    var PUBLISH_HINT = ${safeJson(copy.hint)};
     var wrap = document.getElementById("wrap");
     var toastEl = document.getElementById("toast");
 
@@ -828,6 +834,7 @@ export function renderManuscriptPage(
 
     /** 키가 가리키는 지금 원고의 값(수정 전). 모르는 키면 null. */
     function originalFor(topic, key) {
+      if (key === "title") return topic.title || topic.keyword;
       if (key.indexOf("cap:") === 0) {
         var n = Number(key.slice(4));
         var imgBlock = imageBlocks(topic)[n - 1];
@@ -877,6 +884,7 @@ export function renderManuscriptPage(
 
     /** 키를 사람이 읽는 이름으로("3:h" -> "3번 블록 소제목"). */
     function editLabel(key) {
+      if (key === "title") return "제목";
       if (key.indexOf("cap:") === 0) return "이미지 " + key.slice(4) + " 캡션";
       var parts = key.split(":");
       var n = Number(parts[0]) + 1;
@@ -887,8 +895,8 @@ export function renderManuscriptPage(
     function viewerEditHtml(topic) {
       var rec = topic.viewerEdit;
       if (!rec || !rec.appliedAt) return "";
-      var h = '<div class="edit-result"><b>📤 뷰어 수정 반영</b> ' + esc(kstTime(rec.appliedAt))
-        + ' · ' + (rec.applied || []).length + '곳 반영';
+      var h = '<div class="edit-result"><b>💾 뷰어 수정 저장</b> ' + esc(kstTime(rec.appliedAt))
+        + ' · ' + (rec.applied || []).length + '곳 저장';
       var skipped = rec.skipped || [];
       if (skipped.length > 0) {
         h += ' · <span class="bad">' + skipped.length + '곳 건너뜀</span><ul>'
@@ -901,12 +909,12 @@ export function renderManuscriptPage(
     function submitEdits(topic, btn) {
       var pending = pendingEdits(topic, loadEdits(topic.jobId));
       var count = Object.keys(pending).length;
-      if (count === 0) { toast("반영할 수정이 없습니다"); return; }
-      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 반영할 수 있습니다"); return; }
-      if (!window.confirm("고친 " + count + "곳을 발행 원고에 반영합니다.\\n1~2분 뒤 페이지가 새로 배포됩니다. 계속할까요?")) return;
+      if (count === 0) { toast("저장할 수정이 없습니다"); return; }
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 저장할 수 있습니다"); return; }
+      if (!window.confirm("고친 " + count + "곳을 저장합니다.\\n발행되지 않습니다 — 발행은 텔레그램 버튼으로만 됩니다.\\n(저장본이 화면에 보이기까지 1~2분) 계속할까요?")) return;
       var label = btn.textContent;
       btn.disabled = true;
-      btn.textContent = "📤 보내는 중…";
+      btn.textContent = "💾 보내는 중…";
       function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
       fetch("/api/manuscript-edit", {
         method: "POST",
@@ -917,48 +925,15 @@ export function renderManuscriptPage(
         return res.json().catch(function () { return {}; }).then(function (body) {
           if (res.status === 202) {
             markSent(topic.jobId);
-            toast("반영 요청을 보냈습니다 — 1~2분 뒤 새로고침하세요");
+            toast("저장 요청을 보냈습니다 — 발행되지 않습니다. 1~2분 뒤 새로고침하세요");
             render(topic.jobId);
             return;
           }
-          fail((body && body.error) || ("반영 실패(" + res.status + ")"));
+          fail((body && body.error) || ("저장 실패(" + res.status + ")"));
         });
       }).catch(function () {
         // Access 로그인이 만료되면 로그인 화면으로 돌려보내져(다른 출처) fetch 자체가 실패한다.
-        fail("반영 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
-      });
-    }
-
-    /**
-     * 🟠 티스토리 발행(사회 트랙, 2026-10-06). 텔레그램 버튼과 **같은 큐**로 간다 - 둘 다 눌러도 한 번만 올라간다.
-     * 반영 안 된 수정이 있으면 호출부가 버튼을 막는다(옛 글이 올라가는 사고 방지) - 여기서도 한 번 더 본다.
-     */
-    function submitPublish(topic, btn) {
-      var pending = Object.keys(pendingEdits(topic, loadEdits(topic.jobId) || {})).length;
-      if (pending > 0) { toast("먼저 📤 수정본 반영을 눌러주세요 (" + pending + "곳 미반영)"); return; }
-      if (loadSent(topic.jobId)) { toast("수정본 반영이 끝날 때까지 기다렸다가(1~2분) 새로고침 후 눌러주세요"); return; }
-      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 발행할 수 있습니다"); return; }
-      if (!window.confirm("이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 텔레그램(사회 봇)으로 결과를 알립니다. 계속할까요?")) return;
-      var label = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "🟠 요청 중…";
-      function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
-      fetch("/api/publish-request", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobId: topic.jobId, channel: "tistory" }),
-      }).then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (body) {
-          if (res.status === 202) {
-            btn.textContent = "🟠 발행 요청됨";
-            toast("발행을 요청했습니다 — 결과는 텔레그램으로 옵니다");
-            return;
-          }
-          fail((body && body.error) || ("발행 요청 실패(" + res.status + ")"));
-        });
-      }).catch(function () {
-        fail("발행 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+        fail("저장 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
       });
     }
 
@@ -991,8 +966,11 @@ export function renderManuscriptPage(
         h += '<a class="src-badge" href="' + esc(topic.sourceUrl || "#") + '" target="_blank" rel="noopener">'
           + '📷 인스타 소스</a>';
       }
-      h += '<div class="doc-title' + (topic.sourceTag === "instagram" ? " ig" : "") + '">'
-        + esc(topic.title || topic.keyword) + '</div>';
+      // 제목은 편집 키 "title"을 쓴다(2026-10-07). 수정 모드(✏️)에서 글자를 직접 고친다 - 한 줄이라 Enter는 막는다.
+      var shownTitle = edits && edits.title != null ? edits.title : (topic.title || topic.keyword);
+      h += '<div class="doc-title editable' + (topic.sourceTag === "instagram" ? " ig" : "") + '" data-title="1">'
+        + esc(shownTitle) + '</div>';
+      h += '<div class="title-note' + (edits && edits.title != null ? ' on' : '') + '">제목 변경은 저장 후 발행하는 글부터 적용됩니다 — 이미 발행된 글의 제목은 바뀌지 않습니다.</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
       h += viewerEditHtml(topic);
 
@@ -1010,7 +988,7 @@ export function renderManuscriptPage(
       }
 
       h += '<div class="meta-grid">';
-      h += metaRow("제목", topic.title || topic.keyword);
+      h += metaRow("제목", shownTitle);
       if (topic.searchDescription) h += metaRow("검색 설명", topic.searchDescription);
       if (topic.slug) h += metaRow("슬러그", topic.slug);
       if (topic.tags && topic.tags.length) h += metaRow("태그", topic.tags.join(", "));
@@ -1023,20 +1001,16 @@ export function renderManuscriptPage(
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
       if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
-      // 사회 트랙만: 티스토리 발행. 반영 안 된 수정이 있으면 누를 수 없다 - 발행은 DB 원고(마지막 반영본)를 읽는다.
-      if (TRACK === "social") {
-        var blocked = pendingCount > 0 || !!sentAt;
-        h += '<button class="btn primary" id="publish-tistory"' + (blocked ? ' disabled title="먼저 📤 수정본 반영을 누르고 반영이 끝난 뒤 발행하세요"' : '') + '>🟠 티스토리 발행</button>';
-      }
-      // 수정은 localStorage에만 남는다 - 발행 버튼은 DB 원고를 읽으므로 반영되지 않는다. 그 사실을 숨기면
-      // 뷰어에서 고치고 발행 버튼을 눌렀는데 옛 글이 올라가는 사고가 난다.
+      // 수정은 localStorage에만 남는다 - 💾 저장을 눌러야 DB 원고에 들어간다. 저장은 저장일 뿐 발행하지 않는다(2026-10-07):
+      // 발행 진입점은 텔레그램 버튼 하나다. 저장하고 곧바로 발행 버튼을 누르는 경합은 서버가 막는다(viewerEditGuard).
       if (edits) {
-        h += '<button class="btn primary" id="submit-edits">📤 수정본 반영(' + pendingCount + '곳)</button>';
+        h += '<button class="btn primary" id="submit-edits">💾 수정본 저장(' + pendingCount + '곳)</button>';
         h += '<button class="btn" id="revert">↩️ 원본으로</button>';
         h += '<span class="edited-badge">' + (sentAt
-          ? '반영 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 반영본이 보입니다'
-          : '이 브라우저에서 수정됨 · 반영 전까지 복사에만 적용(발행 버튼 미반영)') + '</span>';
+          ? '저장 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 저장본이 보입니다(발행되지 않음)'
+          : '이 브라우저에서 수정됨 · 저장 전까지 복사에만 적용') + '</span>';
       }
+      h += '<span class="pub-hint">' + esc(PUBLISH_HINT) + '</span>';
       h += '</div>';
 
       if (blocks.length > 0) {
@@ -1090,6 +1064,7 @@ export function renderManuscriptPage(
     function currentTexts() {
       var texts = {};
       document.querySelectorAll(".editable").forEach(function (el) {
+        if (el.dataset.title) { texts.title = el.innerText.replace(/\\s*\\n+\\s*/g, " ").trim(); return; }
         var key = el.dataset.blockIndex + (el.dataset.field ? ":" + el.dataset.field : "");
         texts[key] = el.innerText;
       });
@@ -1139,14 +1114,12 @@ export function renderManuscriptPage(
       var dlBtn = document.getElementById("dl-images");
       if (dlBtn) dlBtn.addEventListener("click", function () { downloadImages(topic, dlBtn); });
 
-      var pubBtn = document.getElementById("publish-tistory");
-      if (pubBtn) pubBtn.addEventListener("click", function () { submitPublish(topic, pubBtn); });
-
       var editing = false;
       var editBtn = document.getElementById("edit-toggle");
       editBtn.addEventListener("click", function () {
         editing = !editing;
         editBtn.classList.toggle("active", editing);
+        document.body.classList.toggle("editing", editing);
         editBtn.textContent = editing ? "✅ 편집 종료" : "✏️ 수정";
         document.querySelectorAll(".editable").forEach(function (el) {
           el.setAttribute("contenteditable", editing ? "true" : "false");
@@ -1154,6 +1127,9 @@ export function renderManuscriptPage(
         // 캡션 수정(cap:N)을 지우지 않도록 기존 값 위에 본문 텍스트를 덮어쓴다.
         if (!editing) { saveEdits(topic.jobId, Object.assign({}, loadEdits(topic.jobId) || {}, currentTexts())); render(topic.jobId); }
       });
+
+      var titleEl = wrap.querySelector(".doc-title[data-title]");
+      if (titleEl) titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") ev.preventDefault(); });
 
       var submitBtn = document.getElementById("submit-edits");
       if (submitBtn) submitBtn.addEventListener("click", function () { submitEdits(topic, submitBtn); });

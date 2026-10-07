@@ -60,6 +60,8 @@ export type ApplyViewerEditDeps = {
   loadJob: (jobId: string) => Promise<ArticleJobRow | null>;
   loadArticles: (jobId: string) => Promise<ArticleRow[]>;
   updateArticleContent: (articleId: number, content: string) => Promise<void>;
+  /** 제목 수정(2026-10-07). 본문과 **같은 final article 행**에 쓴다 - 발행 3채널이 읽는 곳이다. */
+  updateArticleTitle?: (articleId: number, title: string) => Promise<void>;
   mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   loadManifest: () => Promise<ManuscriptManifest>;
   saveTopic: (topic: ManuscriptTopicEntry) => Promise<void>;
@@ -68,7 +70,7 @@ export type ApplyViewerEditDeps = {
 };
 
 export type ApplyViewerEditOutcome =
-  | { status: "applied" | "nothing"; record: ViewerEditRecord; articleChanged: boolean; imagesChanged: boolean }
+  | { status: "applied" | "nothing"; record: ViewerEditRecord; articleChanged: boolean; imagesChanged: boolean; titleChanged: boolean }
   | { status: "failed"; reason: string };
 
 export async function applyViewerEditRequest(
@@ -107,6 +109,7 @@ export async function applyViewerEditRequest(
     articleContent: picked.final.content ?? "",
     // 캡션의 "수정 전" 대조는 뷰어가 본 값(manifest)으로 한다.
     images: m.images,
+    manifestTitle: m.title,
     edits: request.edits,
   });
 
@@ -118,6 +121,10 @@ export async function applyViewerEditRequest(
 
   // 1) 발행 본문
   if (result.articleChanged) await deps.updateArticleContent(picked.final.id, result.articleContent);
+  if (result.titleChanged) {
+    if (!deps.updateArticleTitle) throw new Error("updateArticleTitle 의존성이 없습니다");
+    await deps.updateArticleTitle(picked.final.id, result.title);
+  }
 
   // 2) 발행 캡션 + 기록. 캡션은 job.metadata.images에도 같은 자리 번호로 옮긴다(발행이 읽는 쪽).
   const patch: Record<string, unknown> = { viewerEdit: record };
@@ -132,7 +139,7 @@ export async function applyViewerEditRequest(
   // 3) 뷰어 행
   const updated: ManuscriptTopicEntry = {
     ...topic,
-    manuscript: { ...m, body: result.manifestBody, images: result.images, viewerEdit: record },
+    manuscript: { ...m, title: result.title, body: result.manifestBody, images: result.images, viewerEdit: record },
   };
   await deps.saveTopic(updated);
 
@@ -144,5 +151,6 @@ export async function applyViewerEditRequest(
     record,
     articleChanged: result.articleChanged,
     imagesChanged: result.imagesChanged,
+    titleChanged: result.titleChanged,
   };
 }

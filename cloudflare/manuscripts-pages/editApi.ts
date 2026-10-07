@@ -32,7 +32,7 @@ type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** src/workflows/manuscripts/applyViewerEdits.ts의 VIEWER_EDIT_KEY_RE와 같아야 한다. */
-const KEY_RE = /^(?:\d{1,4}(?::[hb])?|cap:\d{1,3})$/;
+const KEY_RE = /^(?:title|\d{1,4}(?::[hb])?|cap:\d{1,3})$/;
 const MAX_EDITS = 300;
 const MAX_VALUE_LENGTH = 20000;
 /** repository_dispatch client_payload 상한(GitHub 문서상 64KB 안팎)보다 넉넉히 작게. */

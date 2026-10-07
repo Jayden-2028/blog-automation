@@ -51,6 +51,9 @@ async function main(): Promise<void> {
     updateArticleContent: async (articleId, content) => {
       await updateArticle(articleId, { content });
     },
+    updateArticleTitle: async (articleId, title) => {
+      await updateArticle(articleId, { title });
+    },
     mergeJobMetadata: async (jobId, patch) => {
       await ArticleJobRepository.mergeMetadata(jobId, patch);
     },
@@ -67,7 +70,7 @@ async function main(): Promise<void> {
   console.log(
     `✅ ${outcome.status === "applied" ? "반영" : "반영할 것 없음"} - 반영 ${outcome.record.applied.length}개` +
       ` · 건너뜀 ${outcome.record.skipped.length}개 · 본문 ${outcome.articleChanged ? "갱신" : "그대로"}` +
-      ` · 캡션 ${outcome.imagesChanged ? "갱신" : "그대로"}`
+      ` · 캡션 ${outcome.imagesChanged ? "갱신" : "그대로"} · 제목 ${outcome.titleChanged ? "갱신" : "그대로"}`
   );
   for (const skip of outcome.record.skipped) console.log(`   ⏭ ${skip.key}: ${skip.reason}`);
 }

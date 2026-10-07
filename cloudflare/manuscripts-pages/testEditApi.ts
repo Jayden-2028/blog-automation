@@ -132,6 +132,10 @@ async function main(): Promise<void> {
     // 쿠키로 온 토큰도 받는다(헤더가 없는 경로).
     const viaCookie = await call(request({ token: good, cookie: true }));
     assert(viaCookie.status === 202, `쿠키 토큰도 202 (${viaCookie.status})`);
+    // 제목 수정 키(2026-10-07)도 같은 경로로 넘어간다.
+    const titled = await call(request({ token: good, body: { jobId: JOB, edits: { title: { from: "옛 제목", to: "새 제목" } } } }));
+    assert(titled.status === 202, `title 키는 202 (${titled.status})`);
+    assert(JSON.parse(String(dispatched[dispatched.length - 1].init?.body)).client_payload.edits.title.to === "새 제목", "title이 payload에 실린다");
     // AUD를 설정하지 않으면 AUD 검사는 건너뛴다(권장은 설정).
     const noAud = await call(request({ token: await sign(privateKey, claims({ aud: ["x"] })) }), { ...ENV, ACCESS_AUD: undefined });
     assert(noAud.status === 202, `AUD 미설정이면 검사 생략 (${noAud.status})`);
