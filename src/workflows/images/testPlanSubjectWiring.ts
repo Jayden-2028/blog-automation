@@ -121,6 +121,20 @@ async function main(): Promise<void> {
     console.log("✅ 기획 없음 - 마커 그대로");
   }
 
+  // 4-1) 대상이 비어 있는 자리(= 영어본에서 routeImagePlan이 한글 대상을 caution으로만 넘긴 경우).
+  //      설명(캡션 바탕)은 마커 그대로 두되, **검색어와 판정 기준은 그대로 얹어야 한다**
+  //      - 예전 가드는 subject가 비면 통째로 건너뛰어 기획 검색어까지 버렸다(2026-10-08).
+  {
+    const { seen, agentPrompt } = await run({
+      ...PLAN,
+      planSubjects: { 1: { subject: "", caution: "찾을 대상: 오세훈 서울시장 단독 사진" } },
+    });
+    assert(seen && seen.markerDescription.includes("청사 외관"), `대상이 비면 캡션 바탕은 마커 그대로여야 한다 (${seen?.markerDescription})`);
+    assert(seen!.caution === "찾을 대상: 오세훈 서울시장 단독 사진", `판정 기준은 전달돼야 한다 (${seen?.caution})`);
+    assert(agentPrompt.includes("검색어: 오세훈 서울시장"), "기획 검색어는 그대로 살아 있어야 한다");
+    console.log("✅ 대상 비어 있음(영어본) - 캡션은 마커, 검색어·판정 기준은 유지");
+  }
+
   // 5) 최신성 today - 최신순 결과가 후보 맨 앞에 오고, 판정에도 "오늘 사진"이 전달된다.
   {
     const hit = (link: string) => ({ title: link, link, thumbnail: link, width: 1600, height: 900 });

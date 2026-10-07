@@ -72,6 +72,12 @@ export type PlanImageSlotsInput = {
   today: string;
   /** 리서치 파일 전문. `## 11. 캡처할 페이지`의 URL을 기획이 쓴다. */
   researchText?: string | null;
+  /**
+   * `subject`를 쓸 언어. 사용설명서 영어본은 "en" - subject가 생성 이미지 캡션·alt의 바탕이 돼
+   * 독자에게 그대로 보인다(2026-10-08 실측: 기획 subject가 한글이라 영어 글 캡션이 전부 한글로 나갔다).
+   * 검색어(queries)는 영향 없다 - 한국 소재는 한국어 검색이 잘 찾는다.
+   */
+  subjectLanguage?: "ko" | "en";
 };
 
 export type PlanImageSlotsOptions = {
@@ -145,6 +151,14 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     ...imageMakerSpecLines(spec === undefined ? undefined : spec),
     "너는 한국어 블로그 원고의 **이미지 기획자**다. 자리마다 **무엇을 찾을지와 검색어**를 정한다.",
     "이미지를 만들지 않고, 검색도 하지 않는다. 기획만 한다.",
+    ...(input.subjectLanguage === "en"
+      ? [
+          "",
+          "**이 원고는 영어 블로그 발행본이다. `subject`(찾을 대상)는 반드시 영어로 쓴다** - subject가",
+          "생성 이미지의 캡션·alt로 독자에게 그대로 보인다. `queries`(검색어)는 평소대로 가장 잘 찾히는",
+          "언어로 쓴다(한국 소재는 한국어 검색이 잘 찾는다).",
+        ]
+      : []),
     "",
     `원고 주제: ${input.keyword}`,
     `카테고리: ${input.category ?? "미분류"}`,

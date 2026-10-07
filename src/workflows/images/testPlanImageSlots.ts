@@ -232,6 +232,16 @@ async function main(): Promise<void> {
     console.log("✅ 프롬프트 - 방송 출연자 비보호 + R12(주인공은 키워드 대상, MC 아님)");
   }
 
+  // 사용설명서 영어본: `subject`가 캡션·alt가 되므로 영어로 쓰라고 지시한다(2026-10-08).
+  // 검색어는 한국어 그대로여야 한다 - 한국 소재는 한국어 검색이 잘 찾는다.
+  {
+    const en = buildPlanPrompt({ ...INPUT, subjectLanguage: "en" }, null);
+    assert(en.includes("`subject`(찾을 대상)는 반드시 영어로 쓴다"), "영어본은 대상을 영어로 쓰라고 지시해야 한다");
+    assert(en.includes("`queries`(검색어)는 평소대로"), "검색어는 평소대로라고 알려야 한다");
+    assert(!buildPlanPrompt(INPUT, null).includes("반드시 영어로 쓴다"), "한글 원고에는 영어 지시가 붙지 않아야 한다");
+    console.log("✅ 프롬프트 - 영어본은 대상만 영어(검색어는 그대로)");
+  }
+
   console.log("\n✅ 이미지 기획 단계 테스트 전부 통과");
 }
 
