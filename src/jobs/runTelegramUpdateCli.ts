@@ -92,6 +92,14 @@ async function main(): Promise<void> {
     pendingDispatches.push(promise);
   };
 
+  // 통합 알림 🗑 반려 뒤 뷰어 페이지에서 그 원고를 뺀다(PIPELINE-MERGE-2026-10.md §1-b). manifest 행을 지운 다음 재배포한다.
+  const dispatchManuscriptsRefresh = (): void => {
+    const promise = dispatchGithubWorkflow({ workflowFile: "manuscripts-refresh.yml", inputs: {} }).catch((error) => {
+      console.error("⚠️ manuscripts-refresh.yml 발화 실패:", error instanceof Error ? error.message : error);
+    });
+    pendingDispatches.push(promise);
+  };
+
   // 사용설명서 트랙 영어본 생성(개편3). heavy-pipeline 큐를 타지 않는다 - 가벼운 텍스트 변환이라 긴 집필 뒤에 줄 서지 않게
   // job별 concurrency를 쓰는 별도 워크플로다(job-translate.yml 머리말).
   const dispatchTranslation = (jobId: string, feedback?: string): void => {
@@ -111,6 +119,7 @@ async function main(): Promise<void> {
       triggerResearch: (jobId) => enqueueHeavy(jobId, "job-research.yml"),
       triggerWriting: (jobId) => enqueueHeavy(jobId, "job-write.yml"),
       triggerPublishPrepare: () => dispatchPublishPrepare(),
+      triggerManuscriptsRefresh: () => dispatchManuscriptsRefresh(),
       triggerRevision: (jobId, feedback) => enqueueHeavy(jobId, "job-revise.yml", { feedback }),
       triggerTranslation: (jobId, feedback) => dispatchTranslation(jobId, feedback),
     },

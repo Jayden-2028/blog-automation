@@ -13,14 +13,17 @@
 //   npm run job:revise -- <jobId> <feedback>
 import "dotenv/config";
 
+import { shouldSkipDraftReview } from "../../config/pipelineGate.js";
 import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
 import { notifierForJob, notifierForJobId } from "../../notifications/notifierForJob.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { dispatchGithubWorkflow } from "../../services/github/dispatchWorkflow.js";
 import { listArticlesByJobId, createArticle } from "../../services/supabase/repositories/articleRepository.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
+import { applyUnifiedRevision } from "./applyUnifiedRevision.js";
 import { notifyRevisedArticleReady } from "./notifyRevisedArticleReady.js";
 import { reviseArticleWithFeedback } from "./reviseArticleWithFeedback.js";
+import type { ArticleJobRow } from "../../types/database.js";
 
 async function main(): Promise<void> {
   const jobId = process.argv[2];
@@ -76,14 +79,23 @@ async function main(): Promise<void> {
   console.log(`   제목: ${result.revised.title}`);
   console.log(`   본문 길이: ${result.revised.body.length}자`);
 
+  // 통합 흐름(자동 승인된 job)이면 수정본도 곧바로 approved다 - 초안 검수 대기로 되돌리지 않는다.
+  const unified = shouldSkipDraftReview(job) && job.status === "approved";
+
   const newArticle = await createArticle({
     job_id: jobId,
     title: result.revised.title,
     content: result.revised.body,
-    status: "review",
+    status: unified ? "approved" : "review",
     ai_model: baseArticle.ai_model,
     platform: null,
   });
+
+  // 통합 흐름: 마커 diff로 이미지를 유지/부분 갱신하고 원고 준비를 다시 돌린다(전체 재실행 아님).
+  if (unified) {
+    await reviseUnified(job, baseArticle.content, result.revised.body);
+    return;
+  }
 
   // 이미 최종 원고까지 만들어진(=승인된) job이면 초안 검수로 되돌리지 않는다 - 사용자가 최종본을
   // 보고 고쳐달라고 한 것이므로, 바로 최종본을 다시 만들어 발행 버튼과 함께 재전송한다
@@ -104,6 +116,37 @@ async function main(): Promise<void> {
   console.log("✅ 완료 - Telegram에서 확인해주세요");
 }
 
+
+/** 통합 흐름의 수정 반영. 이미지는 마커 diff에 따라 유지하거나 달라진 자리만 갱신한다(PIPELINE-MERGE §1-c). */
+async function reviseUnified(job: ArticleJobRow, beforeBody: string, afterBody: string): Promise<void> {
+  const outcome = await applyUnifiedRevision(job, beforeBody, afterBody);
+
+  const imageLine =
+    outcome.plan.kind === "keep"
+      ? "이미지는 그대로 두고 원고만 다시 만듭니다."
+      : outcome.plan.diff.countChanged
+        ? `이미지 마커가 바뀌어 ${outcome.plan.changedIndexes[0]}번 자리부터 다시 구합니다(앞쪽 이미지는 유지).`
+        : `이미지 마커가 바뀐 ${outcome.plan.changedIndexes.join(", ")}번 자리만 다시 구합니다(나머지는 유지).`;
+
+  await (await notifierForJobId(job.id))
+    .sendMessages([
+      {
+        text:
+          `🔄 <b>수정을 반영했습니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n${imageLine}\n` +
+          (outcome.dispatched
+            ? "완료되면 발행 버튼과 함께 다시 보내드립니다."
+            : "⚠️ 원고 준비 발화에 실패했습니다. GitHub Actions의 job-publish-prepare를 수동 실행해 주세요."),
+      },
+    ])
+    .catch(() => {});
+
+  if (!outcome.dispatched) {
+    console.error(`⚠️ job-publish-prepare.yml 발화 실패: ${outcome.error}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`✅ 완료 - 원고를 다시 만듭니다(job-publish-prepare). 이미지: ${outcome.plan.kind}`);
+}
 
 /**
  * 승인 이후 수정이 들어온 job을, 최종 원고 준비 단계로 되돌린다.

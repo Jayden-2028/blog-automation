@@ -39,7 +39,10 @@ import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
 import { readEditPending } from "../workflows/manuscripts/viewerEditGuard.js";
 import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.js";
 import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
-import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
+import { readJobManuscriptImages, removeManifestTopic } from "../workflows/manuscripts/manuscriptManifest.js";
+import { buildReadyKeyboard } from "../workflows/manuscripts/notifyManuscriptsReady.js";
+import { isAutoApproved } from "../config/pipelineGate.js";
+import { listPublicationsByArticleIds } from "../services/supabase/repositories/publicationRepository.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
 import { applyImageEditRequest, readImageCandidates, rewriteAcquisitions } from "../workflows/images/applyImageEditRequest.js";
@@ -117,7 +120,9 @@ export type HandleArticleReviewOutcome =
   | { status: "ignored"; reason: "not_a_review" | "wrong_chat" }
   | { status: "job_not_found" }
   | { status: "reviewed"; action: ArticleReviewAction; job: ArticleJobRow }
-  | { status: "already_reviewed"; action: ArticleReviewAction; job: ArticleJobRow };
+  | { status: "already_reviewed"; action: ArticleReviewAction; job: ArticleJobRow }
+  /** 이미 발행됐거나 발행 중이라 반려를 받지 않았다(통합 알림의 🗑, PIPELINE-MERGE §1-b). */
+  | { status: "blocked"; action: ArticleReviewAction; job: ArticleJobRow };
 
 export type HandleArticleReviewResult = {
   outcome: HandleArticleReviewOutcome;
@@ -202,6 +207,8 @@ export type HandlePublishDecisionOutcome =
   | { status: "channel_mismatch"; action: PublishDecisionAction }
   /** 뷰어 수정 반영·이미지 교체가 진행 중이라 큐에 넣지 않았다(2026-10-07). 버튼은 되살려 잠시 뒤 다시 누르게 한다. */
   | { status: "edit_pending"; action: PublishDecisionAction }
+  /** 반려된 원고라 발행을 받지 않았다(통합 알림에서 🗑 뒤에 남은 오래된 버튼). */
+  | { status: "job_rejected"; action: PublishDecisionAction }
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
@@ -301,6 +308,18 @@ export type TelegramBotOptions = {
    */
   triggerPublishPrepare?: () => void;
   /**
+   * 통합 알림의 🗑 반려 직후 호출한다(PIPELINE-MERGE-2026-10.md §1-b). 뷰어 manifest에서 지운 원고를 페이지에서도 빼려고
+   * manuscripts-refresh.yml을 발화한다. 기본은 no-op, 클라우드 진입점(runTelegramUpdateCli.ts)이 주입한다.
+   */
+  triggerManuscriptsRefresh?: () => void;
+  /** 반려 시 뷰어 manifest 행 삭제. 기본은 removeManifestTopic. 테스트 주입용. */
+  removeManifestTopic?: (jobId: string) => Promise<void>;
+  /**
+   * 이 job이 이미 발행됐거나 발행 중인지(반려 가드). 기본은 job.status/발행 큐 상태/publications 기록을 본다.
+   * 발행된 글은 반려로 되돌릴 수 없으므로 막는다.
+   */
+  hasPublishHistory?: (job: ArticleJobRow) => Promise<boolean>;
+  /**
    * "수정 필요" 뒤 사용자가 답장으로 보낸 피드백을 받으면 호출한다(2026-09-15). 기본 구현은
    * job:revise CLI를 detached 프로세스로 띄우고 즉시 반환한다(완료 알림은 그 CLI가 직접 보낸다).
    * 클라우드 진입점(runTelegramUpdateCli.ts)은 job-revise.yml을 workflow_dispatch로 발화하도록
@@ -339,6 +358,27 @@ export type TelegramBotOptions = {
   sendTelegramRequest?: <T = unknown>(method: string, body: Record<string, unknown>) => Promise<T | null>;
 };
 
+/** 발행 큐 상태 키 - 이름은 각 큐 모듈의 상수와 같다(naverPublishQueue/tistoryPublishQueue). */
+const PUBLISH_QUEUE_KEYS = ["naverPublish", "tistoryPublish"] as const;
+
+/**
+ * 이미 발행됐거나 발행 중인가(반려 가드). job.status가 published이거나, 발행 큐에 요청(requested)/완료(done)가 남았거나,
+ * publications에 실패가 아닌 기록이 있으면 true. 실패(failed)만 있는 원고는 반려할 수 있다.
+ */
+async function defaultHasPublishHistory(job: ArticleJobRow): Promise<boolean> {
+  if (job.status === "published") return true;
+  // 승인 전(selected~review)에는 발행 기록이 있을 수 없다 - DB를 읽지 않는다(옛 초안 단계의 🗑 반려 경로 불변).
+  if (job.status !== "approved") return false;
+  const metadata = (job.metadata ?? {}) as Record<string, unknown>;
+  for (const key of PUBLISH_QUEUE_KEYS) {
+    const status = (metadata[key] as { status?: unknown } | undefined)?.status;
+    if (status === "requested" || status === "done") return true;
+  }
+  const articles = await listArticlesByJobId(job.id);
+  const publications = await listPublicationsByArticleIds(articles.map((article) => article.id));
+  return publications.some((publication) => publication.status !== "failed");
+}
+
 export class TelegramBot {
   private readonly botToken: string;
   private readonly chatId: string;
@@ -361,6 +401,9 @@ export class TelegramBot {
   private readonly onWriteStart: (job: ArticleJobRow, query: TelegramCallbackQuery) => Promise<void>;
   private readonly triggerResearch: (jobId: string) => void;
   private readonly triggerPublishPrepare: () => void;
+  private readonly triggerManuscriptsRefresh: () => void;
+  private readonly removeManifestTopic: (jobId: string) => Promise<void>;
+  private readonly hasPublishHistory: (job: ArticleJobRow) => Promise<boolean>;
   private readonly triggerRevision: (jobId: string, feedback: string) => void;
   private readonly triggerTranslation: (jobId: string, feedback?: string) => void;
   private readonly findJobByEditRequestMessageId: (messageId: number) => Promise<ArticleJobRow | null>;
@@ -430,6 +473,9 @@ export class TelegramBot {
     this.triggerResearch =
       options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
     this.triggerPublishPrepare = options.triggerPublishPrepare ?? (() => {});
+    this.triggerManuscriptsRefresh = options.triggerManuscriptsRefresh ?? (() => {});
+    this.removeManifestTopic = options.removeManifestTopic ?? ((jobId) => removeManifestTopic(jobId));
+    this.hasPublishHistory = options.hasPublishHistory ?? ((job) => defaultHasPublishHistory(job));
     this.triggerRevision =
       options.triggerRevision ?? ((jobId, feedback) => spawnDetachedTask("job:revise", [jobId, feedback]));
     this.triggerTranslation =
@@ -673,6 +719,14 @@ export class TelegramBot {
       };
     }
 
+    // 반려된 원고에 남은 오래된 ✏️ 버튼 - 수정 요청을 받으면 반려한 원고가 다시 살아나 헷갈린다.
+    if (parsed.action === "edit" && job.status === "rejected") {
+      return {
+        outcome: { status: "blocked", action: "edit", job },
+        message: `🗑 <b>반려된 원고입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n수정 요청을 받지 않았습니다.`,
+      };
+    }
+
     if (
       parsed.action === "edit" &&
       job.metadata.reviewDecision === "needs_edit" &&
@@ -694,18 +748,43 @@ export class TelegramBot {
     }
 
     if (parsed.action === "discard") {
+      // 통합 알림의 🗑(PIPELINE-MERGE-2026-10.md §1-b): 발행됐거나 발행 중인 원고는 반려로 되돌릴 수 없다. 이미지는 반려 7일 뒤
+      // storage-cleanup이 지우는데, 발행 이력이 있으면 지우면 안 되므로 여기서 먼저 막는다.
+      if (await this.hasPublishHistory(job)) {
+        return {
+          outcome: { status: "blocked", action: "discard", job },
+          message:
+            `🚫 <b>이미 발행됐거나 발행 중인 원고는 반려할 수 없어요</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+            `올라간 글은 해당 블로그에서 직접 내려 주세요.`,
+        };
+      }
+      const rejectedAt = new Date().toISOString();
       const updated = (await this.updateJobStatus(job.id, "rejected")) ?? job;
       await this.mergeJobMetadata(job.id, {
         reviewDecision: "discarded",
-        reviewedAt: new Date().toISOString(),
+        reviewedAt: rejectedAt,
+        // storage-cleanup이 "반려 후 7일"을 셀 기준(PIPELINE-MERGE §4). rejectArticleJob(조사 단계 중단)과 같은 키를 쓴다.
+        rejectedAt,
+        rejectedVia: "telegram-review",
+        rejectedAtStatus: job.status,
         // 의학 주제였다면 이력에도 남긴다(구 필드명 유지 - 과거 job과 조회 방식을 맞춘다).
         ...(job.metadata.requiresMedicalReview
           ? { medicalReviewDecision: "discarded", medicalReviewedAt: new Date().toISOString() }
           : {}),
       });
+      // 뷰어에서 뺀다. 아직 준비 전이라 행이 없어도 오류가 아니다. 삭제가 실패해도 반려 자체는 유효하다 - 폴러·발행 콜백이
+      // rejected 상태를 보고 막으므로, 뷰어에 남은 카드는 다음 재배포 때 정리된다.
+      let manifestNote = "";
+      try {
+        await this.removeManifestTopic(job.id);
+        if (job.metadata.channelManuscriptsReadyAt) this.triggerManuscriptsRefresh();
+      } catch (error) {
+        console.error("⚠️ 반려 원고의 뷰어 manifest 행 삭제 실패:", error instanceof Error ? error.message : error);
+        manifestNote = "\n\n⚠️ 원고 페이지에서 바로 빠지지 않았을 수 있어요(발행은 막혀 있습니다).";
+      }
       return {
         outcome: { status: "reviewed", action: "discard", job: updated },
-        message: `🗑 <b>반려됨</b>\n${escapeTelegramHtml(job.keyword)}`,
+        message: `🗑 <b>반려됨</b>\n${escapeTelegramHtml(job.keyword)}${manifestNote}`,
       };
     }
 
@@ -963,6 +1042,14 @@ export class TelegramBot {
     const job = await this.loadJobById(parsed.jobId);
     if (!job) {
       return { outcome: { status: "job_not_found" }, message: "해당 job을 찾을 수 없습니다(이미 정리됐을 수 있습니다)." };
+    }
+
+    // 반려된 원고는 발행하지 않는다(통합 알림 🗑 이후 남은 오래된 알림의 버튼, PIPELINE-MERGE §1-b).
+    if (job.status === "rejected" && (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot")) {
+      return {
+        outcome: { status: "job_rejected", action: parsed.action },
+        message: `🗑 <b>반려된 원고입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n발행을 접수하지 않았습니다.`,
+      };
     }
 
     // 서버 측 트랙-채널 검증(개편2.5 B-2): 버튼은 트랙별로 다르게 붙지만, 오래된 알림의 버튼이나 다른 트랙 채팅의
@@ -1225,10 +1312,36 @@ export class TelegramBot {
    * confirm/edit/discard 버튼을 눌린 결과로 갱신한다. 세 버튼 모두 남기되(재확인 흐름을 위해)
    * 눌린 버튼만 체크 표시로 바꾼다.
    */
-  private async markReviewButtonsDecided(query: TelegramCallbackQuery, action: ArticleReviewAction): Promise<void> {
+  private async markReviewButtonsDecided(
+    query: TelegramCallbackQuery,
+    action: ArticleReviewAction,
+    job?: ArticleJobRow
+  ): Promise<void> {
     const keyboard = query.message?.reply_markup?.inline_keyboard;
     const messageId = query.message?.message_id;
-    if (!keyboard || messageId === undefined) return;
+    if (messageId === undefined) return;
+
+    // 통합 알림(자동 승인 job, PIPELINE-MERGE §1-b)의 ✏️/🗑. 릴레이가 눌린 순간 키보드를 "⏳ 처리 중…" 하나로 덮어쓰므로
+    // 아래 라벨 치환(원본 키보드 전제)이 통하지 않는다 - 반려는 한 버튼으로 닫고, 수정 요청은 발행 줄을 포함한 전체를 되살린다.
+    if (job && isAutoApproved(job) && (action === "edit" || action === "discard")) {
+      const restored: TelegramInlineKeyboardButton[][] =
+        action === "discard"
+          ? [[{ text: "🗑 반려됨", callback_data: "noop" }]]
+          : buildReadyKeyboard(job).map((row) =>
+              row.map((button) => {
+                const own = parseArticleReviewCallbackData(button.callback_data);
+                return own?.action === "edit" ? { ...button, text: "✅ 수정 요청됨" } : button;
+              })
+            );
+      await this.post("editMessageReplyMarkup", {
+        chat_id: this.chatId,
+        message_id: messageId,
+        reply_markup: { inline_keyboard: restored },
+      });
+      return;
+    }
+
+    if (!keyboard) return;
 
     const LABELS: Record<ArticleReviewAction, string> = {
       confirm: "승인",
@@ -1485,6 +1598,7 @@ export class TelegramBot {
         case "not_wired":
         case "channel_mismatch":
         case "edit_pending":
+        case "job_rejected":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
           return null;
         default:
@@ -1528,6 +1642,12 @@ export class TelegramBot {
             }
         )
       );
+      // 자동 승인으로 올라온 원고는 ✏️ 수정 요청 / 🗑 반려 줄이 있다 - 잠금 버튼으로 덮인 뒤에도 되살린다.
+      const job = await this.loadJobById(parsed.jobId).catch(() => null);
+      const reviewRow = job && isAutoApproved(job) ? buildReadyKeyboard(job, null).slice(-1)[0] : undefined;
+      if (reviewRow && reviewRow.some((b) => parseArticleReviewCallbackData(b.callback_data) !== null)) {
+        keyboard.push(reviewRow);
+      }
     }
 
     await this.post("editMessageReplyMarkup", {
@@ -1694,13 +1814,27 @@ export class TelegramBot {
   }
 
   /** respondToCallback과 같은 원칙(§answerCallbackQuery 만료 무시)으로 검수 결과를 알린다. */
+  /** 잠금 버튼으로 덮인 통합 알림 키보드를 원래 구성으로 되돌린다. */
+  private async restoreReadyKeyboard(query: TelegramCallbackQuery, job: ArticleJobRow): Promise<void> {
+    const messageId = query.message?.message_id;
+    if (messageId === undefined) return;
+    await this.post("editMessageReplyMarkup", {
+      chat_id: this.chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: buildReadyKeyboard(job) },
+    });
+  }
+
   private async respondToArticleReview(query: TelegramCallbackQuery, result: HandleArticleReviewResult): Promise<void> {
     if (result.outcome.status === "ignored") return;
 
     await this.answerCallbackQuery(query.id, result.message.replace(/<[^>]+>/g, "").slice(0, 200)).catch(() => {});
 
     if (result.outcome.status === "reviewed" || result.outcome.status === "already_reviewed") {
-      await this.markReviewButtonsDecided(query, result.outcome.action).catch(() => {});
+      await this.markReviewButtonsDecided(query, result.outcome.action, result.outcome.job).catch(() => {});
+    } else if (result.outcome.status === "blocked") {
+      // 반려가 막혔다 - 눌러서 잠긴 키보드를 원래대로 되살린다(발행 버튼이 사라지면 안 된다).
+      await this.restoreReadyKeyboard(query, result.outcome.job).catch(() => {});
     }
 
     if (result.message) {

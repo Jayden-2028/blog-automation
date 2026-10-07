@@ -74,6 +74,52 @@ export function selectCleanupJobs(
   return { candidates, skipped };
 }
 
+// ---- 반려분(PIPELINE-MERGE-2026-10.md §4) -------------------------------------------------------------
+// 통합 알림의 🗑 반려 뒤에는 발행 이력이 없는 job의 이미지가 Storage에 남는다. 반려 후 N일(기본 7)이 지나면 지운다.
+// 반려는 7일 안에는 사람이 마음을 바꿀 수 있다고 보고 남겨 두는 유예 기간이다(발행 이력이 있으면 대상이 아니다 - 반려 자체가
+// 막히지만, 반려 뒤에 다른 경로로 발행 기록이 생겼어도 안전하게 보존한다).
+
+export const DEFAULT_REJECTED_RETENTION_DAYS = 7;
+
+export type RejectedCleanupSkipReason = "rejected_has_publication" | "rejected_too_recent" | "rejected_no_timestamp";
+
+/** 반려된 job 한 건. rejectedAt은 metadata.rejectedAt(없으면 reviewedAt) - 둘 다 없으면 null. */
+export type RejectedJob = {
+  jobId: string;
+  rejectedAt: string | null;
+  /** 이 job의 발행 기록 개수(실패 포함). 하나라도 있으면 보존한다. */
+  publicationCount: number;
+};
+
+export function selectRejectedCleanupJobs(
+  jobs: readonly RejectedJob[],
+  now: Date,
+  retentionDays: number = DEFAULT_REJECTED_RETENTION_DAYS
+): { candidates: CleanupCandidate[]; skipped: { jobId: string; reason: RejectedCleanupSkipReason }[] } {
+  const candidates: CleanupCandidate[] = [];
+  const skipped: { jobId: string; reason: RejectedCleanupSkipReason }[] = [];
+  const cutoff = now.getTime() - retentionDays * DAY_MS;
+
+  for (const job of jobs) {
+    if (job.publicationCount > 0) {
+      skipped.push({ jobId: job.jobId, reason: "rejected_has_publication" });
+      continue;
+    }
+    const at = job.rejectedAt ? new Date(job.rejectedAt).getTime() : NaN;
+    if (Number.isNaN(at)) {
+      // 반려 시각을 모르면 지우지 않는다 - 언제 반려했는지 모르는 job의 이미지를 추측으로 지울 수 없다.
+      skipped.push({ jobId: job.jobId, reason: "rejected_no_timestamp" });
+      continue;
+    }
+    if (at > cutoff) {
+      skipped.push({ jobId: job.jobId, reason: "rejected_too_recent" });
+      continue;
+    }
+    candidates.push({ jobId: job.jobId, publishedAt: new Date(at).toISOString() });
+  }
+  return { candidates, skipped };
+}
+
 export type StorageObject = { name: string; size: number };
 
 export type CleanupPlan = {

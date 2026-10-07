@@ -78,6 +78,9 @@ jobs:
           # 이미 승인·준비된 원고를 고친 경우, 재작성 뒤 job-publish-prepare.yml을 직접 발화해
           # 최종본을 다시 만든다(2026-09-19). 그 workflow_dispatch 호출에 토큰이 필요하다.
           GITHUB_TOKEN: ${{ github.token }}
+          # 단계 통합(PIPELINE-MERGE-2026-10.md §2). 미설정·빈 값이면 켜짐 - 자동 승인된 원고의 수정은 이미지 마커 diff로
+          # 이미지를 유지·부분 갱신한다. false면 옛 흐름(초안 재검수 / 승인 후 수정은 이미지 초기화 후 재준비).
+          PIPELINE_SKIP_DRAFT_REVIEW: ${{ vars.PIPELINE_SKIP_DRAFT_REVIEW }}
         run: npm run job:revise -- "${{ inputs.job_id }}" "${{ inputs.feedback }}"
 
       # job-research.yml과 같은 이유(2026-09-16) - always()로 돌아 큐 행을 마감하고 다음 대기
