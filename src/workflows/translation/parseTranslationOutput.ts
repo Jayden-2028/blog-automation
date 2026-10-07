@@ -7,7 +7,7 @@
 // (한글 원고 순서로 저장된 검색어)가 번호로 마커에 짝지어지고, 획득 방식(웹 검색/AI 생성...)이 바뀌면 엉뚱한 경로로
 // 이미지를 구한다. 마커가 어긋난 번역은 조용히 통과시키지 않고 실패로 돌려 한 번 더 시도한다.
 
-import { parseImageAcquisition } from "../manuscripts/parseManuscriptBlocks.js";
+import { parseImageAcquisition, stripAcquisitionSuffix } from "../manuscripts/parseManuscriptBlocks.js";
 
 export const TRANSLATION_SECTIONS = ["TITLE", "SEARCH_DESCRIPTION", "SLUG", "TAGS", "BODY", "KO_SUMMARY"] as const;
 type SectionName = (typeof TRANSLATION_SECTIONS)[number];
@@ -123,6 +123,15 @@ export function validateTranslation({ koreanBody, parsed }: TranslationValidatio
     ko.forEach((description, index) => {
       if (parseImageAcquisition(description) !== parseImageAcquisition(en[index])) {
         errors.push(`${index + 1}번 마커의 획득 방식이 바뀌었습니다("${description.slice(-12)}" -> "${en[index].slice(-12)}") - 접미사(— 웹 검색 등)는 그대로 두세요`);
+      }
+      // 마커 줄은 strayHangulCount에서 통째로 빠지므로(접미사가 한글이라) 설명의 한글은 여기서 잡아야
+      // 한다. 안 잡으면 설명이 캡션·alt로 **한글 그대로 발행**된다(2026-10-07 실측 - 첫 발행 글의
+      // 캡션 5개 전부). 괄호 안 한글은 본문과 같은 이유로 허용한다(표지판·메뉴 표기).
+      const enDescription = stripAcquisitionSuffix(en[index]).replace(/\([^()]*\)/g, " ");
+      if ((enDescription.match(HANGUL_RE) ?? []).length > 0) {
+        errors.push(
+          `${index + 1}번 마커의 설명이 한글입니다("${enDescription.trim().slice(0, 20)}…") - 설명은 독자에게 보일 캡션·alt라서 영어로 다시 써야 합니다. 접미사(— 웹 검색 등)만 한글로 남기세요`
+        );
       }
     });
   }

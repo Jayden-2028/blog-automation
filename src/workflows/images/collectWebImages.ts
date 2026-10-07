@@ -233,6 +233,11 @@ export type ChooseImageInput = {
   keyword: string;
   /** 이미지 메이커 규격. 없으면 파일에서 읽는다(테스트는 null로 끈다). */
   spec?: string | null;
+  /**
+   * 캡션을 쓸 언어(2026-10-07). 사용설명서 영어본은 "en" - 다시 쓴 캡션이 발행 캡션·alt로
+   * 나가므로 독자 언어여야 한다(실측: 첫 발행 글의 캡션 5개가 전부 한글로 나갔다). 기본 한국어.
+   */
+  captionLanguage?: "ko" | "en";
 };
 
 /** `picked`가 null이면 "쓸 만한 것이 없다"는 뜻이다. */
@@ -327,6 +332,11 @@ export type CollectWebImagesOptions = {
   chooseImage?: (input: ChooseImageInput) => Promise<ChooseImageResult>;
   /** false면 비전 검증을 건너뛴다(시간·호출을 아끼고 싶을 때). 기본 true. */
   verify?: boolean;
+  /**
+   * 캡션·alt를 쓸 언어(2026-10-07). 사용설명서 영어본은 "en" - 수집 에이전트의 alt와 검증자가
+   * 다시 쓰는 캡션이 발행본에 그대로 나간다. 기본(미지정)은 한국어.
+   */
+  captionLanguage?: "ko" | "en";
   /**
    * 사용자가 직접 고른 이미지(주소 지정·`N번 후보M`)인가(2026-10-04). 그렇다면 **같은 컷 검사로 막지 않는다** -
    * 등록만 해서 다른 자리가 이 컷을 다시 쓰지 않게 한다. 실측(겨울왕국3): 사용자가 "3번 후보1 반영"을
@@ -453,12 +463,22 @@ export function buildPrompt(
    * 이미지 메이커 규격 본문(prompts/images/image-maker.md). 넘기지 않으면 파일에서 읽는다.
    * 테스트는 null을 넘겨 규격 없이 예전 프롬프트만 검사한다.
    */
-  spec: string | null | undefined = undefined
+  spec: string | null | undefined = undefined,
+  /** 캡션·alt 언어(2026-10-07). "en"이면 영어 블로그 발행본 - alt·caption·출처 표기를 영어로 쓰게 한다. */
+  captionLanguage: "ko" | "en" | null = null
 ): string {
   const lines = [
     ...imageMakerSpecLines(spec === undefined ? undefined : spec),
     "너는 한국어 블로그 원고에 넣을 **실제 이미지**를 웹에서 찾는다. 이미지를 만들지 않는다.",
     "web_search 도구로 찾고, 각 자리마다 바로 쓸 수 있는 이미지 파일 URL 하나를 고른다.",
+    ...(captionLanguage === "en"
+      ? [
+          "",
+          "이 원고는 **영어 블로그 발행본**이다(2026-10-07). `alt`·`caption` 필드는 **영어로** 쓰고, `license`의",
+          '출처 표기도 "Photo: Kyunghyang Shinmun"처럼 로마자로 적는다. 검색은 한국 자료를 찾는 것이므로',
+          "검색어는 한국어를 써도 된다.",
+        ]
+      : []),
     "",
     `## 원고 주제: ${keyword}`,
     "",
@@ -830,7 +850,12 @@ export async function defaultChooseImage(input: ChooseImageInput): Promise<Choos
     "왔는데 캡션은 그대로 나갔다 - 독자에게는 거짓말이다.",
     "",
     "- **사진에 보이는 것만** 쓴다. 인물·작품·장면을 사진으로 확인할 수 없으면 캡션에 넣지 않는다.",
-    "- 출처가 분명하면 끝에 출처를 붙인다(\"사진=ENA\", \"출처: 뉴시스\").",
+    ...(input.captionLanguage === "en"
+      ? [
+          "- **캡션은 영어로 쓴다** - 이 원고는 영어 블로그 발행본이고 독자는 한국어를 모른다.",
+          '  출처 표기도 영어로 붙인다: "Photo: Kyunghyang Shinmun", "Source: Yonhap News"처럼 매체명을 로마자로.',
+        ]
+      : ['- 출처가 분명하면 끝에 출처를 붙인다("사진=ENA", "출처: 뉴시스").']),
     "- **캡션을 정직하게 썼더니 위 문단과 어긋난다면, 그 사진은 이 자리에 맞지 않는 것이다**",
     "  - `picked: null`로 비운다. 캡션을 맞추려고 문단에 없는 말을 지어내지 않는다.",
     "  - **단, `[공식 스틸]`은 예외다**(위 2-0). 비우지 말고 사진에 보이는 것을 그대로 캡션에 쓴다",
@@ -1041,7 +1066,15 @@ export async function collectWebImages(
   }
 
   const run = await runCodex({
-    prompt: buildPrompt(input.keyword, input.slots, prefetched, options.category ?? null, options.briefType ?? null),
+    prompt: buildPrompt(
+      input.keyword,
+      input.slots,
+      prefetched,
+      options.category ?? null,
+      options.briefType ?? null,
+      undefined,
+      options.captionLanguage ?? null
+    ),
     outputSchema: OUTPUT_SCHEMA as unknown as Record<string, unknown>,
     search: true,
   });
@@ -1225,6 +1258,7 @@ export async function collectWebImages(
         caution: slot.caution,
         broadcastCapture: slot.broadcastCapture,
         keyword: input.keyword,
+        captionLanguage: options.captionLanguage,
       });
       if (verdict.picked === null) {
         for (const c of candidates) await rm(c.filePath, { force: true });

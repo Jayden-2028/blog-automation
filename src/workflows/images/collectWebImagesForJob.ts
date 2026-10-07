@@ -70,6 +70,11 @@ export type CollectWebImagesForJobInput = {
    * 사람이 눈으로 고른 것이라 검증도 건너뛴다 - 지시가 판정보다 우선한다(사용자 결정).
    */
   directUrls?: Record<string, string>;
+  /**
+   * 캡션·alt 언어(2026-10-07). 사용설명서 영어본(The Korea Manual)은 "en" - 수집 에이전트의 alt와
+   * 검증자가 다시 쓰는 캡션이 발행본에 그대로 나간다. 기본(미지정)은 한국어.
+   */
+  captionLanguage?: "ko" | "en";
 };
 
 export type CollectWebImagesForJobResult = {
@@ -245,6 +250,7 @@ export async function collectWebImagesForJob(
               deduper,
               category: input.category ?? null,
               briefType: input.briefType ?? null,
+              captionLanguage: input.captionLanguage,
               searchImages: false,
               verify: false,
               userChosen: true,
@@ -281,6 +287,7 @@ export async function collectWebImagesForJob(
         deduper,
         category: input.category ?? null,
         briefType: input.briefType ?? null,
+        captionLanguage: input.captionLanguage,
         researchText: input.researchText ?? null,
         planQueries: effectivePlanQueries,
         planRecency: input.planSubjects

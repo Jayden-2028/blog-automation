@@ -564,6 +564,9 @@ export async function prepareManuscript(
       keyword: job.keyword,
       category: job.category ?? null,
       briefType: readJobBrief(job.metadata as Record<string, unknown> | null)?.type ?? null,
+      // 사용설명서 영어본은 캡션·alt를 영어로 쓴다(2026-10-07 사용자 보고 - 첫 발행 글의 캡션
+      // 5개가 전부 한글로 나갔다). 마커 설명의 영어화는 번역 검증이 따로 막는다.
+      ...(translatedVariant ? { captionLanguage: "en" as const } : {}),
       // 리서치 파일 전문(2026-10-01). 작품 자리에서 공식 스틸이 없을 때 여기 적힌 유튜브 공식
       // 영상 링크로 자동 프레임을 후보에 넣는다(youtubeTrailerFrames.ts).
       researchText: typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
