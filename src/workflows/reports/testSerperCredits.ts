@@ -118,7 +118,8 @@ async function main(): Promise<void> {
   }, {
     id: 10, started_at: "2026-12-01T00:05:00Z", completed_at: "2026-12-01T00:10:00Z", status: "completed",
     candidates_count: 1, clusters_count: 1, inserted_count: 1, error_count: 0, source: "naver", seed_queries: null,
-    metadata: { kind: "kscene_topic" }, created_at: "2026-12-01T00:05:00Z",
+    // kscene_topic은 round가 없다 - concat 원소들의 합성 타입이 round를 요구해 캐스팅으로 맞춘다(2026-10-07 tsc 수정).
+    metadata: { kind: "kscene_topic" } as unknown as { kind: string; round: string }, created_at: "2026-12-01T00:05:00Z",
   }]) as unknown as DiscoveryRunRow[];
   const now = new Date("2026-12-01T03:00:00Z");
 

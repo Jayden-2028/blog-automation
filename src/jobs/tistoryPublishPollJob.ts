@@ -4,8 +4,10 @@
 //   1. **로그인 풀림은 실패가 아니라 대기(deferred)** 다. 사회 트랙은 사용자가 바로 개입할 수 있는 트랙이라(사용자
 //      전제), 사회 봇으로 "로그인 필요"를 한 번 알리고 재로그인되면 다음 주기에 알아서 다시 올린다. 3일 지난 대기
 //      건은 자동 재개하지 않는다(사용자 결정) - 그 건은 하루 한 번 "다시 눌러야 한다"고 알린다.
-//   2. 대기열이 비어 있어도 **하루 한 번(19:25~19:55 KST, 20시 리포트 직전) 로그인 상태를 점검**해 풀려 있으면
-//      미리 알린다. 리포트를 보고 Go를 누르기 전에 로그인해 둘 수 있게.
+//   2. 대기열이 비어 있어도 **keepalive**(기본 3시간 간격, TISTORY_KEEPALIVE_HOURS)로 관리 화면을 열어 세션을 만진다
+//      (2026-10-07 - 쿠키 보관에도 세션이 하루 안에 죽은 실측. 카카오가 토큰을 돌릴 때마다 쿠키를 따라 갱신해야 수명이
+//      는다). 성공하면 쿠키 보관함이 갱신되고, 풀려 있으면 알린다(6시간 중복 방지). 20시 사회 리포트 직전
+//      (19:25~19:55)에는 간격과 무관하게 한 번 보장한다 - Go를 누르기 전에 미리 알 수 있게.
 //   3. 알림은 메인봇이 아니라 **그 job의 트랙 봇**(사회 봇)으로 간다(notifierForJob).
 //
 // 브라우저는 headless로 뜬다(본문은 TinyMCE API로 넣어 클립보드·포커스가 필요 없다) - 네이버 폴러(headed+클립보드)와
@@ -37,13 +39,26 @@ import type { ArticleJobRow } from "../types/database.js";
 
 /** 한 번에 처리할 최대 건수. 브라우저를 띄우는 작업이라 길게 돌면 다음 주기와 겹친다. */
 const MAX_PER_RUN = 2;
-/** 로그인 사전 점검 시간대(KST). 20시 사회 리포트 직전. */
+/** 20시 사회 리포트 직전에는 간격과 무관하게 keepalive를 한 번 보장하는 시간대(KST). */
 const LOGIN_CHECK_WINDOW = { fromMinute: 19 * 60 + 25, toMinute: 19 * 60 + 55 };
+
+/** keepalive 간격(시간). 0이면 끔(리포트 직전 보장만 남는다). */
+function keepaliveHours(): number {
+  const raw = Number.parseFloat(process.env.TISTORY_KEEPALIVE_HOURS ?? "");
+  return Number.isNaN(raw) || raw < 0 ? 3 : raw;
+}
 /** 같은 사유 알림의 최소 간격 - 폴링마다 쏟아지지 않게. */
 const REMINDER_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const STATE_FILE = resolve("logs/.tistory-poll-state.json");
 
-export type PollState = { loginCheckedOn?: string; loginLostNotifiedAt?: string; expiredNotifiedOn?: string };
+export type PollState = {
+  /** (구) 하루 1회 점검 날짜. keepalive 도입으로 더는 쓰지 않지만 옛 상태 파일과의 호환으로 남긴다. */
+  loginCheckedOn?: string;
+  loginLostNotifiedAt?: string;
+  expiredNotifiedOn?: string;
+  /** 마지막 keepalive(또는 발행으로 세션을 만진) 시각. */
+  lastKeepaliveAt?: string;
+};
 
 function readState(): PollState {
   try {
@@ -203,22 +218,45 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
   }
 }
 
-/** 대기열이 비었을 때 하루 한 번 로그인 상태를 미리 본다. */
-async function dailyLoginCheck(state: PollState): Promise<void> {
-  const today = kstToday();
-  const minute = kstMinuteOfDay();
-  if (state.loginCheckedOn === today) return;
-  if (minute < LOGIN_CHECK_WINDOW.fromMinute || minute > LOGIN_CHECK_WINDOW.toMinute) return;
+/**
+ * keepalive를 지금 돌릴지. 순수 함수(테스트: testTistoryPublishPollJob.ts).
+ *  - 마지막 keepalive에서 intervalHours가 지났으면 true.
+ *  - 리포트 직전 시간대(19:25~19:55 KST)에는 그 날 그 시간대에 아직 안 돌았으면 간격과 무관하게 true.
+ *  - intervalHours 0은 끔(시간대 보장만 남는다).
+ */
+export function shouldRunKeepalive(state: PollState, now: Date, intervalHours: number = keepaliveHours()): boolean {
+  const last = state.lastKeepaliveAt ? new Date(state.lastKeepaliveAt).getTime() : NaN;
+  const minute = kstMinuteOfDay(now);
+  const inWindow = minute >= LOGIN_CHECK_WINDOW.fromMinute && minute <= LOGIN_CHECK_WINDOW.toMinute;
+  if (Number.isNaN(last)) return intervalHours > 0 || inWindow;
+  if (inWindow) {
+    // 이 시간대 시작 시각(KST 19:25를 now 기준으로 환산) 이후에 이미 돌았으면 중복하지 않는다.
+    const windowStart = now.getTime() - (minute - LOGIN_CHECK_WINDOW.fromMinute) * 60 * 1000;
+    if (last < windowStart) return true;
+  }
+  if (intervalHours <= 0) return false;
+  return now.getTime() - last >= intervalHours * 60 * 60 * 1000;
+}
 
-  state.loginCheckedOn = today;
+/**
+ * 대기열이 비었을 때 세션을 만져 살려 둔다(keepalive). checkLogin이 성공하면 쿠키 보관함도 갱신된다
+ * (TistoryPublisher.checkLogin -> refreshSavedCookies). 풀려 있으면 알리되 6시간에 한 번만.
+ */
+async function keepalive(state: PollState): Promise<void> {
+  if (!shouldRunKeepalive(state, new Date())) return;
+  state.lastKeepaliveAt = new Date().toISOString();
   writeState(state);
   const check = await new TistoryPublisher().checkLogin();
   if (check.loggedIn) {
-    console.log("· [tistory-poll] 로그인 점검: 정상");
+    console.log("· [tistory-poll] keepalive: 로그인 정상, 쿠키 갱신");
     return;
   }
-  console.log(`· [tistory-poll] 로그인 점검: 풀림(${check.reason})`);
-  await notify(null, ["🔑 <b>티스토리 로그인이 풀려 있습니다</b>", "", "오늘 리포트에서 Go를 누르기 전에 미리 로그인해 두세요.", LOGIN_GUIDE].join("\n"));
+  console.log(`· [tistory-poll] keepalive: 로그인 풀림(${check.reason})`);
+  const lastNotified = state.loginLostNotifiedAt ? new Date(state.loginLostNotifiedAt).getTime() : 0;
+  if (Date.now() - lastNotified < REMINDER_INTERVAL_MS) return;
+  state.loginLostNotifiedAt = new Date().toISOString();
+  writeState(state);
+  await notify(null, ["🔑 <b>티스토리 로그인이 풀려 있습니다</b>", "", "다음 발행 전에 미리 로그인해 두세요.", LOGIN_GUIDE].join("\n"));
 }
 
 /** 3일 넘게 로그인 대기였던 건은 자동 재개하지 않는다 - 하루 한 번만 알려 준다. */
@@ -263,10 +301,13 @@ async function main(): Promise<void> {
   }
   if (pending.length > 0) {
     await processPending(pending, state);
+    // 발행 시도도 세션을 만진다(성공 시 쿠키 갱신 포함) - 직후에 keepalive 브라우저를 또 띄우지 않는다.
+    state.lastKeepaliveAt = new Date().toISOString();
+    writeState(state);
   } else if (waiting.length === 0) {
-    // 점검 단계의 예외(브라우저 기동·로그인 확인)가 만료 알림까지 막지 않게 따로 감싼다.
-    await dailyLoginCheck(state).catch((error) => {
-      console.warn(`⚠️ [tistory-poll] 로그인 점검 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
+    // keepalive 단계의 예외(브라우저 기동·로그인 확인)가 만료 알림까지 막지 않게 따로 감싼다.
+    await keepalive(state).catch((error) => {
+      console.warn(`⚠️ [tistory-poll] keepalive 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
     });
   }
   await remindExpired(state);

@@ -3,7 +3,7 @@
 // 지켜야 할 것: ① 예외가 나도 폴러가 죽지 않고 failed로 기록·알림하고 다음 건으로 간다
 // ② 발행 성공 후 기록 실패(published_unrecorded)는 재시도 큐로 되돌리지 않고 수동 확인을 알린다
 // ③ 로그인 대기(deferred)는 재확인 간격 안이면 이번 주기에 집지 않는다.
-import { processPending, selectDueRequests } from "./tistoryPublishPollJob.js";
+import { processPending, selectDueRequests, shouldRunKeepalive } from "./tistoryPublishPollJob.js";
 import type { PollDeps, PollState } from "./tistoryPublishPollJob.js";
 import {
   finishTistoryPublish,
@@ -42,6 +42,23 @@ const quiet = <T>(fn: () => Promise<T>): Promise<T> => {
 };
 
 async function main(): Promise<void> {
+  // keepalive 판정(2026-10-07): 간격 경과·첫 실행·리포트 직전 보장·끔(0) - 시각은 KST 기준.
+  {
+    const at = (iso: string): Date => new Date(iso);
+    const st = (last?: string) => ({ lastKeepaliveAt: last }) as Parameters<typeof shouldRunKeepalive>[0];
+    // 10:00 KST = 01:00Z
+    assert(shouldRunKeepalive(st(undefined), at("2026-10-07T01:00:00Z"), 3), "기록이 없으면 돈다");
+    assert(!shouldRunKeepalive(st("2026-10-07T00:00:00Z"), at("2026-10-07T01:00:00Z"), 3), "1시간 전이면 안 돈다");
+    assert(shouldRunKeepalive(st("2026-10-06T21:00:00Z"), at("2026-10-07T01:00:00Z"), 3), "4시간 지났으면 돈다");
+    // 19:30 KST = 10:30Z - 리포트 직전 시간대는 간격과 무관하게 보장(그날 시간대 안에서 이미 돌았으면 중복 안 함)
+    assert(shouldRunKeepalive(st("2026-10-07T09:00:00Z"), at("2026-10-07T10:30:00Z"), 99), "리포트 직전엔 간격 무시하고 돈다");
+    assert(!shouldRunKeepalive(st("2026-10-07T10:26:00Z"), at("2026-10-07T10:30:00Z"), 99), "시간대 안에서 이미 돌았으면 중복 안 함");
+    // 끔(0): 간격 실행은 없고 리포트 직전 보장만 남는다
+    assert(!shouldRunKeepalive(st("2026-10-01T00:00:00Z"), at("2026-10-07T01:00:00Z"), 0), "0이면 간격 실행 없음");
+    assert(shouldRunKeepalive(st("2026-10-01T00:00:00Z"), at("2026-10-07T10:30:00Z"), 0), "0이어도 리포트 직전은 돈다");
+    console.log("✅ shouldRunKeepalive - 간격·첫 실행·리포트 직전 보장·끔");
+  }
+
   const state: PollState = {};
 
   // 1) 예외 -> failed 기록 + 알림, 다음 건은 계속 처리
