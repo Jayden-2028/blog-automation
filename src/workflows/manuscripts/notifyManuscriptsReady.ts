@@ -18,9 +18,9 @@ import type { Track } from "../../notifications/telegramTracks.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
-/** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 반영)을 문구로 알린다. */
+/** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 저장)을 문구로 알린다. */
 const SOCIAL_MANUAL_PUBLISH_GUIDE =
-  "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '📤 수정본 반영'을 누르세요.";
+  "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.";
 
 /**
  * 사회 이슈 트랙(2026-10-05 §3.3 → 2026-10-06 TISTORY_AUTO_PUBLISH_DESIGN.md): 네이버·Blogger 버튼 없이
@@ -95,7 +95,7 @@ function buildKsceneReadyMessage(
     `<b>${escapeTelegramHtml(outcome.topic.manuscript.title || job.keyword)}</b>`,
     detail,
     "",
-    "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '📤 수정본 반영'을 누르세요.",
+    "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.",
   ];
 
   const jobId = outcome.topic.jobId;

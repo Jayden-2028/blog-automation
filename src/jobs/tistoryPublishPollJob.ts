@@ -26,6 +26,8 @@ import { escapeTelegramHtml, TelegramNotifier } from "../notifications/TelegramN
 import { notifierForJob } from "../notifications/notifierForJob.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { TistoryPublisher } from "../services/publish/tistory/TistoryPublisher.js";
+import { reportStaleEdits } from "./lib/staleEditReport.js";
+import type { StaleEntry } from "./lib/staleEditReport.js";
 import { publishJobToTistory } from "../workflows/publish/publishJobToTistory.js";
 import {
   deferTistoryPublish,
@@ -293,7 +295,9 @@ async function main(): Promise<void> {
   if (!lock) return;
 
   const state = readState();
-  const waiting = await listPendingTistoryRequests();
+  const stale: StaleEntry[] = [];
+  const waiting = await listPendingTistoryRequests({ onStale: (job, entryState) => stale.push({ job, state: entryState }) });
+  await reportStaleEdits(stale, (job, text) => notify(job as ArticleJobRow, text));
   // 로그인 대기(deferred) 건은 재확인 간격 안이면 이번엔 건너뛴다 - 브라우저를 띄우지 않는다(B-1).
   const pending = selectDueRequests(waiting, new Date());
   if (waiting.length > pending.length) {

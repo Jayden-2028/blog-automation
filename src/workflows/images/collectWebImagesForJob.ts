@@ -70,6 +70,11 @@ export type CollectWebImagesForJobInput = {
    * 사람이 눈으로 고른 것이라 검증도 건너뛴다 - 지시가 판정보다 우선한다(사용자 결정).
    */
   directUrls?: Record<string, string>;
+  /**
+   * 캡션·alt 언어(2026-10-07). 사용설명서 영어본(The Korea Manual)은 "en" - 수집 에이전트의 alt와
+   * 검증자가 다시 쓰는 캡션이 발행본에 그대로 나간다. 기본(미지정)은 한국어.
+   */
+  captionLanguage?: "ko" | "en";
 };
 
 export type CollectWebImagesForJobResult = {
@@ -104,7 +109,7 @@ export async function collectWebImagesForJob(
     // 사람이 결과를 보고 적은 것이 기획보다 우선한다. 주소를 직접 찍어 준 자리는 건드리지 않는다.
     .map((slot) => {
       const planned = input.planSubjects?.[slot.index];
-      if (!planned?.subject || directIndexes.has(slot.index)) return slot;
+      if (!planned || directIndexes.has(slot.index)) return slot;
       // 최신성은 판정자에게도 한 줄로 알린다 - 검색만 최신순으로 해도 판정이 옛 사진을 고르면 그만이다.
       const recencyNote =
         planned.recency === "today"
@@ -115,7 +120,10 @@ export async function collectWebImagesForJob(
       const caution = [planned.caution, recencyNote].filter(Boolean).join(" ");
       return {
         ...slot,
-        description: planned.subject,
+        // subject가 비어 있으면 **설명을 갈아끼우지 않는다**(2026-10-08). 영어본에서 routeImagePlan이
+        // 한글 subject를 캡션 자리에서 빼고 caution으로만 넘긴 경우다 - 설명(=캡션 바탕)은 영어 마커
+        // 그대로 두고, 검색어와 판정 기준은 그대로 얹는다.
+        ...(planned.subject ? { description: planned.subject } : {}),
         query: input.planQueries?.[slot.index]?.[0] ?? slot.query,
         ...(caution ? { caution } : {}),
       };
@@ -245,6 +253,7 @@ export async function collectWebImagesForJob(
               deduper,
               category: input.category ?? null,
               briefType: input.briefType ?? null,
+              captionLanguage: input.captionLanguage,
               searchImages: false,
               verify: false,
               userChosen: true,
@@ -281,6 +290,7 @@ export async function collectWebImagesForJob(
         deduper,
         category: input.category ?? null,
         briefType: input.briefType ?? null,
+        captionLanguage: input.captionLanguage,
         researchText: input.researchText ?? null,
         planQueries: effectivePlanQueries,
         planRecency: input.planSubjects

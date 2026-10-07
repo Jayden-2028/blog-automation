@@ -12,6 +12,8 @@
 // 담고 있어 패턴이 같고, 마이그레이션이 필요 없다. 큐 길이도 하루 몇 건이라 테이블을 쓸 만큼
 // 크지 않다. 나중에 커지면 그때 옮긴다.
 
+import { filterEditPending } from "../manuscripts/viewerEditGuard.js";
+import type { EditGuardOptions } from "../manuscripts/viewerEditGuard.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
@@ -35,7 +37,7 @@ export function readNaverRequest(job: ArticleJobRow): NaverPublishRequest | null
   return { status: value.status, requestedAt: String(value.requestedAt ?? ""), finishedAt: value.finishedAt, url: value.url, error: value.error };
 }
 
-export type NaverQueueOptions = {
+export type NaverQueueOptions = EditGuardOptions & {
   mergeMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
   listRecentJobs?: (limit?: number) => Promise<ArticleJobRow[]>;
   now?: () => Date;
@@ -86,8 +88,11 @@ export async function finishNaverPublish(
 export async function listPendingNaverRequests(options: NaverQueueOptions = {}): Promise<ArticleJobRow[]> {
   const listRecentJobs = options.listRecentJobs ?? ((limit) => ArticleJobRepository.listRecent(limit));
   const jobs = await listRecentJobs(100);
-  return jobs
-    .filter((job) => readNaverRequest(job)?.status === "requested")
+  // 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c).
+  return filterEditPending(
+    jobs.filter((job) => readNaverRequest(job)?.status === "requested"),
+    options
+  )
     .sort((a, b) => {
       const at = readNaverRequest(a)?.requestedAt ?? "";
       const bt = readNaverRequest(b)?.requestedAt ?? "";

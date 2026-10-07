@@ -119,13 +119,31 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
   (`job-publish-prepare.yml`)가 실행한다.
 - **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가, 2026-10-05 트랙별 구성).
-  원고 준비 완료 알림의 버튼은 공통 `📄 원고 페이지 열기` / `🖼 이미지 수정`(아직 미연결) /
+  원고 준비 완료 알림의 버튼은 공통 `📄 원고 페이지 열기` / `🖼 이미지 수정` /
   `⬇️ 맥으로 내려받기`에 **트랙별 발행 버튼**이 붙는다 - 엔터는 `🟢 네이버 발행`,
   사회는 `🟠 티스토리 발행`(🔵 블로그 발행은 2026-10 개편으로 두 트랙에서 제외).
   **이미지까지 반영된 최종 원고를 뷰어에서 눈으로 본 뒤**
   누르는 것이고, 사람이 곧 품질 게이트다. 누르지 않은 원고는 올라가지 않는다.
-  - **뷰어에서 고친 본문·캡션은 `📤 수정본 반영`을 눌러야 발행 원고(DB)에 들어간다**(2026-10-03). 누르기 전에는
-    복사에만 쓰인다. 경로: Pages Function → `manuscript-edit.yml` → `applyViewerEditRequest.ts`.
+  - **발행 진입점은 텔레그램 버튼 하나다**(2026-10-07 사용자 결정). 뷰어(원고 페이지)에는 발행 버튼이 없다 - 사회
+    페이지의 🟠 티스토리 발행 버튼을 뺐다. 서버 쪽 `/api/publish-request`(`publishApi.ts`·`publish-request.yml`·
+    `publishRequestCli.ts`)는 롤백·재사용을 위해 **코드만 남겼고 뷰어는 호출하지 않는다**.
+  - **뷰어에서 고친 본문·캡션·제목은 `💾 수정본 저장`을 눌러야 발행 원고(DB)에 들어간다**(2026-10-03, 버튼 이름은
+    2026-10-07에 "반영"→"저장"). 누르기 전에는 복사에만 쓰인다. **저장은 저장일 뿐 발행하지 않는다.** 경로: Pages
+    Function → `manuscript-edit.yml` → `applyViewerEditRequest.ts`. 편집 키는 본문 블록 번호·`N:h`/`N:b`·`cap:N`·
+    **`title`**(제목, 2026-10-07 - `articles.title`의 final article 행 + manifest 제목. slug·검색설명·폴더명은 안 바뀌고
+    이미 발행된 글에 소급되지 않는다).
+  - **수정-발행 경합 가드**(2026-10-07, `viewerEditGuard.ts`): 반영 요청이 접수되면 `job.metadata.viewerEditPendingAt`,
+    이미지 교체는 `imagePickPendingAt`을 남기고 완료 기록(`viewerEdit.appliedAt` / `imagePick.at`)이 그 뒤 시각이 될
+    때까지 네이버·티스토리 폴러(`listPending*Requests`)와 텔레그램 발행 콜백(naver/tistory/blogspot)이 그 원고를 집지
+    않는다(콜백은 "수정 반영 진행 중 - 잠시 후 다시 누르세요"). 10분 넘으면 stale로 보고 막지 않고 경고 알림 후 진행한다.
+  - **후보 이미지 클릭 교체**(2026-10-07): 뷰어 후보 썸네일을 누르면 그 자리(슬롯)만 바뀐다. 경로: Pages Function
+    `/api/image-pick` → `image-pick.yml`(repository_dispatch `image_pick`) → `applyImagePickCli.ts`/`applyImagePick.ts`.
+    **후보 URL은 DB `imageCandidates`에서 번호로 찾고 클라이언트 URL은 신뢰하지 않으며**, 뷰어가 본 채택본(`fromUrl`)이
+    지금과 다르면 중단한다. 내려받기(`defaultFetchImage`, referer=출처) → 크기·형식 검사 → 긴 세로 자르기 → Storage 같은
+    경로 upsert → `metadata.images[슬롯]`·`imageCandidates.picked`·manifest → 페이지 재배포. 캡션은 그대로(뷰어에서 수정).
+    **원고 준비 재실행·완료 알림 재발송 없음.** 실패(403·소멸·너무 작음)는 manifest(`imagePick`)와 텔레그램에 남는다.
+    이미 발행된 글에는 반영되지 않는다. 텔레그램 `🖼 이미지 수정`(`N번 후보M` 등 **답장형 재수집 → 원고 준비 재실행**)은
+    후보가 다 마음에 안 들 때의 대체 수단으로 그대로 있다.
   - 임시저장은 쓰지 않는다. 네이버 임시저장 글은 다시 열 때 레이어 팝업이 떠 흐름을 꼬았고,
     Blogspot 초안은 발행 버튼이 "이미 올라가 있음"에 막혀 매번 수동 공개가 필요했다.
   - **자동 재시도는 없다.** 실패하면 버튼이 `(재시도)`로 되살아난다 - 눌러야 다시 돈다.

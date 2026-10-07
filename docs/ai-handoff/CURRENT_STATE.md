@@ -1,6 +1,16 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-06 (Asia/Seoul)
+기준일: 2026-10-07 (Asia/Seoul)
+
+## 2026-10-07 — 원고뷰어 개선 (브랜치 `feat/viewer-refine`, 워크트리 `viewer-refine/`, 지시서 `VIEWER-REFINE-2026-10.md`)
+
+**상태: 코드·테스트 완료(커밋됨, push 전). push·배포·실측 1건은 승인 대기.**
+
+- **§3 후보 클릭 교체(최우선)**: 후보 썸네일 클릭 → `POST /api/image-pick`(Access JWT·Origin 검증, `imagePickApi.ts`) → `repository_dispatch(image_pick)` → `image-pick.yml` → `applyImagePickCli.ts`. 순수 로직은 `applyImagePick.ts`(후보 해석·fromUrl 경합·파일 검사·picked 이동·실패 기록, 의존성 주입). **원고 준비 재실행·완료 알림 없음**, 그 슬롯만 치환. 후보 URL은 DB에서 번호로 찾는다(클라이언트 URL 불신). 캡션은 유지(뷰어 안내). 실패는 `manifest.imagePick`(뷰어에 사유·대체 수단 표시)과 텔레그램. 발행 여부(`publications.status=published`)는 CLI가 판단해 알린다 - **뷰어는 발행 여부를 몰라 확인창 경고를 항상 띄운다**(지시서는 발행된 job에만이라 했으나 manifest에 발행 정보가 없어 항상 표시로 대체).
+- **§2 저장은 저장만**: 확인창·토스트·배지·결과 문구를 "저장"으로(버튼도 `💾 수정본 저장`). 뷰어 🟠 발행 버튼·`submitPublish` 제거, 트랙별 "발행은 텔레그램의 … 버튼으로만" 안내(`copy.hint`). `publishApi`/`publish-request.yml`/`publishRequestCli`는 코드만 유지. **가드**: `viewerEditGuard.ts` - `viewerEditPendingAt`(반영 접수)·`imagePickPendingAt`(교체 접수)이 완료 기록보다 늦으면 진행 중. 네이버·티스토리 폴러 목록과 텔레그램 발행 콜백(naver/tistory/blogspot)이 건너뛰고/거부, 10분 넘으면 stale → `staleEditReport.ts`가 경고 알림 + 표식 해제 후 진행. 접수 후 아무것도 못 쓰고 실패하면 표식을 바로 푼다.
+- **§1 제목 편집**: 키 `title` - 뷰어(`.doc-title` 수정 모드 편집·한 줄·안내)·`editApi.KEY_RE`·`VIEWER_EDIT_KEY_RE`·`applyViewerEdits`(manifest 제목과 대조, 비움·200자 초과 건너뜀)·`applyViewerEditRequest`(`updateArticleTitle` → final article 행, manifest 동기화). slug·검색설명·폴더명은 그대로, 이미 발행된 글엔 소급 안 됨(뷰어 안내).
+- **검증**: `test:viewer-image-pick`(신규)·`test:viewer-image-pick-api`(신규)·`test:viewer-edits`·`test:viewer-edit-api`·`test:viewer-layout`(Chromium)·`test:manuscript-track-pages`·`test:viewer-copy`·`test:viewer-publish-api`·`test:naver-queue`·`test:tistory-queue`·`test:tistory-poll`, 텔레그램 콜백 가드(격리 실행)·`tsc` 통과. `test:telegram-bot` 전체는 **main에서도** Supabase 자격증명이 없으면 이미지 수정 답장 구간에서 네트워크 오류로 멈춘다(내 변경과 무관).
+- **남은 것(승인 필요)**: push·배포, `image-pick.yml`은 Pages Function 배포(wrangler)와 같이 나가야 동작, 완료 기준 §5-3 **실측 1건**(후보 클릭 → 1~2분 내 슬롯 교체, 원고 준비 재실행 없음), 완료 기준 §5-1·2·4의 실서비스 확인. `image-pick.yml`은 러너에 Chromium·Claude CLI를 깔아 건당 1~2분이 걸린다(긴 세로 후보 자르기용 - 드문 경로라 느리면 조건부 설치로 줄일 수 있다). 개편3(kscene)과 `renderManuscriptPage.ts`가 겹치므로 **개편3 시작 전 병합 권장**.
 
 ## 2026-10-06 — Serper 재가동·계측 (브랜치 `feat/serper-revival`, 워크트리 `serper-revival/`, 지시서 `SERPER-REVIVAL-2026-10.md`)
 

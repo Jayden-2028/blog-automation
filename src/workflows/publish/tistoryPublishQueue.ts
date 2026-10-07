@@ -13,6 +13,8 @@
 //                                         ├ 성공/실패  -> finishTistoryPublish()
 //                                         └ 로그인 풀림 -> deferTistoryPublish()  (재로그인 후 자동 재개)
 
+import { filterEditPending } from "../manuscripts/viewerEditGuard.js";
+import type { EditGuardOptions } from "../manuscripts/viewerEditGuard.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
@@ -58,7 +60,7 @@ export function readTistoryRequest(job: ArticleJobRow): TistoryPublishRequest | 
   };
 }
 
-export type TistoryQueueOptions = {
+export type TistoryQueueOptions = EditGuardOptions & {
   mergeMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
   listRecentJobs?: (limit?: number) => Promise<ArticleJobRow[]>;
   now?: () => Date;
@@ -187,13 +189,16 @@ export async function listPendingTistoryRequests(options: TistoryQueueOptions = 
   const listRecentJobs = options.listRecentJobs ?? ((limit) => ArticleJobRepository.listRecent(limit));
   const now = options.now ?? (() => new Date());
   const jobs = await listRecentJobs(100);
-  return jobs
-    .filter((job) => {
+  // 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c).
+  return filterEditPending(
+    jobs.filter((job) => {
       const request = readTistoryRequest(job);
       if (!request) return false;
       if (request.status === "requested") return true;
       return request.status === "deferred" && !isDeferredExpired(request, now(), options.deferredMaxDays);
-    })
+    }),
+    { ...options, nowMs: options.nowMs ?? now().getTime() }
+  )
     .sort((a, b) => {
       const at = readTistoryRequest(a)?.requestedAt ?? "";
       const bt = readTistoryRequest(b)?.requestedAt ?? "";

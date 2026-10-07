@@ -144,7 +144,10 @@ async function main(): Promise<void> {
   assert(untranslated.ok && validateTranslation({ koreanBody: KO_BODY, parsed: untranslated.parsed }).some((e) => e.includes("한글")), "번역 안 된 한글이 남으면 거부");
   const hangulTitle = parseTranslationOutput(output(EN_BODY, "티머니 Guide"));
   assert(hangulTitle.ok && validateTranslation({ koreanBody: KO_BODY, parsed: hangulTitle.parsed }).some((e) => e.includes("제목")), "한글 제목 거부");
-  console.log("  ✅ 계약 검증(마커 개수·획득 방식·링크·한글 잔존·제목)");
+  // 마커 설명이 한글 그대로면 캡션·alt가 한글로 발행된다(2026-10-07 실측 - 첫 발행 글 캡션 5개 전부).
+  const koMarker = parseTranslationOutput(output(EN_BODY.replace(/\[IMAGE: A subway[^\]]*\]/, "[IMAGE: 지하철 개찰구에서 카드를 찍는 사람 — 웹 검색]")));
+  assert(koMarker.ok && validateTranslation({ koreanBody: KO_BODY, parsed: koMarker.parsed }).some((e) => e.includes("설명이 한글")), "한글 마커 설명 거부");
+  console.log("  ✅ 계약 검증(마커 개수·획득 방식·링크·한글 잔존·제목·한글 마커 설명)");
 
   // ---- 프롬프트 ----
   const prompt = buildTranslationPrompt({ keyword: "k", koreanTitle: "제목", koreanSearchDescription: null, koreanBody: KO_BODY, koreanTags: ["티머니"], guide: "GUIDE-TEXT" });

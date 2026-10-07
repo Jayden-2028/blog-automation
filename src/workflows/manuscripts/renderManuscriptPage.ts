@@ -23,27 +23,28 @@
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import { topicTrack } from "./manuscriptManifest.js";
-import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord } from "./manuscriptManifest.js";
+import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord, ImagePickRecord } from "./manuscriptManifest.js";
 import { DEFAULT_TRACK } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 
 /**
  * 페이지 머리말·사이드바 문구. 엔터는 개편 전 문구 그대로다.
- * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 🟠 티스토리 발행 버튼(뷰어·텔레그램)으로 올리므로 안내 문구가 엔터와 다르다.
+ * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 텔레그램의 🟠 티스토리 발행 버튼으로 올리므로 안내 문구가 엔터와 다르다.
+ * 발행 진입점은 텔레그램 버튼 하나다(2026-10-07) - 뷰어에는 발행 버튼이 없고 `hint`만 안내한다.
  */
 // pen/penSoft는 강조색(--pen, --pen-soft)이다. 트랙을 한눈에 구분하려고 페이지마다 다르게 둔다(2026-10-05 사용자 요청):
 // 엔터(네이버용) 다크 그린, 사회 네이비. 사용설명서는 기존 오렌지를 유지한다.
-const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: string; pen: string; penSoft: string }> = {
+const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: string; hint: string; pen: string; penSoft: string }> = {
   entertainment: {
-    title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행",
+    title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행", hint: "발행은 텔레그램의 🟢 네이버 발행 버튼으로만 됩니다",
     pen: "#1B5E3A", penSoft: "#E4F0E8",
   },
   social: {
-    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 🟠 티스토리 발행 버튼으로 발행",
+    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 텔레그램의 🟠 티스토리 발행 버튼으로 발행", hint: "발행은 텔레그램의 🟠 티스토리 발행 버튼으로만 됩니다",
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
-    title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행",
+    title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
     pen: "#E8590C", penSoft: "#FDF0E6",
   },
 };
@@ -85,6 +86,8 @@ type PageTopic = {
   charCount: number;
   /** 마지막 "수정본 반영" 결과(2026-10-03). 없으면 null. */
   viewerEdit: ViewerEditRecord | null;
+  /** 마지막 후보 클릭 교체 결과(2026-10-07). 없으면 null. */
+  imagePick: ImagePickRecord | null;
   // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
   // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
@@ -123,6 +126,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     imageCandidates: m.imageCandidates ?? {},
     charCount: m.body.replace(/\s/g, "").length,
     viewerEdit: m.viewerEdit ?? null,
+    imagePick: m.imagePick ?? null,
   };
 }
 
@@ -270,6 +274,20 @@ export function renderManuscriptPage(
   .candgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:8px}
   .cand img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;border:1px solid #ddd;background:#f3f3f3}
   .cand.picked img{border:2px solid #2e7d32}
+  .cand .cand-pick{display:block;width:100%;padding:0;border:0;background:none;cursor:pointer;position:relative}
+  .cand .cand-pick:hover img{outline:2px solid var(--pen);outline-offset:1px}
+  .cand .cand-pick:disabled{cursor:progress;opacity:.55}
+  .doc-title.editable[contenteditable="true"]{outline-offset:2px}
+  .title-row{display:flex;align-items:flex-start;gap:8px}
+  .title-row .doc-title{flex:1;min-width:0}
+  .title-row .title-edit{flex:none;margin-top:3px}
+  .edited-badge.unsaved{font-weight:700;background:var(--warn-soft,#FFF4D6);padding:4px 8px;border-radius:6px}
+  .title-note{display:none;font-size:12px;color:var(--muted,#666);margin:0 0 6px}
+  body.editing .title-note,.title-note.on{display:block}
+  .pub-hint{font-size:12px;color:var(--muted,#666);align-self:center}
+  .cand-note{margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted,#666)}
+  .cand-note.bad{color:#b3261e}
+  .cand-note.busy{color:var(--pen);font-weight:600}
   .candlab{margin-top:2px;line-height:1.4}
   .missing{border:1px dashed var(--pen);border-radius:8px;background:var(--pen-soft);
            padding:11px 14px;font-size:12.5px;color:var(--pen)}
@@ -319,6 +337,7 @@ export function renderManuscriptPage(
     var TODAY = ${safeJson(todayKst)};
     // 이 페이지의 트랙. 사회(social)만 🟠 티스토리 발행 버튼이 붙는다(TISTORY_AUTO_PUBLISH_DESIGN.md §5).
     var TRACK = ${safeJson(track)};
+    var PUBLISH_HINT = ${safeJson(copy.hint)};
     var wrap = document.getElementById("wrap");
     var toastEl = document.getElementById("toast");
 
@@ -657,16 +676,88 @@ export function renderManuscriptPage(
     function candidatesHtml(topic, n) {
       var list = (topic.imageCandidates || {})[String(n)] || [];
       if (list.length === 0) return "";
+      var busy = pickBusy(topic, n);
       var items = list.map(function (c) {
         var size = c.width && c.height ? c.width + "×" + c.height : "";
-        return '<div class="cand' + (c.picked ? ' picked' : '') + '">'
-          + '<a href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">'
-          + '<img src="' + esc(c.url) + '" alt="후보 ' + c.number + '" loading="lazy" referrerpolicy="no-referrer"></a>'
+        // 썸네일 클릭 = 이 자리를 그 후보로 교체(2026-10-07). 원본 보기는 아래 별도 링크라 클릭과 섞이지 않는다.
+        // 이미 채택된 후보는 누를 수 없다. 교체 요청이 가 있는 동안엔 모두 잠근다(같은 자리에 두 요청이 겹치지 않게).
+        var img = '<img src="' + esc(c.url) + '" alt="후보 ' + c.number + '" loading="lazy" referrerpolicy="no-referrer">';
+        var thumb = c.picked
+          ? img
+          : '<button type="button" class="cand-pick" data-slot="' + n + '" data-cand="' + c.number + '"'
+            + (busy ? ' disabled' : '') + ' title="클릭하면 ' + n + '번 이미지를 이 후보로 교체합니다">' + img + '</button>';
+        return '<div class="cand' + (c.picked ? ' picked' : '') + '">' + thumb
           + '<div class="candlab">후보 ' + c.number + (c.picked ? ' ✅ 채택' : '') + (size ? ' · ' + esc(size) : '')
+          + ' · <a href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">원본 보기</a>'
           + ' · <a href="' + esc(c.sourcePage) + '" target="_blank" rel="noopener noreferrer">출처</a></div></div>';
       }).join("");
-      return '<details class="cands" open><summary>후보 ' + list.length + '장 — 바꾸려면 이미지 수정에서 <code>'
-        + n + '번 후보N</code></summary><div class="candgrid">' + items + '</div></details>';
+      return '<details class="cands" open><summary>후보 ' + list.length + '장 — 마음에 드는 후보를 클릭하면 이 자리 이미지가 교체됩니다</summary>'
+        + '<div class="candgrid">' + items + '</div>' + pickNoteHtml(topic, n, busy) + '</details>';
+    }
+
+    /** 자리별 교체 요청 표식(localStorage). 값은 {at, from} - from은 보낼 때 본 채택 이미지 주소. */
+    function pickKey(jobId, n) { return "image-pick-sent:" + jobId + ":" + n; }
+    function loadPickSent(jobId, n) {
+      try { var raw = localStorage.getItem(pickKey(jobId, n)); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    }
+    function markPickSent(jobId, n, from) {
+      try { localStorage.setItem(pickKey(jobId, n), JSON.stringify({ at: new Date().toISOString(), from: from })); } catch (e) {}
+    }
+    function clearPickSent(jobId, n) { try { localStorage.removeItem(pickKey(jobId, n)); } catch (e) {} }
+
+    /**
+     * 그 자리가 교체 처리 중인가. 서버가 끝낸 기록(imagePick.at, 성공이든 실패든)이 보낸 시각 뒤이거나, 채택 이미지 주소가
+     * 보낼 때와 달라졌으면(= 재배포로 교체가 보임) 표식을 지운다. 10분이 지나도 안 풀리면 포기하고 푼다.
+     */
+    function pickBusy(topic, n) {
+      var sent = loadPickSent(topic.jobId, n);
+      if (!sent) return false;
+      var rec = topic.imagePick;
+      var shots = imagesFor(topic, n);
+      var nowUrl = shots[0] && shots[0].url ? shots[0].url : "";
+      var finished = rec && rec.index === n && rec.at >= sent.at;
+      if (finished || nowUrl !== sent.from || Date.now() - Date.parse(sent.at) > 600000) { clearPickSent(topic.jobId, n); return false; }
+      return true;
+    }
+
+    function pickNoteHtml(topic, n, busy) {
+      if (busy) return '<div class="cand-note busy">⏳ 교체 중 — 1~2분 뒤 새로고침하세요</div>';
+      var rec = topic.imagePick;
+      if (!rec || rec.index !== n) return "";
+      if (rec.status === "failed") {
+        return '<div class="cand-note bad">⚠️ 마지막 교체 실패(후보 ' + rec.candidateNumber + '): ' + esc(rec.error || "알 수 없는 오류")
+          + ' — 다른 후보를 고르거나, 후보가 다 마음에 안 들면 텔레그램 🖼 이미지 수정으로 다시 수집하세요.</div>';
+      }
+      return '<div class="cand-note">✅ 후보 ' + rec.candidateNumber + '번으로 교체됨 · 캡션은 그대로입니다 — 위 캡션을 확인하고 필요하면 수정하세요.'
+        + (rec.alreadyPublished ? ' <b>이미 발행된 글에는 반영되지 않았습니다.</b>' : '') + '</div>';
+    }
+
+    function submitPick(topic, n, candNumber, btn) {
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 교체할 수 있습니다"); return; }
+      if (pickBusy(topic, n)) { toast(n + "번 이미지 교체가 진행 중입니다 — 1~2분 뒤 새로고침하세요"); return; }
+      var shots = imagesFor(topic, n);
+      var from = shots[0] && shots[0].url ? shots[0].url : "";
+      if (!window.confirm(n + "번 이미지를 후보 " + candNumber + "번으로 교체합니다.\\n캡션은 그대로 남으니 교체 후 확인해 주세요.\\n이미 발행된 글에는 반영되지 않습니다. 계속할까요?")) return;
+      btn.disabled = true;
+      function fail(msg) { btn.disabled = false; toast(msg); }
+      fetch("/api/image-pick", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobId: topic.jobId, index: n, candidateNumber: candNumber, fromUrl: from }),
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (res.status === 202) {
+            markPickSent(topic.jobId, n, from);
+            toast("교체 요청을 보냈습니다 — 1~2분 뒤 새로고침하세요");
+            render(topic.jobId);
+            return;
+          }
+          fail((body && body.error) || ("교체 요청 실패(" + res.status + ")"));
+        });
+      }).catch(function () {
+        fail("교체 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+      });
     }
 
     /** 캡션 수정의 localStorage 키(자리 번호별). 본문 수정(블록 인덱스 키)과 같은 객체에 산다. */
@@ -747,6 +838,7 @@ export function renderManuscriptPage(
 
     /** 키가 가리키는 지금 원고의 값(수정 전). 모르는 키면 null. */
     function originalFor(topic, key) {
+      if (key === "title") return topic.title || topic.keyword;
       if (key.indexOf("cap:") === 0) {
         var n = Number(key.slice(4));
         var imgBlock = imageBlocks(topic)[n - 1];
@@ -796,6 +888,7 @@ export function renderManuscriptPage(
 
     /** 키를 사람이 읽는 이름으로("3:h" -> "3번 블록 소제목"). */
     function editLabel(key) {
+      if (key === "title") return "제목";
       if (key.indexOf("cap:") === 0) return "이미지 " + key.slice(4) + " 캡션";
       var parts = key.split(":");
       var n = Number(parts[0]) + 1;
@@ -806,8 +899,8 @@ export function renderManuscriptPage(
     function viewerEditHtml(topic) {
       var rec = topic.viewerEdit;
       if (!rec || !rec.appliedAt) return "";
-      var h = '<div class="edit-result"><b>📤 뷰어 수정 반영</b> ' + esc(kstTime(rec.appliedAt))
-        + ' · ' + (rec.applied || []).length + '곳 반영';
+      var h = '<div class="edit-result"><b>💾 뷰어 수정 저장</b> ' + esc(kstTime(rec.appliedAt))
+        + ' · ' + (rec.applied || []).length + '곳 저장';
       var skipped = rec.skipped || [];
       if (skipped.length > 0) {
         h += ' · <span class="bad">' + skipped.length + '곳 건너뜀</span><ul>'
@@ -820,12 +913,12 @@ export function renderManuscriptPage(
     function submitEdits(topic, btn) {
       var pending = pendingEdits(topic, loadEdits(topic.jobId));
       var count = Object.keys(pending).length;
-      if (count === 0) { toast("반영할 수정이 없습니다"); return; }
-      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 반영할 수 있습니다"); return; }
-      if (!window.confirm("고친 " + count + "곳을 발행 원고에 반영합니다.\\n1~2분 뒤 페이지가 새로 배포됩니다. 계속할까요?")) return;
+      if (count === 0) { toast("저장할 수정이 없습니다"); return; }
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 저장할 수 있습니다"); return; }
+      if (!window.confirm("고친 " + count + "곳을 저장합니다.\\n발행되지 않습니다 — 발행은 텔레그램 버튼으로만 됩니다.\\n(저장본이 화면에 보이기까지 1~2분) 계속할까요?")) return;
       var label = btn.textContent;
       btn.disabled = true;
-      btn.textContent = "📤 보내는 중…";
+      btn.textContent = "💾 보내는 중…";
       function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
       fetch("/api/manuscript-edit", {
         method: "POST",
@@ -836,48 +929,15 @@ export function renderManuscriptPage(
         return res.json().catch(function () { return {}; }).then(function (body) {
           if (res.status === 202) {
             markSent(topic.jobId);
-            toast("반영 요청을 보냈습니다 — 1~2분 뒤 새로고침하세요");
+            toast("저장 요청을 보냈습니다 — 발행되지 않습니다. 1~2분 뒤 새로고침하세요");
             render(topic.jobId);
             return;
           }
-          fail((body && body.error) || ("반영 실패(" + res.status + ")"));
+          fail((body && body.error) || ("저장 실패(" + res.status + ")"));
         });
       }).catch(function () {
         // Access 로그인이 만료되면 로그인 화면으로 돌려보내져(다른 출처) fetch 자체가 실패한다.
-        fail("반영 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
-      });
-    }
-
-    /**
-     * 🟠 티스토리 발행(사회 트랙, 2026-10-06). 텔레그램 버튼과 **같은 큐**로 간다 - 둘 다 눌러도 한 번만 올라간다.
-     * 반영 안 된 수정이 있으면 호출부가 버튼을 막는다(옛 글이 올라가는 사고 방지) - 여기서도 한 번 더 본다.
-     */
-    function submitPublish(topic, btn) {
-      var pending = Object.keys(pendingEdits(topic, loadEdits(topic.jobId) || {})).length;
-      if (pending > 0) { toast("먼저 📤 수정본 반영을 눌러주세요 (" + pending + "곳 미반영)"); return; }
-      if (loadSent(topic.jobId)) { toast("수정본 반영이 끝날 때까지 기다렸다가(1~2분) 새로고침 후 눌러주세요"); return; }
-      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 발행할 수 있습니다"); return; }
-      if (!window.confirm("이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 텔레그램(사회 봇)으로 결과를 알립니다. 계속할까요?")) return;
-      var label = btn.textContent;
-      btn.disabled = true;
-      btn.textContent = "🟠 요청 중…";
-      function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
-      fetch("/api/publish-request", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobId: topic.jobId, channel: "tistory" }),
-      }).then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (body) {
-          if (res.status === 202) {
-            btn.textContent = "🟠 발행 요청됨";
-            toast("발행을 요청했습니다 — 결과는 텔레그램으로 옵니다");
-            return;
-          }
-          fail((body && body.error) || ("발행 요청 실패(" + res.status + ")"));
-        });
-      }).catch(function () {
-        fail("발행 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+        fail("저장 요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
       });
     }
 
@@ -910,8 +970,11 @@ export function renderManuscriptPage(
         h += '<a class="src-badge" href="' + esc(topic.sourceUrl || "#") + '" target="_blank" rel="noopener">'
           + '📷 인스타 소스</a>';
       }
-      h += '<div class="doc-title' + (topic.sourceTag === "instagram" ? " ig" : "") + '">'
-        + esc(topic.title || topic.keyword) + '</div>';
+      // 제목은 편집 키 "title"을 쓴다(2026-10-07). 수정 모드(✏️)에서 글자를 직접 고친다 - 한 줄이라 Enter는 막는다.
+      var shownTitle = edits && edits.title != null ? edits.title : (topic.title || topic.keyword);
+      h += '<div class="title-row"><div class="doc-title editable' + (topic.sourceTag === "instagram" ? " ig" : "") + '" data-title="1">'
+        + esc(shownTitle) + '</div><button type="button" class="mini title-edit">수정</button></div>';
+      h += '<div class="title-note' + (edits && edits.title != null ? ' on' : '') + '">제목 변경은 저장 후 발행하는 글부터 적용됩니다 — 이미 발행된 글의 제목은 바뀌지 않습니다.</div>';
       h += '<div class="doc-sub">' + sub.join(" · ") + '</div>';
       h += viewerEditHtml(topic);
 
@@ -929,7 +992,7 @@ export function renderManuscriptPage(
       }
 
       h += '<div class="meta-grid">';
-      h += metaRow("제목", topic.title || topic.keyword);
+      h += metaRow("제목", shownTitle);
       if (topic.searchDescription) h += metaRow("검색 설명", topic.searchDescription);
       if (topic.slug) h += metaRow("슬러그", topic.slug);
       if (topic.tags && topic.tags.length) h += metaRow("태그", topic.tags.join(", "));
@@ -942,20 +1005,16 @@ export function renderManuscriptPage(
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
       if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
-      // 사회 트랙만: 티스토리 발행. 반영 안 된 수정이 있으면 누를 수 없다 - 발행은 DB 원고(마지막 반영본)를 읽는다.
-      if (TRACK === "social") {
-        var blocked = pendingCount > 0 || !!sentAt;
-        h += '<button class="btn primary" id="publish-tistory"' + (blocked ? ' disabled title="먼저 📤 수정본 반영을 누르고 반영이 끝난 뒤 발행하세요"' : '') + '>🟠 티스토리 발행</button>';
-      }
-      // 수정은 localStorage에만 남는다 - 발행 버튼은 DB 원고를 읽으므로 반영되지 않는다. 그 사실을 숨기면
-      // 뷰어에서 고치고 발행 버튼을 눌렀는데 옛 글이 올라가는 사고가 난다.
+      // 수정은 localStorage에만 남는다 - 💾 저장을 눌러야 DB 원고에 들어간다. 저장은 저장일 뿐 발행하지 않는다(2026-10-07):
+      // 발행 진입점은 텔레그램 버튼 하나다. 저장하고 곧바로 발행 버튼을 누르는 경합은 서버가 막는다(viewerEditGuard).
       if (edits) {
-        h += '<button class="btn primary" id="submit-edits">📤 수정본 반영(' + pendingCount + '곳)</button>';
+        h += '<button class="btn primary" id="submit-edits">💾 수정본 저장(' + pendingCount + '곳)</button>';
         h += '<button class="btn" id="revert">↩️ 원본으로</button>';
-        h += '<span class="edited-badge">' + (sentAt
-          ? '반영 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 반영본이 보입니다'
-          : '이 브라우저에서 수정됨 · 반영 전까지 복사에만 적용(발행 버튼 미반영)') + '</span>';
+        h += '<span class="edited-badge' + (sentAt ? '' : ' unsaved') + '">' + (sentAt
+          ? '저장 요청 ' + esc(kstTime(sentAt)) + ' — 1~2분 뒤 새로고침하면 저장본이 보입니다(발행되지 않음)'
+          : '⚠️ 저장 안 됨 — 💾 저장해야 발행에 반영됩니다 · 저장 전까지 복사에만 적용') + '</span>';
       }
+      h += '<span class="pub-hint">' + esc(PUBLISH_HINT) + '</span>';
       h += '</div>';
 
       if (blocks.length > 0) {
@@ -1009,6 +1068,7 @@ export function renderManuscriptPage(
     function currentTexts() {
       var texts = {};
       document.querySelectorAll(".editable").forEach(function (el) {
+        if (el.dataset.title) { texts.title = el.innerText.replace(/\\s*\\n+\\s*/g, " ").trim(); return; }
         var key = el.dataset.blockIndex + (el.dataset.field ? ":" + el.dataset.field : "");
         texts[key] = el.innerText;
       });
@@ -1046,20 +1106,24 @@ export function renderManuscriptPage(
         });
       });
 
+      wrap.querySelectorAll(".cand-pick").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          submitPick(topic, Number(btn.getAttribute("data-slot")), Number(btn.getAttribute("data-cand")), btn);
+        });
+      });
+
       var promptBtn = document.getElementById("c-prompt");
       if (promptBtn) promptBtn.addEventListener("click", function () { copyText(promptPack(topic)); });
 
       var dlBtn = document.getElementById("dl-images");
       if (dlBtn) dlBtn.addEventListener("click", function () { downloadImages(topic, dlBtn); });
 
-      var pubBtn = document.getElementById("publish-tistory");
-      if (pubBtn) pubBtn.addEventListener("click", function () { submitPublish(topic, pubBtn); });
-
       var editing = false;
       var editBtn = document.getElementById("edit-toggle");
       editBtn.addEventListener("click", function () {
         editing = !editing;
         editBtn.classList.toggle("active", editing);
+        document.body.classList.toggle("editing", editing);
         editBtn.textContent = editing ? "✅ 편집 종료" : "✏️ 수정";
         document.querySelectorAll(".editable").forEach(function (el) {
           el.setAttribute("contenteditable", editing ? "true" : "false");
@@ -1067,6 +1131,28 @@ export function renderManuscriptPage(
         // 캡션 수정(cap:N)을 지우지 않도록 기존 값 위에 본문 텍스트를 덮어쓴다.
         if (!editing) { saveEdits(topic.jobId, Object.assign({}, loadEdits(topic.jobId) || {}, currentTexts())); render(topic.jobId); }
       });
+
+      // 제목 옆 수정 버튼(2026-10-08) - 캡션 수정과 같다: 누르면 제목만 편집 상태가 되고, 다시 누르면 수정으로 남긴다(저장은 💾로).
+      var titleBtn = wrap.querySelector(".title-edit");
+      var titleBox = wrap.querySelector(".doc-title[data-title]");
+      if (titleBtn && titleBox) {
+        titleBtn.addEventListener("click", function () {
+          if (titleBox.getAttribute("contenteditable") !== "true") {
+            titleBox.setAttribute("contenteditable", "true");
+            titleBox.classList.add("editing");
+            titleBox.focus();
+            titleBtn.textContent = "확인";
+            document.querySelector(".title-note").classList.add("on");
+            return;
+          }
+          var merged = loadEdits(topic.jobId) || {};
+          merged.title = titleBox.innerText.replace(/\\s*\\n+\\s*/g, " ").trim();
+          saveEdits(topic.jobId, merged);
+          render(topic.jobId);
+        });
+      }
+      var titleEl = wrap.querySelector(".doc-title[data-title]");
+      if (titleEl) titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") ev.preventDefault(); });
 
       var submitBtn = document.getElementById("submit-edits");
       if (submitBtn) submitBtn.addEventListener("click", function () { submitEdits(topic, submitBtn); });

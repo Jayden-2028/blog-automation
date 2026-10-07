@@ -36,6 +36,7 @@ import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } 
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
+import { readEditPending } from "../workflows/manuscripts/viewerEditGuard.js";
 import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.js";
 import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
 import { readJobManuscriptImages } from "../workflows/manuscripts/manuscriptManifest.js";
@@ -199,6 +200,8 @@ export type HandlePublishDecisionOutcome =
   | { status: "not_wired"; action: PublishDecisionAction }
   /** 요청 채널이 job 트랙과 맞지 않아 거부했다(엔터→티스토리, 사회→네이버·블로그스팟 등). 버튼은 건드리지 않는다. */
   | { status: "channel_mismatch"; action: PublishDecisionAction }
+  /** 뷰어 수정 반영·이미지 교체가 진행 중이라 큐에 넣지 않았다(2026-10-07). 버튼은 되살려 잠시 뒤 다시 누르게 한다. */
+  | { status: "edit_pending"; action: PublishDecisionAction }
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
@@ -979,6 +982,22 @@ export class TelegramBot {
       }
     }
 
+    // 수정 반영·이미지 교체가 진행 중이면 발행을 받지 않는다(2026-10-07). 발행은 DB 원고·이미지를 읽으므로 지금 누르면
+    // 반영 직전의 옛 글이 나간다. 10분 넘게 진행 중이면(stale) 반영이 죽은 것으로 보고 막지 않는다.
+    if (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot") {
+      if (readEditPending(job.metadata).state === "pending") {
+        return {
+          outcome: { status: "edit_pending", action: parsed.action },
+          message: [
+            "⏳ <b>수정 반영 진행 중 — 잠시 후 다시 누르세요</b>",
+            "",
+            `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+            "뷰어에서 보낸 수정·이미지 교체가 아직 저장되는 중입니다(보통 1~2분). 발행은 접수하지 않았습니다.",
+          ].join("\n"),
+        };
+      }
+    }
+
     // 2026-09-22 네이버 재개로 버튼이 3개가 됐다. **분기가 없으면 어떤 버튼을 눌러도 Blogspot이
     // 발행된다** - 동작별로 확실히 갈라 놓는다.
     if (parsed.action === "naver") {
@@ -1009,7 +1028,7 @@ export class TelegramBot {
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
           queued.queued
-            ? "맥미니가 켜져 있으면 곧 올라갑니다. 뷰어에서 고친 내용은 '📤 수정본 반영'을 누른 것까지만 들어갑니다. 완료되면 주소를 보내드립니다."
+            ? "맥미니가 켜져 있으면 곧 올라갑니다. 뷰어에서 고친 내용은 '💾 수정본 저장'을 누른 것까지만 들어갑니다. 완료되면 주소를 보내드립니다."
             : escapeTelegramHtml(queued.reason ?? ""),
         ].join("\n"),
       };
@@ -1465,6 +1484,7 @@ export class TelegramBot {
           return { text: action === "tistory" ? "🟠 예약됨" : "🟢 예약됨", callback_data: "noop" };
         case "not_wired":
         case "channel_mismatch":
+        case "edit_pending":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
           return null;
         default:

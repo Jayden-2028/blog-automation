@@ -1,7 +1,7 @@
 // 승인된 원고 1건을 **티스토리에 실제 발행**한다(TISTORY_AUTO_PUBLISH_DESIGN.md). publishJobToNaver.ts의
 // 티스토리 판 - 오케스트레이션은 같고 변환기·발행 수단만 다르다.
 //
-// 발행하는 글은 작성 단계 원고(=최종 원고, pickFinalArticle) 그대로다. 뷰어에서 "📤 수정본 반영"을 누른 수정은
+// 발행하는 글은 작성 단계 원고(=최종 원고, pickFinalArticle) 그대로다. 뷰어에서 "💾 수정본 저장"을 누른 수정은
 // articles.content에 먼저 쓰이므로(applyViewerEditRequest.ts) 여기서 별도 처리 없이 반영된다.
 //
 // 사회 트랙 전용 가공:

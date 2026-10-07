@@ -73,6 +73,58 @@ async function main(): Promise<void> {
   assert(twice.generate.length === 0, "마커가 이미 ai면 첫 생성 단계에 맡긴다");
   console.log("✅ 중복 생성 없음");
 
+  // 7) 영어본(사용설명서): 한글 subject는 캡션으로 나가지 않는다(2026-10-08 실측 - 영어 글
+  //    7자리 캡션이 전부 "…하는 장면"으로 발행됐다). 검색어·판정 기준은 그대로 살아 있어야 한다.
+  const EN_BODY = [
+    "Koreans use titles instead of first names.",
+    "[IMAGE: Two friends greeting each other and talking in Korea — 웹 검색]\n[IMAGE PROMPT: 한국 친구 인사]",
+    "At home, siblings speak differently.",
+    // 기획이 `웹 검색` 자리를 AI 생성으로 바꾼 경우 - 이때만 route.generate가 캡션을 정한다
+    // (마커와 기획이 같은 방식이면 첫 생성 단계가 마커 설명을 그대로 쓴다).
+    "[IMAGE: Siblings talking together in a Korean home — 웹 검색]\n[IMAGE PROMPT: 한국 가정 남매]",
+  ].join("\n\n");
+  const EN_PLAN: ImagePlan = {
+    summary: "한국어 호칭",
+    protagonist: "호칭",
+    slots: [
+      { index: 1, subject: "한국에서 두 친구가 인사하며 대화하는 장면", queries: ["한국 친구 인사"], acquisition: "search", recency: "any", changed: true, reason: "", caution: "실내 사진은 피한다" },
+      {
+        index: 2,
+        subject: "한국 가정에서 남매가 이야기하는 장면",
+        queries: ["photorealistic photograph of siblings talking in a Korean home, no text, no letters, 16:9"],
+        acquisition: "ai",
+        changed: true,
+        reason: "",
+        caution: "",
+      },
+    ],
+  };
+  const en = routeImagePlan(EN_PLAN, EN_BODY, [], { captionLanguage: "en" });
+  assert(en.subjects[1].subject === "", `영어본에서 한글 subject는 캡션으로 쓰지 않는다 (${JSON.stringify(en.subjects[1])})`);
+  assert(
+    en.subjects[1].caution?.includes("한국에서 두 친구가") && en.subjects[1].caution?.includes("실내 사진은 피한다"),
+    `찾을 대상과 기존 주의사항이 판정 기준에 남아야 한다 (${en.subjects[1].caution})`
+  );
+  assert(en.queries[1][0] === "한국 친구 인사", "검색어는 한국어 그대로 간다");
+  const enGen = en.generate.find((g) => g.index === 2);
+  assert(
+    enGen?.description === "Siblings talking together in a Korean home",
+    `생성 자리 캡션은 영어 마커 설명을 쓴다 (${enGen?.description})`
+  );
+  // 같은 기획을 한글 원고로 돌리면 예전 그대로다(회귀 방지).
+  const ko = routeImagePlan(EN_PLAN, EN_BODY, []);
+  assert(ko.subjects[1].subject === "한국에서 두 친구가 인사하며 대화하는 장면", "한글 원고는 subject를 그대로 쓴다");
+  assert(ko.generate.find((g) => g.index === 2)?.description === "한국 가정에서 남매가 이야기하는 장면", "한글 원고 생성 캡션은 subject");
+  // 영어 subject는 영어본에서도 캡션으로 쓴다(기획이 지시대로 영어로 썼을 때).
+  const enSubject = routeImagePlan(
+    { ...EN_PLAN, slots: [{ ...EN_PLAN.slots[0], subject: "Two friends greeting on a Seoul street" }] },
+    EN_BODY,
+    [],
+    { captionLanguage: "en" }
+  );
+  assert(enSubject.subjects[1].subject === "Two friends greeting on a Seoul street", "영어 subject는 그대로 쓴다");
+  console.log("✅ 영어본 - 한글 대상은 판정 기준으로만, 캡션은 영어");
+
   // 6) 인포그래픽 검증.
   assert(validateInfographicPrompt(INFOGRAPHIC) === null, "정상 프롬프트는 통과");
   assert(validateInfographicPrompt("정치자금법 위반 처벌 기준") !== null, "검색어 한 줄은 거부");

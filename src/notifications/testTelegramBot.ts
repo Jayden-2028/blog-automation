@@ -1259,6 +1259,37 @@ main().catch((error) => {
       assert(out.outcome.status === "channel_mismatch", `${jobTrack} job의 ${action} 요청은 거부해야 한다 (${JSON.stringify(out.outcome)})`);
       assert(touched === 0, `${jobTrack} job의 ${action} 요청이 큐/발행에 닿으면 안 된다`);
     }
+    // 수정 반영·이미지 교체가 진행 중이면 어느 채널이든 큐에 넣지 않는다(2026-10-07). 끝났거나 10분 넘게 묵었으면 통과한다.
+    for (const [action, track] of [["naver", {}], ["tistory", { track: "social" }], ["blogspot", { track: "kscene" }]] as const) {
+      const nowIso = new Date().toISOString();
+      const longAgo = new Date(Date.now() - 30 * 60_000).toISOString();
+      for (const [label, metadata, blocked] of [
+        ["viewerEdit 진행 중", { ...track, viewerEditPendingAt: nowIso }, true],
+        ["imagePick 진행 중", { ...track, imagePickPendingAt: nowIso }, true],
+        ["반영 완료", { ...track, viewerEditPendingAt: longAgo, viewerEdit: { appliedAt: nowIso } }, false],
+        ["10분 넘게 묵음(stale)", { ...track, viewerEditPendingAt: longAgo }, false],
+      ] as const) {
+        let touched = 0;
+        const bot = new TelegramBot({
+          botToken: "test-token",
+          chatId: CHAT_ID,
+          loadJobById: async () => ({ id: JOB, keyword: "경합", metadata }) as never,
+          publishToBlogspot: (async () => { touched += 1; return { ok: true, publicationId: 1, url: "https://b/x", isDraft: false, variantCreated: false, alreadyDone: false } as never; }) as never,
+          requestNaverPublish: async () => { touched += 1; return { queued: true }; },
+          requestTistoryPublish: async () => { touched += 1; return { queued: true }; },
+          sendMessage: async () => {},
+          answerCallbackQuery: async () => {},
+        } as never);
+        const out = await bot.handlePublishDecisionCallback(query(`publish:${action}:${JOB}`));
+        if (blocked) {
+          assert(out.outcome.status === "edit_pending" && touched === 0, `${action}/${label}: 큐·발행에 닿지 않고 거부해야 한다 (${JSON.stringify(out.outcome)})`);
+          assert(out.message.includes("다시 누르세요"), `${action}/${label}: 안내 문구`);
+        } else {
+          assert(out.outcome.status !== "edit_pending" && touched === 1, `${action}/${label}: 막지 않는다 (${JSON.stringify(out.outcome)})`);
+        }
+      }
+    }
+    console.log("✅ 수정 반영·이미지 교체 진행 중에는 발행 콜백을 거부한다(stale·완료면 통과)");
     // 맞는 조합은 통과한다.
     {
       let queued = 0;

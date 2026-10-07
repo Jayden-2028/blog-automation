@@ -158,6 +158,27 @@ async function main(): Promise<void> {
   }
   console.log("✅ 같은 수정을 다시 보내면 이미 반영됨으로 조용히 넘긴다");
 
+  // ⑨ 제목(2026-10-07) - 키 "title". 뷰어가 본 제목(manifest)과 대조하고, 한 줄로 접고, 비우거나 너무 길면 건너뛴다.
+  {
+    const base = { manifestBody: MANIFEST, imagePrompts: [], articleContent: ARTICLE, images: IMAGES, manifestTitle: "옛 제목" };
+    const ok = applyViewerEdits({ ...base, edits: { title: { from: "옛 제목", to: "새 제목\n둘째 줄" } } });
+    assert(ok.titleChanged && ok.title === "새 제목 둘째 줄" && ok.applied.includes("title"), `제목 반영·한 줄로 접기 (${JSON.stringify(ok.title)})`);
+    assert(!ok.articleChanged && ok.articleContent === ARTICLE, "제목 수정은 본문을 건드리지 않는다");
+    const stale = applyViewerEdits({ ...base, edits: { title: { from: "다른 제목", to: "새 제목" } } });
+    assert(!stale.titleChanged && stale.skipped[0]?.key === "title" && stale.title === "옛 제목", "from이 지금 제목과 다르면 건너뛴다");
+    const again = applyViewerEdits({ ...base, manifestTitle: "새 제목", edits: { title: { from: "옛 제목", to: "새 제목" } } });
+    assert(!again.titleChanged && again.skipped.length === 0, "이미 반영된 제목을 다시 보내면 조용히 넘긴다");
+    const empty = applyViewerEdits({ ...base, edits: { title: { from: "옛 제목", to: "  " } } });
+    assert(!empty.titleChanged && empty.skipped[0]?.reason.includes("비울"), "제목을 비울 수 없다");
+    const long = applyViewerEdits({ ...base, edits: { title: { from: "옛 제목", to: "가".repeat(201) } } });
+    assert(!long.titleChanged && long.skipped[0]?.reason.includes("너무 깁니다"), "너무 긴 제목은 건너뛴다");
+    const noTitle = applyViewerEdits({ manifestBody: MANIFEST, imagePrompts: [], articleContent: ARTICLE, images: IMAGES, edits: { title: { from: "a", to: "b" } } });
+    assert(!noTitle.titleChanged && noTitle.skipped.length === 1, "제목 정보가 없으면 건너뛴다");
+    const mixed = applyViewerEdits({ ...base, edits: { title: { from: "옛 제목", to: "새 제목" }, "0": { from: "도입 문단입니다.", to: "고친 도입입니다." } } });
+    assert(mixed.titleChanged && mixed.articleChanged && mixed.applied.length === 2, "제목과 본문을 함께 고칠 수 있다");
+  }
+  console.log("✅ 제목 - 반영·대조·한 줄·빈 값·길이·본문과 공존");
+
   // 요청 검증
   {
     let threw = false;
@@ -176,6 +197,7 @@ async function main(): Promise<void> {
     assert(threw, "모르는 키는 거부");
     const ok = parseViewerEditRequest(JSON.stringify({ jobId: "054bfe0b-1234-4abc-8def-0123456789ab", edits: { "cap:1": { from: "a", to: "b" } } }));
     assert(ok.edits["cap:1"].to === "b", "정상 요청은 통과");
+    assert(parseViewerEditRequest({ jobId: "054bfe0b-1234-4abc-8def-0123456789ab", edits: { title: { from: "a", to: "b" } } }).edits.title.to === "b", "title 키는 통과");
   }
   console.log("✅ 요청 검증 - jobId·키 형식");
 
@@ -205,6 +227,7 @@ async function main(): Promise<void> {
     const calls: string[] = [];
     let savedContent = "";
     let metaPatch: Record<string, unknown> = {};
+    const pendingPatches: Record<string, unknown>[] = [];
     let savedTopic: ManuscriptTopicEntry | null = null;
     let published: ManuscriptManifest | null = null;
 
@@ -225,7 +248,8 @@ async function main(): Promise<void> {
         },
         mergeJobMetadata: async (_id, patch) => {
           calls.push("metadata");
-          metaPatch = patch;
+          if ("viewerEditPendingAt" in patch) pendingPatches.push(patch);
+          else metaPatch = patch;
         },
         loadManifest: async () => ({ topics: [topic, other] }),
         saveTopic: async (t) => {
@@ -241,7 +265,13 @@ async function main(): Promise<void> {
     );
 
     assert(outcome.status === "applied", `반영돼야 한다 (${JSON.stringify(outcome)})`);
-    assert(calls.join(",") === "article:42,metadata,manifest,publish", `쓰는 순서 (${calls.join(",")})`);
+    // 접수 표식(viewerEditPendingAt)이 가장 먼저 - 발행 폴러·텔레그램 콜백이 반영 중인 원고를 집지 않게(2026-10-07).
+    assert(calls.join(",") === "metadata,article:42,metadata,manifest,publish", `쓰는 순서 (${calls.join(",")})`);
+    assert(pendingPatches.length === 1 && pendingPatches[0].viewerEditPendingAt === "2026-10-03T10:00:00.000Z", "접수 표식 시각");
+    assert(
+      (metaPatch.viewerEdit as { appliedAt: string }).appliedAt >= (pendingPatches[0].viewerEditPendingAt as string),
+      "완료 기록(appliedAt)이 접수 시각 이후라 가드가 풀린다"
+    );
     assert(savedContent.startsWith("고친 도입입니다.") && savedContent.endsWith("#태그1 #태그2"), "발행 원고에 반영");
     const metaImages = metaPatch.images as ManuscriptImage[];
     assert(metaImages?.[0]?.description === "고친 첫 캡션", "job.metadata.images 캡션도 바뀌어야 한다(발행이 읽는 쪽)");
@@ -285,6 +315,62 @@ async function main(): Promise<void> {
     assert(calls.includes("manifest") && calls.includes("publish"), "기록은 남기고 다시 그린다");
   }
   console.log("✅ 전부 건너뛰어도 사유를 남기고 다시 그린다(본문은 안 씀)");
+
+  // 아무것도 쓰지 못하고 끝나는 실패는 접수 표식을 바로 푼다 - 안 풀면 10분 동안 발행이 막힌다(2026-10-07).
+  {
+    const jobId = "054bfe0b-1234-4abc-8def-0123456789ab";
+    const patches: Record<string, unknown>[] = [];
+    const outcome = await applyViewerEditRequest(
+      { jobId, edits: { "0": { from: "a", to: "b" } } },
+      {
+        loadJob: async () => ({ id: jobId, metadata: {} }) as unknown as ArticleJobRow,
+        loadArticles: async () => [],
+        updateArticleContent: async () => {},
+        mergeJobMetadata: async (_id, patch) => {
+          patches.push(patch);
+        },
+        loadManifest: async () => ({
+          topics: [{ jobId, keyword: "k", category: null, date: "d", readyAt: "r", manuscript: { title: "", searchDescription: null, slug: null, tags: [], body: MANIFEST, imagePrompts: [], images: [], filePath: "" } }],
+        }),
+        saveTopic: async () => {},
+        publishPage: async () => {},
+      }
+    );
+    assert(outcome.status === "failed", "article이 없으면 실패");
+    assert(patches.length === 2 && typeof patches[0].viewerEditPendingAt === "string" && patches[1].viewerEditPendingAt === null, "실패하면 접수 표식을 바로 푼다");
+  }
+  console.log("✅ 일찍 실패하면 접수 표식을 푼다");
+
+  // 제목 수정은 본문과 같은 final article 행에 쓰고 manifest 제목도 맞춘다(2026-10-07).
+  {
+    const jobId = "054bfe0b-1234-4abc-8def-0123456789ab";
+    const old = { id: 7, job_id: jobId, platform: null, content: ARTICLE, title: "옛 제목" } as unknown as ArticleRow;
+    const legacy = { id: 9, job_id: jobId, platform: "blogspot", content: ARTICLE, title: "옛 제목(변형)" } as unknown as ArticleRow;
+    const titleWrites: { id: number; title: string }[] = [];
+    let contentWrites = 0;
+    let savedTopic: ManuscriptTopicEntry | null = null;
+    const outcome = await applyViewerEditRequest(
+      { jobId, edits: { title: { from: "옛 제목", to: "새 제목" } } },
+      {
+        loadJob: async () => ({ id: jobId, keyword: "k", metadata: {} }) as unknown as ArticleJobRow,
+        loadArticles: async () => [old, legacy],
+        updateArticleContent: async () => { contentWrites += 1; },
+        updateArticleTitle: async (id, title) => { titleWrites.push({ id, title }); },
+        mergeJobMetadata: async () => {},
+        loadManifest: async () => ({
+          topics: [{ jobId, keyword: "k", category: null, date: "d", readyAt: "r", manuscript: { title: "옛 제목", searchDescription: null, slug: "keep-slug", tags: [], body: MANIFEST, imagePrompts: [], images: [], filePath: "" } }],
+        }),
+        saveTopic: async (t) => { savedTopic = t; },
+        publishPage: async () => {},
+      }
+    );
+    assert(outcome.status === "applied" && outcome.titleChanged && !outcome.articleChanged, `제목만 반영 (${JSON.stringify(outcome)})`);
+    assert(titleWrites.length === 1 && titleWrites[0].id === 9 && titleWrites[0].title === "새 제목", `발행이 읽는 final article 행(레거시 변형이 더 새것이면 그 행)에 쓴다 (${JSON.stringify(titleWrites)})`);
+    assert(contentWrites === 0, "본문은 쓰지 않는다");
+    const st = savedTopic as ManuscriptTopicEntry | null;
+    assert(st?.manuscript.title === "새 제목" && st.manuscript.slug === "keep-slug", "manifest 제목만 바뀌고 slug 등은 그대로");
+  }
+  console.log("✅ 제목 적용부 - final article 행·manifest 동기화, 본문·slug 불변");
 
   console.log("\n✅ 뷰어 수정본 반영 테스트 전부 통과");
 }

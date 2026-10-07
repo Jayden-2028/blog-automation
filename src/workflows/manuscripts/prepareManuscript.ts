@@ -433,6 +433,9 @@ export async function prepareManuscript(
       today: date,
       researchText:
         typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
+      // 영어본은 기획의 `subject`가 그대로 캡션·alt가 되므로 영어로 쓰게 한다(2026-10-08 실측:
+      // 한글 subject 탓에 영어 글 캡션이 전부 "…하는 장면"으로 나갔다). 검색어는 그대로 한국어다.
+      ...(translatedVariant ? { subjectLanguage: "en" as const } : {}),
     });
     imageFailures.push(...planned.notes);
     plan = planned.plan;
@@ -443,7 +446,11 @@ export async function prepareManuscript(
 
   // 기획이 있으면 자리 배분을 기획이 정한다. 없으면 전부 undefined라 예전 경로 그대로다.
   // 배정은 routeImagePlan 한곳에서 한다 - 경로마다 따로 걸렀더니 생성 자리와 기획 밖 자리가 빠졌다.
-  const route = plan ? routeImagePlan(plan, content, slotPrompts) : null;
+  // 캡션 언어를 함께 넘긴다 - 지난 실행에 한글로 기획해 둔 원고(imagePlan 캐시)도 영어본이면
+  // 한글 subject가 캡션으로 새지 않는다(2026-10-08).
+  const route = plan
+    ? routeImagePlan(plan, content, slotPrompts, translatedVariant ? { captionLanguage: "en" } : {})
+    : null;
   // 자리별 후보(2026-10-02). 지난 실행 것을 이어받는다 - 재수집하지 않은 자리의 후보도 뷰어에 남는다.
   let imageCandidates: Record<string, ImageCandidateRecord[]> = readImageCandidates(
     job.metadata as Record<string, unknown> | null
@@ -564,6 +571,9 @@ export async function prepareManuscript(
       keyword: job.keyword,
       category: job.category ?? null,
       briefType: readJobBrief(job.metadata as Record<string, unknown> | null)?.type ?? null,
+      // 사용설명서 영어본은 캡션·alt를 영어로 쓴다(2026-10-07 사용자 보고 - 첫 발행 글의 캡션
+      // 5개가 전부 한글로 나갔다). 마커 설명의 영어화는 번역 검증이 따로 막는다.
+      ...(translatedVariant ? { captionLanguage: "en" as const } : {}),
       // 리서치 파일 전문(2026-10-01). 작품 자리에서 공식 스틸이 없을 때 여기 적힌 유튜브 공식
       // 영상 링크로 자동 프레임을 후보에 넣는다(youtubeTrailerFrames.ts).
       researchText: typeof job.metadata?.researchFileContent === "string" ? job.metadata.researchFileContent : null,
