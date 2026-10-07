@@ -1,6 +1,21 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-07 (Asia/Seoul)
+기준일: 2026-10-08 (Asia/Seoul)
+
+## 2026-10-08 — 파이프라인 단계 통합 (브랜치 `feat/pipeline-merge`, 워크트리 `pipeline-merge/`, 지시서 `PIPELINE-MERGE-2026-10.md`)
+
+**상태: 코드·단위 테스트·tsc 완료(로컬 커밋, push 전). push·배포·실왕복 4건은 승인 대기.** 베이스: `origin/main` 3e738c8(뷰어-개선 머지 확인 후 시작).
+
+- **흐름**: 키워드 Go → 자료조사 ✍️ → write → **자동 승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화** → 이미지 반영 원고 → **통합 알림 한 번**(📄 페이지 / 🖼 이미지 수정 / ⬇️ 내려받기 / 트랙별 발행 / **✏️ 수정 요청 / 🗑 반려**). 초안 알림(Telegraph 미리보기 + ✅/✏️/🗑)은 폐지 - `telegraph` 서비스는 호출만 뺐다(`runWritingStage`가 게이트 켜짐이면 건너뜀).
+- **게이트 `PIPELINE_SKIP_DRAFT_REVIEW`**(`config/pipelineGate.ts`): 미설정·빈 값 = **켜짐**, `false/0/off/no` = 옛 2단계 흐름. 배선: `job-write.yml`·`job-revise.yml`(repo variable). **사용설명서(kscene)는 게이트와 무관하게 옛 흐름**(한글 ✅→영어본→영어 ✅는 개편3 지시서가 통합 흐름에 맞춰 재설계 - 지시서 §5). `review` 상태로 대기 중인 옛 job은 옛 ✅/✏️/🗑으로 소진(마이그레이션 없음). 통합 알림의 버튼·검수 요약은 환경변수가 아니라 `autoApprovedAt` 유무로 정한다(게이트를 중간에 바꿔도 job마다 지나온 흐름의 알림).
+- **write 마무리**: `finishWrite.ts`(성공/실패/건너뜀/게이트 분기, CLI는 얇은 껍데기). `autoApproveDraft.ts`가 ✅ 콜백과 같은 전이(메타 → job approved → article approved → prepare 발화)를 수행. 의학 주제는 `requiresMedicalReview`를 **내리지 않고** 통합 알림에 ⚕️ 경고 + 검수(팩트·법률·광고) 요약 3건을 옮겼다(초안 단계가 사라져 볼 곳이 없어지므로). 준비 발화 실패 시 승인은 유지하고 사람에게 수동 실행 안내(자동 재시도 없음 원칙).
+- **버튼 콜백**: 옛 `review:edit` / `review:discard` 재사용. 🗑 = `rejected` + `rejectedAt/rejectedVia/rejectedAtStatus` 기록 + 뷰어 manifest 행 삭제(`removeManifestTopic`) + `manuscripts-refresh.yml` 발화. **발행됐거나 발행 중(큐 requested/done·publications 비실패)이면 반려 거부**. 반려된 원고의 ✏️·발행 콜백은 거부. 준비 도중 반려하면 `prepareApprovedManuscripts`가 뷰어·알림에서 제외. ✏️ 답장 매칭은 `findByEditRequestMessageId(track)`(approved 포함) 그대로.
+- **키보드 복원(중요)**: Cloudflare 릴레이는 **어떤 버튼이든 누르는 순간 키보드 전체를 "⏳ 처리 중…" 하나로 덮어쓴다**. 그래서 키보드 구성을 `buildReadyKeyboard` 한 곳에 모아 알림 생성과 복원이 같이 쓴다 - ✏️ 뒤에는 발행 버튼 포함 전체를 되살리고(수정 요청됨 표시), 🗑 뒤에는 "반려됨" 한 버튼으로 닫고, 반려 거부 뒤에는 원상 복원. 발행/이미지 버튼 처리 뒤 재구성에도 ✏️/🗑 줄을 붙인다.
+- **revise 재배치(§1-c)**: 프롬프트에 "이미지 마커 위치·개수·내용 유지" 지시(규격이 `prompts/`가 아니라 `reviseArticleWithFeedback.ts` 인라인이라 거기에). 자동 승인 job의 수정은 `applyUnifiedRevision` → `planReviseImages`(마커 diff): **불변 → 이미지·게이트 그대로, `channelManuscriptsReadyAt`만 비우고 prepare 재실행(뷰어 재배포)** / 같은 개수·설명 변경 → 바뀐 자리만 기존 `applyImageEditRequest`로 비워 재수집 / 개수 변경 → **처음 달라진 자리부터 뒤쪽만** 갱신(Storage 경로가 `<jobId>/<자리번호>`라 번호를 밀면 파일을 덮어쓴다). 완료 알림은 prepare가 보내는 통합 알림(버튼 동일). 게이트 꺼짐·review 상태 job은 옛 경로.
+- **cleanup(§4)**: `storage-cleanup`에 반려분 추가 - `rejectedAt`(없으면 `reviewedAt`) 7일 경과 + 발행 이력 0건(시각 불명은 보존). dry-run 기본 그대로, `--rejected-days=N`.
+- **테스트**: 신규 `test:pipeline-gate`·`test:finish-write`(성공·write 실패·건너뜀·게이트 false·발화 실패)·`test:revise-images`(diff 5종·계획 3종·프롬프트)·`test:pipeline-merge-callbacks`(🗑/✏️/가드/키보드 복원/공존), 확장 `test:notify-manuscripts-ready`·`test:storage-cleanup`. 영향 범위 72개 스크립트 중 실패 3건은 **전부 `origin/main` 3e738c8에서도 동일 실패**(제 변경 무관): `test:telegram-bot`(이미지 수정 답장 구간이 실제 Supabase 호출 - 통과 줄 수 베이스라인과 동일 50/50), `test:manuscript-manifest`(테스트 데이터 정리가 실DB 호출), **`test:image-notes`(뷰어-개선 쪽: "후보 2장 — 마음에 드는 후보를 클릭하면…" 문구 단언 불일치 - 뷰어 세션 확인 필요)**. 테스트는 Supabase 환경변수가 있어야 import되므로 더미 값(`SUPABASE_URL=http://127.0.0.1:9`)으로 돌렸다.
+- **남은 것(승인 필요)**: push·배포(워크플로 2개 + Worker 변경 없음), 실왕복 4건(§7: ①키워드 Go→알림 한 번 ②마커 불변 ✏️ 1건 ③🗑 1건 + cleanup dry-run ④`PIPELINE_SKIP_DRAFT_REVIEW=false` 복귀) - 모두 텔레그램 발송·원격 DB 쓰기가 필요하다. 게이트·구흐름 제거는 1~2주 안정 확인 뒤 별도 커밋(§2). 개편3은 이 흐름을 전제로 시작.
+- **알려 둔 한계**: ① 개수가 바뀐 수정은 뒤쪽 이미지를 모두 다시 구한다(번호 밀기 금지의 대가) ② 마커 불변 수정도 prepare는 다시 돈다 - 비어 있던 자리는 재수집을 시도하고 내부 링크·기획 호출은 캐시를 따른다 ③ 반려 직후 manifest 삭제 실패 시 카드가 다음 재배포까지 남는다(발행은 막힘) ④ 마지막 원고를 반려하면 `manuscripts:build --refresh`가 빈 manifest를 건너뛰어 페이지 갱신이 안 된다(기존 동작).
 
 ## 2026-10-07 — 원고뷰어 개선 (브랜치 `feat/viewer-refine`, 워크트리 `viewer-refine/`, 지시서 `VIEWER-REFINE-2026-10.md`)
 
