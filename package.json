@@ -93,6 +93,7 @@
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
     "test:naver-queue": "tsx src/workflows/publish/testNaverPublishQueue.ts",
+    "test:tistory-url": "tsx src/services/publish/tistory/testTistoryPublishedUrl.ts",
     "test:tistory-queue": "tsx src/workflows/publish/testTistoryPublishQueue.ts",
     "test:publish-tistory-job": "tsx src/workflows/publish/testPublishJobToTistory.ts",
     "test:tistory-html": "tsx src/services/publish/testConvertArticleToTistoryHtml.ts",

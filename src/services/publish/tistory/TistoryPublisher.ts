@@ -303,10 +303,18 @@ export class TistoryPublisher {
         return { ok: false, stage: "publish", error: `발행 확인 신호(글쓰기 화면 이탈)를 ${PUBLISH_WAIT_MS / 1000}초 내 감지하지 못했습니다: ${this.errorMessage(error).split("\n")[0]}` };
       }
 
-      const url = slug
+      // 발행 레이어에서 읽은 슬러그는 티스토리가 발행 시 다듬어(쉼표 제거 등) 실제 주소와 달라질 수 있다
+      // (2026-10-07 실측: 알림 주소가 404). 공개 글은 RSS에서 제목으로 실제 주소를 찾는다. 비공개는 RSS에 없다.
+      const slugUrl = slug
         ? `https://${this.blogName}.tistory.com/entry/${encodeURI(slug)}`
         : `https://${this.blogName}.tistory.com/manage/posts/`;
-      if (!slug) warnings.push("발행 URL 슬러그를 읽지 못해 관리 화면 주소를 돌려줍니다.");
+      let url = slugUrl;
+      if (visibility === "public") {
+        const fromRss = await this.resolveUrlFromRss(input.title).catch(() => null);
+        if (fromRss) url = fromRss;
+        else warnings.push("RSS에서 발행 글을 찾지 못해 추정 주소를 돌려줍니다(다듬어진 슬러그면 404일 수 있습니다).");
+      }
+      if (!slug && url === slugUrl) warnings.push("발행 URL 슬러그를 읽지 못해 관리 화면 주소를 돌려줍니다.");
       return { ok: true, url, warnings };
     } finally {
       await context.close().catch(() => {});
@@ -474,7 +482,10 @@ export class TistoryPublisher {
       cap.textContent = ${JSON.stringify(text)};
       if (ed.setDirty) ed.setDirty(true);
       if (ed.fire) { ed.fire("change"); ed.fire("input"); }
-      return (ed.getContent() || "").includes(${JSON.stringify(text.slice(0, 20))}) ? "ok" : "not-serialized";
+      // 저장 형식([##_Image|...|{"caption":...}])은 특수문자를 엔티티로 바꾼다(2026-10-07 오탐 실측: "·" 포함 캡션이
+      // 실제로는 들어갔는데 not-serialized로 찍혔다). 한글·영숫자만 남겨 비교한다.
+      const norm = (v) => String(v).replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, "");
+      return norm(ed.getContent() || "").includes(norm(${JSON.stringify(text)}).slice(0, 20)) ? "ok" : "not-serialized";
     })()`;
     const result = (await page.evaluate(js).catch((error: unknown) => `error:${error instanceof Error ? error.message : String(error)}`)) as string;
     return result === "ok" ? null : `이미지 캡션 입력 실패(${result}): ${text.slice(0, 30)}`;
@@ -517,6 +528,23 @@ export class TistoryPublisher {
     return filePath;
   }
 
+  /** 발행 직후 RSS에서 같은 제목의 글을 찾아 실제 주소를 돌려준다. 반영이 늦을 수 있어 짧게 재시도한다. */
+  private async resolveUrlFromRss(title: string): Promise<string | null> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await fetch(`https://${this.blogName}.tistory.com/rss`);
+        if (res.ok) {
+          const link = matchRssLink(await res.text(), title);
+          if (link) return link;
+        }
+      } catch {
+        // 네트워크 실패는 재시도로
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+    return null;
+  }
+
   private async saveFailureSnapshot(page: Page, label: string): Promise<void> {
     try {
       mkdirSync(FAILURE_SNAPSHOT_DIR, { recursive: true });
@@ -527,4 +555,32 @@ export class TistoryPublisher {
       // 진단 저장 실패는 무시한다.
     }
   }
+}
+
+// ---------- RSS 제목 매칭(순수 함수, 테스트: testTistoryPublishedUrl.ts) ----------
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, "$1")
+    .replace(/&middot;/g, "\u00b7")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
+}
+
+/** 비교용 정규화 - RSS가 특수문자를 엔티티로 바꾸므로 한글·영숫자만 남긴다(캡션 검증과 같은 이유). */
+function normalizeTitle(text: string): string {
+  return decodeEntities(text).replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, "");
+}
+
+/** RSS XML에서 제목이 같은 item의 link. 같은 제목이 여럿이면 최신(첫 번째) 것. */
+export function matchRssLink(rssXml: string, title: string): string | null {
+  const want = normalizeTitle(title);
+  if (!want) return null;
+  for (const match of rssXml.matchAll(/<item>.*?<title>(.*?)<\/title>.*?<link>(.*?)<\/link>/gs)) {
+    if (normalizeTitle(match[1]) === want) return decodeEntities(match[2]).trim();
+  }
+  return null;
 }
