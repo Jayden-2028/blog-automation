@@ -19,6 +19,8 @@ import {
   finishNaverPublish,
   listPendingNaverRequests,
 } from "../workflows/publish/naverPublishQueue.js";
+import { reportStaleEdits } from "./lib/staleEditReport.js";
+import type { StaleEntry } from "./lib/staleEditReport.js";
 import { publishJobToNaver } from "../workflows/publish/publishJobToNaver.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 
@@ -38,7 +40,9 @@ async function main(): Promise<void> {
   const lock = acquireSingleInstanceLock(resolve("logs/.naver-poll.lock"));
   if (!lock) return;
 
-  const pending = await listPendingNaverRequests();
+  const stale: StaleEntry[] = [];
+  const pending = await listPendingNaverRequests({ onStale: (job, state) => stale.push({ job, state }) });
+  await reportStaleEdits(stale, (_job, text) => notify(text));
   if (pending.length === 0) return; // 대기열 없음 - 조용히 종료
 
   console.log(`▶ [naver-poll] 대기 ${pending.length}건 중 ${Math.min(pending.length, MAX_PER_RUN)}건 처리`);

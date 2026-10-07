@@ -106,6 +106,28 @@ async function main(): Promise<void> {
     console.log("✅ 깨진 값은 없는 것으로 처리");
   }
 
+  // 8) 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c). 끝나면 다음 주기에 집는다.
+  {
+    const now = new Date("2026-10-07T01:00:00Z");
+    const req = { status: "requested", requestedAt: "2026-10-07T00:59:00Z" };
+    const withMeta = (id: string, extra: Record<string, unknown>) =>
+      ({ id, keyword: `키워드 ${id}`, status: "approved", metadata: { [NAVER_REQUEST_KEY]: req, ...extra } }) as unknown as ArticleJobRow;
+    const jobs = [
+      withMeta("edit-running", { viewerEditPendingAt: "2026-10-07T00:59:30Z" }),
+      withMeta("pick-running", { imagePickPendingAt: "2026-10-07T00:59:30Z" }),
+      withMeta("edit-done", { viewerEditPendingAt: "2026-10-07T00:58:00Z", viewerEdit: { appliedAt: "2026-10-07T00:58:40Z" } }),
+      withMeta("edit-stale", { viewerEditPendingAt: "2026-10-07T00:30:00Z" }),
+      withMeta("clean", {}),
+    ];
+    const stale: string[] = [];
+    const pending = await listPendingNaverRequests({ listRecentJobs: async () => jobs, nowMs: now.getTime(), onStale: (j) => stale.push(j.id) });
+    assert(pending.map((j) => j.id).sort().join() === "clean,edit-done,edit-stale", `진행 중인 건은 건너뛴다 (${pending.map((j) => j.id)})`);
+    assert(stale.join() === "edit-stale", `10분 넘게 묵은 건은 통과시키되 알린다 (${stale})`);
+    const off = await listPendingNaverRequests({ listRecentJobs: async () => jobs, nowMs: now.getTime(), skipEditPending: false });
+    assert(off.length === 5, "가드를 끄면 전부 나온다");
+    console.log("✅ 수정 반영·이미지 교체 진행 중인 건은 건너뛰고, stale은 통과+알림");
+  }
+
   console.log("\n🎉 네이버 발행 대기열 테스트 통과");
 }
 

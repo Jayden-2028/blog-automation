@@ -55,3 +55,31 @@ export function readEditPending(metadata: Record<string, unknown> | null | undef
   ];
   return states.find((s) => s.state === "pending") ?? states.find((s) => s.state === "stale") ?? { state: "idle" };
 }
+
+export type EditGuardOptions = {
+  /** 진행 중(pending)인 건을 목록에서 뺄지. 기본 true. */
+  skipEditPending?: boolean;
+  /** 10분 넘게 묵은(stale) 표식을 만났을 때 - 경고 알림과 표식 해제는 호출부가 한다. 막지는 않는다. */
+  onStale?: (job: { id: string; keyword?: string; metadata?: unknown }, state: Extract<EditPendingState, { state: "stale" }>) => void;
+  nowMs?: number;
+};
+
+/**
+ * 발행 큐 폴러가 건을 집기 전에 부른다. 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에서 뺀다(다음 주기에 다시 본다 -
+ * 영구 차단이 아니다). stale이면 막지 않고 통과시키되 onStale로 알린다.
+ */
+export function filterEditPending<T extends { id: string; keyword?: string; metadata?: unknown }>(jobs: T[], options: EditGuardOptions = {}): T[] {
+  if (options.skipEditPending === false) return jobs;
+  const nowMs = options.nowMs ?? Date.now();
+  return jobs.filter((job) => {
+    const state = readEditPending(job.metadata as Record<string, unknown> | null | undefined, nowMs);
+    if (state.state === "pending") return false;
+    if (state.state === "stale") options.onStale?.(job, state);
+    return true;
+  });
+}
+
+/** stale 표식을 지우는 metadata 패치(알림을 보낸 뒤 같은 경고가 반복되지 않게). */
+export function staleClearPatch(kind: "viewerEdit" | "imagePick"): Record<string, null> {
+  return kind === "viewerEdit" ? { [VIEWER_EDIT_PENDING_KEY]: null } : { [IMAGE_PICK_PENDING_KEY]: null };
+}

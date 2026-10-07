@@ -14,6 +14,7 @@
 
 import { applyViewerEdits, normalizeEditText, VIEWER_EDIT_KEY_RE } from "./applyViewerEdits.js";
 import type { ViewerEdits } from "./applyViewerEdits.js";
+import { VIEWER_EDIT_PENDING_KEY } from "./viewerEditGuard.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
 // manuscriptManifest.ts는 **타입만** 가져온다. 값을 import하면 Supabase 클라이언트가 모듈 로드 시점에
 // 초기화돼 자격증명 없는 테스트가 import 단계에서 죽는다. 그래서 거기 있는 작은 순수 함수 둘
@@ -79,12 +80,25 @@ export async function applyViewerEditRequest(
   const job = await deps.loadJob(request.jobId);
   if (!job) return { status: "failed", reason: `job을 찾을 수 없습니다: ${request.jobId}` };
 
+  // 접수 표식(2026-10-07, VIEWER-REFINE §2-c). 반영이 끝나 viewerEdit.appliedAt이 이 시각 뒤로 남을 때까지 발행 큐 폴러와
+  // 텔레그램 발행 콜백이 이 원고를 집지 않는다 - 반영 직전의 옛 본문이 나가는 경합을 닫는다. 아래에서 어떤 이유로 일찍 끝나도
+  // (실패 반환) 표식이 남으면 10분 뒤 stale로 풀린다(경고 알림 후 진행).
+  await deps.mergeJobMetadata(job.id, { [VIEWER_EDIT_PENDING_KEY]: now().toISOString() });
+
   const manifest = await deps.loadManifest();
   const topic = manifest.topics.find((t) => t.jobId === request.jobId);
-  if (!topic) return { status: "failed", reason: "원고 페이지에 없는 job입니다(원고 준비 전)" };
+  // 아무것도 쓰지 못하고 끝나는 실패는 표식을 바로 푼다(그대로 두면 10분 동안 발행이 막힌다).
+  const release = () => deps.mergeJobMetadata(job.id, { [VIEWER_EDIT_PENDING_KEY]: null }).catch(() => {});
+  if (!topic) {
+    await release();
+    return { status: "failed", reason: "원고 페이지에 없는 job입니다(원고 준비 전)" };
+  }
 
   const picked = pickFinalArticle(await deps.loadArticles(request.jobId));
-  if (!picked) return { status: "failed", reason: "발행할 원고(article)가 없습니다" };
+  if (!picked) {
+    await release();
+    return { status: "failed", reason: "발행할 원고(article)가 없습니다" };
+  }
 
   const m = topic.manuscript;
   const result = applyViewerEdits({

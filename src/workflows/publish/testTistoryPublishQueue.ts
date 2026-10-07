@@ -100,6 +100,26 @@ async function main(): Promise<void> {
     console.log("✅ 결과 기록");
   }
 
+  // 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c). requested·deferred 모두.
+  {
+    const now = new Date("2026-10-07T01:00:00Z");
+    const withMeta = (id: string, request: unknown, extra: Record<string, unknown>) =>
+      ({ id, keyword: `키워드 ${id}`, status: "approved", metadata: { [TISTORY_REQUEST_KEY]: request, ...extra } }) as unknown as ArticleJobRow;
+    const req = { status: "requested", requestedAt: "2026-10-07T00:59:00Z" };
+    const jobs = [
+      withMeta("edit-running", req, { viewerEditPendingAt: "2026-10-07T00:59:30Z" }),
+      withMeta("pick-running-deferred", { status: "deferred", requestedAt: "2026-10-07T00:00:00Z", deferredAt: "2026-10-07T00:10:00Z" }, { imagePickPendingAt: "2026-10-07T00:59:30Z" }),
+      withMeta("edit-done", req, { viewerEditPendingAt: "2026-10-07T00:58:00Z", viewerEdit: { appliedAt: "2026-10-07T00:58:40Z" } }),
+      withMeta("edit-stale", req, { viewerEditPendingAt: "2026-10-07T00:30:00Z" }),
+      withMeta("clean", req, {}),
+    ];
+    const stale: string[] = [];
+    const pending = await listPendingTistoryRequests({ listRecentJobs: async () => jobs, now: () => now, deferredMaxDays: 3, onStale: (j) => stale.push(j.id) });
+    assert(pending.map((j) => j.id).sort().join() === "clean,edit-done,edit-stale", `진행 중인 건은 건너뛴다 (${pending.map((j) => j.id)})`);
+    assert(stale.join() === "edit-stale", `10분 넘게 묵은 건은 통과시키되 알린다 (${stale})`);
+    console.log("✅ 수정 반영·이미지 교체 진행 중인 건은 건너뛰고, stale은 통과+알림");
+  }
+
   console.log("\n✅ 티스토리 발행 대기열 테스트 전체 통과");
 }
 

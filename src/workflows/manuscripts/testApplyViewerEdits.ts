@@ -205,6 +205,7 @@ async function main(): Promise<void> {
     const calls: string[] = [];
     let savedContent = "";
     let metaPatch: Record<string, unknown> = {};
+    const pendingPatches: Record<string, unknown>[] = [];
     let savedTopic: ManuscriptTopicEntry | null = null;
     let published: ManuscriptManifest | null = null;
 
@@ -225,7 +226,8 @@ async function main(): Promise<void> {
         },
         mergeJobMetadata: async (_id, patch) => {
           calls.push("metadata");
-          metaPatch = patch;
+          if ("viewerEditPendingAt" in patch) pendingPatches.push(patch);
+          else metaPatch = patch;
         },
         loadManifest: async () => ({ topics: [topic, other] }),
         saveTopic: async (t) => {
@@ -241,7 +243,13 @@ async function main(): Promise<void> {
     );
 
     assert(outcome.status === "applied", `반영돼야 한다 (${JSON.stringify(outcome)})`);
-    assert(calls.join(",") === "article:42,metadata,manifest,publish", `쓰는 순서 (${calls.join(",")})`);
+    // 접수 표식(viewerEditPendingAt)이 가장 먼저 - 발행 폴러·텔레그램 콜백이 반영 중인 원고를 집지 않게(2026-10-07).
+    assert(calls.join(",") === "metadata,article:42,metadata,manifest,publish", `쓰는 순서 (${calls.join(",")})`);
+    assert(pendingPatches.length === 1 && pendingPatches[0].viewerEditPendingAt === "2026-10-03T10:00:00.000Z", "접수 표식 시각");
+    assert(
+      (metaPatch.viewerEdit as { appliedAt: string }).appliedAt >= (pendingPatches[0].viewerEditPendingAt as string),
+      "완료 기록(appliedAt)이 접수 시각 이후라 가드가 풀린다"
+    );
     assert(savedContent.startsWith("고친 도입입니다.") && savedContent.endsWith("#태그1 #태그2"), "발행 원고에 반영");
     const metaImages = metaPatch.images as ManuscriptImage[];
     assert(metaImages?.[0]?.description === "고친 첫 캡션", "job.metadata.images 캡션도 바뀌어야 한다(발행이 읽는 쪽)");
@@ -285,6 +293,31 @@ async function main(): Promise<void> {
     assert(calls.includes("manifest") && calls.includes("publish"), "기록은 남기고 다시 그린다");
   }
   console.log("✅ 전부 건너뛰어도 사유를 남기고 다시 그린다(본문은 안 씀)");
+
+  // 아무것도 쓰지 못하고 끝나는 실패는 접수 표식을 바로 푼다 - 안 풀면 10분 동안 발행이 막힌다(2026-10-07).
+  {
+    const jobId = "054bfe0b-1234-4abc-8def-0123456789ab";
+    const patches: Record<string, unknown>[] = [];
+    const outcome = await applyViewerEditRequest(
+      { jobId, edits: { "0": { from: "a", to: "b" } } },
+      {
+        loadJob: async () => ({ id: jobId, metadata: {} }) as unknown as ArticleJobRow,
+        loadArticles: async () => [],
+        updateArticleContent: async () => {},
+        mergeJobMetadata: async (_id, patch) => {
+          patches.push(patch);
+        },
+        loadManifest: async () => ({
+          topics: [{ jobId, keyword: "k", category: null, date: "d", readyAt: "r", manuscript: { title: "", searchDescription: null, slug: null, tags: [], body: MANIFEST, imagePrompts: [], images: [], filePath: "" } }],
+        }),
+        saveTopic: async () => {},
+        publishPage: async () => {},
+      }
+    );
+    assert(outcome.status === "failed", "article이 없으면 실패");
+    assert(patches.length === 2 && typeof patches[0].viewerEditPendingAt === "string" && patches[1].viewerEditPendingAt === null, "실패하면 접수 표식을 바로 푼다");
+  }
+  console.log("✅ 일찍 실패하면 접수 표식을 푼다");
 
   console.log("\n✅ 뷰어 수정본 반영 테스트 전부 통과");
 }
