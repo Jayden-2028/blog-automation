@@ -82,11 +82,12 @@ function escapeHtml(text: string): string {
  *
  * 매주 오는 알림이라 **평소에는 짧아야 한다.** 정상일 때 긴 표를 보내면 다음 주부터 안 읽힌다.
  */
-export function buildHealthMessage(report: HealthReport, total: number): string {
+export function buildHealthMessage(report: HealthReport, total: number, siteName?: string): string {
   const lines: string[] = [];
   const hasProblem = report.broken.length > 0;
 
-  lines.push(hasProblem ? "⚠️ <b>색인 점검 - 고장 발견</b>" : "🔍 <b>색인 점검</b>");
+  const suffix = siteName ? ` · ${escapeHtml(siteName)}` : "";
+  lines.push(hasProblem ? `⚠️ <b>색인 점검 - 고장 발견${suffix}</b>` : `🔍 <b>색인 점검${suffix}</b>`);
   lines.push("");
   lines.push(`색인됨 ${report.indexed.length} · 대기 ${report.pending.length} · 고장 ${report.broken.length} (전체 ${total})`);
 

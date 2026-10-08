@@ -2,6 +2,7 @@
 import { buildAssertion, mapAnalyticsRows } from "../../services/searchConsole/SearchConsoleClient.js";
 import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./normalizeSearchRows.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
+import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -160,7 +161,36 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   // 전부 대기인 신생 블로그 - 걱정할 일이 아님을 같이 알린다(오늘 우리 상태가 이것이다).
   const freshMsg = buildHealthMessage(buildReport([inspect("https://b.com/a.html", "URL is unknown to Google")]), 1);
   assert(freshMsg.includes("2~4주"), "전부 대기면 기다리면 된다는 안내가 있어야 한다");
+  assert(buildHealthMessage(healthy, 2, "wooahpapa.tistory.com").includes("wooahpapa.tistory.com"), "속성 이름이 제목에 붙는다");
   console.log("✅ 알림 문구 - 정상이면 짧게, 고장이면 목록 첨부");
+}
+
+// --- 8. 다중 속성 - 목록 해석·단일 폴백·타 채널 job 매칭 무해성 -------------------------------
+{
+  const A = "https://whynowissue.blogspot.com/";
+  const B = "https://thekoreamanual.blogspot.com/";
+  const T = "https://wooahpapa.tistory.com/";
+
+  assert(resolveSiteUrls({ GSC_SITE_URLS: `${A}, ${B} ,,${T},${A}` }).join("|") === [A, B, T].join("|"), "콤마 분리·공백/빈칸/중복 제거·순서 유지");
+  assert(resolveSiteUrls({ GSC_SITE_URL: A }).join("|") === A, "GSC_SITE_URLS가 없으면 단일 값 폴백");
+  assert(resolveSiteUrls({ GSC_SITE_URLS: "  ", GSC_SITE_URL: A }).join("|") === A, "빈 목록은 단일 값 폴백");
+  assert(resolveSiteUrls({ GSC_SITE_URLS: B, GSC_SITE_URL: A }).join("|") === B, "목록이 있으면 목록이 이긴다");
+  assert(resolveSiteUrls({}).length === 0, "둘 다 없으면 빈 목록");
+
+  assert(siteLabel(T) === "wooahpapa.tistory.com" && siteLabel("sc-domain:x.com") === "x.com", "표시 이름");
+
+  assert(belongsToSite(`${A}2026/09/a.html`, A) && !belongsToSite(`${B}2026/10/b.html`, A), "접두어 속성 소속");
+  assert(belongsToSite("https://m.x.com/a", "sc-domain:x.com") && !belongsToSite("https://notx.com/a", "sc-domain:x.com"), "도메인 속성은 하위 도메인까지, 접미 우연 일치는 제외");
+
+  // 타 채널 URL이 매칭표에 섞여 있어도 각 행은 자기 URL로만 붙고, 없으면 null(무해).
+  const merged = aggregateRows([
+    { date: "2026-10-05", pageUrl: `${B}2026/10/guide.html?m=1`, query: "q", clicks: 1, impressions: 3, ctr: 0.3, position: 4 },
+    { date: "2026-10-05", pageUrl: `${T}12`, query: "q", clicks: 0, impressions: 5, ctr: 0, position: 9 },
+  ]);
+  const attached = attachJobIds(merged, new Map([[`${A}2026/09/x.html`, "job-a"], [`${B}2026/10/guide.html`, "job-b"]]));
+  assert(attached[0].jobId === "job-b", "TKM 글은 자기 job에 붙는다");
+  assert(attached[1].jobId === null, "매칭표에 없는 티스토리 글은 null로 비켜 간다");
+  console.log("✅ 다중 속성 - 목록 해석·단일 폴백·소속 판정·타 채널 job 매칭 무해");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");
