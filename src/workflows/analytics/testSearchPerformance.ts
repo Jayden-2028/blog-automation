@@ -4,6 +4,7 @@ import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./nor
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
 import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
 import type { PerfRow } from "./weeklyReport.js";
+import { mapGa4Rows } from "../../services/ga4/Ga4Client.js";
 import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
@@ -225,6 +226,22 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(buildSiteMessage(a, end).includes("<b>⚠") === false && buildSiteMessage(a, end).includes("⚠️ <b>클릭 급락"), "경보는 굵게");
   assert(buildSiteMessage(e, end).includes("노출 기록이 없습니다"), "빈 속성 문구");
   console.log("✅ 주간 리포트 - 추이·축적 중 분기·경보·속성 분리");
+}
+
+// --- 10. GA4 응답 매핑 - 날짜 형식·깨진 행 격리 -------------------------------------------------
+{
+  const rows = mapGa4Rows({
+    rows: [
+      { dimensionValues: [{ value: "20261008" }, { value: "Organic Search" }], metricValues: [{ value: "3" }, { value: "2" }, { value: "7" }] },
+      { dimensionValues: [{ value: "bad" }, { value: "Direct" }], metricValues: [{ value: "1" }, { value: "1" }, { value: "1" }] },
+      { dimensionValues: [{ value: "20261008" }], metricValues: [] },
+    ],
+  });
+  assert(rows.length === 1, `정상 행만 남는다 (${rows.length})`);
+  assert(rows[0].date === "2026-10-08" && rows[0].channelGroup === "Organic Search", "날짜 YYYY-MM-DD 변환");
+  assert(rows[0].sessions === 3 && rows[0].totalUsers === 2 && rows[0].pageViews === 7, "지표 매핑");
+  assert(mapGa4Rows({}).length === 0, "rows 없으면 빈 배열(데이터 없음)");
+  console.log("✅ GA4 응답 매핑 - 날짜 변환·깨진 행 격리");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");

@@ -139,6 +139,7 @@
     "test:notify-write-failed": "tsx src/workflows/writing/testNotifyWriteFailed.ts",
     "analytics:index-health": "tsx src/workflows/analytics/checkIndexHealthCli.ts",
     "analytics:weekly-report": "tsx src/workflows/analytics/weeklyReportCli.ts",
+    "analytics:ga4": "tsx src/workflows/analytics/collectGa4Cli.ts",
     "analytics:search": "tsx src/workflows/analytics/collectSearchPerformanceCli.ts",
     "test:serper-outage": "tsx src/workflows/images/testNotifySerperOutage.ts",
     "test:merged-search": "tsx src/workflows/images/testSearchImagesMerged.ts",

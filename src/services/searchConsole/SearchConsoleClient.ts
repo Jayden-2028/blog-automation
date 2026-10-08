@@ -66,13 +66,13 @@ function base64Url(input: Buffer | string): string {
  * 순수 함수로 빼 둔 이유: 네트워크 없이 테스트할 수 있어야 한다 - 서명이 깨지면 401만 보이고
  * 원인이 안 보인다(실측 아님, 예방). 키 내용은 절대 로그에 남기지 않는다.
  */
-export function buildAssertion(account: ServiceAccount, now: Date): string {
+export function buildAssertion(account: ServiceAccount, now: Date, scope: string = SCOPE): string {
   const issuedAt = Math.floor(now.getTime() / 1000);
   const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claim = base64Url(
     JSON.stringify({
       iss: account.client_email,
-      scope: SCOPE,
+      scope,
       aud: TOKEN_URL,
       iat: issuedAt,
       exp: issuedAt + 3600,
