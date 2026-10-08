@@ -175,6 +175,16 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
     `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 
+## 측정·분석 운영 규칙 (2026-10-08)
+
+- **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: whynowissue → thekoreamanual → 티스토리).
+  비면 `GSC_SITE_URL` 단일 폴백. 속성 = `page_url` 호스트라 `search_performance_daily` 구조는 그대로다(migration 없음).
+  새 속성 추가는 변수에 한 항목 덧붙이고 `analytics:search -- --site=<속성> --days=N --apply`로 백필.
+- **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 월요일 `analytics-index-health.yml`에 동승한다.
+  Worker cron은 4/5 사용, 마지막 1슬롯은 예약이다. 14일 미만 데이터 속성은 "축적 중"만 표기한다.
+- GA4 수집은 서비스 계정(기존 `GSC_SERVICE_ACCOUNT_JSON` 재사용) + `ga4_performance_daily`(migration 승인 게이트) 설계안
+  상태다 - `docs/ai-handoff/ANALYTICS_OPS.md` §2. 네이버 조회수는 GSC·GA4 밖이고 맥미니 수집 세션 소유다.
+
 ## 승인 없이는 금지
 
 - Supabase migration 적용 또는 migration history 변경

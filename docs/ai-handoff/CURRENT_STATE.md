@@ -2,6 +2,14 @@
 
 기준일: 2026-10-08 (Asia/Seoul)
 
+## 2026-10-08 — 측정·분석 (브랜치 `feat/analytics-ops`, 워크트리 `analytics-ops/`, 지시서 `ANALYTICS-OPS-2026-10.md`, 상세 `ANALYTICS_OPS.md`)
+
+**코드 완료(로컬 커밋, push·main 병합은 승인됐으나 도구 권한으로 보류 - 아래 참고).**
+- GSC 다중 속성: env `GSC_SITE_URLS`(콤마, 없으면 `GSC_SITE_URL` 폴백) → `analytics:search`·`analytics:index-health`가 속성을 순서대로 돈다. migration 없음(page_url에 도메인 포함).
+- 주간 리포트 `analytics:weekly-report`(속성별 메시지, 전주 대비, 14일 미만은 "축적 중"): 새 cron 없이 월요일 `analytics-index-health.yml`에 동승. Worker cron 4/5 유지.
+- GA4 일일 수집은 **설계안만**(`ANALYTICS_OPS.md` §2) - 테이블 `ga4_performance_daily` migration 승인 대기.
+- **남은 것**: repo variable `GSC_SITE_URLS` 설정, thekoreamanual·티스토리 백필(`--apply`), 티스토리 GA4 스트림·head 삽입, 주간 리포트 첫 실발송.
+
 ## 2026-10-08 — 개편0 전체 점검·병합 정리 (메인 세션)
 
 - **AVIF 수집 정규화 브랜치(3805560)와 `fix/exclude-sports`(10-07 스포츠 키워드 제외 2커밋, 병합 누락분)를 검증 후 main 병합·push**(abd107b). 이미지 형식·키워드 제외·빌드 테스트 통과 확인.
