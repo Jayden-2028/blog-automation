@@ -63,7 +63,7 @@ function buildAutoApprovedNotes(job: ArticleJobRow): string[] {
  * Cloudflare 릴레이가 어떤 버튼이든 누르는 순간 키보드를 "⏳ 처리 중…" 하나로 덮어쓰므로(telegram-relay lockButtons),
  * 러너가 처리 뒤에 원래 구성을 다시 세워야 한다(TelegramBot.markReviewButtonsDecided).
  *
- * 줄 구성: [📄 페이지 열기] / [🖼 이미지 수정][⬇️ 내려받기] / [트랙별 발행] / [✏️ 수정 요청][🗑 반려](자동 승인 job만).
+ * 줄 구성: [📄 페이지 열기] / [✏️ 수정 요청][🗑 반려](자동 승인 job만) / [🖼 이미지 수정][⬇️ 내려받기] / [트랙별 발행].
  * 한 줄에 4개를 몰면 텔레그램이 글자를 자르므로 줄을 나눈다(2026-09-29). jobId가 UUID가 아니면 버튼만 뺀다.
  */
 export function buildReadyKeyboard(
@@ -77,6 +77,8 @@ export function buildReadyKeyboard(
     const url = track === "entertainment" ? `${pagesUrl}/#${jobId}` : viewerPageLink(pagesUrl, track, jobId);
     rows.push([{ text: "📄 원고 페이지 열기", url }]);
   }
+  // 수정/반려 줄은 링크 바로 아래에 둔다(2026-10-08 사용자 요청) - 발행 버튼 위에서 먼저 판단하게 한다.
+  if (track !== "kscene") rows.push(...reviewActionRows(job));
   try {
     const publishButton: TelegramInlineKeyboardButton =
       track === "social"
@@ -95,7 +97,6 @@ export function buildReadyKeyboard(
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 발행 줄을 뺀다 - 여기서 던지면 알림 전체가 사라진다.
   }
-  if (track !== "kscene") rows.push(...reviewActionRows(job));
   return rows;
 }
 

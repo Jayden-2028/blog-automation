@@ -1644,10 +1644,13 @@ export class TelegramBot {
       );
       // 자동 승인으로 올라온 원고는 ✏️ 수정 요청 / 🗑 반려 줄이 있다 - 잠금 버튼으로 덮인 뒤에도 되살린다.
       const job = await this.loadJobById(parsed.jobId).catch(() => null);
-      const reviewRow = job && isAutoApproved(job) ? buildReadyKeyboard(job, null).slice(-1)[0] : undefined;
-      if (reviewRow && reviewRow.some((b) => parseArticleReviewCallbackData(b.callback_data) !== null)) {
-        keyboard.push(reviewRow);
-      }
+      // 링크 줄이 없는 상태에서 다시 세우므로 맨 위(= buildReadyKeyboard의 배치와 같은 자리)에 넣는다.
+      const reviewRow = job && isAutoApproved(job)
+        ? buildReadyKeyboard(job, null).find((row) =>
+            row.some((b) => parseArticleReviewCallbackData(b.callback_data) !== null)
+          )
+        : undefined;
+      if (reviewRow) keyboard.unshift(reviewRow);
     }
 
     await this.post("editMessageReplyMarkup", {

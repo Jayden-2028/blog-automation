@@ -191,8 +191,12 @@ main().catch((error) => {
   // 엔터: 기존 버튼 + 마지막 줄 [✏️ 수정 요청][🗑 반려], 콜백은 review:edit / review:discard(옛 초안 알림의 것을 재사용).
   const ent = buildManuscriptReadyMessage(successResult(job(JOB, auto)), "https://pages.example.dev");
   const entRows = rowsOf(ent);
-  const last = entRows[entRows.length - 1];
-  if (last.length !== 2 || !last[0].text.includes("수정 요청") || !last[1].text.includes("반려")) throw new Error(`❌ 마지막 줄은 ✏️ 수정 요청 / 🗑 반려여야 한다 (${JSON.stringify(last)})`);
+  // 줄 순서(2026-10-08): 링크 / 수정·반려 / 이미지 수정·내려받기 / 발행.
+  const texts = entRows.map((row) => row.map((b) => b.text.replace(/^\S+\s/, "")));
+  const expectedOrder = [["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"], ["네이버 발행"]];
+  if (JSON.stringify(texts) !== JSON.stringify(expectedOrder)) throw new Error(`❌ 버튼 줄 순서가 다르다 (${JSON.stringify(texts)})`);
+  const last = entRows[1];
+  if (last.length !== 2 || !last[0].text.includes("수정 요청") || !last[1].text.includes("반려")) throw new Error(`❌ 둘째 줄은 ✏️ 수정 요청 / 🗑 반려여야 한다 (${JSON.stringify(last)})`);
   if (last[0].callback_data !== `review:edit:${JOB}` || last[1].callback_data !== `review:discard:${JOB}`) throw new Error("❌ 콜백은 review:edit / review:discard여야 한다");
   const entAll = entRows.flat();
   if (!entAll.some((b) => b.callback_data === `publish:naver:${JOB}`) || !entAll.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 기존 발행·이미지 수정 버튼은 그대로여야 한다");
