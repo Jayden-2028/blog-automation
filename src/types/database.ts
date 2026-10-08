@@ -605,6 +605,34 @@ export type SearchPerformanceInsertRow = {
 
 export type SearchPerformanceUpdate = Partial<SearchPerformanceInsertRow>;
 
+// ---------- ga4_performance_daily ----------
+// GA4 일일 방문 지표. 한 행 = (날짜, 속성 라벨, 채널 그룹).
+// 스키마: supabase/migrations/20261009120000_ga4_performance_daily.sql.
+
+export type Ga4PerformanceRow = {
+  date: string;
+  property_label: string;
+  channel_group: string;
+  sessions: number;
+  total_users: number;
+  page_views: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Ga4PerformanceInsertRow = {
+  date: string;
+  property_label: string;
+  channel_group: string;
+  sessions?: number;
+  total_users?: number;
+  page_views?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type Ga4PerformanceUpdate = Partial<Ga4PerformanceInsertRow>;
+
 // ---------- api_usage ----------
 // 유료 API 호출 1건 = row 1건. 대시보드(manuscripts/cost.json)가 이 테이블만 보고 비용을 집계한다.
 // 스키마: supabase/migrations/20260916153725_api_usage.sql.
@@ -761,6 +789,12 @@ export type Database = {
         Row: SearchPerformanceRow;
         Insert: SearchPerformanceInsertRow;
         Update: SearchPerformanceUpdate;
+        Relationships: [];
+      };
+      ga4_performance_daily: {
+        Row: Ga4PerformanceRow;
+        Insert: Ga4PerformanceInsertRow;
+        Update: Ga4PerformanceUpdate;
         Relationships: [];
       };
     };

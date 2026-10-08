@@ -75,3 +75,26 @@ export async function loadSearchPerformanceRange(
   }
   return out;
 }
+
+export type Ga4PerformanceInsert = {
+  date: string;
+  property_label: string;
+  channel_group: string;
+  sessions: number;
+  total_users: number;
+  page_views: number;
+};
+
+/** ga4_performance_daily upsert. GA4도 며칠간 수치를 보정하므로 같은 날짜 재수집은 덮어쓴다. */
+export async function upsertGa4Performance(rows: Ga4PerformanceInsert[]): Promise<number> {
+  let written = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK).map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+    const { error } = await supabase
+      .from("ga4_performance_daily")
+      .upsert(chunk, { onConflict: "date,property_label,channel_group" });
+    if (error) throw error;
+    written += chunk.length;
+  }
+  return written;
+}
