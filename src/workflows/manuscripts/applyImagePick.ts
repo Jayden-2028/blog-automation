@@ -147,7 +147,7 @@ export type ApplyImagePickDeps = {
     alt: string;
     context: string;
   }) => Promise<{ ok: true; buffer: Buffer; mimeType: string; width: number; height: number } | { ok: false; error: string }>;
-  upload: (input: { jobId: string; index: number; buffer: Buffer; mimeType: string }) => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  upload: (input: { jobId: string; index: number; buffer: Buffer; mimeType: string }) => Promise<{ ok: true; url: string; extension?: string } | { ok: false; error: string }>;
   mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   saveTopic: (topic: ManuscriptTopicEntry) => Promise<void>;
   publishPage: (manifest: ManuscriptManifest) => Promise<void>;
@@ -161,6 +161,23 @@ export type ApplyImagePickDeps = {
 export type ApplyImagePickOutcome =
   | { status: "applied"; record: ImagePickRecord }
   | { status: "failed"; reason: string; record: ImagePickRecord | null };
+
+/**
+ * 기록할 파일 이름. 업로드가 정한 **최종 확장자**를 따른다(2026-10-08) - AVIF가 WebP로 바뀌어 올라가면 이름도
+ * `.webp`여야 맥 보관함이 바이트와 맞는 이름으로 저장한다. 옛 코드는 모르는 형식을 전부 `jpg`로 적었다.
+ */
+export function fileNameFor(current: string | undefined, index: number, mimeType: string, uploadedExtension?: string): string {
+  const fallbackExt = mimeType.includes("png")
+    ? "png"
+    : mimeType.includes("webp")
+      ? "webp"
+      : mimeType.includes("avif")
+        ? "avif"
+        : "jpg";
+  const ext = uploadedExtension || fallbackExt;
+  if (!current) return `${String(index).padStart(2, "0")}-image.${ext}`;
+  return uploadedExtension ? current.replace(/\.[A-Za-z0-9]+$/, "") + `.${uploadedExtension}` : current;
+}
 
 export async function applyImagePick(request: ImagePickRequest, deps: ApplyImagePickDeps): Promise<ApplyImagePickOutcome> {
   const now = deps.now ?? (() => new Date());
@@ -247,7 +264,7 @@ export async function applyImagePick(request: ImagePickRequest, deps: ApplyImage
     provider: "web",
     sourcePage: candidate.sourcePage || null,
     license: current?.license && current.provider === "web" && current.sourcePage === candidate.sourcePage ? current.license : "출처 확인 필요",
-    fileName: current?.fileName || `${String(request.index).padStart(2, "0")}-image.${mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg"}`,
+    fileName: fileNameFor(current?.fileName, request.index, mimeType, uploaded.extension),
     error: null,
   };
   const nextImages = current ? images.map((image) => (image.index === request.index ? nextImage : image)) : [...images, nextImage].sort((a, b) => a.index - b.index);

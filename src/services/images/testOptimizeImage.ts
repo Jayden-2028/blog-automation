@@ -6,7 +6,7 @@ import { MAX_SIDE_PX, optimizeImage, shouldOptimize, targetSize } from "./optimi
 
 /** Chromium으로 노이즈가 섞인 큰 PNG를 만든다(압축이 잘 안 되는 실제 일러스트와 비슷하게). */
 async function makePng(width: number, height: number): Promise<Buffer> {
-  const browser = await chromium.launch({ args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ args: ["--no-sandbox"], executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined });
   try {
     const page = await browser.newPage();
     await page.setContent("<!doctype html><canvas id=c></canvas>");
@@ -32,6 +32,7 @@ async function main(): Promise<void> {
   assert.equal(shouldOptimize("image/gif", 5_000_000) !== null, true, "gif는 건드리지 않는다");
   assert.equal(shouldOptimize("image/png", 50 * 1024) !== null, true, "작은 파일은 건드리지 않는다");
   assert.equal(shouldOptimize("image/png", 800 * 1024), null, "큰 PNG는 대상");
+  assert.equal(shouldOptimize("image/avif", 14_900), null, "AVIF는 작아도 대상(형식 정규화, 2026-10-08)");
   console.log("✅ 규칙(크기·형식·최소 용량)");
 
   // 큰 PNG -> WebP, 긴 변 1600 이하

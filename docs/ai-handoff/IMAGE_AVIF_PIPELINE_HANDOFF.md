@@ -63,3 +63,37 @@
 - 증상·타임라인 상세: 이 세션 로그(2026-10-08 00~02시, 맥미니
   `~/Library/Logs/blog-automation-tistory-poll.log`의 "이미지 업로드가 확인되지 않았습니다" 4건).
 - 티스토리 방어 설계: `docs/ai-handoff/TISTORY_AUTO_PUBLISH_DESIGN.md`.
+
+---
+
+## 처리 결과 (2026-10-08, 이미지 파이프라인 세션)
+
+제안 A·B를 **둘 다** 했고, 문서가 짚지 않은 파생 문제 하나(보관함 이름)까지 막았다.
+
+| 항목 | 수정 |
+|---|---|
+| A. 변환 | `optimizeImage` - AVIF는 **용량과 무관하게** WebP로 변환(150KB 미만 스킵·"충분히 줄 때만" 규칙을 AVIF에는 적용 안 함. 목적이 용량 절감이 아니라 형식 정규화). 더 커져도 바꾼다(실측: 63KB AVIF → 85KB WebP) |
+| B. 이름 | `uploadArticleImage.extensionFor` - avif → `.avif`, gif → `.gif`. 모르는 형식만 예전처럼 `.png` |
+| 추가 1 | **서버가 준 content-type을 믿지 않는다** - 업로드 직전 실제 바이트(`sniffImageFormat`)로 형식을 정하고 content-type을 바로잡는다. 이름·content-type·바이트 셋이 일치한다 |
+| 추가 2 | **`optimize`를 끈 호출(캡처·표)도 AVIF는 정규화**한다 |
+| 추가 3 | 변환이 실패해도(브라우저 없음) 거짓 `.png`가 아니라 **정직한 `.avif`**로 올라간다(A가 best-effort라 B가 안전망) |
+| 파생 | 업로드가 형식을 바꾸면 **수집 기록·후보 교체의 `fileName`도 따라간다**(`UploadArticleImageResult.extension`). 안 하면 맥 보관함이 Storage의 WebP 바이트를 `.avif` 이름으로 저장한다. 옛 후보 교체 코드는 모르는 형식을 전부 `jpg`로 적기도 했다 |
+| 공용화 | `sniffImageFormat`을 `services/images/sniffImageFormat.ts`로 옮겼다. `TistoryPublisher`는 다시 내보내므로 기존 import·`test:tistory-image`는 그대로 동작 |
+
+- 이미 발행된 글이 참조하는 기존 Storage 파일은 **건드리지 않았다**(새로 올라가는 이미지부터 적용).
+- 파일명이 `{index}-web.{ext}`라 형식이 바뀐 자리는 **주소가 바뀐다**(문서가 경고한 대로). `?v=` 해시는 변환 후 바이트 기준.
+
+### 검증
+
+- `npm run test:upload-image-format` 신설 - 실제 AVIF(AOM 공식 테스트 파일 63KB, `fixtures/small.avif`)로 실제 Chromium 변환까지.
+  거짓 `image/png`로 온 작은 AVIF → WebP·`.webp`·content-type 일치 / 변환 실패 시 `.avif` / JPEG·PNG 불변.
+  각 수정을 되돌리면 해당 단언이 실패하는 것을 확인했다.
+- `test:plan-subject` 9번(수집 기록 이름), `test:viewer-image-pick`(후보 교체 이름), `test:optimize-image`(AVIF 규칙) 보강.
+- 같이 고친 기존 불일치: `test:image-url-version`(10-04 소스 변경 후 옛 문자열을 찾고 있었다), `test:optimize-image`(브라우저 경로 환경변수 미지원).
+  클라우드 세션처럼 playwright와 설치된 브라우저 버전이 다른 환경은 `PLAYWRIGHT_CHROMIUM_PATH`.
+
+### 확인 못 한 것
+
+- **네이버 발행 1회 실측**: 이 세션은 클라우드라 못 했다. 이제 수집·업로드에서 AVIF가 사라지므로(변환 실패 때만 `.avif` 잔존) 네이버가 AVIF를 어떻게 받는지는 사실상 더 이상 위험이 아니지만, 문서의 권장대로 맥에서 1회 확인하면 좋다.
+- 운영 Chromium(맥·GitHub 러너)의 AVIF 디코드는 이 세션의 Chromium 1194에서만 확인했다. 실패해도 위 안전망(`.avif` 정직한 이름)과 티스토리 발행기 방어가 받는다.
+- `test:image-notes`는 이번 변경과 무관하게 main에서 이미 실패 중이다(뷰어 후보 안내 문구가 "클릭하면 교체"로 바뀌었는데 테스트가 옛 문구 `1번 후보N`을 찾는다 - 다른 세션 변경).

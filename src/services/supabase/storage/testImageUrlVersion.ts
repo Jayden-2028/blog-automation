@@ -33,7 +33,7 @@ const version = (b: Buffer) => createHash("sha256").update(b).digest("hex").slic
   const source = await import("node:fs").then((fs) =>
     fs.readFileSync(new URL("./uploadArticleImage.ts", import.meta.url), "utf8")
   );
-  assert(source.includes("?v=${versionOf(input.imageBuffer)}"), "업로드 URL에 내용 해시를 붙여야 한다");
+  assert(source.includes("?v=${versionOf(imageBuffer)}"), "업로드 URL에 내용 해시를 붙여야 한다");
   assert(source.includes("path"), "원래 경로는 그대로 돌려줘야 한다");
   assert(typeof uploadArticleImage === "function", "함수가 export돼 있어야 한다");
   console.log("✅ 업로드 URL에 ?v=<내용해시>가 붙는다");

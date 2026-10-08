@@ -203,7 +203,9 @@ export async function collectWebImagesForJob(
           // 웹에서 받은 원본은 13MB짜리도 있었다(2026-10-04). 본문 폭에 맞게 줄여 올린다.
           optimize: true,
         });
-        return uploaded.ok ? { ok: true as const, url: uploaded.url } : { ok: false as const, error: uploaded.error };
+        return uploaded.ok
+          ? { ok: true as const, url: uploaded.url, extension: uploaded.extension }
+          : { ok: false as const, error: uploaded.error };
       });
 
     // 원고 하나에 하나만 만든다(2026-09-23, images.md §8-8). 사용자가 직접 지정한 자리와

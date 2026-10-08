@@ -23,7 +23,17 @@ export const MIN_BYTES_TO_OPTIMIZE = 150 * 1024;
 /** 결과가 원본의 이 비율 이하일 때만 바꾼다. 조금만 작아지는 변환은 화질 손실이 아깝다. */
 export const MAX_RESULT_RATIO = 0.9;
 
-const OPTIMIZABLE = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+const OPTIMIZABLE = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/avif"]);
+
+/**
+ * AVIF는 **용량과 무관하게** 변환한다(2026-10-08 실측). 이 변환의 목적은 용량 절감이 아니라 **형식 정규화**다 -
+ * 티스토리 에디터가 AVIF에서 꼬여 뒤의 정상 이미지까지 업로드에 실패했고, 네이버·뷰어·보관함이 AVIF를 어떻게
+ * 받는지는 확인된 적이 없다. 그래서 150KB 미만 스킵(`MIN_BYTES_TO_OPTIMIZE`)과 "충분히 줄어들 때만"
+ * (`MAX_RESULT_RATIO`) 규칙을 AVIF에는 적용하지 않는다(실측 사례가 14.9KB였다).
+ */
+export function isAvif(mimeType: string): boolean {
+  return mimeType.toLowerCase().includes("avif");
+}
 
 export type OptimizeImageInput = {
   buffer: Buffer;
@@ -48,6 +58,7 @@ export type OptimizeImageResult = {
 export function shouldOptimize(mimeType: string, bytes: number): string | null {
   const type = mimeType.toLowerCase();
   if (!OPTIMIZABLE.has(type)) return `대상 형식이 아님(${mimeType})`;
+  if (isAvif(type)) return null; // 형식 정규화 - 크기와 무관하게 변환한다.
   if (bytes < MIN_BYTES_TO_OPTIMIZE) return `이미 작음(${Math.round(bytes / 1024)}KB)`;
   return null;
 }
@@ -78,7 +89,11 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
-    browser = await chromium.launch({ args: ["--no-sandbox"] });
+    // PLAYWRIGHT_CHROMIUM_PATH - 설치된 브라우저 버전이 playwright와 다른 환경(클라우드 세션 등)용. 없으면 기본.
+    browser = await chromium.launch({
+      args: ["--no-sandbox"],
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    });
     const page = await browser.newPage();
     const dataUrl = `data:${input.mimeType};base64,${input.buffer.toString("base64")}`;
 
@@ -113,7 +128,8 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
 
     if (!out.data.startsWith("data:image/webp")) return keep("canvas가 WebP를 만들지 못함");
     const buffer = Buffer.from(out.data.slice(out.data.indexOf(",") + 1), "base64");
-    if (buffer.length > originalBytes * MAX_RESULT_RATIO) {
+    // AVIF는 더 커져도 바꾼다 - 목적이 형식 정규화다(위 isAvif 주석). 그 외는 충분히 줄 때만.
+    if (!isAvif(input.mimeType) && buffer.length > originalBytes * MAX_RESULT_RATIO) {
       return keep(`줄어든 폭이 작음(${Math.round(originalBytes / 1024)}KB → ${Math.round(buffer.length / 1024)}KB)`);
     }
     return { buffer, mimeType: "image/webp", optimized: true, originalBytes, width: out.width, height: out.height };

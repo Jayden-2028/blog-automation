@@ -254,6 +254,38 @@ async function main(): Promise<void> {
     console.log("✅ 사용자가 고른 이미지 - 같은 컷 검사로 막지 않고, 못 받아도 AI 대체로 넘기지 않음");
   }
 
+  // 9) 업로드가 형식을 바꾸면(AVIF → WebP) 수집 기록의 파일 이름도 따라간다(2026-10-08).
+  //    안 따라가면 맥 보관함이 Storage의 WebP 바이트를 `.avif` 이름으로 저장한다.
+  {
+    const result = await collectWebImagesForJob(
+      {
+        jobId: "test-job",
+        keyword: "우크라 러 석유",
+        category: "incident",
+        body: "정유시설이 공격받았다.\n\n[IMAGE: 정유시설 — 웹 검색]\n[IMAGE PROMPT: 우크라 정유시설]",
+        imagePrompts: [],
+      },
+      {
+        searchImages: false,
+        searchKinolights: false,
+        cropTall: false,
+        deduper: undefined,
+        runCodex: async () => ({
+          ok: true as const,
+          durationMs: 0,
+          data: { slots: [{ index: 1, imageUrl: "https://news.example.com/a.avif", sourcePage: "https://news.example.com", alt: "정유시설", caption: "정유시설", license: "보도", reusePermission: "news_photo", rationale: "", skipped: false, skipReason: "", alternates: [] }] },
+        }),
+        fetchImage: async () => ({ ok: true, buffer: PNG, contentType: "image/avif" }),
+        readSize: () => ({ width: 1920, height: 1050 }),
+        chooseImage: async () => ({ picked: 1, reason: "맞다", caption: "정유시설" }),
+        upload: async ({ fileName }: { fileName: string }) => ({ ok: true as const, url: `https://storage/${fileName}`, extension: "webp" }),
+      } as never
+    );
+    assert(result.images.length === 1, "이미지 1장");
+    assert(result.images[0].fileName.endsWith(".webp"), `기록의 이름이 올라간 형식(webp)을 따라야 한다 (${result.images[0].fileName})`);
+    console.log("✅ AVIF가 WebP로 올라가면 기록의 파일 이름도 .webp");
+  }
+
   console.log("\n✅ 기획 대상 배선 테스트 전부 통과");
 }
 
