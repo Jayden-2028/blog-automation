@@ -182,8 +182,8 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   새 속성 추가는 변수에 한 항목 덧붙이고 `analytics:search -- --site=<속성> --days=N --apply`로 백필.
 - **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 월요일 `analytics-index-health.yml`에 동승한다.
   Worker cron은 4/5 사용, 마지막 1슬롯은 예약이다. 14일 미만 데이터 속성은 "축적 중"만 표기한다.
-- GA4 수집은 서비스 계정(기존 `GSC_SERVICE_ACCOUNT_JSON` 재사용) + `ga4_performance_daily`(migration 승인 게이트) 설계안
-  상태다 - `docs/ai-handoff/ANALYTICS_OPS.md` §2. 네이버 조회수는 GSC·GA4 밖이고 맥미니 수집 세션 소유다.
+- GA4 수집은 서비스 계정(기존 `GSC_SERVICE_ACCOUNT_JSON` 재사용)으로 `analytics:ga4`가 `ga4_performance_daily`에 upsert한다
+  (repo variable `GA4_PROPERTY_IDS`=`라벨:숫자속성ID` 콤마 목록, 일일 `analytics-search.yml`에 동승) - `docs/ai-handoff/ANALYTICS_OPS.md` §2. 네이버 조회수는 GSC·GA4 밖이고 맥미니 수집 세션 소유다.
 
 ## 승인 없이는 금지
 

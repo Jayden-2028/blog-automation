@@ -2,13 +2,12 @@
 
 기준일: 2026-10-08 (Asia/Seoul)
 
-## 2026-10-08 — 측정·분석 (브랜치 `feat/analytics-ops`, 워크트리 `analytics-ops/`, 지시서 `ANALYTICS-OPS-2026-10.md`, 상세 `ANALYTICS_OPS.md`)
+## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
 
-**코드 완료(로컬 커밋, push·main 병합은 승인됐으나 도구 권한으로 보류 - 아래 참고).**
-- GSC 다중 속성: env `GSC_SITE_URLS`(콤마, 없으면 `GSC_SITE_URL` 폴백) → `analytics:search`·`analytics:index-health`가 속성을 순서대로 돈다. migration 없음(page_url에 도메인 포함).
-- 주간 리포트 `analytics:weekly-report`(속성별 메시지, 전주 대비, 14일 미만은 "축적 중"): 새 cron 없이 월요일 `analytics-index-health.yml`에 동승. Worker cron 4/5 유지.
-- GA4 일일 수집은 **설계안만**(`ANALYTICS_OPS.md` §2) - 테이블 `ga4_performance_daily` migration 승인 대기.
-- **남은 것**: repo variable `GSC_SITE_URLS` 설정, thekoreamanual·티스토리 백필(`--apply`), 티스토리 GA4 스트림·head 삽입, 주간 리포트 첫 실발송.
+- **GSC 다중 속성 라이브**: repo variable `GSC_SITE_URLS`(whynowissue·thekoreamanual·티스토리). 서비스 계정 `gsc-reader@…`를 두 새 속성에 "제한됨"으로 추가, 3속성 수집 오류 없음. 새 속성 첫 데이터는 10-10~11 전후(GSC 지연) - 그때 `analytics:search -- --site=<속성> --days=7 --apply` 백필.
+- **GA4 라이브**: 티스토리 속성 `오늘의 맥락`(숫자 ID 558030120, 측정 ID G-G8K3PS5X0T, 스킨 `<head>` 삽입·실시간 수신 확인). 서비스 계정을 GA4 계정 뷰어로 추가 + Analytics Data API 사용 설정. `ga4_performance_daily` migration 적용(10-09), `GA4_PROPERTY_IDS=tkm:557900208,tistory:558030120`, 일일 수집(`analytics-search.yml`)에 동승 - TKM 적재 확인.
+- **주간 리포트** `analytics:weekly-report`: 월요일 `analytics-index-health.yml`에 동승(새 cron 없음, Worker 4/5). 첫 실발송은 3속성 데이터가 쌓인 뒤 승인 받아 진행.
+- **남은 것**: ① 3속성 GSC 행 적재 확인 + 백필 ② 주간 리포트 첫 실발송(승인) ③ 월요일 색인 점검에서 "제한됨" 권한으로 URL Inspection이 되는지 확인(안 되면 "전체"로 상향) ④ 색인 신규/이탈 수는 상태 저장 테이블이 없어 미구현.
 
 ## 2026-10-08 — 개편0 전체 점검·병합 정리 (메인 세션)
 
