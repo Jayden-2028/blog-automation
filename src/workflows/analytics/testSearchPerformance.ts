@@ -2,6 +2,8 @@
 import { buildAssertion, mapAnalyticsRows } from "../../services/searchConsole/SearchConsoleClient.js";
 import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./normalizeSearchRows.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
+import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
+import type { PerfRow } from "./weeklyReport.js";
 import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
@@ -191,6 +193,38 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(attached[0].jobId === "job-b", "TKM 글은 자기 job에 붙는다");
   assert(attached[1].jobId === null, "매칭표에 없는 티스토리 글은 null로 비켜 간다");
   console.log("✅ 다중 속성 - 목록 해석·단일 폴백·소속 판정·타 채널 job 매칭 무해");
+}
+
+// --- 9. 주간 리포트 - 추이·축적 중 분기·경보·속성 분리 ----------------------------------------
+{
+  const A = "https://a.blogspot.com/p1.html";
+  const T = "https://t.tistory.com/1";
+  const mk = (date: string, page_url: string, clicks: number, impressions = clicks * 10): PerfRow =>
+    ({ date, page_url, query: "q" + (clicks % 3), clicks, impressions, position: 5 });
+  const end = "2026-10-20";
+  const days = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => {
+    const d = new Date("2026-10-20T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (to - i)); return d.toISOString().slice(0, 10);
+  });
+
+  // A: 14일 이상, 전주 20/일 → 이번 주 2/일(급락). T: 3일치만.
+  const rows: PerfRow[] = [
+    ...days(0, 13).map((d, i) => mk(d, A, i < 7 ? 20 : 2)),
+    ...days(0, 2).map((d) => mk(d, T, 1)),
+  ];
+  const weeks = buildWeeklyReport(rows, end, ["a.blogspot.com", "t.tistory.com", "empty.example"]);
+  const a = weeks.find((w) => w.site === "a.blogspot.com")!;
+  const t = weeks.find((w) => w.site === "t.tistory.com")!;
+  const e = weeks.find((w) => w.site === "empty.example")!;
+
+  assert(siteOf(A) === "a.blogspot.com", "호스트가 속성");
+  assert(!a.accumulating && a.previous.clicks === 140 && a.current.clicks === 14, `주 합계 (${a.previous.clicks}/${a.current.clicks})`);
+  assert(a.alerts.length === 1 && a.alerts[0].includes("급락"), "클릭 급락 경보");
+  assert(t.accumulating && t.alerts.length === 0, "3일치는 축적 중, 경보 없음");
+  assert(e.accumulating && e.current.clicks === 0, "데이터 없는 속성도 항목은 있다");
+  assert(buildSiteMessage(t, end).includes("축적 중") && !buildSiteMessage(t, end).includes("(전주"), "축적 중이면 추이 생략");
+  assert(buildSiteMessage(a, end).includes("<b>⚠") === false && buildSiteMessage(a, end).includes("⚠️ <b>클릭 급락"), "경보는 굵게");
+  assert(buildSiteMessage(e, end).includes("노출 기록이 없습니다"), "빈 속성 문구");
+  console.log("✅ 주간 리포트 - 추이·축적 중 분기·경보·속성 분리");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");

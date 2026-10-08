@@ -51,3 +51,27 @@ export async function loadPublishedUrlToJobId(): Promise<Map<string, string>> {
   }
   return map;
 }
+
+/** 기간(포함)의 성과 행을 읽는다. Supabase 1회 응답 상한(1000행)을 넘으므로 나눠 읽는다. */
+export async function loadSearchPerformanceRange(
+  fromDate: string,
+  toDate: string
+): Promise<Array<{ date: string; page_url: string; query: string; clicks: number; impressions: number; position: number }>> {
+  const PAGE = 1000;
+  const out: Array<{ date: string; page_url: string; query: string; clicks: number; impressions: number; position: number }> = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("search_performance_daily")
+      .select("date,page_url,query,clicks,impressions,position")
+      .gte("date", fromDate)
+      .lte("date", toDate)
+      .order("date", { ascending: true })
+      .order("page_url", { ascending: true })
+      .order("query", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
