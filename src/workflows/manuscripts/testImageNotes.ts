@@ -150,7 +150,8 @@ async function main(): Promise<void> {
       assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
       assert(counts.groups === 2, `채운 자리와 빈 자리 모두 후보 묶음이 보여야 한다 (${counts.groups})`);
       assert(counts.cards === 3 && counts.picked === 1, `후보 3장, 채택 1장 (${JSON.stringify(counts)})`);
-      assert(counts.hint.includes("1번 후보N"), `고르는 법이 보여야 한다 (${counts.hint})`);
+      // 2026-10-07 뷰어-개선: 텔레그램 답장("1번 후보N") 안내에서 클릭 교체 안내로 바뀌었다.
+      assert(counts.hint.includes("클릭하면 이 자리 이미지가 교체"), `고르는 법이 보여야 한다 (${counts.hint})`);
     } finally {
       await browser.close();
     }
