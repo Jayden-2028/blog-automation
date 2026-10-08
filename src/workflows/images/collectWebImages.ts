@@ -352,7 +352,7 @@ export type CollectWebImagesOptions = {
     fileName: string;
     buffer: Buffer;
     mimeType: string;
-  }) => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  }) => Promise<{ ok: true; url: string; extension?: string } | { ok: false; error: string }>;
 };
 
 /**
@@ -1356,7 +1356,7 @@ export async function collectWebImages(
     }
 
     // 후보 파일명(`-cand1`)을 최종 이름으로 바꾼다. 내보내기 폴더가 이 이름을 그대로 쓴다.
-    const fileName = `${stem}.${extension}`;
+    let fileName = `${stem}.${extension}`;
     const filePath = resolve(input.dir, fileName);
     await writeFile(filePath, buffer);
     if (filePath !== chosen.filePath) await rm(chosen.filePath, { force: true });
@@ -1372,6 +1372,11 @@ export async function collectWebImages(
         return null;
       }
       storageUrl = uploaded.url;
+      // 업로드가 형식을 바꿨으면(AVIF → WebP) 기록의 이름도 맞춘다(2026-10-08). 안 맞추면 맥 보관함이
+      // Storage의 WebP 바이트를 `.avif` 이름으로 저장한다.
+      if (uploaded.extension && uploaded.extension !== extension) {
+        fileName = `${stem}.${uploaded.extension}`;
+      }
     }
 
     void rawExtension;

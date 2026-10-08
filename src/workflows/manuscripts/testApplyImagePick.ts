@@ -18,6 +18,7 @@ import {
   validatePicked,
 } from "./applyImagePick.js";
 import type { ApplyImagePickDeps } from "./applyImagePick.js";
+import { fileNameFor } from "./applyImagePick.js";
 import { readEditPending } from "./viewerEditGuard.js";
 import type { ImageCandidateRecord, ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -160,6 +161,26 @@ async function main(): Promise<void> {
     const patch = calls.metadata[calls.metadata.length - 1] as { images: ManuscriptImage[] };
     assert(patch.images.map((i) => i.index).join() === "1,2", "슬롯 추가·정렬");
     console.log("✅ 빈 자리 채우기");
+  }
+
+  // 업로드가 형식을 바꾸면(AVIF → WebP) 기록의 파일 이름도 따라간다(2026-10-08). 안 따라가면 맥 보관함이
+  // Storage의 WebP 바이트를 `.avif` 이름으로 저장한다. 빈 자리를 AVIF로 채울 때 옛 코드는 확장자를 `jpg`로 적었다.
+  {
+    const job = makeJob({ images: [image(2, "https://x.supabase.co/2.jpg")] });
+    const { deps, calls } = makeDeps(job, {
+      fetchImage: async () => ({ ok: true, buffer: JPEG, contentType: "image/avif" }),
+      upload: async () => ({ ok: true, url: "https://x.supabase.co/1-web.webp?v=ccc", extension: "webp" }),
+    });
+    const out = await applyImagePick({ jobId: JOB_ID, index: 1, candidateNumber: 2, fromUrl: "" }, deps);
+    assert(out.status === "applied", "적용돼야 한다");
+    const patch = calls.metadata[calls.metadata.length - 1] as { images: ManuscriptImage[] };
+    const filled = patch.images.find((i) => i.index === 1);
+    assert(filled?.fileName.endsWith(".webp"), `업로드가 정한 확장자를 따라야 한다 (${filled?.fileName})`);
+
+    assert(fileNameFor("03-감독.avif", 3, "image/avif", "webp") === "03-감독.webp", "기존 이름의 확장자만 바꾼다");
+    assert(fileNameFor("03-감독.jpg", 3, "image/jpeg", undefined) === "03-감독.jpg", "업로드가 확장자를 안 알려주면 기존 이름 유지");
+    assert(fileNameFor(undefined, 3, "image/avif", undefined) === "03-image.avif", "AVIF를 jpg로 적지 않는다(옛 동작)");
+    console.log("✅ 후보 교체 - 업로드가 바꾼 확장자를 기록 이름에 반영");
   }
 
   // 이미 발행된 글

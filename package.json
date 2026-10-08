@@ -94,6 +94,7 @@
     "test:naver-markers": "tsx src/services/publish/testNaverImageMarkers.ts",
     "test:naver-publish": "tsx src/services/publish/testPublishArticleToNaver.ts",
     "test:optimize-image": "tsx src/services/images/testOptimizeImage.ts",
+    "test:upload-image-format": "tsx src/services/images/testUploadImageFormat.ts",
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
     "test:naver-queue": "tsx src/workflows/publish/testNaverPublishQueue.ts",
