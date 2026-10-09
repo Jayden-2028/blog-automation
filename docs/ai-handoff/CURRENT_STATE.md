@@ -24,9 +24,11 @@
   (id·keyword+필요 metadata 키 조각만, 실패 시 전체 행 폴백) + 집어 갈 건만 `listByIds` 전체 행 - 회당 3MB→수 KB.
   복구: 사용자가 Pro 1개월 업그레이드 결정(이후 다운그레이드), whynowissue는 사용자가 블로그 폐쇄 예정(폐쇄 후 Storage
   이미지 316파일·198MB 삭제 가능 - 별도 승인). 복구 직후 체크: 폴러 슬림 쿼리 1주기 로그 확인(문법 폴백 경고 없어야 함).
-- **남은 것**: Supabase 복구 후 TKM 발행글 재발행으로 이미지 URL을 Pages로 치환(egress 재발 방지 핵심). 재발행은
-  기존 postId에 posts.update라 URL·조회수·GSC 이력 유지. cost-of-living 글은 사용자가 초안으로 돌림 - 이미지 치환 후
-  posts.publish로 공개 전환까지(사용자 지시 10-09).
+- **TKM 7글 재발행 완료(10-09)**: Pro 전환으로 차단 해제 직후 전글을 기존 postId에 update(주소·조회수·GSC 불변)해
+  이미지가 전부 korea-manual-images-2026.pages.dev로 치환됨(supabase 참조 0 실측, 44파일 5.2MB 서빙 확인,
+  `imagesRehostedAt` 7건 기록 - storage-cleanup 대상化). cost-of-living은 초안 postId 매칭 후 공개 전환까지 완료.
+  폴러 슬림 쿼리 실검증 2.02MB→28KB. 남은 것: 11/5 전후 Pro 해지 노티([[supabase-pro-cancel-reminder]] 메모리),
+  whynowissue 폐쇄는 사용자 고민 중(폐쇄 시 Storage 316파일·198MB 삭제 가능).
   부가 발견: TKM `cost-of-living…` 글 URL이 404(publications 기록과 불일치 - 사용자 삭제 여부 확인 필요).
 
 ## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
