@@ -3,7 +3,7 @@
 // 지켜야 할 것: ① 예외가 나도 폴러가 죽지 않고 failed로 기록·알림하고 다음 건으로 간다
 // ② 발행 성공 후 기록 실패(published_unrecorded)는 재시도 큐로 되돌리지 않고 수동 확인을 알린다
 // ③ 로그인 대기(deferred)는 재확인 간격 안이면 이번 주기에 집지 않는다.
-import { processPending, selectDueRequests, shouldRunKeepalive } from "./tistoryPublishPollJob.js";
+import { describeError, processPending, selectDueRequests, shouldRunKeepalive } from "./tistoryPublishPollJob.js";
 import type { PollDeps, PollState } from "./tistoryPublishPollJob.js";
 import {
   finishTistoryPublish,
@@ -57,6 +57,18 @@ async function main(): Promise<void> {
     assert(!shouldRunKeepalive(st("2026-10-01T00:00:00Z"), at("2026-10-07T01:00:00Z"), 0), "0이면 간격 실행 없음");
     assert(shouldRunKeepalive(st("2026-10-01T00:00:00Z"), at("2026-10-07T10:30:00Z"), 0), "0이어도 리포트 직전은 돈다");
     console.log("✅ shouldRunKeepalive - 간격·첫 실행·리포트 직전 보장·끔");
+  }
+
+  // describeError(2026-10-09): Supabase 오류는 Error가 아닌 객체라 "[object Object]"로 찍히던 것을 고쳤다.
+  {
+    assert(describeError(new Error("붐")) === "붐", "Error는 message");
+    assert(describeError({ message: "제한됨", code: "PGRST001" }) === "제한됨 / PGRST001", "객체는 message/code 조합");
+    assert(describeError({ foo: 1 }) === '{"foo":1}', "읽을 필드가 없으면 JSON");
+    assert(describeError("문자열") === "문자열", "문자열은 그대로");
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    assert(describeError(circular) === "[object Object]", "순환 참조는 String()으로 폴백");
+    console.log("✅ describeError - Error·Supabase 객체·순환 참조");
   }
 
   const state: PollState = {};

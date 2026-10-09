@@ -78,6 +78,26 @@ function writeState(state: PollState): void {
   }
 }
 
+/**
+ * 오류를 사람이 읽을 수 있는 한 줄로. Supabase 오류는 Error가 아니라 평범한 객체라
+ * 템플릿 문자열에 넣으면 "[object Object]"로 찍힌다(2026-10-09 egress 초과 장애 때 실측).
+ */
+export function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const parts = ["message", "code", "details", "hint"]
+      .map((key) => (error as Record<string, unknown>)[key])
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
+    if (parts.length > 0) return parts.join(" / ");
+    try {
+      return JSON.stringify(error);
+    } catch {
+      // 순환 참조 등 - 아래 String()으로 떨어진다.
+    }
+  }
+  return String(error);
+}
+
 function kstToday(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(now);
 }
@@ -109,7 +129,7 @@ const defaultDeps: PollDeps = {
 async function notify(job: ArticleJobRow | null, text: string): Promise<void> {
   const notifier = job ? notifierForJob(job) : TelegramNotifier.fromEnv("social");
   await notifier.sendMessages([{ text }]).catch((error) => {
-    console.warn(`⚠️ [tistory-poll] 알림 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
+    console.warn(`⚠️ [tistory-poll] 알림 실패(무시하고 계속): ${describeError(error)}`);
   });
 }
 
@@ -296,7 +316,20 @@ async function main(): Promise<void> {
 
   const state = readState();
   const stale: StaleEntry[] = [];
-  const waiting = await listPendingTistoryRequests({ onStale: (job, entryState) => stale.push({ job, state: entryState }) });
+  let waiting: ArticleJobRow[];
+  try {
+    waiting = await listPendingTistoryRequests({ onStale: (job, entryState) => stale.push({ job, state: entryState }) });
+  } catch (error) {
+    // DB 장애(예: 2026-10-09 Supabase egress 초과로 5시간 제한)로 대기열을 못 읽어도 keepalive는 돌린다.
+    // 그때 폴러가 통째로 죽어 keepalive까지 멈췄고, 그 사이 티스토리 로그인이 풀렸다. keepalive는 브라우저로
+    // 티스토리만 만지므로 DB와 무관하게 돌 수 있다.
+    console.error(`❌ [tistory-poll] 대기열 조회 실패(keepalive만 진행): ${describeError(error)}`);
+    process.exitCode = 1;
+    await keepalive(state).catch((keepaliveError) => {
+      console.warn(`⚠️ [tistory-poll] keepalive 실패(무시하고 계속): ${describeError(keepaliveError)}`);
+    });
+    return;
+  }
   await reportStaleEdits(stale, (job, text) => notify(job as ArticleJobRow, text));
   // 로그인 대기(deferred) 건은 재확인 간격 안이면 이번엔 건너뛴다 - 브라우저를 띄우지 않는다(B-1).
   const pending = selectDueRequests(waiting, new Date());
@@ -311,7 +344,7 @@ async function main(): Promise<void> {
   } else if (waiting.length === 0) {
     // keepalive 단계의 예외(브라우저 기동·로그인 확인)가 만료 알림까지 막지 않게 따로 감싼다.
     await keepalive(state).catch((error) => {
-      console.warn(`⚠️ [tistory-poll] keepalive 실패(무시하고 계속): ${error instanceof Error ? error.message : error}`);
+      console.warn(`⚠️ [tistory-poll] keepalive 실패(무시하고 계속): ${describeError(error)}`);
     });
   }
   await remindExpired(state);
@@ -320,7 +353,7 @@ async function main(): Promise<void> {
 // 테스트가 이 파일을 import해도 폴러가 돌지 않게 한다(npm run job:tistory-poll로 직접 실행할 때만).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((error) => {
-    console.error(`❌ [tistory-poll] 실패: ${error instanceof Error ? error.message : error}`);
+    console.error(`❌ [tistory-poll] 실패: ${describeError(error)}`);
     process.exit(1);
   });
 }
