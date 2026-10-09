@@ -86,6 +86,10 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          # 단계 통합(PIPELINE-MERGE-2026-10.md §2): 미설정·빈 값이면 켜짐(초안 승인 생략). 옛 2단계 흐름으로 되돌리려면
+          # repo variable PIPELINE_SKIP_DRAFT_REVIEW=false. 켜져 있으면 write 직후 job-publish-prepare를 발화한다(actions: write).
+          PIPELINE_SKIP_DRAFT_REVIEW: ${{ vars.PIPELINE_SKIP_DRAFT_REVIEW }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run job:write -- "${{ inputs.job_id }}"
 
       # job-research.yml과 같은 이유(2026-09-16) - always()로 돌아 큐 행을 마감하고 다음 대기

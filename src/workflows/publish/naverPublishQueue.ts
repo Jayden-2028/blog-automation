@@ -12,7 +12,7 @@
 // 담고 있어 패턴이 같고, 마이그레이션이 필요 없다. 큐 길이도 하루 몇 건이라 테이블을 쓸 만큼
 // 크지 않다. 나중에 커지면 그때 옮긴다.
 
-import { filterEditPending } from "../manuscripts/viewerEditGuard.js";
+import { EDIT_GUARD_METADATA_KEYS, filterEditPending } from "../manuscripts/viewerEditGuard.js";
 import type { EditGuardOptions } from "../manuscripts/viewerEditGuard.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -29,7 +29,7 @@ export type NaverPublishRequest = {
   error?: string;
 };
 
-export function readNaverRequest(job: ArticleJobRow): NaverPublishRequest | null {
+export function readNaverRequest(job: Pick<ArticleJobRow, "metadata">): NaverPublishRequest | null {
   const raw = (job.metadata as Record<string, unknown> | null)?.[NAVER_REQUEST_KEY];
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Partial<NaverPublishRequest>;
@@ -86,16 +86,25 @@ export async function finishNaverPublish(
  * 최근 job 몇십 건만 보면 된다. 발행 요청이 며칠 묵는 일은 없다.
  */
 export async function listPendingNaverRequests(options: NaverQueueOptions = {}): Promise<ArticleJobRow[]> {
-  const listRecentJobs = options.listRecentJobs ?? ((limit) => ArticleJobRepository.listRecent(limit));
-  const jobs = await listRecentJobs(100);
+  // 2026-10-09 egress 절감: 기본 경로는 전체 행(회당 ~3MB)이 아니라 판정에 필요한 metadata 조각만 받아
+  // 거른 뒤, 실제 집어 갈 소수 건만 전체 행을 다시 받는다. 테스트 주입(listRecentJobs)은 전체 행이므로 그대로 쓴다.
+  const injected = options.listRecentJobs;
+  const candidates = injected
+    ? await injected(100)
+    : await ArticleJobRepository.listRecentSlim([NAVER_REQUEST_KEY, ...EDIT_GUARD_METADATA_KEYS], 100);
   // 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c).
-  return filterEditPending(
-    jobs.filter((job) => readNaverRequest(job)?.status === "requested"),
+  const pending = filterEditPending(
+    candidates.filter((job) => readNaverRequest(job)?.status === "requested"),
     options
-  )
-    .sort((a, b) => {
-      const at = readNaverRequest(a)?.requestedAt ?? "";
-      const bt = readNaverRequest(b)?.requestedAt ?? "";
-      return at.localeCompare(bt);
-    });
+  ).sort((a, b) => {
+    const at = readNaverRequest(a)?.requestedAt ?? "";
+    const bt = readNaverRequest(b)?.requestedAt ?? "";
+    return at.localeCompare(bt);
+  });
+  if (injected) return pending as ArticleJobRow[];
+  // 조각 조회와 전체 조회 사이에 상태가 바뀌었을 수 있어 받은 전체 행으로 한 번 더 거른다(순서 유지).
+  const byId = new Map((await ArticleJobRepository.listByIds(pending.map((job) => job.id))).map((job) => [job.id, job]));
+  return pending
+    .map((job) => byId.get(job.id))
+    .filter((job): job is ArticleJobRow => Boolean(job) && readNaverRequest(job as ArticleJobRow)?.status === "requested");
 }

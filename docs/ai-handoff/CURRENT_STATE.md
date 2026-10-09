@@ -1,10 +1,78 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-07 (Asia/Seoul)
+기준일: 2026-10-09 (Asia/Seoul)
+
+## 2026-10-09 — Supabase egress 초과 전면 차단 + TKM 이미지 rehost 미작동 발견·수정 (메인 세션)
+
+- **Supabase 무료 플랜 egress 한도 초과로 API 게이트웨이(REST·Storage) 전면 402 차단**(10-09 00:00 UTC 전후 시작.
+  10-08 16:26 UTC Storage 업로드까지는 성공). 증상: 09:00 KST 엔터 키워드 run의 trendCollect 3소스·seed 전부
+  "exceed_cached_egress_quota, exceed_egress_quota" — 파이프라인 전 트랙 중단, 맥미니 폴러 402 공회전(무해, 자동 복귀),
+  **블로그스팟 두 블로그(whynowissue + The Korea Manual)의 Storage 핫링크 이미지 전부 깨짐**. 네이버·티스토리 글은 발행 시
+  플랫폼 업로드라 무사. 관리 API는 살아 있어 MCP execute_sql·데일리 데스크 대시보드는 정상. 해제 = 결제 주기 리셋 또는
+  Pro 업그레이드(사용자 결정 대기 — Usage 화면 확인 후 결정하기로).
+- **발견: 개편3 'kscene 발행 시 Pages 이미지 복사'가 한 번도 작동한 적 없음.** `korea-manual-images-2026` Pages 프로젝트가
+  생성만 되고 첫 배포가 없어 **404가 아니라 522**를 반환 → rehost가 manifest 읽기 실패로 매번 중단·Supabase URL 폴백
+  (10-08 run 37730209173 로그 실증). TKM 발행 전글이 Supabase 핫링크 상태 = egress 소비 + 이번 차단에 노출.
+- **수정(이 세션)**: ① 빈 manifest 부트스트랩 배포 완료(manifest.json 200 확인) ② `rehostImagesToPages`: manifest 읽기
+  실패 시 Cloudflare API로 배포 이력 조회, **0회일 때만** 빈 사이트로 진행(이력 있음·확인 불가는 기존대로 중단 - 기존 이미지
+  보호) ③ **wrangler cwd를 스테이징 디렉터리로 변경** - 레포 루트에서 실행하면 뷰어용 `functions/api`가 공개 이미지
+  프로젝트에 Pages Functions로 딸려 올라간다(첫 부트스트랩 배포에서 실제 발생 → 즉시 깨끗한 재배포로 제거, /api/* 404 확인).
+  테스트 `test:rehost-images`(미배포 522 진행/이력 있음 중단/API 실패 중단) 보강.
+- **원인 확정(Usage 실측, 10-09)**: 결제 주기 9/21~10/21. 비캐시 egress **41.18GB/5GB(824%)의 99.6%가 PostgREST** -
+  맥미니 폴러들(naver·tistory·export)이 60초마다 `listRecent(100)` 전체 행(회당 ~3MB, metadata가 97%)을 내려받는 구조.
+  캐시 egress 9.18GB/5GB(184%)는 Storage CDN(블로그 핫링크). **폴러 쿼리 다이어트 적용(10-09)**: `listRecentSlim`
+  (id·keyword+필요 metadata 키 조각만, 실패 시 전체 행 폴백) + 집어 갈 건만 `listByIds` 전체 행 - 회당 3MB→수 KB.
+  복구: 사용자가 Pro 1개월 업그레이드 결정(이후 다운그레이드), whynowissue는 사용자가 블로그 폐쇄 예정(폐쇄 후 Storage
+  이미지 316파일·198MB 삭제 가능 - 별도 승인). 복구 직후 체크: 폴러 슬림 쿼리 1주기 로그 확인(문법 폴백 경고 없어야 함).
+- **TKM 7글 재발행 완료(10-09)**: Pro 전환으로 차단 해제 직후 전글을 기존 postId에 update(주소·조회수·GSC 불변)해
+  이미지가 전부 korea-manual-images-2026.pages.dev로 치환됨(supabase 참조 0 실측, 44파일 5.2MB 서빙 확인,
+  `imagesRehostedAt` 7건 기록 - storage-cleanup 대상化). cost-of-living은 초안 postId 매칭 후 공개 전환까지 완료.
+  폴러 슬림 쿼리 실검증 2.02MB→28KB. 남은 것: 11/5 전후 Pro 해지 노티([[supabase-pro-cancel-reminder]] 메모리),
+  whynowissue 폐쇄는 사용자 고민 중(폐쇄 시 Storage 316파일·198MB 삭제 가능).
+  부가 발견: TKM `cost-of-living…` 글 URL이 404(publications 기록과 불일치 - 사용자 삭제 여부 확인 필요).
+
+## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
+
+- **GSC 다중 속성 라이브**: repo variable `GSC_SITE_URLS`(whynowissue·thekoreamanual·티스토리). 서비스 계정 `gsc-reader@…`를 두 새 속성에 "제한됨"으로 추가, 3속성 수집 오류 없음. 새 속성 첫 데이터는 10-10~11 전후(GSC 지연) - 그때 `analytics:search -- --site=<속성> --days=7 --apply` 백필.
+- **GA4 라이브**: 티스토리 속성 `오늘의 맥락`(숫자 ID 558030120, 측정 ID G-G8K3PS5X0T, 스킨 `<head>` 삽입·실시간 수신 확인). 서비스 계정을 GA4 계정 뷰어로 추가 + Analytics Data API 사용 설정. `ga4_performance_daily` migration 적용(10-09), `GA4_PROPERTY_IDS=tkm:557900208,tistory:558030120`, 일일 수집(`analytics-search.yml`)에 동승 - TKM 적재 확인.
+- **주간 리포트** `analytics:weekly-report`: 월요일 `analytics-index-health.yml`에 동승(새 cron 없음, Worker 4/5). 첫 실발송은 3속성 데이터가 쌓인 뒤 승인 받아 진행.
+- **남은 것**: ① 3속성 GSC 행 적재 확인 + 백필 ② 주간 리포트 첫 실발송(승인) ③ 월요일 색인 점검에서 "제한됨" 권한으로 URL Inspection이 되는지 확인(안 되면 "전체"로 상향) ④ 색인 신규/이탈 수는 상태 저장 테이블이 없어 미구현.
+
+## 2026-10-08 — 개편0 전체 점검·병합 정리 (메인 세션)
+
+- **AVIF 수집 정규화 브랜치(3805560)와 `fix/exclude-sports`(10-07 스포츠 키워드 제외 2커밋, 병합 누락분)를 검증 후 main 병합·push**(abd107b). 이미지 형식·키워드 제외·빌드 테스트 통과 확인.
+- **맥미니 prod pull → abd107b**(폴러는 launchd가 60초마다 스크립트를 새로 실행하므로 pull만으로 반영 - 재시작 불필요).
+- **기획⑤ 확정본 반영**(branding-2026-10/): `prompts/translation/kscene-ko-en.md` 통째 교체 + `ksceneSeeds.ts` 시드 60→100개(라벨당 20, News in Context 제외 확정). 다음 kscene 주제 수집(21:00)부터 적용.
+- Worker 배포 최신 확인(마지막 배포 10-06 05:21Z > 마지막 Worker 커밋 7abc153) - kscene 12UTC·storage-cleanup cron(토 18UTC)·C-1 전부 라이브. storage-cleanup 첫 cron 실행은 10-12(일) 03:00 KST dry-run.
+- 13:00 엔터 키워드 notify 실패(10-08): GitHub 러너의 일시 네트워크 장애 1회(fetch failed, 재시도 로직 없음). 데이터는 저장돼 있었고 `npm run notify:keywords`로 재발송 완료. 개선 메모: notify 일시 장애 재시도(§⑤.9 알림부), image-pick 정상 가드 거부가 빨간 run으로 남는 문제.
+
+## 2026-10-08 — 이미지 AVIF를 수집·업로드에서 정규화 (`IMAGE_AVIF_PIPELINE_HANDOFF.md` 처리 완료)
+
+티스토리 세션이 넘긴 건. 웹 수집 AVIF가 `2-web.png`라는 거짓 이름으로 올라가 티스토리 업로드를 연쇄로 막았다.
+**수집·업로드 쪽 근본 수정을 했다**: 실제 바이트로 형식을 정하고(content-type을 믿지 않음), AVIF는 크기와 무관하게
+WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`로 올린다. 업로드가 형식을 바꾸면 수집 기록·후보 교체의
+`fileName`도 따라가게 했다(안 하면 맥 보관함이 WebP 바이트를 `.avif`로 저장). 상세·검증·미확인 항목은 인수인계 문서 끝.
+테스트 `test:upload-image-format` 신설. **남은 것**: 맥에서 네이버 발행 1회 확인(이 세션은 클라우드).
+기존 Storage 파일은 건드리지 않았고 새로 올라가는 이미지부터 적용된다.
+
+## 2026-10-08 — 파이프라인 단계 통합 (브랜치 `feat/pipeline-merge`, 워크트리 `pipeline-merge/`, 지시서 `PIPELINE-MERGE-2026-10.md`)
+
+**상태: main 병합·push 완료(2026-10-08). 게이트 변수 미설정 = 통합 흐름 켜짐. 실왕복 4건(§7)은 운영에서 확인 중.** 베이스: `origin/main` 3e738c8(뷰어-개선 머지 확인 후 시작).
+
+- **흐름**: 키워드 Go → 자료조사 ✍️ → write → **자동 승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화** → 이미지 반영 원고 → **통합 알림 한 번**(📄 페이지 / 🖼 이미지 수정 / ⬇️ 내려받기 / 트랙별 발행 / **✏️ 수정 요청 / 🗑 반려**). 초안 알림(Telegraph 미리보기 + ✅/✏️/🗑)은 폐지 - `telegraph` 서비스는 호출만 뺐다(`runWritingStage`가 게이트 켜짐이면 건너뜀).
+- **게이트 `PIPELINE_SKIP_DRAFT_REVIEW`**(`config/pipelineGate.ts`): 미설정·빈 값 = **켜짐**, `false/0/off/no` = 옛 2단계 흐름. 배선: `job-write.yml`·`job-revise.yml`(repo variable). **사용설명서(kscene)는 게이트와 무관하게 옛 흐름**(한글 ✅→영어본→영어 ✅는 개편3 지시서가 통합 흐름에 맞춰 재설계 - 지시서 §5). `review` 상태로 대기 중인 옛 job은 옛 ✅/✏️/🗑으로 소진(마이그레이션 없음). 통합 알림의 버튼·검수 요약은 환경변수가 아니라 `autoApprovedAt` 유무로 정한다(게이트를 중간에 바꿔도 job마다 지나온 흐름의 알림).
+- **write 마무리**: `finishWrite.ts`(성공/실패/건너뜀/게이트 분기, CLI는 얇은 껍데기). `autoApproveDraft.ts`가 ✅ 콜백과 같은 전이(메타 → job approved → article approved → prepare 발화)를 수행. 의학 주제는 `requiresMedicalReview`를 **내리지 않고** 통합 알림에 ⚕️ 경고 + 검수(팩트·법률·광고) 요약 3건을 옮겼다(초안 단계가 사라져 볼 곳이 없어지므로). 준비 발화 실패 시 승인은 유지하고 사람에게 수동 실행 안내(자동 재시도 없음 원칙).
+- **버튼 콜백**: 옛 `review:edit` / `review:discard` 재사용. 🗑 = `rejected` + `rejectedAt/rejectedVia/rejectedAtStatus` 기록 + 뷰어 manifest 행 삭제(`removeManifestTopic`) + `manuscripts-refresh.yml` 발화. **발행됐거나 발행 중(큐 requested/done·publications 비실패)이면 반려 거부**. 반려된 원고의 ✏️·발행 콜백은 거부. 준비 도중 반려하면 `prepareApprovedManuscripts`가 뷰어·알림에서 제외. ✏️ 답장 매칭은 `findByEditRequestMessageId(track)`(approved 포함) 그대로.
+- **키보드 복원(중요)**: Cloudflare 릴레이는 **어떤 버튼이든 누르는 순간 키보드 전체를 "⏳ 처리 중…" 하나로 덮어쓴다**. 그래서 키보드 구성을 `buildReadyKeyboard` 한 곳에 모아 알림 생성과 복원이 같이 쓴다 - ✏️ 뒤에는 발행 버튼 포함 전체를 되살리고(수정 요청됨 표시), 🗑 뒤에는 "반려됨" 한 버튼으로 닫고, 반려 거부 뒤에는 원상 복원. 발행/이미지 버튼 처리 뒤 재구성에도 ✏️/🗑 줄을 붙인다.
+- **revise 재배치(§1-c)**: 프롬프트에 "이미지 마커 위치·개수·내용 유지" 지시(규격이 `prompts/`가 아니라 `reviseArticleWithFeedback.ts` 인라인이라 거기에). 자동 승인 job의 수정은 `applyUnifiedRevision` → `planReviseImages`(마커 diff): **불변 → 이미지·게이트 그대로, `channelManuscriptsReadyAt`만 비우고 prepare 재실행(뷰어 재배포)** / 같은 개수·설명 변경 → 바뀐 자리만 기존 `applyImageEditRequest`로 비워 재수집 / 개수 변경 → **처음 달라진 자리부터 뒤쪽만** 갱신(Storage 경로가 `<jobId>/<자리번호>`라 번호를 밀면 파일을 덮어쓴다). 완료 알림은 prepare가 보내는 통합 알림(버튼 동일). 게이트 꺼짐·review 상태 job은 옛 경로.
+- **cleanup(§4)**: `storage-cleanup`에 반려분 추가 - `rejectedAt`(없으면 `reviewedAt`) 7일 경과 + 발행 이력 0건(시각 불명은 보존). dry-run 기본 그대로, `--rejected-days=N`.
+- **테스트**: 신규 `test:pipeline-gate`·`test:finish-write`(성공·write 실패·건너뜀·게이트 false·발화 실패)·`test:revise-images`(diff 5종·계획 3종·프롬프트)·`test:pipeline-merge-callbacks`(🗑/✏️/가드/키보드 복원/공존), 확장 `test:notify-manuscripts-ready`·`test:storage-cleanup`. 영향 범위 72개 스크립트 중 실패 3건은 **전부 `origin/main` 3e738c8에서도 동일 실패**(제 변경 무관): `test:telegram-bot`(이미지 수정 답장 구간이 실제 Supabase 호출 - 통과 줄 수 베이스라인과 동일 50/50), `test:manuscript-manifest`(테스트 데이터 정리가 실DB 호출), **`test:image-notes`(뷰어-개선 쪽: "후보 2장 — 마음에 드는 후보를 클릭하면…" 문구 단언 불일치 - 뷰어 세션 확인 필요)**. 테스트는 Supabase 환경변수가 있어야 import되므로 더미 값(`SUPABASE_URL=http://127.0.0.1:9`)으로 돌렸다.
+- **남은 것(승인 필요)**: push·배포(워크플로 2개 + Worker 변경 없음), 실왕복 4건(§7: ①키워드 Go→알림 한 번 ②마커 불변 ✏️ 1건 ③🗑 1건 + cleanup dry-run ④`PIPELINE_SKIP_DRAFT_REVIEW=false` 복귀) - 모두 텔레그램 발송·원격 DB 쓰기가 필요하다. 게이트·구흐름 제거는 1~2주 안정 확인 뒤 별도 커밋(§2). 개편3은 이 흐름을 전제로 시작.
+- **알려 둔 한계**: ① 개수가 바뀐 수정은 뒤쪽 이미지를 모두 다시 구한다(번호 밀기 금지의 대가) ② 마커 불변 수정도 prepare는 다시 돈다 - 비어 있던 자리는 재수집을 시도하고 내부 링크·기획 호출은 캐시를 따른다 ③ 반려 직후 manifest 삭제 실패 시 카드가 다음 재배포까지 남는다(발행은 막힘) ④ 마지막 원고를 반려하면 `manuscripts:build --refresh`가 빈 manifest를 건너뛰어 페이지 갱신이 안 된다(기존 동작).
 
 ## 2026-10-07 — 원고뷰어 개선 (브랜치 `feat/viewer-refine`, 워크트리 `viewer-refine/`, 지시서 `VIEWER-REFINE-2026-10.md`)
 
-**상태: 코드·테스트 완료(커밋됨, push 전). push·배포·실측 1건은 승인 대기.**
+**상태: main 병합·배포 완료. 실측 완료 - 2026-10-08 후보 클릭 교체 성공 run 2건(원고 준비 재실행 없음), "원고 준비 전 job" 가드 거부 1건 동작 확인.**
 
 - **§3 후보 클릭 교체(최우선)**: 후보 썸네일 클릭 → `POST /api/image-pick`(Access JWT·Origin 검증, `imagePickApi.ts`) → `repository_dispatch(image_pick)` → `image-pick.yml` → `applyImagePickCli.ts`. 순수 로직은 `applyImagePick.ts`(후보 해석·fromUrl 경합·파일 검사·picked 이동·실패 기록, 의존성 주입). **원고 준비 재실행·완료 알림 없음**, 그 슬롯만 치환. 후보 URL은 DB에서 번호로 찾는다(클라이언트 URL 불신). 캡션은 유지(뷰어 안내). 실패는 `manifest.imagePick`(뷰어에 사유·대체 수단 표시)과 텔레그램. 발행 여부(`publications.status=published`)는 CLI가 판단해 알린다 - **뷰어는 발행 여부를 몰라 확인창 경고를 항상 띄운다**(지시서는 발행된 job에만이라 했으나 manifest에 발행 정보가 없어 항상 표시로 대체).
 - **§2 저장은 저장만**: 확인창·토스트·배지·결과 문구를 "저장"으로(버튼도 `💾 수정본 저장`). 뷰어 🟠 발행 버튼·`submitPublish` 제거, 트랙별 "발행은 텔레그램의 … 버튼으로만" 안내(`copy.hint`). `publishApi`/`publish-request.yml`/`publishRequestCli`는 코드만 유지. **가드**: `viewerEditGuard.ts` - `viewerEditPendingAt`(반영 접수)·`imagePickPendingAt`(교체 접수)이 완료 기록보다 늦으면 진행 중. 네이버·티스토리 폴러 목록과 텔레그램 발행 콜백(naver/tistory/blogspot)이 건너뛰고/거부, 10분 넘으면 stale → `staleEditReport.ts`가 경고 알림 + 표식 해제 후 진행. 접수 후 아무것도 못 쓰고 실패하면 표식을 바로 푼다.
@@ -14,7 +82,7 @@
 
 ## 2026-10-06 — Serper 재가동·계측 (브랜치 `feat/serper-revival`, 워크트리 `serper-revival/`, 지시서 `SERPER-REVIVAL-2026-10.md`)
 
-**상태: 코드·단위 테스트·빌드 완료(커밋됨, push 전). A의 실호출 검증과 main 병합은 승인 대기.**
+**상태: main 병합·variables 등록(`SERPER_CREDITS_PURCHASED`·`_AT`) 완료. `api_usage`에 serper 행 적재 확인(계측 가동, 2026-10-07). E(1주 뒤 Serper Usage 대조)는 메인 세션 일정.**
 
 - **사실**: 2026-10-06 사용자가 Serper 50,000크레딧($50, 유효 6개월 → 2027-04-06) 구매. API 키는 기존 그대로. 크레딧 소진(잔액 -15)으로 400이 이어지던 구글 이미지 색인이 되살아난다.
 - **계측(B)**: Serper 호출 지점 전부가 `recordSerperUsage`(fire-and-forget, 기록 실패는 검색에 무영향)로 `api_usage`에 적재 - `searchSerperImages`(429 재시도는 시도마다 1행), `searchKinolightsStills`의 `/search`. provider `serper`, model `serper-images`/`serper-search`, operation `image.search`/`web.search`, **실패(400·429·네트워크)는 `.failed` + cost 0**. 단가 $0.001/쿼리(`config/apiPricing.ts`의 `API_QUERY_PRICING`). `job_id`는 `collectWebImagesForJob → collectWebImages(options.jobId) → createSearchImagesMerged(jobId)`로 흘려 원고당 단가(`perManuscript`)에 잡힌다. 수동 CLI(`collectWebImagesCli`)는 job을 몰라 job_id 없음.
@@ -28,17 +96,17 @@
 
 ## 2026-10-06 — 개편3 사용설명서 트랙(The Korea Manual) 구현 (브랜치 `feat/restructure-3-kscene-track`)
 
-**상태: 코드·테스트 완료, main 병합·Worker 재배포·봇 C 웹훅 등록·Pages 프로젝트 생성은 사용자 승인 대기.** 상세·체크리스트는 `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`.
+**상태: main 병합·Worker 재배포(10-06)·웹훅·Pages 설정 완료, 첫 발행 2026-10-07(Korean Gift Giving Etiquette).** 상세·체크리스트는 `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`.
 
 - 21:00 KST 주제 제안(`kscene-topic.yml`): 영문 자동완성 + 기본 시드 60개, 기발행·기제안 중복 제거, 사용설명서 봇 Go/Pass. Worker 12 UTC 슬롯이 **watchdog과 함께** 깨운다(GitHub cron 폐지). watchdog은 kscene을 전날분 기준으로 본다.
 - 한→영 2단계 승인: 한글 ✅ → `job-translate`(영어본 + 한글 대역 요약, 마커·링크·한글 잔존 검증) → 영어본 재승인 → 이미지·🔵 Blogger 발행. 상태는 `metadata.ksceneStage`.
 - Blogger 발행 타깃 분기(`KSCENE_BLOGGER_BLOG_ID`, 비면 발행 안 함) + 영문 라벨 + 발행 시 이미지를 공개 Cloudflare Pages로 복사·URL 치환(설정 없으면 Supabase 링크로 발행). 옮긴 글은 storage-cleanup 대상.
-- **번역 지침(`prompts/translation/kscene-ko-en.md`)과 시드(`ksceneSeeds.ts`)는 임시 기본본** - 기획 세션(⑤) 산출물로 교체.
+- 번역 지침(`prompts/translation/kscene-ko-en.md`)과 시드(`ksceneSeeds.ts`)는 **2026-10-08 기획⑤ 확정본으로 교체 완료**(시드 100개, News in Context 라벨 제외 확정).
 - 알려진 한계: `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md` "알려 둔 한계".
 
 ## 2026-10-06 — 개편2.5 안정화 구현 (브랜치 `feat/restructure-2.5-stabilization`, 지시서 `RESTRUCTURE-2.5-STABILIZATION.md`)
 
-**상태: 코드·테스트 완료, main 병합·Worker 재배포·맥미니 반영은 사용자 승인 대기.**
+**상태: main 병합·Worker 재배포 완료. 맥미니 prod pull 2026-10-08(abd107b). 남은 승인 대기: ④ 사회 트랙 티스토리 비공개 왕복 리허설, ⑤ storage-cleanup 실삭제(dry-run 보고 후).**
 
 - **A-1** 티스토리 폴러 예외 처리: 폴러가 예외로 죽지 않고 `failed` 기록 + 사회 봇 알림 후 다음 건으로. 발행 성공 뒤 기록(`savePublication`)만 실패하면 `tistoryPublish.status = "published_unrecorded"`로 남기고 폴러가 다시 집지 않는다(다시 눌러도 거부 - 중복 발행 방지), 수동 확인 알림.
 - **A-2** 인스타 버튼 선택은 큐 항목이 `needs_track`일 때만 적용(`applyTrackPick`). 이미 처리된 링크는 무시하고 "이미 처리된 링크입니다" 안내. 글자 답으로 트랙이 정해질 때 클라우드가 보낸 버튼 메시지를 지우는 건 하지 않았다(클라우드는 맥 큐 상태를 모른다) - 상태 가드만으로 수용.

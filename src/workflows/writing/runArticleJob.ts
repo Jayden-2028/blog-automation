@@ -29,6 +29,7 @@ import { dirname } from "node:path";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
+import { shouldSkipDraftReview } from "../../config/pipelineGate.js";
 import { PIPELINE_ROOT, draftFilePath, researchFilePath } from "../../config/pipelinePaths.js";
 import { RESEARCH_PROVIDER, RESEARCH_FALLBACK_TO_CLAUDE } from "../../config/researchProvider.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
@@ -857,9 +858,13 @@ async function runWritingStageInner(
   // ⚠️ Telegraph 페이지는 URL을 아는 누구나 볼 수 있는 공개 페이지다. 검수 전 원고가 이 URL로
   // 노출된다는 뜻이라, 사람 확인 전에 발행하는 지금 방식은 트레이드오프를 감수한 것이다
   // (2026-08-27 사용자 승인).
-  const telegraphResult = await publishArticleToTelegraph(article.title ?? job.keyword, content);
-  const telegraphUrl = telegraphResult.ok ? telegraphResult.url : null;
-  if (!telegraphResult.ok) {
+  //
+  // 단계 통합(PIPELINE-MERGE-2026-10.md §1-b): 초안 승인 단계가 없으면 Telegraph 미리보기도 필요 없다 - 뷰어가
+  // 그 역할을 한다. 서비스 코드는 지우지 않고 호출만 건너뛴다(게이트가 꺼지면 옛 흐름이 그대로 쓴다).
+  const skipTelegraph = shouldSkipDraftReview(job);
+  const telegraphResult = skipTelegraph ? null : await publishArticleToTelegraph(article.title ?? job.keyword, content);
+  const telegraphUrl = telegraphResult?.ok ? telegraphResult.url : null;
+  if (telegraphResult && !telegraphResult.ok) {
     console.error(`⚠️ Telegraph 발행 실패 (Telegram 본문 dump로 폴백) -`, telegraphResult.error);
   }
 

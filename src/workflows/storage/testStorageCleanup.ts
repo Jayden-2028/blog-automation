@@ -90,3 +90,44 @@ async function main(): Promise<void> {
   console.log("\n✅ testStorageCleanup 전체 통과");
 }
 main().catch((e) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });
+
+// ---- 반려분(PIPELINE-MERGE-2026-10.md §4): 발행 이력 없는 rejected job을 반려 후 7일 뒤 지운다 ----
+{
+  const { selectRejectedCleanupJobs } = await import("./planStorageCleanup.js");
+  const rejected = [
+    { jobId: "rej-old", rejectedAt: daysAgo(8), publicationCount: 0 },
+    { jobId: "rej-edge", rejectedAt: daysAgo(7), publicationCount: 0 },
+    { jobId: "rej-recent", rejectedAt: daysAgo(3), publicationCount: 0 },
+    { jobId: "rej-published", rejectedAt: daysAgo(30), publicationCount: 1 },
+    { jobId: "rej-unknown", rejectedAt: null, publicationCount: 0 },
+  ];
+  const sel = selectRejectedCleanupJobs(rejected, NOW, 7);
+  assert(sel.candidates.map((c) => c.jobId).join() === "rej-old,rej-edge", `7일 지난 무발행 반려분만 (${sel.candidates.map((c) => c.jobId)})`);
+  const why2 = Object.fromEntries(sel.skipped.map((s) => [s.jobId, s.reason]));
+  assert(why2["rej-recent"] === "rejected_too_recent", "7일 안에는 유예(마음을 바꿀 수 있다)");
+  assert(why2["rej-published"] === "rejected_has_publication", "발행 이력이 있으면 몇 년이 지나도 보존");
+  assert(why2["rej-unknown"] === "rejected_no_timestamp", "반려 시각을 모르면 추측으로 지우지 않는다");
+  console.log("✅ 반려분 선정 규칙 - 7일·발행 이력·시각 불명");
+
+  // 실행기: 발행분 + 반려분이 한 계획에 합쳐지고 dry-run 기본이라 아무것도 지우지 않는다.
+  const removedPaths: string[] = [];
+  const deps: StorageCleanupDeps = {
+    loadJobPublications: async () => [{ jobId: "old-naver", publications: [pub("naver", "published", 20)] }],
+    loadRejectedJobs: async () => rejected,
+    listObjects: async () => [{ name: "1.png", size: 1000 }, { name: "2.png", size: 500 }],
+    removeObjects: async (paths) => (removedPaths.push(...paths), paths.length),
+  };
+  const dry = await runStorageCleanup({ now: NOW }, deps);
+  assert(dry.rejectedCandidateJobs === 2 && dry.candidateJobs === 3, `발행 1 + 반려 2 = 대상 3건 (${dry.candidateJobs}/${dry.rejectedCandidateJobs})`);
+  assert(dry.plan.paths.includes("rej-old/1.png") && dry.plan.paths.includes("old-naver/2.png"), "두 종류 모두 계획에 들어간다");
+  assert(removedPaths.length === 0 && dry.removed === 0, "dry-run 기본 - 아무것도 지우지 않는다");
+  assert(dry.rejectedSkipped.too_recent === 1 && dry.rejectedSkipped.has_publication === 1 && dry.rejectedSkipped.no_timestamp === 1, "보존 사유 집계");
+  assert(formatCleanupReport(dry).includes("반려 후 7일"), "보고에 반려 기준이 보인다");
+  const applied = await runStorageCleanup({ now: NOW, apply: true }, deps);
+  assert(applied.removed === applied.plan.paths.length && removedPaths.includes("rej-edge/2.png"), "--apply일 때만 지운다");
+
+  // loadRejectedJobs를 안 주면(옛 호출부) 반려분은 건드리지 않는다.
+  const legacy = await runStorageCleanup({ now: NOW }, { ...deps, loadRejectedJobs: undefined });
+  assert(legacy.rejectedCandidateJobs === 0 && legacy.candidateJobs === 1, "옛 호출부는 동작 불변");
+  console.log("✅ 반려분 정리 - dry-run 기본, apply에서만 삭제, 옛 호출부 불변");
+}

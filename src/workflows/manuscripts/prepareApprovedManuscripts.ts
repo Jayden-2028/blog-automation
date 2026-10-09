@@ -12,6 +12,7 @@
 // 내부 링크 준비와 뷰어·알림까지만 맡고, 발행 호출은 텔레그램 버튼·뷰어 요청 경로(TelegramBot / publishRequestCli)에 있다.
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
+import { isAutoApproved } from "../../config/pipelineGate.js";
 import { prepareManuscript } from "./prepareManuscript.js";
 import type { PrepareManuscriptResult } from "./prepareManuscript.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
@@ -37,6 +38,11 @@ export type PrepareApprovedManuscriptsOptions = {
   saveManifest?: (manifest: ManuscriptManifest) => Promise<void>;
   /** 테스트 주입: 엔터(index.html) 페이지 HTML만 받는다. 생략하면 writePages(트랙별 전부)를 쓴다. */
   writePage?: (html: string) => Promise<void>;
+  /**
+   * 준비가 끝난 시점에 job이 아직 approved인가. 준비는 길어서(이미지 수집) 그 사이 사용자가 통합 알림 없이 이전 알림의 🗑로
+   * 반려할 수 있다 - 반려된 원고를 뷰어에 올리고 "준비 완료"를 보내면 안 된다. 자동 승인 job만 확인한다(기본 구현).
+   */
+  isStillApproved?: (job: ArticleJobRow) => Promise<boolean>;
   /** 트랙별 페이지를 전부 쓴다. 기본은 writeManuscriptPages. */
   writePages?: (manifest: ManuscriptManifest) => Promise<unknown>;
   deploy?: () => Promise<DeployManuscriptsPageResult>;
@@ -66,6 +72,13 @@ export async function prepareApprovedManuscripts(
   const deploy = options.deploy ?? (() => deployManuscriptsPage());
   const writeCostSnapshotFn = options.writeCostSnapshot ?? (() => writeCostSnapshot());
   const maxJobsPerRun = options.maxJobsPerRun ?? 3;
+  const isStillApproved =
+    options.isStillApproved ??
+    (async (job: ArticleJobRow) => {
+      if (!isAutoApproved(job)) return true;
+      const latest = await ArticleJobRepository.findById(job.id);
+      return latest?.status === "approved";
+    });
 
   const approved = await loadApprovedJobs();
   const pending = approved.filter((job) => !job.metadata?.channelManuscriptsReadyAt).slice(0, maxJobsPerRun);
@@ -75,6 +88,10 @@ export async function prepareApprovedManuscripts(
 
   for (const job of pending) {
     const result = await prepareJob(job);
+    if (result.status === "success" && !(await isStillApproved(job))) {
+      console.log(`· [manuscripts] ${job.keyword}: 준비 중 반려되어 뷰어·알림에서 제외했습니다.`);
+      continue;
+    }
     results.push({ job, result });
 
     if (result.status === "success") {

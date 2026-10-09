@@ -20,6 +20,7 @@
 // page.evaluate에 넘기는 코드는 **문자열**로 둔다. tsx(esbuild)가 함수에 `__name(...)`을 끼워 넣어 브라우저에서
 // "ReferenceError: __name is not defined"로 죽는다(setupTistorySession.ts 2026-10-06 실측).
 
+import { sniffImageFormat } from "../../images/sniffImageFormat.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -607,20 +608,5 @@ export function matchRssLink(rssXml: string, title: string): string | null {
   return null;
 }
 
-/**
- * 이미지 버퍼의 실제 형식(확장자 문자열). URL 확장자는 믿지 않는다 - 웹 수집 이미지가 AVIF를
- * `.png` 이름으로 저장한 실측(2026-10-08)이 계기. 모르는 형식이면 null.
- */
-export function sniffImageFormat(buffer: Buffer): "jpg" | "png" | "gif" | "webp" | "avif" | null {
-  if (buffer.length < 12) return null;
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "jpg";
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return "png";
-  if (buffer.subarray(0, 4).toString("latin1") === "GIF8") return "gif";
-  if (buffer.subarray(0, 4).toString("latin1") === "RIFF" && buffer.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
-  // ISO BMFF: [4바이트 크기]["ftyp"][브랜드]. avif(정지)·avis(시퀀스) 둘 다 AVIF다.
-  if (buffer.subarray(4, 8).toString("latin1") === "ftyp") {
-    const brand = buffer.subarray(8, 12).toString("latin1");
-    if (brand === "avif" || brand === "avis") return "avif";
-  }
-  return null;
-}
+// 형식 판별은 수집·업로드와 공유하는 모듈로 옮겼다(2026-10-08) - 기존 import가 깨지지 않게 다시 내보낸다.
+export { sniffImageFormat } from "../../images/sniffImageFormat.js";

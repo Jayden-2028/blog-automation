@@ -25,6 +25,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # 진행 중 표식을 **러너가 뜨자마자** 먼저 쓴다(2026-10-08). 체크아웃·npm ci에 20~40초가 걸리는데, 표식을 CLI 시작 때
+      # 쓰면 그 사이 텔레그램 발행 콜백·폴러가 옛 본문을 집어 간다. 실패해도 막지 않는다 - CLI가 시작할 때 다시 쓴다.
+      - name: 진행 중 표식 선기록
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          JOB_ID: ${{ github.event.client_payload.jobId }}
+        run: |
+          [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]] || { echo "jobId 형식 아님 - 건너뜀"; exit 0; }
+          url="$SUPABASE_URL/rest/v1/article_jobs?id=eq.$JOB_ID"
+          auth=(-H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
+          meta=$(curl -sf "${auth[@]}" "$url&select=metadata" | jq -c '.[0].metadata // {}')
+          body=$(jq -cn --argjson m "$meta" --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" '{metadata: ($m + {viewerEditPendingAt: $t})}')
+          curl -sf -X PATCH "${auth[@]}" -H "Content-Type: application/json" -d "$body" "$url"
+          echo "표식 기록 완료"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4

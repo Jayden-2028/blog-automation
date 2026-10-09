@@ -51,3 +51,50 @@ export async function loadPublishedUrlToJobId(): Promise<Map<string, string>> {
   }
   return map;
 }
+
+/** 기간(포함)의 성과 행을 읽는다. Supabase 1회 응답 상한(1000행)을 넘으므로 나눠 읽는다. */
+export async function loadSearchPerformanceRange(
+  fromDate: string,
+  toDate: string
+): Promise<Array<{ date: string; page_url: string; query: string; clicks: number; impressions: number; position: number }>> {
+  const PAGE = 1000;
+  const out: Array<{ date: string; page_url: string; query: string; clicks: number; impressions: number; position: number }> = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("search_performance_daily")
+      .select("date,page_url,query,clicks,impressions,position")
+      .gte("date", fromDate)
+      .lte("date", toDate)
+      .order("date", { ascending: true })
+      .order("page_url", { ascending: true })
+      .order("query", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+export type Ga4PerformanceInsert = {
+  date: string;
+  property_label: string;
+  channel_group: string;
+  sessions: number;
+  total_users: number;
+  page_views: number;
+};
+
+/** ga4_performance_daily upsert. GA4도 며칠간 수치를 보정하므로 같은 날짜 재수집은 덮어쓴다. */
+export async function upsertGa4Performance(rows: Ga4PerformanceInsert[]): Promise<number> {
+  let written = 0;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK).map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+    const { error } = await supabase
+      .from("ga4_performance_daily")
+      .upsert(chunk, { onConflict: "date,property_label,channel_group" });
+    if (error) throw error;
+    written += chunk.length;
+  }
+  return written;
+}

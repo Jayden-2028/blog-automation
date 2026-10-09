@@ -233,6 +233,15 @@ export async function saveManifest(manifest: ManuscriptManifest): Promise<void> 
   if (error) throw error;
 }
 
+/**
+ * 뷰어 manifest에서 job의 topic 행을 지운다(반려 처리, PIPELINE-MERGE-2026-10.md §1-b). saveManifest는 upsert만 하므로
+ * 지우려면 이 함수가 필요하다. 행이 없어도 오류가 아니다(아직 준비 전에 반려한 경우).
+ */
+export async function removeManifestTopic(jobId: string): Promise<void> {
+  const { error } = await supabase.from("manuscript_manifest_topics").delete().eq("job_id", jobId);
+  if (error) throw error;
+}
+
 /** 같은 jobId의 기존 topic을 새 entry로 교체한다(없으면 추가). 순수 함수 - DB 접근 없음. */
 export function upsertTopicEntry(manifest: ManuscriptManifest, entry: ManuscriptTopicEntry): ManuscriptManifest {
   return { topics: [...manifest.topics.filter((t) => t.jobId !== entry.jobId), entry] };

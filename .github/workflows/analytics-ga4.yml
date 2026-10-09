@@ -1,0 +1,38 @@
+# GA4 일일 지표 수집 - 미리보기 전용(2026-10-09). 저장(--apply)은 migration 승인 뒤에 추가한다.
+# 수동 실행만(workflow_dispatch). 서비스 계정은 GSC와 같은 것을 쓴다(GA4 계정 뷰어 + Analytics Data API 사용 설정 필요).
+
+name: analytics-ga4
+
+on:
+  workflow_dispatch:
+    inputs:
+      properties:
+        description: "라벨:숫자속성ID 콤마 목록"
+        required: false
+        default: "tkm:557900208,tistory:558030120"
+        type: string
+      days:
+        description: "어제까지 며칠치"
+        required: false
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run analytics:ga4 (preview)
+        env:
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+          GA4_PROPERTY_IDS: ${{ inputs.properties || vars.GA4_PROPERTY_IDS }}
+        run: npm run analytics:ga4 -- --days=${{ inputs.days || '3' }}

@@ -13,7 +13,7 @@
 //                                         ├ 성공/실패  -> finishTistoryPublish()
 //                                         └ 로그인 풀림 -> deferTistoryPublish()  (재로그인 후 자동 재개)
 
-import { filterEditPending } from "../manuscripts/viewerEditGuard.js";
+import { EDIT_GUARD_METADATA_KEYS, filterEditPending } from "../manuscripts/viewerEditGuard.js";
 import type { EditGuardOptions } from "../manuscripts/viewerEditGuard.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -41,7 +41,7 @@ export type TistoryPublishRequest = {
   error?: string;
 };
 
-export function readTistoryRequest(job: ArticleJobRow): TistoryPublishRequest | null {
+export function readTistoryRequest(job: Pick<ArticleJobRow, "metadata">): TistoryPublishRequest | null {
   const raw = (job.metadata as Record<string, unknown> | null)?.[TISTORY_REQUEST_KEY];
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Partial<TistoryPublishRequest>;
@@ -186,28 +186,33 @@ export function isDeferredExpired(
  * listRecent를 쓰는 이유는 naverPublishQueue와 같다(jsonb 키 필터는 인덱스를 못 타고, 최근 100건이면 충분).
  */
 export async function listPendingTistoryRequests(options: TistoryQueueOptions = {}): Promise<ArticleJobRow[]> {
-  const listRecentJobs = options.listRecentJobs ?? ((limit) => ArticleJobRepository.listRecent(limit));
+  // 2026-10-09 egress 절감: 기본 경로는 전체 행(회당 ~3MB)이 아니라 판정에 필요한 metadata 조각만 받아
+  // 거른 뒤, 실제 집어 갈 소수 건만 전체 행을 다시 받는다. 테스트 주입(listRecentJobs)은 전체 행이므로 그대로 쓴다.
+  const injected = options.listRecentJobs;
   const now = options.now ?? (() => new Date());
-  const jobs = await listRecentJobs(100);
+  const candidates = injected
+    ? await injected(100)
+    : await ArticleJobRepository.listRecentSlim([TISTORY_REQUEST_KEY, ...EDIT_GUARD_METADATA_KEYS], 100);
+  const isDue = (job: Pick<ArticleJobRow, "metadata">): boolean => {
+    const request = readTistoryRequest(job);
+    if (!request) return false;
+    if (request.status === "requested") return true;
+    return request.status === "deferred" && !isDeferredExpired(request, now(), options.deferredMaxDays);
+  };
   // 뷰어 수정 반영·이미지 교체가 진행 중인 건은 이번 주기에 집지 않는다(2026-10-07, VIEWER-REFINE §2-c).
-  return filterEditPending(
-    jobs.filter((job) => {
-      const request = readTistoryRequest(job);
-      if (!request) return false;
-      if (request.status === "requested") return true;
-      return request.status === "deferred" && !isDeferredExpired(request, now(), options.deferredMaxDays);
-    }),
-    { ...options, nowMs: options.nowMs ?? now().getTime() }
-  )
-    .sort((a, b) => {
-      const at = readTistoryRequest(a)?.requestedAt ?? "";
-      const bt = readTistoryRequest(b)?.requestedAt ?? "";
-      return at.localeCompare(bt);
-    });
+  const pending = filterEditPending(candidates.filter(isDue), { ...options, nowMs: options.nowMs ?? now().getTime() }).sort((a, b) => {
+    const at = readTistoryRequest(a)?.requestedAt ?? "";
+    const bt = readTistoryRequest(b)?.requestedAt ?? "";
+    return at.localeCompare(bt);
+  });
+  if (injected) return pending as ArticleJobRow[];
+  // 조각 조회와 전체 조회 사이에 상태가 바뀌었을 수 있어 받은 전체 행으로 한 번 더 거른다(순서 유지).
+  const byId = new Map((await ArticleJobRepository.listByIds(pending.map((job) => job.id))).map((job) => [job.id, job]));
+  return pending.map((job) => byId.get(job.id)).filter((job): job is ArticleJobRow => Boolean(job) && isDue(job as ArticleJobRow));
 }
 
 /** 만료된 보류 건(사람이 다시 눌러야 하는 것). 폴러가 하루 한 번 알려 주는 데 쓴다. */
-export function listExpiredDeferred(jobs: ArticleJobRow[], now: Date, deferredMaxDays?: number): ArticleJobRow[] {
+export function listExpiredDeferred<T extends Pick<ArticleJobRow, "metadata">>(jobs: T[], now: Date, deferredMaxDays?: number): T[] {
   return jobs.filter((job) => {
     const request = readTistoryRequest(job);
     return !!request && isDeferredExpired(request, now, deferredMaxDays);

@@ -15,8 +15,7 @@
 import "dotenv/config";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
-import { notifyArticleReady } from "./notifyArticleReady.js";
-import { notifyWriteFailed } from "./notifyWriteFailed.js";
+import { finishWrite } from "./finishWrite.js";
 import { runWritingStage } from "./runArticleJob.js";
 
 /** "Xm전" 형태로 짧게 표시한다. */
@@ -80,30 +79,8 @@ async function main(): Promise<void> {
   console.log(`▶ 원고 작성 시작: ${jobId}`);
 
   const result = await runWritingStage(jobId);
-
-  if (result.status === "skipped") {
-    console.log(`⏭ 건너뜀: ${result.reason}`);
-    return;
-  }
-
-  if (result.status === "failed") {
-    console.error(`❌ 실패: ${result.error}`);
-    const job = await ArticleJobRepository.findById(jobId).catch(() => null);
-    await notifyWriteFailed({ id: jobId, keyword: job?.keyword ?? "(키워드를 찾지 못했습니다)", metadata: job?.metadata }, result.error).catch(() => {});
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log("\n▶ 결과: success");
-  console.log(`   근거: ${result.sources.length}건`);
-  console.log(`   작성: ${Math.round(result.durationMs / 1000)}초`);
-  console.log(`   article #${result.article.id}: ${result.article.title}`);
-  console.log(`   본문 길이: ${result.article.content?.length ?? 0}자`);
-  console.log(`   의학 주제: ${result.isMedical ? "예 (사람 교차확인 필요)" : "아니오"}`);
-
-  console.log("\n▶ Telegram 알림 발송 중...");
-  await notifyArticleReady(result);
-  console.log("✅ 완료 - Telegram에서 확인해주세요");
+  const finished = await finishWrite(jobId, result);
+  if (finished.exitCode !== 0) process.exitCode = finished.exitCode;
 }
 
 main().catch((error) => {

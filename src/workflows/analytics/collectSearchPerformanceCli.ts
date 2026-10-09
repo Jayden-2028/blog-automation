@@ -10,6 +10,11 @@
 //   npm run analytics:search -- --apply         저장
 //   npm run analytics:search -- --date=2026-09-18
 //   npm run analytics:search -- --days=7        그날부터 과거 7일치(백필)
+//   npm run analytics:search -- --site=https://x.blogspot.com/   목록 중 한 속성만(백필용)
+//
+// 속성은 env `GSC_SITE_URLS`(콤마 구분)를 순서대로 돈다. 없으면 `GSC_SITE_URL` 단일 폴백.
+// page_url에 도메인이 들어 있어 unique (date,page_url,query)는 그대로 다중 속성이 공존한다.
+// 한 속성이 실패해도 나머지는 계속 수집하고, 종료 코드는 1로 남긴다.
 import "dotenv/config";
 
 import { SearchConsoleClient } from "../../services/searchConsole/SearchConsoleClient.js";
@@ -18,6 +23,7 @@ import {
   upsertSearchPerformance,
 } from "../../services/supabase/repositories/searchPerformanceRepository.js";
 import { aggregateRows, attachJobIds, reportDate } from "./normalizeSearchRows.js";
+import { resolveSiteUrls, siteLabel } from "./siteUrls.js";
 
 function argValue(name: string): string | null {
   const prefix = `--${name}=`;
@@ -41,18 +47,29 @@ async function main(): Promise<void> {
   const baseDate = argValue("date") ?? reportDate();
   const days = Math.max(1, Number(argValue("days") ?? 1));
 
-  const client = new SearchConsoleClient();
-  const configError = client.missingConfig();
+  const only = argValue("site");
+  let sites = resolveSiteUrls(process.env);
+  if (only) sites = sites.filter((site) => site === only);
+  if (sites.length === 0) {
+    console.error(`❌ ${only ? `--site=${only}가 GSC_SITE_URLS에 없습니다.` : "GSC_SITE_URLS(또는 GSC_SITE_URL)가 없습니다."}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const clients = sites.map((siteUrl) => ({ siteUrl, client: new SearchConsoleClient({ siteUrl }) }));
+  const configError = clients[0].client.missingConfig();
   if (configError) {
     console.error(`❌ ${configError}`);
-    console.error("   GSC_SERVICE_ACCOUNT_JSON / GSC_SITE_URL을 .env에 넣은 뒤 다시 실행하세요.");
+    console.error("   GSC_SERVICE_ACCOUNT_JSON / GSC_SITE_URLS(또는 GSC_SITE_URL)를 .env에 넣은 뒤 다시 실행하세요.");
     process.exitCode = 1;
     return;
   }
 
   console.log(apply ? "▶ 성과 수집(저장)\n" : "▶ 성과 수집 - 미리보기, 쓰지 않습니다(--apply로 저장)\n");
+  console.log(`· 속성 ${sites.length}개: ${sites.map(siteLabel).join(", ")}`);
 
-  // 매칭표는 한 번만 읽는다(날짜마다 다시 읽을 이유가 없다).
+  // 매칭표는 한 번만 읽는다(날짜·속성마다 다시 읽을 이유가 없다). 타 채널 URL은 매칭표에 없으면
+  // job_id null로 저장될 뿐이라 속성 간에 서로 비켜 간다.
   let urlToJobId = new Map<string, string>();
   try {
     urlToJobId = await loadPublishedUrlToJobId();
@@ -65,60 +82,65 @@ async function main(): Promise<void> {
   let totalClicks = 0;
   let totalImpressions = 0;
 
-  for (const date of datesToFetch(baseDate, days)) {
-    const result = await client.fetchDay(date);
-    if (!result.ok) {
-      console.error(`❌ ${date} 실패 [${result.stage}]: ${result.error}`);
-      process.exitCode = 1;
-      continue;
-    }
+  for (const { siteUrl, client } of clients) {
+    console.log(`\n━━ ${siteLabel(siteUrl)} ${"━".repeat(30)}`);
+    let siteRows = 0;
+    for (const date of datesToFetch(baseDate, days)) {
+      const result = await client.fetchDay(date);
+      if (!result.ok) {
+        console.error(`❌ ${date} 실패 [${result.stage}]: ${result.error}`);
+        process.exitCode = 1;
+        continue;
+      }
 
-    const merged = aggregateRows(result.data);
-    const attached = attachJobIds(merged, urlToJobId);
-    const matched = attached.filter((r) => r.jobId).length;
-    const clicks = attached.reduce((sum, r) => sum + r.clicks, 0);
-    const impressions = attached.reduce((sum, r) => sum + r.impressions, 0);
+      const merged = aggregateRows(result.data);
+      const attached = attachJobIds(merged, urlToJobId);
+      const matched = attached.filter((r) => r.jobId).length;
+      const clicks = attached.reduce((sum, r) => sum + r.clicks, 0);
+      const impressions = attached.reduce((sum, r) => sum + r.impressions, 0);
 
-    totalRows += attached.length;
-    totalClicks += clicks;
-    totalImpressions += impressions;
+      siteRows += attached.length;
+      totalRows += attached.length;
+      totalClicks += clicks;
+      totalImpressions += impressions;
 
-    console.log(
-      `· ${date}  원본 ${String(result.data.length).padStart(4)}행 → 합산 ${String(attached.length).padStart(4)}행 | ` +
-        `클릭 ${clicks} · 노출 ${impressions} | job 매칭 ${matched}/${attached.length}`
-    );
-
-    if (apply && attached.length > 0) {
-      const written = await upsertSearchPerformance(
-        attached.map((r) => ({
-          date: r.date,
-          page_url: r.pageUrl,
-          query: r.query,
-          clicks: r.clicks,
-          impressions: r.impressions,
-          ctr: r.ctr,
-          position: r.position,
-          job_id: r.jobId,
-        }))
+      console.log(
+        `· ${date}  원본 ${String(result.data.length).padStart(4)}행 → 합산 ${String(attached.length).padStart(4)}행 | ` +
+          `클릭 ${clicks} · 노출 ${impressions} | job 매칭 ${matched}/${attached.length}`
       );
-      console.log(`  → ${written}행 저장`);
-    }
-  }
 
-  // 미리보기에서는 상위 몇 건을 보여준다 - 숫자만 보면 제대로 온 건지 알 수 없다.
-  if (!apply && totalRows > 0) {
-    const sample = await client.fetchDay(baseDate);
-    if (sample.ok) {
-      const top = attachJobIds(aggregateRows(sample.data), urlToJobId)
-        .sort((a, b) => b.impressions - a.impressions)
-        .slice(0, 10);
-      console.log(`\n── ${baseDate} 노출 상위 ${top.length}건 ${"─".repeat(30)}`);
-      for (const row of top) {
-        console.log(`  "${row.query}"`);
-        console.log(
-          `    클릭 ${row.clicks} · 노출 ${row.impressions} · CTR ${(row.ctr * 100).toFixed(1)}% · ` +
-            `순위 ${row.position.toFixed(1)} ${row.jobId ? "" : "(수동 발행 글)"}`
+      if (apply && attached.length > 0) {
+        const written = await upsertSearchPerformance(
+          attached.map((r) => ({
+            date: r.date,
+            page_url: r.pageUrl,
+            query: r.query,
+            clicks: r.clicks,
+            impressions: r.impressions,
+            ctr: r.ctr,
+            position: r.position,
+            job_id: r.jobId,
+          }))
         );
+        console.log(`  → ${written}행 저장`);
+      }
+    }
+
+    // 미리보기에서는 상위 몇 건을 보여준다 - 숫자만 보면 제대로 온 건지 알 수 없다.
+    if (!apply && siteRows > 0) {
+      const sample = await client.fetchDay(baseDate);
+      if (sample.ok) {
+        const top = attachJobIds(aggregateRows(sample.data), urlToJobId)
+          .sort((a, b) => b.impressions - a.impressions)
+          .slice(0, 10);
+        console.log(`\n── ${baseDate} 노출 상위 ${top.length}건 ${"─".repeat(30)}`);
+        for (const row of top) {
+          console.log(`  "${row.query}"`);
+          console.log(
+            `    클릭 ${row.clicks} · 노출 ${row.impressions} · CTR ${(row.ctr * 100).toFixed(1)}% · ` +
+              `순위 ${row.position.toFixed(1)} ${row.jobId ? "" : "(수동 발행 글)"}`
+          );
+        }
       }
     }
   }

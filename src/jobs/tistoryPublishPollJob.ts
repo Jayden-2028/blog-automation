@@ -36,6 +36,7 @@ import {
   listExpiredDeferred,
   listPendingTistoryRequests,
   readTistoryRequest,
+  TISTORY_REQUEST_KEY,
 } from "../workflows/publish/tistoryPublishQueue.js";
 import type { ArticleJobRow } from "../types/database.js";
 
@@ -285,8 +286,11 @@ async function keepalive(state: PollState): Promise<void> {
 async function remindExpired(state: PollState): Promise<void> {
   const today = kstToday();
   if (state.expiredNotifiedOn === today) return;
-  const recent = await ArticleJobRepository.listRecent(100);
-  const expired = listExpiredDeferred(recent, new Date());
+  // 2026-10-09 egress 절감: 만료 판정은 요청 조각만으로 하고, 알림을 만들 때만 전체 행을 받는다(대부분의 주기는 0건).
+  const recentSlim = await ArticleJobRepository.listRecentSlim([TISTORY_REQUEST_KEY], 100);
+  const expiredSlim = listExpiredDeferred(recentSlim, new Date());
+  if (expiredSlim.length === 0) return;
+  const expired = listExpiredDeferred(await ArticleJobRepository.listByIds(expiredSlim.map((job) => job.id)), new Date());
   if (expired.length === 0) return;
   state.expiredNotifiedOn = today;
   writeState(state);

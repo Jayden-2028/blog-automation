@@ -16,7 +16,98 @@ import { manuscriptPagePath, viewerPageLink } from "../../config/manuscriptViewe
 import { TRACK_LABEL, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
+import { buildArticleReviewCallbackData } from "../../notifications/articleReviewCallbackData.js";
+import { isAutoApproved } from "../../config/pipelineGate.js";
+import type { ArticleJobRow } from "../../types/database.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
+
+/**
+ * 통합 알림의 **수정 요청 / 반려** 버튼 줄(PIPELINE-MERGE-2026-10.md §1-b). 초안 승인 단계가 없어진 대신 이 알림이
+ * 단일 승인 지점이다 - 발행 버튼이 "승인", 이 줄이 "고쳐라/버려라"다. 콜백은 옛 초안 알림의 것을 재사용한다
+ * (`review:edit` -> 답장으로 수정 방향 받기, `review:discard` -> 반려). 자동 승인으로 올라온 job에만 붙는다.
+ */
+function buildReviewActionRow(job: ArticleJobRow): TelegramInlineKeyboardButton[] | null {
+  if (!isAutoApproved(job)) return null;
+  try {
+    return [
+      { text: "✏️ 수정 요청", callback_data: buildArticleReviewCallbackData("edit", job.id) },
+      { text: "🗑 반려", callback_data: buildArticleReviewCallbackData("discard", job.id) },
+    ];
+  } catch {
+    return null; // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 뺀다.
+  }
+}
+
+/**
+ * 옛 초안 알림이 보여주던 것 중 승인 판단에 쓰이던 두 가지를 통합 알림에 옮긴다: 의학 주제 경고와 검수(팩트·법률·광고)
+ * 결과. 초안 단계가 없어졌으므로 여기서 안 보여주면 사람이 볼 기회가 사라진다. 검수 결과는 차단하지 않는 참고 정보다.
+ */
+function buildAutoApprovedNotes(job: ArticleJobRow): string[] {
+  if (!isAutoApproved(job)) return [];
+  const metadata = (job.metadata ?? {}) as Record<string, unknown>;
+  const lines: string[] = [];
+  if (metadata.requiresMedicalReview === true) {
+    lines.push("⚕️ <b>의학 주제 — 원고와 출처를 직접 확인한 뒤 발행해 주세요</b>");
+  }
+  const checks = Array.isArray(metadata.reviewChecks) ? (metadata.reviewChecks as { message?: unknown }[]) : [];
+  const messages = checks.map((check) => (typeof check.message === "string" ? check.message : "")).filter(Boolean);
+  if (messages.length > 0) {
+    lines.push(`⚠️ 검수 ${messages.length}건`, ...messages.slice(0, 3).map((message) => `· ${escapeTelegramHtml(message)}`));
+    if (messages.length > 3) lines.push(`· 외 ${messages.length - 3}건 (뷰어에서 확인)`);
+  }
+  return lines;
+}
+
+/**
+ * 준비 완료 알림의 키보드 전체(페이지 열기 링크 제외 줄 + 링크 줄). 알림 생성과 **키보드 복원**이 같은 함수를 쓴다 -
+ * Cloudflare 릴레이가 어떤 버튼이든 누르는 순간 키보드를 "⏳ 처리 중…" 하나로 덮어쓰므로(telegram-relay lockButtons),
+ * 러너가 처리 뒤에 원래 구성을 다시 세워야 한다(TelegramBot.markReviewButtonsDecided).
+ *
+ * 줄 구성: [📄 페이지 열기] / [✏️ 수정 요청][🗑 반려](자동 승인 job만) / [🖼 이미지 수정][⬇️ 내려받기] / [트랙별 발행].
+ * 한 줄에 4개를 몰면 텔레그램이 글자를 자르므로 줄을 나눈다(2026-09-29). jobId가 UUID가 아니면 버튼만 뺀다.
+ */
+export function buildReadyKeyboard(
+  job: ArticleJobRow,
+  pagesUrl: string | null = cloudflarePagesUrl()
+): TelegramInlineKeyboardButton[][] {
+  const track: Track = trackOfJob(job);
+  const jobId = job.id;
+  const rows: TelegramInlineKeyboardButton[][] = [];
+  if (pagesUrl) {
+    const url = track === "entertainment" ? `${pagesUrl}/#${jobId}` : viewerPageLink(pagesUrl, track, jobId);
+    rows.push([{ text: "📄 원고 페이지 열기", url }]);
+  }
+  // 수정/반려 줄은 링크 바로 아래에 둔다(2026-10-08 사용자 요청) - 발행 버튼 위에서 먼저 판단하게 한다.
+  if (track !== "kscene") rows.push(...reviewActionRows(job));
+  try {
+    const publishButton: TelegramInlineKeyboardButton =
+      track === "social"
+        ? { text: "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }
+        : track === "kscene"
+          ? { text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }
+          : // 엔터는 네이버 발행만 한다(RESTRUCTURE-PLAN-2026-10.md §2.5 - Blogspot 버튼은 2026-10-05에 뺐다).
+            { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") };
+    rows.push(
+      [
+        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
+      ],
+      [publishButton]
+    );
+  } catch {
+    // jobId가 UUID가 아니면(옛 데이터·테스트) 발행 줄을 뺀다 - 여기서 던지면 알림 전체가 사라진다.
+  }
+  return rows;
+}
+
+function reviewActionRows(job: ArticleJobRow): TelegramInlineKeyboardButton[][] {
+  const row = buildReviewActionRow(job);
+  return row ? [row] : [];
+}
+
+function withLeadingBlank(lines: string[]): string[] {
+  return lines.length > 0 ? ["", ...lines] : [];
+}
 
 /** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 저장)을 문구로 알린다. */
 const SOCIAL_MANUAL_PUBLISH_GUIDE =
@@ -43,32 +134,15 @@ function buildSocialReadyMessage(
     "",
     `<b>${escapeTelegramHtml(job.keyword)}</b>`,
     detail,
+    ...withLeadingBlank(buildAutoApprovedNotes(job)),
     "",
     SOCIAL_MANUAL_PUBLISH_GUIDE,
   ];
 
-  const jobId = outcome.topic.jobId;
-  let actionRows: TelegramInlineKeyboardButton[][] = [];
-  try {
-    actionRows = [
-      [
-        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
-        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
-      ],
-      [{ text: "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }],
-    ];
-  } catch {
-    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
-    actionRows = [];
-  }
-
-  const buttons: TelegramInlineKeyboardButton[][] = [];
-  if (pagesUrl) {
-    buttons.push([{ text: "📄 원고 페이지 열기", url: viewerPageLink(pagesUrl, "social", jobId) }]);
-  } else {
+  const buttons = buildReadyKeyboard(job, pagesUrl);
+  if (!pagesUrl) {
     lines.push("", `<code>${escapeTelegramHtml(manuscriptPagePath("social"))}</code>`, "위 파일을 브라우저로 열어 확인·복사해 주세요.");
   }
-  buttons.push(...actionRows);
 
   return { text: lines.join("\n"), replyMarkup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined };
 }
@@ -98,28 +172,10 @@ function buildKsceneReadyMessage(
     "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.",
   ];
 
-  const jobId = outcome.topic.jobId;
-  let actionRows: TelegramInlineKeyboardButton[][] = [];
-  try {
-    actionRows = [
-      [
-        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
-        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
-      ],
-      [{ text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }],
-    ];
-  } catch {
-    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
-    actionRows = [];
-  }
-
-  const buttons: TelegramInlineKeyboardButton[][] = [];
-  if (pagesUrl) {
-    buttons.push([{ text: "📄 원고 페이지 열기", url: viewerPageLink(pagesUrl, "kscene", jobId) }]);
-  } else {
+  const buttons = buildReadyKeyboard(job, pagesUrl);
+  if (!pagesUrl) {
     lines.push("", `<code>${escapeTelegramHtml(manuscriptPagePath("kscene"))}</code>`, "위 파일을 브라우저로 열어 확인해 주세요.");
   }
-  buttons.push(...actionRows);
 
   return { text: lines.join("\n"), replyMarkup: buttons.length > 0 ? { inline_keyboard: buttons } : undefined };
 }
@@ -158,43 +214,18 @@ export function buildManuscriptReadyMessage(
   const summary = imageCount > 0 ? `🟢 네이버 · 이미지 ${imageCount}장` : "🟢 네이버";
   const lines0 = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
 
-  const lines = ["📄 <b>원고 준비 완료</b>", "", `<b>${escapeTelegramHtml(job.keyword)}</b>`, lines0];
-  let buttons: TelegramInlineKeyboardButton[][] | undefined;
-
-  // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤**
-  // 누르는 공개 발행이다. 사람이 곧 품질 게이트다 - 누르지 않은 원고는 지금처럼 뷰어에서 복사해
-  // 올리지 않는다(발행 버튼은 엔터=🟢 네이버, 사회=🟠 티스토리). 페이지 열기와 같은 줄에 둔다(먼저 보고 나서 누르는 순서라 시선이 왼→오른쪽).
-  // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다 - 여기서 예외를
-  // 던지면 "원고 준비 완료" 알림 자체가 통째로 사라진다.
-  // 2026-09-22 네이버 운영 재개: 버튼이 1개 -> 3개가 됐다. 한 줄에 몰면 텔레그램에서 글자가
-  // 잘려 무슨 버튼인지 안 보이므로 줄을 나눈다. 2026-09-29 내려받기가 붙어 4개가 됐고,
-  // 그래서 **두 줄로** 나눈다(한 줄 4개는 글자가 잘린다).
-  //   · 이미지 수정 - 빈 자리 재수집 + 사용자가 번호·요구사항으로 지정한 자리 다시 만들기
-  //   · 맥으로 내려받기 - 보관함 내보내기를 30분 주기 전에 지금 돌린다. 맥의 폴러가 집어 간다
-  //   · (블로그 발행 버튼은 2026-10-05에 뺐다 - 아래 참고)
-  //   · 네이버 발행 - 공식 API가 없어 로그인된 브라우저가 필요하다. 맥의 로컬 폴러가 집어 간다
-  let actionRows: TelegramInlineKeyboardButton[][] = [];
-  try {
-    const jobId = outcome.topic.jobId;
-    actionRows = [
-      [
-        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
-        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
-      ],
-      // 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §2.5): 엔터 트랙은 네이버 발행만 한다. Blogspot
-      // 버튼은 뺐다(콜백 처리 코드는 남아 있다 - 3순위에서 사용설명서 트랙이 K-Scene 블로그로 쓴다).
-      [{ text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") }],
-    ];
-  } catch {
-    // jobId가 UUID가 아니면(옛 데이터·테스트) 버튼만 빼고 알림은 그대로 보낸다.
-    actionRows = [];
-  }
-
-  if (pagesUrl) {
-    buttons = [[{ text: "📄 원고 페이지 열기", url: `${pagesUrl}/#${outcome.topic.jobId}` }]];
-    if (actionRows.length > 0) buttons.push(...actionRows);
-  } else {
-    if (actionRows.length > 0) buttons = actionRows;
+  const lines = [
+    "📄 <b>원고 준비 완료</b>",
+    "",
+    `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+    lines0,
+    ...withLeadingBlank(buildAutoApprovedNotes(job)),
+  ];
+  // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤** 누르는 공개 발행이다.
+  // 사람이 곧 품질 게이트다 - 누르지 않은 원고는 올라가지 않는다. 버튼 구성(줄 나눔·트랙별 발행 버튼)은 buildReadyKeyboard 한 곳에 둔다.
+  const keyboard = buildReadyKeyboard(job, pagesUrl);
+  const buttons = keyboard.length > 0 ? keyboard : undefined;
+  if (!pagesUrl) {
     lines.push("", `<code>${escapeTelegramHtml(manuscriptIndexPagePath())}</code>`, "위 파일을 브라우저로 열어 원고를 확인·복사해 붙여넣어 주세요.");
   }
 

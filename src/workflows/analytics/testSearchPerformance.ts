@@ -2,6 +2,10 @@
 import { buildAssertion, mapAnalyticsRows } from "../../services/searchConsole/SearchConsoleClient.js";
 import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./normalizeSearchRows.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
+import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
+import type { PerfRow } from "./weeklyReport.js";
+import { mapGa4Rows } from "../../services/ga4/Ga4Client.js";
+import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -160,7 +164,84 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   // 전부 대기인 신생 블로그 - 걱정할 일이 아님을 같이 알린다(오늘 우리 상태가 이것이다).
   const freshMsg = buildHealthMessage(buildReport([inspect("https://b.com/a.html", "URL is unknown to Google")]), 1);
   assert(freshMsg.includes("2~4주"), "전부 대기면 기다리면 된다는 안내가 있어야 한다");
+  assert(buildHealthMessage(healthy, 2, "wooahpapa.tistory.com").includes("wooahpapa.tistory.com"), "속성 이름이 제목에 붙는다");
   console.log("✅ 알림 문구 - 정상이면 짧게, 고장이면 목록 첨부");
+}
+
+// --- 8. 다중 속성 - 목록 해석·단일 폴백·타 채널 job 매칭 무해성 -------------------------------
+{
+  const A = "https://whynowissue.blogspot.com/";
+  const B = "https://thekoreamanual.blogspot.com/";
+  const T = "https://wooahpapa.tistory.com/";
+
+  assert(resolveSiteUrls({ GSC_SITE_URLS: `${A}, ${B} ,,${T},${A}` }).join("|") === [A, B, T].join("|"), "콤마 분리·공백/빈칸/중복 제거·순서 유지");
+  assert(resolveSiteUrls({ GSC_SITE_URL: A }).join("|") === A, "GSC_SITE_URLS가 없으면 단일 값 폴백");
+  assert(resolveSiteUrls({ GSC_SITE_URLS: "  ", GSC_SITE_URL: A }).join("|") === A, "빈 목록은 단일 값 폴백");
+  assert(resolveSiteUrls({ GSC_SITE_URLS: B, GSC_SITE_URL: A }).join("|") === B, "목록이 있으면 목록이 이긴다");
+  assert(resolveSiteUrls({}).length === 0, "둘 다 없으면 빈 목록");
+
+  assert(siteLabel(T) === "wooahpapa.tistory.com" && siteLabel("sc-domain:x.com") === "x.com", "표시 이름");
+
+  assert(belongsToSite(`${A}2026/09/a.html`, A) && !belongsToSite(`${B}2026/10/b.html`, A), "접두어 속성 소속");
+  assert(belongsToSite("https://m.x.com/a", "sc-domain:x.com") && !belongsToSite("https://notx.com/a", "sc-domain:x.com"), "도메인 속성은 하위 도메인까지, 접미 우연 일치는 제외");
+
+  // 타 채널 URL이 매칭표에 섞여 있어도 각 행은 자기 URL로만 붙고, 없으면 null(무해).
+  const merged = aggregateRows([
+    { date: "2026-10-05", pageUrl: `${B}2026/10/guide.html?m=1`, query: "q", clicks: 1, impressions: 3, ctr: 0.3, position: 4 },
+    { date: "2026-10-05", pageUrl: `${T}12`, query: "q", clicks: 0, impressions: 5, ctr: 0, position: 9 },
+  ]);
+  const attached = attachJobIds(merged, new Map([[`${A}2026/09/x.html`, "job-a"], [`${B}2026/10/guide.html`, "job-b"]]));
+  assert(attached[0].jobId === "job-b", "TKM 글은 자기 job에 붙는다");
+  assert(attached[1].jobId === null, "매칭표에 없는 티스토리 글은 null로 비켜 간다");
+  console.log("✅ 다중 속성 - 목록 해석·단일 폴백·소속 판정·타 채널 job 매칭 무해");
+}
+
+// --- 9. 주간 리포트 - 추이·축적 중 분기·경보·속성 분리 ----------------------------------------
+{
+  const A = "https://a.blogspot.com/p1.html";
+  const T = "https://t.tistory.com/1";
+  const mk = (date: string, page_url: string, clicks: number, impressions = clicks * 10): PerfRow =>
+    ({ date, page_url, query: "q" + (clicks % 3), clicks, impressions, position: 5 });
+  const end = "2026-10-20";
+  const days = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => {
+    const d = new Date("2026-10-20T00:00:00Z"); d.setUTCDate(d.getUTCDate() - (to - i)); return d.toISOString().slice(0, 10);
+  });
+
+  // A: 14일 이상, 전주 20/일 → 이번 주 2/일(급락). T: 3일치만.
+  const rows: PerfRow[] = [
+    ...days(0, 13).map((d, i) => mk(d, A, i < 7 ? 20 : 2)),
+    ...days(0, 2).map((d) => mk(d, T, 1)),
+  ];
+  const weeks = buildWeeklyReport(rows, end, ["a.blogspot.com", "t.tistory.com", "empty.example"]);
+  const a = weeks.find((w) => w.site === "a.blogspot.com")!;
+  const t = weeks.find((w) => w.site === "t.tistory.com")!;
+  const e = weeks.find((w) => w.site === "empty.example")!;
+
+  assert(siteOf(A) === "a.blogspot.com", "호스트가 속성");
+  assert(!a.accumulating && a.previous.clicks === 140 && a.current.clicks === 14, `주 합계 (${a.previous.clicks}/${a.current.clicks})`);
+  assert(a.alerts.length === 1 && a.alerts[0].includes("급락"), "클릭 급락 경보");
+  assert(t.accumulating && t.alerts.length === 0, "3일치는 축적 중, 경보 없음");
+  assert(e.accumulating && e.current.clicks === 0, "데이터 없는 속성도 항목은 있다");
+  assert(buildSiteMessage(t, end).includes("축적 중") && !buildSiteMessage(t, end).includes("(전주"), "축적 중이면 추이 생략");
+  assert(buildSiteMessage(a, end).includes("<b>⚠") === false && buildSiteMessage(a, end).includes("⚠️ <b>클릭 급락"), "경보는 굵게");
+  assert(buildSiteMessage(e, end).includes("노출 기록이 없습니다"), "빈 속성 문구");
+  console.log("✅ 주간 리포트 - 추이·축적 중 분기·경보·속성 분리");
+}
+
+// --- 10. GA4 응답 매핑 - 날짜 형식·깨진 행 격리 -------------------------------------------------
+{
+  const rows = mapGa4Rows({
+    rows: [
+      { dimensionValues: [{ value: "20261008" }, { value: "Organic Search" }], metricValues: [{ value: "3" }, { value: "2" }, { value: "7" }] },
+      { dimensionValues: [{ value: "bad" }, { value: "Direct" }], metricValues: [{ value: "1" }, { value: "1" }, { value: "1" }] },
+      { dimensionValues: [{ value: "20261008" }], metricValues: [] },
+    ],
+  });
+  assert(rows.length === 1, `정상 행만 남는다 (${rows.length})`);
+  assert(rows[0].date === "2026-10-08" && rows[0].channelGroup === "Organic Search", "날짜 YYYY-MM-DD 변환");
+  assert(rows[0].sessions === 3 && rows[0].totalUsers === 2 && rows[0].pageViews === 7, "지표 매핑");
+  assert(mapGa4Rows({}).length === 0, "rows 없으면 빈 배열(데이터 없음)");
+  console.log("✅ GA4 응답 매핑 - 날짜 변환·깨진 행 격리");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");

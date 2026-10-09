@@ -41,6 +41,18 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
           GSC_SITE_URL: ${{ vars.GSC_SITE_URL }}
+          GSC_SITE_URLS: ${{ vars.GSC_SITE_URLS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run analytics:index-health -- --notify
+
+      # 주간 검색 성과 리포트(2026-10-08). 새 Worker cron을 쓰지 않고 월요일 색인 점검 경로에 동승한다.
+      - name: Run analytics:weekly-report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GSC_SITE_URL: ${{ vars.GSC_SITE_URL }}
+          GSC_SITE_URLS: ${{ vars.GSC_SITE_URLS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: npm run analytics:weekly-report -- --notify

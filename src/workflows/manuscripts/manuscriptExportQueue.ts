@@ -32,7 +32,7 @@ export type ManuscriptExportRequest = {
   error?: string;
 };
 
-export function readExportRequest(job: ArticleJobRow): ManuscriptExportRequest | null {
+export function readExportRequest(job: Pick<ArticleJobRow, "metadata">): ManuscriptExportRequest | null {
   const raw = (job.metadata as Record<string, unknown> | null)?.[EXPORT_REQUEST_KEY];
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Partial<ManuscriptExportRequest>;
@@ -101,13 +101,21 @@ export async function finishManuscriptExport(
  * 인덱스를 못 타고, 어차피 최근 job 몇십 건만 보면 된다.
  */
 export async function listPendingExportRequests(options: ExportQueueOptions = {}): Promise<ArticleJobRow[]> {
-  const listRecentJobs = options.listRecentJobs ?? ((limit) => ArticleJobRepository.listRecent(limit));
-  const jobs = await listRecentJobs(100);
-  return jobs
+  // 2026-10-09 egress 절감: 기본 경로는 전체 행(회당 ~3MB)이 아니라 요청 조각만 받아 거른 뒤,
+  // 실제 집어 갈 소수 건만 전체 행을 다시 받는다. 테스트 주입(listRecentJobs)은 전체 행이므로 그대로 쓴다.
+  const injected = options.listRecentJobs;
+  const candidates = injected ? await injected(100) : await ArticleJobRepository.listRecentSlim([EXPORT_REQUEST_KEY], 100);
+  const pending = candidates
     .filter((job) => readExportRequest(job)?.status === "requested")
     .sort((a, b) => {
       const at = readExportRequest(a)?.requestedAt ?? "";
       const bt = readExportRequest(b)?.requestedAt ?? "";
       return at.localeCompare(bt);
     });
+  if (injected) return pending as ArticleJobRow[];
+  // 조각 조회와 전체 조회 사이에 상태가 바뀌었을 수 있어 받은 전체 행으로 한 번 더 거른다(순서 유지).
+  const byId = new Map((await ArticleJobRepository.listByIds(pending.map((job) => job.id))).map((job) => [job.id, job]));
+  return pending
+    .map((job) => byId.get(job.id))
+    .filter((job): job is ArticleJobRow => Boolean(job) && readExportRequest(job as ArticleJobRow)?.status === "requested");
 }

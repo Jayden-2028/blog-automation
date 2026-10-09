@@ -8,7 +8,7 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
 }
 
-function job(id: string): ArticleJobRow {
+function job(id: string, metadata: Record<string, unknown> = {}): ArticleJobRow {
   return {
     id,
     source_run_id: 1,
@@ -22,7 +22,7 @@ function job(id: string): ArticleJobRow {
     status: "approved",
     selected_at: "x",
     selected_via: "telegram",
-    metadata: {},
+    metadata,
     created_at: "x",
     updated_at: "x",
   } as ArticleJobRow;
@@ -180,4 +180,53 @@ main().catch((error) => {
     throw new Error(`❌ 영어 제목과 영어본 표기가 있어야 하고 네이버 표기는 없어야 한다 (${msg.text})`);
   }
   console.log("✅ 사용설명서 트랙 - 🔵 Blogger 발행 버튼만, 영어 제목, kscene.html 딥링크");
+}
+
+// --- 단계 통합(PIPELINE-MERGE-2026-10.md §1-b): 자동 승인 job의 통합 알림 = 발행 + ✏️ 수정 요청 + 🗑 반려 ---------------------
+{
+  const JOB = "354bfe0b-1234-4abc-8def-0123456789ab";
+  const auto = { autoApprovedAt: "2026-10-08T00:00:00Z" };
+  const rowsOf = (m: ReturnType<typeof buildManuscriptReadyMessage>) => m.replyMarkup?.inline_keyboard ?? [];
+
+  // 엔터: 기존 버튼 + 마지막 줄 [✏️ 수정 요청][🗑 반려], 콜백은 review:edit / review:discard(옛 초안 알림의 것을 재사용).
+  const ent = buildManuscriptReadyMessage(successResult(job(JOB, auto)), "https://pages.example.dev");
+  const entRows = rowsOf(ent);
+  // 줄 순서(2026-10-08): 링크 / 수정·반려 / 이미지 수정·내려받기 / 발행.
+  const texts = entRows.map((row) => row.map((b) => b.text.replace(/^\S+\s/, "")));
+  const expectedOrder = [["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"], ["네이버 발행"]];
+  if (JSON.stringify(texts) !== JSON.stringify(expectedOrder)) throw new Error(`❌ 버튼 줄 순서가 다르다 (${JSON.stringify(texts)})`);
+  const last = entRows[1];
+  if (last.length !== 2 || !last[0].text.includes("수정 요청") || !last[1].text.includes("반려")) throw new Error(`❌ 둘째 줄은 ✏️ 수정 요청 / 🗑 반려여야 한다 (${JSON.stringify(last)})`);
+  if (last[0].callback_data !== `review:edit:${JOB}` || last[1].callback_data !== `review:discard:${JOB}`) throw new Error("❌ 콜백은 review:edit / review:discard여야 한다");
+  const entAll = entRows.flat();
+  if (!entAll.some((b) => b.callback_data === `publish:naver:${JOB}`) || !entAll.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 기존 발행·이미지 수정 버튼은 그대로여야 한다");
+
+  // 사회: 티스토리 발행 + 같은 줄.
+  const soc = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "social" })), "https://pages.example.dev");
+  const socAll = rowsOf(soc).flat();
+  if (!socAll.some((b) => b.callback_data === `review:edit:${JOB}`) || !socAll.some((b) => b.callback_data === `review:discard:${JOB}`)) throw new Error("❌ 사회 트랙도 수정 요청·반려 버튼이 있어야 한다");
+  if (!socAll.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼은 그대로");
+
+  // 옛 흐름(수동 ✅로 승인된 job): 버튼 구성이 예전 그대로다.
+  const legacy = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
+  if (rowsOf(legacy).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 수동 승인 job에는 수정 요청·반려 버튼이 없어야 한다(옛 알림 불변)");
+
+  // 사용설명서: 개편3 몫 - 자동 승인 기록이 있어도 붙이지 않는다.
+  const ks = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "kscene" })), "https://pages.example.dev");
+  if (rowsOf(ks).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 사용설명서 트랙은 이 버튼을 받지 않는다");
+
+  // 옛 초안 알림이 보여주던 의학 경고·검수 결과가 통합 알림으로 옮겨 온다(초안 단계가 없어졌으므로).
+  const noted = buildManuscriptReadyMessage(
+    successResult(job(JOB, { ...auto, requiresMedicalReview: true, reviewChecks: [{ message: "수치 확인 필요" }, { message: "광고 표기 없음" }, { message: "c" }, { message: "d" }] })),
+    "https://pages.example.dev"
+  );
+  if (!noted.text.includes("의학 주제") || !noted.text.includes("검수 4건") || !noted.text.includes("수치 확인 필요") || !noted.text.includes("외 1건")) {
+    throw new Error(`❌ 의학 경고와 검수 요약이 알림에 있어야 한다 (${noted.text})`);
+  }
+  if (legacy.text.includes("검수")) throw new Error("❌ 옛 흐름 알림에는 검수 요약을 붙이지 않는다");
+
+  // UUID가 아니면 버튼만 빠지고 알림은 산다.
+  const bad = buildManuscriptReadyMessage(successResult(job("a", auto)), "https://pages.example.dev");
+  if (!bad.text.includes("원고 준비 완료")) throw new Error("❌ UUID가 아니어도 알림 본문은 살아야 한다");
+  console.log("✅ 통합 알림 - 자동 승인 job만 ✏️ 수정 요청/🗑 반려(엔터·사회), 의학·검수 요약 이전, 사용설명서·옛 흐름 불변");
 }
