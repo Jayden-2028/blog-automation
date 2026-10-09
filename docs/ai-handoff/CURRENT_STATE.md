@@ -121,7 +121,7 @@ WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`�
 
 ## 2026-10-08 — 파이프라인 단계 통합 (브랜치 `feat/pipeline-merge`, 워크트리 `pipeline-merge/`, 지시서 `PIPELINE-MERGE-2026-10.md`)
 
-**상태: main 병합·push 완료(2026-10-08). 게이트 변수 미설정 = 통합 흐름 켜짐. 실왕복 4건(§7)은 운영에서 확인 중.** 베이스: `origin/main` 3e738c8(뷰어-개선 머지 확인 후 시작).
+**상태: main 병합·push 완료·운영 중(2026-10-09). 게이트 변수 미설정 = 통합 흐름 켜짐. 실왕복 §7: ①알림 1회·②✏️ 수정 반영·③🗑 반려(cleanup dry-run에서 7일 미경과로 유지) 확인, ④게이트 false 복귀는 사용자 결정으로 생략(단위 테스트만).** 후속: 통합 알림 버튼 순서를 `링크 / 수정·반려 / 이미지 수정·내려받기 / 발행`으로 변경(`6a3c33d`), `job-publish-prepare` Chromium 설치 단계에 `timeout-minutes: 8`(러너에서 30분+ 멈춘 적 있음, `942b42c`). 베이스: `origin/main` 3e738c8(뷰어-개선 머지 확인 후 시작).
 
 - **흐름**: 키워드 Go → 자료조사 ✍️ → write → **자동 승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화** → 이미지 반영 원고 → **통합 알림 한 번**(📄 페이지 / 🖼 이미지 수정 / ⬇️ 내려받기 / 트랙별 발행 / **✏️ 수정 요청 / 🗑 반려**). 초안 알림(Telegraph 미리보기 + ✅/✏️/🗑)은 폐지 - `telegraph` 서비스는 호출만 뺐다(`runWritingStage`가 게이트 켜짐이면 건너뜀).
 - **게이트 `PIPELINE_SKIP_DRAFT_REVIEW`**(`config/pipelineGate.ts`): 미설정·빈 값 = **켜짐**, `false/0/off/no` = 옛 2단계 흐름. 배선: `job-write.yml`·`job-revise.yml`(repo variable). **사용설명서(kscene)는 게이트와 무관하게 옛 흐름**(한글 ✅→영어본→영어 ✅는 개편3 지시서가 통합 흐름에 맞춰 재설계 - 지시서 §5). `review` 상태로 대기 중인 옛 job은 옛 ✅/✏️/🗑으로 소진(마이그레이션 없음). 통합 알림의 버튼·검수 요약은 환경변수가 아니라 `autoApprovedAt` 유무로 정한다(게이트를 중간에 바꿔도 job마다 지나온 흐름의 알림).
