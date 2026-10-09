@@ -28,12 +28,15 @@ function makeWorld(initialSite: Site = new Map(), sources: Record<string, string
     sleeps: 0,
     liveAfter: 0, // isLive가 이 횟수만큼 거짓
     liveCalls: 0,
+    siteDown: false, // true면 사이트 요청이 522처럼 던진다(미배포 프로젝트 재현)
+    deployCount: null as number | null, // countDeployments 응답(null이면 API 실패)
     sources,
   };
   const deps: RehostDeps = {
     ...defaultRehostDeps(),
     fetchBytes: async (url) => {
       if (url.startsWith(`${BASE}/`)) {
+        if (world.siteDown) throw new Error(`522 <none> (${url})`);
         const file = world.site.get(url.slice(BASE.length + 1));
         return file ? { bytes: file, contentType: null } : null;
       }
@@ -59,6 +62,10 @@ function makeWorld(initialSite: Site = new Map(), sources: Record<string, string
       await walk("");
       world.site = next; // 스냅샷 교체
       world.deploys.push({ args, files: files.sort() });
+    },
+    countDeployments: async () => {
+      if (world.deployCount === null) throw new Error("Cloudflare API 503");
+      return world.deployCount;
     },
     isLive: async (url) => {
       world.liveCalls += 1;
@@ -130,6 +137,31 @@ async function main(): Promise<void> {
     assert(!result.complete && !result.deployed && world.deploys.length === 0 && result.images[0].url === "https://supabase/c/1.webp", "이전 이미지를 못 받으면 배포하지 않고 Supabase URL 유지");
     assert(result.failures.some((f) => f.includes("기존 이미지")), "실패 사유");
     console.log("  ✅ 스냅샷 재구성 실패 -> 배포 안 함");
+  }
+
+  // 미배포 프로젝트: 첫 배포 전 Pages는 404가 아니라 522를 던진다(2026-10-09 실측). 배포 이력 0이 확인될 때만 빈 사이트로 간주한다.
+  {
+    const fresh = makeWorld(new Map(), { "https://supabase/i/1.webp": "BOOT" });
+    fresh.world.siteDown = true;
+    fresh.world.deployCount = 0;
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/i/1.webp")], config: CONFIG }, fresh.deps);
+    assert(result.complete && result.deployed && fresh.world.deploys.length === 1, "배포 이력 0이면 522여도 첫 배포로 진행");
+    console.log("  ✅ 미배포 프로젝트(522) -> 배포 이력 0 확인 후 첫 배포");
+  }
+  {
+    // 배포 이력이 있는데 사이트가 안 열리면(일시 장애) 빈 스냅샷 배포로 기존 이미지를 지우면 안 된다
+    const outage = makeWorld(new Map(), { "https://supabase/j/1.webp": "RISK" });
+    outage.world.siteDown = true;
+    outage.world.deployCount = 7;
+    const r = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/j/1.webp")], config: CONFIG }, outage.deps);
+    assert(!r.complete && outage.world.deploys.length === 0 && r.failures.some((f) => f.includes("manifest.json")), "배포 이력이 있으면 중단(기존 이미지 보호)");
+    // API 확인 자체가 실패해도 중단한다
+    const unknown = makeWorld(new Map(), { "https://supabase/k/1.webp": "RISK2" });
+    unknown.world.siteDown = true;
+    unknown.world.deployCount = null;
+    const r2 = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/k/1.webp")], config: CONFIG }, unknown.deps);
+    assert(!r2.complete && unknown.world.deploys.length === 0, "이력 확인 불가면 중단");
+    console.log("  ✅ 사이트 장애(이력 있음·확인 불가) -> 배포 안 함");
   }
 
   // 일부 원본 다운로드 실패: 받은 것만 옮기고 complete=false

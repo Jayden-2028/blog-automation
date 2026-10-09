@@ -1,6 +1,25 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-08 (Asia/Seoul)
+기준일: 2026-10-09 (Asia/Seoul)
+
+## 2026-10-09 — Supabase egress 초과 전면 차단 + TKM 이미지 rehost 미작동 발견·수정 (메인 세션)
+
+- **Supabase 무료 플랜 egress 한도 초과로 API 게이트웨이(REST·Storage) 전면 402 차단**(10-09 00:00 UTC 전후 시작.
+  10-08 16:26 UTC Storage 업로드까지는 성공). 증상: 09:00 KST 엔터 키워드 run의 trendCollect 3소스·seed 전부
+  "exceed_cached_egress_quota, exceed_egress_quota" — 파이프라인 전 트랙 중단, 맥미니 폴러 402 공회전(무해, 자동 복귀),
+  **블로그스팟 두 블로그(whynowissue + The Korea Manual)의 Storage 핫링크 이미지 전부 깨짐**. 네이버·티스토리 글은 발행 시
+  플랫폼 업로드라 무사. 관리 API는 살아 있어 MCP execute_sql·데일리 데스크 대시보드는 정상. 해제 = 결제 주기 리셋 또는
+  Pro 업그레이드(사용자 결정 대기 — Usage 화면 확인 후 결정하기로).
+- **발견: 개편3 'kscene 발행 시 Pages 이미지 복사'가 한 번도 작동한 적 없음.** `korea-manual-images-2026` Pages 프로젝트가
+  생성만 되고 첫 배포가 없어 **404가 아니라 522**를 반환 → rehost가 manifest 읽기 실패로 매번 중단·Supabase URL 폴백
+  (10-08 run 37730209173 로그 실증). TKM 발행 전글이 Supabase 핫링크 상태 = egress 소비 + 이번 차단에 노출.
+- **수정(이 세션)**: ① 빈 manifest 부트스트랩 배포 완료(manifest.json 200 확인) ② `rehostImagesToPages`: manifest 읽기
+  실패 시 Cloudflare API로 배포 이력 조회, **0회일 때만** 빈 사이트로 진행(이력 있음·확인 불가는 기존대로 중단 - 기존 이미지
+  보호) ③ **wrangler cwd를 스테이징 디렉터리로 변경** - 레포 루트에서 실행하면 뷰어용 `functions/api`가 공개 이미지
+  프로젝트에 Pages Functions로 딸려 올라간다(첫 부트스트랩 배포에서 실제 발생 → 즉시 깨끗한 재배포로 제거, /api/* 404 확인).
+  테스트 `test:rehost-images`(미배포 522 진행/이력 있음 중단/API 실패 중단) 보강.
+- **남은 것**: Supabase 복구 후 TKM 발행글 재발행으로 이미지 URL을 Pages로 치환(egress 재발 방지 핵심), 복구 방법 사용자 결정.
+  부가 발견: TKM `cost-of-living…` 글 URL이 404(publications 기록과 불일치 - 사용자 삭제 여부 확인 필요).
 
 ## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
 

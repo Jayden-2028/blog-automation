@@ -20,7 +20,6 @@ import { dirname, join } from "node:path";
 
 import { KSCENE_IMAGES_FILE_LIMIT_WARN } from "../../config/ksceneImages.js";
 import type { KsceneImagesConfig } from "../../config/ksceneImages.js";
-import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import type { ManuscriptImage } from "../../workflows/manuscripts/manuscriptManifest.js";
 
 export type FetchedBytes = { bytes: Uint8Array; contentType: string | null };
@@ -28,6 +27,8 @@ export type FetchedBytes = { bytes: Uint8Array; contentType: string | null };
 export type RehostDeps = {
   /** URL의 바이트를 받는다. 실패는 던진다. 404는 `null`(manifest 최초 부재 구분용). */
   fetchBytes: (url: string) => Promise<FetchedBytes | null>;
+  /** Pages 프로젝트의 배포 횟수(미배포 프로젝트 판별용). 실패는 던진다. */
+  countDeployments: (config: KsceneImagesConfig) => Promise<number>;
   /** `wrangler pages deploy <dir> ...` 실행. */
   runWrangler: (args: string[], env: NodeJS.ProcessEnv) => Promise<void>;
   /** 새 URL이 실제로 서비스되는지 확인한다(배포 직후 전파 대기). */
@@ -120,7 +121,11 @@ export async function rehostImagesToPages(
   const stagingDir = await deps.makeStagingDir();
   try {
     // 2) 이전 스냅샷 재구성: manifest.json을 읽고 그 파일을 전부 내려받는다.
-    const manifestResponse = await deps.fetchBytes(`${baseUrl}/${MANIFEST_PATH}`).catch((error) => {
+    //    새로 만든 Pages 프로젝트는 첫 배포 전까지 404가 아니라 522를 돌려준다(2026-10-09 실측 - TKM 첫 발행들이 전부
+    //    이 폴백으로 Supabase 핫링크가 됐다). manifest를 못 읽으면 배포 이력을 API로 확인해 **0회일 때만** 빈 사이트로
+    //    간주한다 - 일시 장애(이력 있음·확인 불가)를 빈 사이트로 오판하면 기존 이미지를 지운 스냅샷을 배포하게 된다.
+    const manifestResponse = await deps.fetchBytes(`${baseUrl}/${MANIFEST_PATH}`).catch(async (error) => {
+      if ((await deps.countDeployments(config).catch(() => -1)) === 0) return null;
       throw new Error(`이전 파일 목록(manifest.json)을 읽지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
     });
     const previous: SiteManifest = manifestResponse
@@ -197,6 +202,16 @@ export async function rehostImagesToPages(
 
 // ---------- 기본 구현(네트워크·wrangler·파일시스템) ----------
 
+async function defaultCountDeployments(config: KsceneImagesConfig): Promise<number> {
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/pages/projects/${config.projectName}/deployments?per_page=1`,
+    { headers: { Authorization: `Bearer ${config.apiToken}` }, signal: AbortSignal.timeout(15_000) }
+  );
+  if (!response.ok) throw new Error(`Cloudflare API ${response.status} ${response.statusText}`);
+  const body = (await response.json()) as { result?: unknown[]; result_info?: { total_count?: number } };
+  return body.result_info?.total_count ?? body.result?.length ?? 0;
+}
+
 async function defaultFetchBytes(url: string): Promise<FetchedBytes | null> {
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   if (response.status === 404) return null;
@@ -207,9 +222,13 @@ async function defaultFetchBytes(url: string): Promise<FetchedBytes | null> {
 export function defaultRehostDeps(): RehostDeps {
   return {
     fetchBytes: defaultFetchBytes,
+    countDeployments: defaultCountDeployments,
     runWrangler: (args, env) =>
       new Promise<void>((resolve, reject) => {
-        execFile("npx", args, { cwd: PIPELINE_ROOT, env, timeout: 10 * 60 * 1000 }, (error, _stdout, stderr) => {
+        // cwd에 functions/가 있으면 wrangler가 Pages Functions로 묶어 올린다 - 레포 루트(PIPELINE_ROOT)에는 뷰어용
+        // functions/api가 있어 공개 이미지 프로젝트에 API가 딸려 간다(2026-10-09 실측). 스테이징 디렉터리에서 실행한다.
+        const stagingDir = args[args.indexOf("deploy") + 1] ?? tmpdir();
+        execFile("npx", args, { cwd: stagingDir, env, timeout: 10 * 60 * 1000 }, (error, _stdout, stderr) => {
           if (error) reject(new Error(stderr?.trim() || error.message));
           else resolve();
         });
