@@ -23,6 +23,9 @@ const UNIQUE_VIOLATION = "23505";
  */
 const MANUAL_SOURCE_RUN_ID = -1;
 
+/** listRecentSlim이 돌려주는 경량 행 - metadata에는 요청한 키 조각만 들어 있다(없으면 null). */
+export type ArticleJobSlim = { id: string; keyword: string; metadata: Record<string, unknown> };
+
 export type CreateArticleJobResult = {
   job: ArticleJobRow;
   /**
@@ -240,6 +243,42 @@ export class ArticleJobRepository {
       .order("selected_at", { ascending: false })
       .limit(limit);
 
+    if (error) throw error;
+    return data ?? [];
+  }
+
+  /**
+   * 폴러용 경량 조회(2026-10-09): id·keyword와 **지정한 metadata 키 조각만** 받는다.
+   *
+   * listRecent(100)는 metadata 전체가 실려 회당 ~3MB다. 맥미니 폴러 여럿이 60초마다 이걸 부르면
+   * 하루 수 GB가 나가 Supabase 무료 egress(5GB/월)를 그대로 태운다(2026-10 전면 차단 사고의 주범 -
+   * PostgREST가 egress의 99.6%). 판정은 이 조각으로 하고, 실제 집어 갈 소수 건만 listByIds로
+   * 전체 행을 다시 받는다.
+   */
+  static async listRecentSlim(metadataKeys: readonly string[], limit = 100): Promise<ArticleJobSlim[]> {
+    const columns = ["id", "keyword", ...metadataKeys.map((key) => `${key}:metadata->${key}`)].join(",");
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select(columns)
+      .order("selected_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      // 폴러가 멈추는 것보다 비싼 폴백이 낫다 - 경량 조회가 실패하면(쿼리 문법 등) 전체 행으로 돌아간다.
+      console.warn(`⚠️ listRecentSlim 실패 - 전체 행 조회로 폴백: ${error.message}`);
+      const rows = await this.listRecent(limit);
+      return rows.map(({ id, keyword, metadata }) => ({ id, keyword, metadata: metadata ?? {} }));
+    }
+    return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => {
+      const { id, keyword, ...slices } = row;
+      return { id: String(id), keyword: String(keyword ?? ""), metadata: slices };
+    });
+  }
+
+  /** id 목록의 전체 행. listRecentSlim으로 거른 건을 집어 갈 때 쓴다. */
+  static async listByIds(ids: readonly string[]): Promise<ArticleJobRow[]> {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabase.from("article_jobs").select("*").in("id", [...ids]);
     if (error) throw error;
     return data ?? [];
   }

@@ -11,6 +11,9 @@ export const VIEWER_EDIT_PENDING_KEY = "viewerEditPendingAt";
 export const IMAGE_PICK_PENDING_KEY = "imagePickPendingAt";
 export const IMAGE_PICK_RECORD_KEY = "imagePick";
 
+/** 가드 판정(readEditPending)이 보는 metadata 키 전부 - 폴러의 경량 조회(listRecentSlim)가 이 목록을 쓴다. */
+export const EDIT_GUARD_METADATA_KEYS = [VIEWER_EDIT_PENDING_KEY, IMAGE_PICK_PENDING_KEY, IMAGE_PICK_RECORD_KEY, "viewerEdit"] as const;
+
 /** 이보다 오래 접수 상태면 반영이 죽은 것으로 본다. */
 export const EDIT_PENDING_STALE_MS = 10 * 60 * 1000;
 

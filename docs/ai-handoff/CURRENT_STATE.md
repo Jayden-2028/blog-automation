@@ -18,7 +18,15 @@
   보호) ③ **wrangler cwd를 스테이징 디렉터리로 변경** - 레포 루트에서 실행하면 뷰어용 `functions/api`가 공개 이미지
   프로젝트에 Pages Functions로 딸려 올라간다(첫 부트스트랩 배포에서 실제 발생 → 즉시 깨끗한 재배포로 제거, /api/* 404 확인).
   테스트 `test:rehost-images`(미배포 522 진행/이력 있음 중단/API 실패 중단) 보강.
-- **남은 것**: Supabase 복구 후 TKM 발행글 재발행으로 이미지 URL을 Pages로 치환(egress 재발 방지 핵심), 복구 방법 사용자 결정.
+- **원인 확정(Usage 실측, 10-09)**: 결제 주기 9/21~10/21. 비캐시 egress **41.18GB/5GB(824%)의 99.6%가 PostgREST** -
+  맥미니 폴러들(naver·tistory·export)이 60초마다 `listRecent(100)` 전체 행(회당 ~3MB, metadata가 97%)을 내려받는 구조.
+  캐시 egress 9.18GB/5GB(184%)는 Storage CDN(블로그 핫링크). **폴러 쿼리 다이어트 적용(10-09)**: `listRecentSlim`
+  (id·keyword+필요 metadata 키 조각만, 실패 시 전체 행 폴백) + 집어 갈 건만 `listByIds` 전체 행 - 회당 3MB→수 KB.
+  복구: 사용자가 Pro 1개월 업그레이드 결정(이후 다운그레이드), whynowissue는 사용자가 블로그 폐쇄 예정(폐쇄 후 Storage
+  이미지 316파일·198MB 삭제 가능 - 별도 승인). 복구 직후 체크: 폴러 슬림 쿼리 1주기 로그 확인(문법 폴백 경고 없어야 함).
+- **남은 것**: Supabase 복구 후 TKM 발행글 재발행으로 이미지 URL을 Pages로 치환(egress 재발 방지 핵심). 재발행은
+  기존 postId에 posts.update라 URL·조회수·GSC 이력 유지. cost-of-living 글은 사용자가 초안으로 돌림 - 이미지 치환 후
+  posts.publish로 공개 전환까지(사용자 지시 10-09).
   부가 발견: TKM `cost-of-living…` 글 URL이 404(publications 기록과 불일치 - 사용자 삭제 여부 확인 필요).
 
 ## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
