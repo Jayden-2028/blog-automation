@@ -27,8 +27,10 @@
 - **TKM 7글 재발행 완료(10-09)**: Pro 전환으로 차단 해제 직후 전글을 기존 postId에 update(주소·조회수·GSC 불변)해
   이미지가 전부 korea-manual-images-2026.pages.dev로 치환됨(supabase 참조 0 실측, 44파일 5.2MB 서빙 확인,
   `imagesRehostedAt` 7건 기록 - storage-cleanup 대상化). cost-of-living은 초안 postId 매칭 후 공개 전환까지 완료.
-  폴러 슬림 쿼리 실검증 2.02MB→28KB. 남은 것: 11/5 전후 Pro 해지 노티([[supabase-pro-cancel-reminder]] 메모리),
-  whynowissue 폐쇄는 사용자 고민 중(폐쇄 시 Storage 316파일·198MB 삭제 가능).
+  폴러 슬림 쿼리 실검증 2.02MB→28KB. **whynowissue 블로그 사용자 삭제 완료(10-09, 404 확인)** → 승인 후 해당 job 58건의
+  Storage 이미지 316파일·207MB 삭제(TKM 교차 0, 실패 0, 버킷 561→354MB). 캐시 egress 원인도 소멸 - 측정-분석 검수 때
+  GSC_SITE_URLS에서 whynowissue 속성 제거 검토(수집 데이터가 0으로 수렴). 남은 것: 11/5 전후 Pro 해지 노티
+  ([[supabase-pro-cancel-reminder]] 메모리).
   부가 발견: TKM `cost-of-living…` 글 URL이 404(publications 기록과 불일치 - 사용자 삭제 여부 확인 필요).
 
 ## 2026-10-09 — 측정·분석 (브랜치 `feat/analytics-ops`, main 병합·push 완료, 상세 `ANALYTICS_OPS.md`, 지시서 `ANALYTICS-OPS-2026-10.md`)
