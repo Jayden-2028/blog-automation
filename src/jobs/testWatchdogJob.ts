@@ -12,6 +12,7 @@ import {
   formatWatchdogAlert,
   runWatchdog,
   seoulDateString,
+  WATCHED_JOBS,
 } from "./watchdogJob.js";
 import type { DiscoveryRunRow } from "../types/database.js";
 
@@ -69,8 +70,9 @@ async function main(): Promise<void> {
   assert(!emptyVerdict.ok && emptyVerdict.reason === "no_completed_run", "run 없음 → no_completed_run");
   console.log("  ✅ run 없음 → no_completed_run 알림");
 
-  // ---------- job별 감시(2026-10-03, 2026-10-05 회차 체계로 개편) ----------
-  // 감시 대상: 엔터 오전·오후·저녁 + 사회. 수집일 경계는 KST 05:00이다.
+  // ---------- job별 감시(2026-10-03, 2026-10-05 회차 체계, 2026-10-11 엔터 1회화) ----------
+  // 감시 대상: 엔터 저녁(18시) + 사회 + 사용설명서. 수집일 경계는 KST 05:00이다.
+  // 2026-10-11 개편으로 오전·오후 회차는 감시하지 않는다 - 돌지 않는 회차를 남기면 매일 거짓 경보가 난다.
   const JOB_NOW = new Date("2026-10-05T12:00:00Z"); // KST 10-05 21:00
   const kindRun = (
     kind: string | null,
@@ -88,7 +90,7 @@ async function main(): Promise<void> {
   const kscenePrev = kindRun("kscene_topic", "2026-10-04T12:05:00Z", 190);
   const all = [social, entEvening, entNoon, entMorning, kscenePrev];
 
-  // 5) 네 job이 모두 이번 수집일에 돌았으면 ok, 발송 없음
+  // 5) 세 job이 모두 이번 수집일에 돌았으면 ok, 발송 없음
   const okSends: string[] = [];
   const okResult = await runWatchdog({
     now: JOB_NOW,
@@ -97,47 +99,71 @@ async function main(): Promise<void> {
       okSends.push(text);
     },
   });
-  assert(okResult.verdict.ok && okResult.alerted === false && okSends.length === 0, "네 job이 다 돌았으면 알림 없음");
-  assert(okResult.verdict.checks.length === 5, "감시 대상은 엔터 3회 + 사회 + 사용설명서 = 5개");
-  console.log("  ✅ 엔터 3회 + 사회 + 사용설명서(전날분) 모두 정상 → 발송 없음");
+  assert(okResult.verdict.ok && okResult.alerted === false && okSends.length === 0, "세 job이 다 돌았으면 알림 없음");
+  assert(okResult.verdict.checks.length === 3, "감시 대상은 엔터 저녁 + 사회 + 사용설명서 = 3개");
+  console.log("  ✅ 엔터(18시) + 사회 + 사용설명서(전날분) 모두 정상 → 발송 없음");
 
-  // 6) 오후 회차만 빠졌다: 오전·저녁이 돌았다는 이유로 가려지면 안 된다(회차별로 본다).
-  const noNoonSends: string[] = [];
-  const noNoon = await runWatchdog({
+  // 5-2) **2026-10-11 개편 회귀**: 오전·오후 회차가 없어도 경보가 나지 않아야 한다(폐지된 회차).
+  const retiredSends: string[] = [];
+  const retired = await runWatchdog({
     now: JOB_NOW,
-    fetchRecent: async () => [social, entEvening, entMorning, kscenePrev],
+    fetchRecent: async () => [social, entEvening, kscenePrev],
     send: async (text) => {
-      noNoonSends.push(text);
+      retiredSends.push(text);
     },
   });
-  assert(!noNoon.verdict.ok && noNoon.alerted === true && noNoonSends.length === 1, "오후 회차만 빠져도 알려야 한다");
-  assert(noNoon.verdict.failed.length === 1 && noNoon.verdict.failed[0].job.label === "엔터 오후(13시)", "안 돈 job은 엔터 오후 하나여야 한다");
-  assert(noNoonSends[0].includes("❌ 엔터 오후(13시)") && noNoonSends[0].includes("✅ 엔터 오전(09시)"), "회차별 상태 줄이 보여야 한다");
-  console.log("  ✅ 한 회차만 빠져도 그 회차 이름을 붙여 발송");
+  assert(retired.verdict.ok && retiredSends.length === 0, "오전·오후 run이 없어도(폐지) 경보가 없어야 한다");
+  // 타입이 아니라 값으로 확인한다 - 목록에 다시 오전·오후를 넣으면 이 단언이 걸린다.
+  const watchedRounds = (WATCHED_JOBS as readonly { round?: string }[]).map((job) => job.round ?? "");
+  assert(!watchedRounds.includes("morning") && !watchedRounds.includes("noon"), "감시 목록에 폐지된 오전·오후 회차가 남아 있으면 안 된다");
+  console.log("  ✅ 폐지된 오전·오후 회차 → 거짓 경보 없음");
+
+  // 6) 저녁 회차가 빠지면(유일 회차) 그 이름을 붙여 알린다.
+  const noEveningSends: string[] = [];
+  const noEvening = await runWatchdog({
+    now: JOB_NOW,
+    fetchRecent: async () => [social, entMorning, entNoon, kscenePrev],
+    send: async (text) => {
+      noEveningSends.push(text);
+    },
+  });
+  assert(!noEvening.verdict.ok && noEvening.alerted === true && noEveningSends.length === 1, "저녁 회차가 빠지면 알려야 한다");
+  assert(noEvening.verdict.failed.length === 1 && noEvening.verdict.failed[0].job.label === "엔터(18시)", "안 돈 job은 엔터(18시) 하나여야 한다");
+  assert(noEveningSends[0].includes("❌ 엔터(18시)") && noEveningSends[0].includes("✅ 사회"), "job별 상태 줄이 보여야 한다");
+  console.log("  ✅ 유일 회차가 빠지면 그 이름을 붙여 발송 (오전·오후 run은 가려 주지 못한다)");
+
+  // 6-2) 핫이슈 스타(kind=entertainment-hot-star)는 kind가 달라 엔터 저녁 판정에 섞이지 않는다.
+  const hotStar = kindRun("entertainment-hot-star", "2026-10-05T10:01:00Z", 210); // KST 19:01
+  const hotStarOnly = evaluateWatchdogByJob([social, entMorning, hotStar, kscenePrev], JOB_NOW);
+  assert(
+    !hotStarOnly.ok && hotStarOnly.failed.length === 1 && hotStarOnly.failed[0].job.label === "엔터(18시)",
+    "핫스타 run이 엔터 저녁 누락을 가리면 안 된다"
+  );
+  console.log("  ✅ 핫이슈 스타 run은 엔터 키워드 판정과 섞이지 않음");
 
   // 7) 이전 사고 재현: 사회만 돌고 엔터는 며칠 전 run뿐이다.
   const oldEnt = kindRun("entertainment", "2026-10-02T10:00:00Z", 100, "evening");
   const incident = evaluateWatchdogByJob([social, oldEnt], JOB_NOW);
-  assert(!incident.ok && incident.failed.length === 4, "엔터 3회 + 사용설명서가 stale이어야 한다");
-  console.log("  ✅ 엔터가 통째로 안 돎 → 3회차 모두 감지");
+  assert(!incident.ok && incident.failed.length === 2, "엔터 + 사용설명서가 stale이어야 한다");
+  console.log("  ✅ 엔터가 통째로 안 돎 → 감지");
 
   // 8) 실패했거나 진행 중인 run은 돌았다고 치지 않는다.
   const failedEnt = kindRun("entertainment", "2026-10-05T09:01:00Z", 203, "evening", { status: "failed" });
-  const failedVerdict = evaluateWatchdogByJob([social, entNoon, entMorning, failedEnt, kscenePrev], JOB_NOW);
-  assert(!failedVerdict.ok && failedVerdict.failed.length === 1 && failedVerdict.failed[0].job.label === "엔터 저녁(18시)", "failed run은 돌았다고 치면 안 된다");
+  const failedVerdict = evaluateWatchdogByJob([social, failedEnt, kscenePrev], JOB_NOW);
+  assert(!failedVerdict.ok && failedVerdict.failed.length === 1 && failedVerdict.failed[0].job.label === "엔터(18시)", "failed run은 돌았다고 치면 안 된다");
   console.log("  ✅ 실패한 run은 정상으로 안 침");
 
   // 9) kind(또는 round)가 없는 run이 누락을 가리면 안 된다.
   const anonymous = kindRun(null, "2026-10-05T10:30:00Z", 300);
   const noRound = kindRun("entertainment", "2026-10-05T10:40:00Z", 301); // round 없음 - 옛 형식
-  const masked = evaluateWatchdogByJob([social, entMorning, entNoon, anonymous, noRound, kscenePrev], JOB_NOW);
-  assert(!masked.ok && masked.failed.length === 1 && masked.failed[0].job.label === "엔터 저녁(18시)", "kind/round 없는 run이 저녁 누락을 가리면 안 된다");
+  const masked = evaluateWatchdogByJob([social, anonymous, noRound, kscenePrev], JOB_NOW);
+  assert(!masked.ok && masked.failed.length === 1 && masked.failed[0].job.label === "엔터(18시)", "kind/round 없는 run이 저녁 누락을 가리면 안 된다");
   console.log("  ✅ kind·round 없는 run은 어느 job으로도 안 침");
 
   // 10) 기록이 아예 없으면 전부 no_completed_run
   const none = evaluateWatchdogByJob([], JOB_NOW);
-  assert(none.failed.length === 5 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
-  console.log("  ✅ 기록 없음 → 다섯 job 모두 no_completed_run");
+  assert(none.failed.length === 3 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
+  console.log("  ✅ 기록 없음 → 세 job 모두 no_completed_run");
 
   // 10-2) 사용설명서(dayOffset -1): 오늘 run이 있어도(watchdog이 늦게 돌 때) 전날 run이 없어도 안 되고,
   //       전날 run이 없고 이틀 전 run뿐이면 경보여야 한다. 실패한 전날 run도 돌았다고 치지 않는다.

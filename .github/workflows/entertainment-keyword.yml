@@ -1,5 +1,9 @@
 # 엔터·OTT 키워드 수집. 2026-10-05부터 social-issue와 무관하게 자체 수집한다(entertainmentKeywordJob.ts
-# 상단 주석, RESTRUCTURE-PLAN-2026-10.md §2.2). 하루 3회(KST 09/13/18시) - 회차는 round 입력으로 받는다.
+# 상단 주석, RESTRUCTURE-PLAN-2026-10.md §2.2).
+#
+# **운영은 하루 1회(KST 18:00 = 09 UTC)다**(2026-10-11, KEYWORD-REFRESH-2026-10.md §A - 09·13시는 알림
+# 중복이 많아 폐지). round 입력 스키마는 그대로 남겨 둔다 - 수동 dispatch로 다른 회차를 돌릴 수 있고,
+# 비우면 실행 시각(KST)으로 추정한다(config/keywordRound.ts).
 #
 # 트리거는 workflow_dispatch뿐이다 - schedule은 쓰지 않고 Worker cron이 dispatch한다(아래 메모).
 #
@@ -10,13 +14,14 @@
 name: entertainment-keyword
 
 # 2026-09-16: schedule: 제거, Cloudflare Worker Cron Trigger가 대신 깨운다(social-issue-keyword.yml
-# 상단 메모와 같은 이유). 2026-10-05 개편 뒤로는 하루 3회 KST 09/13/18시에 Worker(cloudflare/telegram-relay
-# src/schedule.ts)가 round 입력을 실어 깨우고, social-issue(KST 20:00)와는 수집 순서 의존이 없다 - 각자 자체 수집한다.
+# 상단 메모와 같은 이유). 2026-10-11부터는 KST 18:00(09 UTC) 한 번만 Worker(cloudflare/telegram-relay
+# src/schedule.ts)가 round=evening을 실어 깨우고, social-issue(KST 20:00)와는 수집 순서 의존이 없다 -
+# 각자 자체 수집한다. 19:00 KST 핫이슈 스타(entertainment-hot-star.yml)는 이 run의 결과를 읽는다.
 on:
   workflow_dispatch:
     inputs:
       round:
-        description: "회차(morning|noon|evening). 비우면 실행 시각(KST)으로 추정"
+        description: "회차(morning|noon|evening). 운영은 evening 1회 - 비우면 실행 시각(KST)으로 추정"
         required: false
         default: ""
 

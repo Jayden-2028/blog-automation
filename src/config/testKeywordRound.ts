@@ -1,5 +1,5 @@
 // 엔터 회차 판정 테스트 - 외부 호출 없음.
-import { formatEntertainmentHeader, getKeywordRoundInfo, inferKeywordRound, resolveKeywordRound } from "./keywordRound.js";
+import { formatEntertainmentHeader, getKeywordRoundInfo, inferKeywordRound, OPERATING_ROUND, resolveKeywordRound } from "./keywordRound.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -26,9 +26,12 @@ assert(resolveKeywordRound({ KEYWORD_ROUND: "" }, kst(13)).round === "noon", "�
 assert(resolveKeywordRound({}, kst(18)).round === "evening", "미설정 -> 시각 추정");
 assert(resolveKeywordRound({ KEYWORD_ROUND: "bogus" }, kst(9)).round === "morning", "잘못된 값 -> 시각 추정");
 
-// 4) 제목에 회차 표기
+// 4) 제목의 회차 표기 - 운영 회차(저녁 1회, 2026-10-11)는 생략하고 수동 회차만 붙인다
 const header = formatEntertainmentHeader(getKeywordRoundInfo("noon"));
-assert(header.includes("엔터 키워드") && header.includes("오후(13시) 회차"), `제목: ${header}`);
+assert(header.includes("엔터 키워드") && header.includes("오후(13시) 회차"), `수동 회차 제목: ${header}`);
+const operating = formatEntertainmentHeader(getKeywordRoundInfo(OPERATING_ROUND));
+assert(operating === "🎬 <b>엔터 키워드</b>", `운영 회차 제목에는 회차 표기가 없어야 한다: ${operating}`);
+assert(OPERATING_ROUND === "evening", "운영 회차는 저녁(18시) 1회다 - 바꾸려면 Worker cron·watchdog도 함께");
 assert(!header.includes("오전 연예"), "옛 고정 문구가 남지 않는다");
 
 console.log("✅ testKeywordRound 통과");

@@ -1,0 +1,59 @@
+# 19:00 KST "오늘의 핫이슈 스타 Top 5" 알림(KEYWORD-REFRESH-2026-10.md §B, 2026-10-11 신설).
+#
+# **알림 전용이다** - 그날 가장 이슈가 된 인물 5명 + 화제 배경만 보낸다. 키워드 선택(Go)·원고 제작
+# 버튼이 없고 파이프라인(research/write)을 발화하지 않는다. 콘텐츠 제작 연결은 카테고리 템플릿·기획
+# 설계 후 별도 발주다(사용자 2026-10-11 결정).
+#
+# 재료는 그날 이미 쌓인 수집 데이터뿐이다(18시 엔터 회차의 keyword_rankings + 당일 trend_candidates).
+# NAVER·Serper 보조 수집은 하지 않는다 - 추가 호출 0건이고, 인물 추출만 `claude -p` 1콜을 쓴다.
+#
+# 트리거는 workflow_dispatch뿐이다 - schedule은 쓰지 않고 Cloudflare Worker cron(10 UTC 슬롯,
+# cloudflare/telegram-relay/src/schedule.ts)이 dispatch한다. 18시 회차 수집(09 UTC, ~10분)이 끝난 뒤라
+# 그날 데이터가 가장 신선한 시점이다.
+#
+# 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+# CLAUDE_CODE_OAUTH_TOKEN(인물·배경 추출 - 기존 제목 생성과 같은 토큰을 재사용한다).
+
+name: entertainment-hot-star
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true면 발송·기록 없이 결과만 로그로 본다"
+        required: false
+        default: ""
+
+concurrency:
+  group: entertainment-hot-star
+  cancel-in-progress: false
+
+# 헤드리스 claude 모델 고정(2026-09-30 사용자 결정) - 맥 .env의 CLAUDE_MODEL과 같은 값이어야 한다.
+env:
+  CLAUDE_MODEL: claude-sonnet-5-5
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI (인물·배경 추출 LLM 호출용)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run entertainment-hot-star
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: npm run job:entertainment-hot-star ${{ inputs.dry_run == 'true' && '-- --dry-run' || '' }}

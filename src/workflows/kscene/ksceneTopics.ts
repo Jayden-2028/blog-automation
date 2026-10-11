@@ -1,6 +1,13 @@
 // 사용설명서 트랙 주제 후보를 고르는 순수 로직(개편3 §4.2). 네트워크·DB가 없어 tsx 테스트로 검증한다.
 //
-// 흐름: 시드(날짜로 돌림) -> 자동완성 제안 -> 제외 규칙 -> 후보 병합 -> 점수 -> 기발행/기제안 중복 제거 -> 라벨 다양성 선정.
+// 흐름: 시드(날짜로 돌림) -> 자동완성 제안 -> 제외 규칙 -> 후보 병합 -> 점수 -> 기발행/기제안 중복 제거 ->
+//      **체류 실용 정보 하한** + 라벨 다양성 상한 선정.
+//
+// 📌 선정 기준(2026-10-11, KEYWORD-REFRESH-2026-10.md §C): **실제 한국에 체류하며 필요한 실용 정보를
+// 입국 전 문화 소개와 동등하게 우선한다.** 라벨 상한(perLabelCap)만 있으면 "쏠리지 않게" 막을 뿐이라,
+// 문화 소개 라벨이 셋(Food·Culture·K-Wave)이고 실용 라벨이 하나(Living in Korea)인 구성에서는 실용
+// 주제가 매일 0~1건으로 밀렸다. 그래서 상한과 짝이 되는 **하한**을 둔다(practicalFloor).
+// 이 트랙의 선정은 LLM 프롬프트가 아니라 이 파일의 결정 규칙이 전부다 - 기준은 여기 적는다.
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
 
@@ -65,6 +72,34 @@ function containsTerm(normalized: string, term: string): boolean {
   // 단어 경계로 본다("war"가 "warm"을 잡지 않게). 구(phrase)는 그대로 포함 검사.
   return new RegExp(`(^| )${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( |$)`).test(normalized) ||
     (term.length > 5 && normalized.includes(term));
+}
+
+/**
+ * **체류 실용 정보** 신호(2026-10-11, §C). 라벨이 "Living in Korea"면 그것만으로 실용으로 보고,
+ * 다른 라벨(특히 Travel & Transit)에서도 환승·개통·납부·행정 절차처럼 "살면서 해야 하는 일"이면 센다.
+ *
+ * 문화 소개(축제·예절·역사)는 여기 들어오지 않는다 - 그쪽은 이미 충분히 뽑히고 있어 하한이 필요 없다.
+ */
+const PRACTICAL_TERMS = [
+  "transfer", "transit card", "t money", "tmoney", "recharge", "top up", "commute", "rush hour",
+  "traffic", "jaywalking", "crosswalk", "driver license", "driving",
+  "sim", "usim", "esim", "phone plan", "phone number", "activation", "verification", "mobile banking",
+  "bank account", "atm", "remittance", "wire transfer", "tax", "pension", "payroll",
+  "registration", "arc", "alien registration", "visa extension", "immigration office", "report",
+  "insurance", "hospital", "clinic", "pharmacy", "prescription", "appointment", "emergency",
+  "recycling", "garbage", "trash", "food waste", "utility", "utilities", "bill", "bills", "payment",
+  "rent", "jeonse", "deposit", "lease", "contract", "internet installation", "wifi",
+  "delivery app", "karrot", "secondhand", "apartment", "gym membership", "post office", "parcel",
+  "renewal", "refund", "documents", "paperwork",
+  // "rules"·"how to"·"apply" 같은 범용 의도어는 넣지 않는다 - 문화 소개 주제("korean dining etiquette
+  // rules")까지 실용으로 세어 하한이 의미를 잃는다. 생활 행정·교통·통신·의료·주거 **영역어**만 둔다.
+] as const;
+
+/** 이 후보가 체류 실용 정보인가. 라벨 또는 문구로 판정한다. */
+export function isPracticalTopic(topic: string, label: KsceneLabel): boolean {
+  if (label === "Living in Korea") return true;
+  const normalized = normalizeTopic(topic);
+  return PRACTICAL_TERMS.some((term) => containsTerm(normalized, term));
 }
 
 export function isExcludedTopic(topic: string): boolean {
@@ -183,13 +218,31 @@ export function scoreTopic(candidate: TopicCandidate): TopicScore {
   return { total: Math.min(100, 10 + demand + crossSignal + specificity + intent), demand, crossSignal, specificity, intent };
 }
 
+/** 체류 실용 정보 하한의 기본값(2026-10-11, §C). topN=8이면 3건 - 라벨 상한(3)과 같은 크기다. */
+export function defaultPracticalFloor(topN: number): number {
+  return Math.min(topN, Math.max(2, Math.round(topN / 3)));
+}
+
 /**
- * 후보를 점수순으로 정렬하고 ① 후보끼리 비슷한 것 ② 기발행·기제안과 같은 것을 걷어낸 뒤,
- * 라벨당 상한을 두고 topN을 뽑는다(한 라벨로 쏠리지 않게). 상한으로 모자라면 남은 것으로 채운다.
+ * 후보를 점수순으로 정렬하고 ① 후보끼리 비슷한 것 ② 기발행·기제안과 같은 것을 걷어낸 뒤 topN을 뽑는다.
+ *
+ * 두 규칙이 함께 작동한다:
+ *   · **하한(practicalFloor)** - 체류 실용 정보를 먼저 그 수만큼 채운다(§C, 2026-10-11). 실용 후보가
+ *     그보다 적으면 있는 만큼만 - 억지로 만들지 않는다.
+ *   · **상한(perLabelCap)** - 한 라벨로 쏠리지 않게 막는다. 하한으로 먼저 뽑은 것도 이 상한에 포함해
+ *     세므로, 실용 하한이 상한을 넘어 한 라벨을 독점하지 않는다.
+ * 둘을 적용하고도 자리가 남으면 점수순으로 채운다(상한 무시 - 비우는 쪽이 손해다, 기존 동작).
  */
 export function selectTopics(
   candidates: readonly TopicCandidate[],
-  options: { topN: number; existingTopics: readonly string[]; similarity: number; perLabelCap?: number }
+  options: {
+    topN: number;
+    existingTopics: readonly string[];
+    similarity: number;
+    perLabelCap?: number;
+    /** 체류 실용 정보 최소 건수. 생략하면 defaultPracticalFloor(topN). 0을 주면 하한을 끈다. */
+    practicalFloor?: number;
+  }
 ): { selected: (TopicCandidate & { score: TopicScore })[]; droppedAsDuplicate: number } {
   const scored = candidates
     .map((candidate) => ({ ...candidate, score: scoreTopic(candidate) }))
@@ -208,15 +261,32 @@ export function selectTopics(
   }
 
   const cap = options.perLabelCap ?? Math.max(2, Math.ceil(options.topN / 3));
+  const floor = options.practicalFloor ?? defaultPracticalFloor(options.topN);
   const perLabel = new Map<KsceneLabel, number>();
   const selected: typeof kept = [];
+
+  const take = (candidate: (typeof kept)[number]): void => {
+    perLabel.set(candidate.label, (perLabel.get(candidate.label) ?? 0) + 1);
+    selected.push(candidate);
+  };
+
+  // 1) 실용 하한을 점수순으로 먼저 채운다. 라벨 상한은 여기서도 지킨다.
+  for (const candidate of kept) {
+    if (selected.length >= Math.min(floor, options.topN)) break;
+    if (!isPracticalTopic(candidate.topic, candidate.label)) continue;
+    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    take(candidate);
+  }
+
+  // 2) 나머지는 기존대로 점수순 + 라벨 상한.
   for (const candidate of kept) {
     if (selected.length >= options.topN) break;
-    const used = perLabel.get(candidate.label) ?? 0;
-    if (used >= cap) continue;
-    perLabel.set(candidate.label, used + 1);
-    selected.push(candidate);
+    if (selected.includes(candidate)) continue;
+    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    take(candidate);
   }
+
+  // 3) 상한 때문에 자리가 남으면 점수순으로 채운다.
   for (const candidate of kept) {
     if (selected.length >= options.topN) break;
     if (!selected.includes(candidate)) selected.push(candidate);

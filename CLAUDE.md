@@ -175,6 +175,36 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
     `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 
+## 키워드 수집·알림 스케줄 (2026-10-11 개편)
+
+Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 고른다
+(`cloudflare/telegram-relay/src/schedule.ts` + `wrangler.toml` - **둘을 항상 같이 바꾼다.** 한쪽만
+바꾸면 발화가 조용히 죽는다). cron 슬롯은 4/5, 마지막 1칸은 예약이다.
+
+| KST | UTC | 워크플로 | 알림 |
+|---|---|---|---|
+| 18:00 | 09 | `entertainment-keyword.yml` (round=evening) | 엔터 메인봇 · Go/Pass |
+| 19:00 | 10 | `entertainment-hot-star.yml` | 엔터 메인봇 · **알림 전용(버튼 없음)** |
+| 20:00 | 11 | `social-issue-keyword.yml` | 사회 봇 · Go/Pass |
+| 21:00 | 12 | `kscene-topic.yml` + `watchdog.yml` | 사용설명서 봇 · Go/Pass |
+
+- **엔터는 하루 1회(18시)다**(2026-10-11, `KEYWORD-REFRESH-2026-10.md` §A). 09·13시 회차는 알림 중복이
+  많아 폐지했다 - Worker에서 0·4 UTC를 빼고 **watchdog 기대 목록(`WATCHED_JOBS`)에서도 뺐다**(안 빼면
+  매일 거짓 경보). 회차 체계(`config/keywordRound.ts`)는 **코드로는 유지**한다(수동 `workflow_dispatch`의
+  `round` 입력 + 시각 추정 안전망). 운영 회차에서는 알림 제목의 회차 표기를 생략한다(`OPERATING_ROUND`).
+  엔터 수집이 1/3로 줄어 Serper·NAVER 호출도 그만큼 줄었다.
+- **19시 핫이슈 스타 Top 5**는 그날 가장 이슈가 된 인물 5명 + 화제 배경을 보낸다. **읽기용이고 원고
+  제작 버튼이 없다** - 콘텐츠 제작 연결은 카테고리 템플릿·기획 설계 후 별도 발주다(사용자 2026-10-11
+  결정). 재료는 그날 이미 쌓인 데이터뿐(18시 run의 `keyword_rankings` + 당일 `trend_candidates`)이고
+  보조 수집(NAVER·Serper) 호출이 0건이며, 인물 추출만 `claude -p` 1콜을 쓴다. 18시 알림과 인물이 겹치면
+  **중복 제거 없이** "18시 알림에도 선정" 한 줄을 붙인다. 5명을 못 채우면 채운 만큼 보내고 "오늘은 N명"
+  이라고 적는다. run은 `discovery_runs`에 `kind=entertainment-hot-star`로 남고 `keyword_rankings`는
+  만들지 않는다(Go 버튼이 가리킬 행이 없어야 한다 - `config/discoveryRunKinds.ts`).
+- **사용설명서(kscene) 주제 선정은 체류 실용 정보를 문화 소개와 동등하게 우선한다**(§C). 시드는 117개
+  (기획⑤ 확정본 100 + 실용 17, Living in Korea 32 / Travel & Transit 25 / 나머지 20)이고, 선정에
+  라벨 상한과 짝이 되는 **실용 하한**(`practicalFloor`, topN=8이면 3건)이 있다. 실용 후보가 적은 날은
+  있는 만큼만 뽑는다. 이 트랙의 주제 선정에는 LLM 프롬프트가 없다 - 기준은 `ksceneTopics.ts`의 규칙이다.
+
 ## 측정·분석 운영 규칙 (2026-10-08)
 
 - **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: thekoreamanual → 티스토리. whynowissue.blogspot.com은 폐쇄돼 2026-10-11에 제외했다).

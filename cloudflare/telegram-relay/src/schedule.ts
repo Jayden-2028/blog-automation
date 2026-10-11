@@ -1,9 +1,13 @@
 // cron 발화 시각(UTC) -> 깨울 워크플로 목록. 순수 함수라 Worker 밖(tsx 테스트)에서도 검증한다.
 //
 // 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §2.1): Workers 무료 플랜은 cron 트리거 5개 한도이고 이미
-// 다 찼다. 그래서 키워드 수집 시각을 cron 표현식 하나(`0 0,4,9,11,12 * * *`)에 묶고, Worker가 **발화한
+// 다 찼다. 그래서 키워드 수집 시각을 cron 표현식 하나(`0 9,10,11,12 * * *`)에 묶고, Worker가 **발화한
 // UTC 시(hour)**로 워크플로를 고른다. 이전의 "cron 문자열 -> 워크플로" map은 문자열이 하나뿐이라 쓸 수 없다.
 // wrangler.toml의 crons와 **반드시 같이 바꿀 것** - 여기 없는 시각에 발화하면 아무 일도 안 일어난다.
+//
+// 2026-10-11 키워드 개편(KEYWORD-REFRESH-2026-10.md §A·§B): 엔터 키워드가 하루 3회(09/13/18시)에서
+// **18시 1회**로 줄었다(09·13시 알림 중복이 많았다 - 사용자 판단). 비운 0·4 UTC 대신 10 UTC(19:00 KST)에
+// 핫이슈 스타 알림을 새로 넣었다. 표현식의 시각 수는 5 -> 4로 줄었고 cron 슬롯 수(4/5)는 그대로다.
 
 export type ScheduledDispatch = {
   workflow: string;
@@ -12,13 +16,16 @@ export type ScheduledDispatch = {
 };
 
 /** 키워드 수집 통합 cron 표현식. wrangler.toml과 동일해야 한다. */
-export const KEYWORD_CRON = "0 0,4,9,11,12 * * *";
+export const KEYWORD_CRON = "0 9,10,11,12 * * *";
 
 /** 발화 UTC 시 -> 워크플로 목록. KST = UTC+9. */
 const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
-  0: [{ workflow: "entertainment-keyword.yml", inputs: { round: "morning" } }], // 09:00 KST 엔터 오전
-  4: [{ workflow: "entertainment-keyword.yml", inputs: { round: "noon" } }], // 13:00 KST 엔터 오후
-  9: [{ workflow: "entertainment-keyword.yml", inputs: { round: "evening" } }], // 18:00 KST 엔터 저녁
+  // 18:00 KST 엔터 키워드 - 2026-10-11부터 이 회차 하나만 돈다(09·13시 폐지). round 입력은 계속 싣는다:
+  // 수동 dispatch와 시각 추정 안전망이 같은 값을 쓰고, watchdog이 metadata.round로 이 회차를 찾는다.
+  9: [{ workflow: "entertainment-keyword.yml", inputs: { round: "evening" } }],
+  // 19:00 KST 핫이슈 스타 Top 5(§B 신설). 18시 회차 수집(09 UTC, ~10분)이 끝난 뒤라 그날 데이터가 가장
+  // 신선하다. **알림 전용**이라 Go/제작 버튼이 없고 discovery_runs에는 kind=entertainment-hot-star로 남는다.
+  10: [{ workflow: "entertainment-hot-star.yml" }],
   11: [{ workflow: "social-issue-keyword.yml" }], // 20:00 KST 사회(2순위에서 데일리 리포트로 개편)
   // 21:00 KST 사용설명서(kscene) 주제 수집 + watchdog(개편3). watchdog은 원래 GitHub 네이티브 cron
   // (`0 12 * * *`)이었는데 10/5에 발화하지 않았다(알려진 지연·누락) - Worker 슬롯으로 옮겼다. 두 워크플로는

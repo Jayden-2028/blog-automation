@@ -1,4 +1,4 @@
-// 외부 감시인(watchdog). "감시 대상 수집 job(엔터 오전·오후·저녁 / 사회) 각각이 이번 수집일에 성공했는가"를
+// 외부 감시인(watchdog). "감시 대상 수집 job(엔터 저녁 / 사회 / 사용설명서) 각각이 이번 수집일에 성공했는가"를
 // 확인하고, 하나라도 아니면 어느 job인지 이름을 붙여 Telegram으로 알린다.
 // 수집일은 KST 05:00에 바뀐다 - collectionDayString 주석 참고.
 //
@@ -89,6 +89,12 @@ export function evaluateWatchdog(
  * 2026-10-05 개편: 엔터는 회차(오전/오후/저녁)마다 따로 본다. 커뮤니티는 엔터 회차에 통합돼 독립 job이
  * 아니므로 목록에서 뺐다.
  *
+ * 2026-10-11 키워드 개편(KEYWORD-REFRESH-2026-10.md §A): **엔터 오전(09시)·오후(13시)를 목록에서 뺐다.**
+ * 운영이 저녁 1회로 줄었으므로 두 회차를 남겨 두면 매일 "오전·오후 회차 누락" 거짓 경보가 울린다. 회차 체계
+ * 자체(config/keywordRound.ts)는 수동 dispatch용으로 코드에 남아 있지만, 돌지 않는 회차는 감시하지 않는다.
+ * 19시 핫이슈 스타(kind=entertainment-hot-star)는 알림 전용이라 아직 목록에 넣지 않았다 - kind가 달라
+ * 엔터 저녁 판정에 섞이지는 않는다(감시 추가는 사용자 결정 사항).
+ *
  * 2026-10-06 개편3: 사용설명서(kscene_topic, 21시)를 추가했다. watchdog이 Worker 12 UTC 슬롯에서 kscene 수집과
  * **같은 시각에** 깨어나므로 오늘 수집일의 kscene run은 아직 없다 - `dayOffset: -1`로 **전날 수집일 이후**의
  * 완료 run을 요구한다(하루 늦게 잡히는 대신 거짓 경보가 없다). 도입 첫날은 전날 run이 없어 한 번 경보가 날 수
@@ -98,9 +104,7 @@ export function evaluateWatchdog(
  * 것으로 보고 안 돌면 경보를 보낸다.
  */
 export const WATCHED_JOBS = [
-  { kind: "entertainment", round: "morning", label: "엔터 오전(09시)" },
-  { kind: "entertainment", round: "noon", label: "엔터 오후(13시)" },
-  { kind: "entertainment", round: "evening", label: "엔터 저녁(18시)" },
+  { kind: "entertainment", round: "evening", label: "엔터(18시)" },
   { kind: "social_issue", label: "사회" },
   { kind: "kscene_topic", label: "사용설명서(21시, 전날분)", dayOffset: -1 },
 ] as const satisfies readonly { kind: string; round?: string; label: string; dayOffset?: number }[];
@@ -182,7 +186,10 @@ export function formatWatchdogAlert(verdict: JobWatchdogVerdict, now: Date): str
   return lines.join("\n");
 }
 
-/** 한 번에 읽을 최근 run 수. 하루 5건(엔터 3 + 사회 1 + 사용설명서 1)이므로 열이틀이다 - 한 job이 오래 멈췄다면 어차피 경보 대상이다. */
+/**
+ * 한 번에 읽을 최근 run 수. 2026-10-11 개편 뒤 하루 4건(엔터 1 + 핫스타 1 + 사회 1 + 사용설명서 1)이라
+ * 보름치다(전에는 하루 5건 = 열이틀). 한 job이 그보다 오래 멈췄다면 어차피 경보 대상이다.
+ */
 const RECENT_RUNS_LIMIT = 60;
 
 export type RunWatchdogOptions = {

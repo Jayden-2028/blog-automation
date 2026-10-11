@@ -4,8 +4,10 @@ import { buildAutocompleteUrl, parseAutocompleteResponse } from "../../services/
 import {
   autocompleteQueriesForSeed,
   buildCandidates,
+  defaultPracticalFloor,
   isDuplicateTopic,
   isExcludedTopic,
+  isPracticalTopic,
   normalizeTopic,
   pickSeedsForDay,
   scoreTopic,
@@ -25,7 +27,23 @@ async function main(): Promise<void> {
   assert(KSCENE_LABELS.every((label) => KSCENE_SEEDS.some((seed) => seed.label === label)), "모든 라벨에 시드가 있다");
   assert(new Set(KSCENE_SEEDS.map((s) => s.query)).size === KSCENE_SEEDS.length, "시드 중복 없음");
   assert(KSCENE_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
-  console.log("  ✅ 시드 구성");
+
+  // 체류 실용 축(2026-10-11, §C): 기획⑤ 확정본 100개를 지우지 않고 누적했고, 실용 시드가 들어와 있다.
+  assert(KSCENE_SEEDS.length === 117, `시드 총량 117개(기획⑤ 100 + 실용 17, 실제 ${KSCENE_SEEDS.length})`);
+  const seedsByLabel = new Map<string, number>();
+  for (const seed of KSCENE_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
+  assert(seedsByLabel.get("Living in Korea") === 32 && seedsByLabel.get("Travel & Transit") === 25, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
+  for (const label of ["Food & Dining", "Culture & Etiquette", "K-Wave Context"]) {
+    assert(seedsByLabel.get(label) === 20, `${label}는 기획⑤ 확정본 20개 그대로`);
+  }
+  for (const practical of ["korea prepaid usim", "korea resident registration move", "korea utility bill payment", "korea garbage bag rules", "korea bus subway transfer", "korea traffic signals"]) {
+    assert(KSCENE_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
+  }
+  // 실용 시드에서 나오는 주제가 제외 규칙(정치·성인·저가치)에 걸리지 않아야 한다 - 걸리면 시드가 헛돈다.
+  for (const topic of ["korea prepaid usim activation guide", "korea resident registration move report", "how to pay korea utility bill online", "jaywalking rules in korea"]) {
+    assert(!isExcludedTopic(topic), `실용 주제가 제외되면 안 된다: ${topic}`);
+  }
+  console.log("  ✅ 시드 구성 + 체류 실용 축(117개, 라벨별 분포)");
 
   // 자동완성 URL/파서
   assert(buildAutocompleteUrl("korea subway").includes("q=korea+subway") && buildAutocompleteUrl("x").includes("hl=en"), "자동완성 URL");
@@ -94,6 +112,39 @@ async function main(): Promise<void> {
   assert(mixed.selected.some((s) => s.label === "Travel & Transit"), "점수가 낮아도 다른 라벨이 상한 덕에 들어온다");
   assert(mixed.selected.length === 6, "모자라면 남은 후보로 채운다");
   console.log("  ✅ 라벨 다양성 상한");
+
+  // ---------- 체류 실용 정보 하한(2026-10-11, §C) ----------
+  assert(isPracticalTopic("how to use t money card in korea", "Travel & Transit"), "환승·교통카드는 실용");
+  assert(isPracticalTopic("korea arc renewal documents", "Living in Korea"), "Living in Korea 라벨은 그 자체로 실용");
+  assert(isPracticalTopic("korea hospital appointment for foreigners", "Culture & Etiquette"), "라벨이 달라도 의료 실무는 실용");
+  assert(!isPracticalTopic("korean dining etiquette rules for guests", "Culture & Etiquette"), "문화 소개는 실용으로 세지 않는다(범용 의도어 'rules'에 걸리면 안 된다)");
+  assert(!isPracticalTopic("korea cherry blossom season best spots", "Travel & Transit"), "관광 시즌 주제는 실용 아님");
+  assert(defaultPracticalFloor(8) === 3 && defaultPracticalFloor(1) === 1, `하한 기본값(${defaultPracticalFloor(8)})`);
+
+  // 문화 후보가 점수를 독점해도 실용 주제가 하한만큼 올라온다(개편 전에는 0~1건으로 밀렸다).
+  const cultural = Array.from({ length: 10 }, (_, i) => ({ topic: `korean festival custom number${i} explained`, seed: "korean etiquette", label: "Culture & Etiquette" as const, hits: 3, bestPosition: 0 }));
+  const practicalCandidates = [
+    { topic: "how to pay korea utility bill online", seed: "korea utility bill payment", label: "Living in Korea" as const, hits: 1, bestPosition: 9 },
+    { topic: "korea bus subway transfer discount rules", seed: "korea bus subway transfer", label: "Travel & Transit" as const, hits: 1, bestPosition: 9 },
+    { topic: "korea prepaid usim activation for foreigners", seed: "korea prepaid usim", label: "Living in Korea" as const, hits: 1, bestPosition: 9 },
+  ];
+  const withFloor = selectTopics([...cultural, ...practicalCandidates], { topN: 8, existingTopics: [], similarity: 0.95 });
+  const practicalPicked = withFloor.selected.filter((s) => isPracticalTopic(s.topic, s.label));
+  assert(practicalPicked.length >= 3, `실용 하한 3건이 보장돼야 한다 (실제 ${practicalPicked.length}건: ${withFloor.selected.map((s) => s.topic).join(" / ")})`);
+  assert(withFloor.selected.length === 8, "하한을 적용하고도 topN을 채운다");
+  // 하한이 라벨 상한을 무너뜨려 한 라벨을 독점하지 않는다.
+  const livingCount = withFloor.selected.filter((s) => s.label === "Living in Korea").length;
+  assert(livingCount <= Math.max(2, Math.ceil(8 / 3)), `하한도 라벨 상한을 지켜야 한다 (Living ${livingCount}건)`);
+
+  // 실용 후보가 하한보다 적으면 있는 만큼만 - 억지로 채우지 않는다.
+  const scarce = selectTopics([...cultural, practicalCandidates[0]], { topN: 8, existingTopics: [], similarity: 0.95 });
+  assert(scarce.selected.filter((s) => isPracticalTopic(s.topic, s.label)).length === 1, "실용 후보가 1건이면 1건만");
+  assert(scarce.selected.length === 8, "실용이 모자라도 topN은 채운다");
+
+  // 하한을 끄면 옛 동작(라벨 상한만)
+  const noFloor = selectTopics([...cultural, ...practicalCandidates], { topN: 3, existingTopics: [], similarity: 0.95, practicalFloor: 0 });
+  assert(noFloor.selected.every((s) => s.label === "Culture & Etiquette") === false || noFloor.selected.length === 3, "practicalFloor=0은 하한 없음");
+  console.log("  ✅ 체류 실용 정보 하한(문화 쏠림에도 3건 보장 · 후보 부족이면 있는 만큼 · 라벨 상한 유지)");
 
   // 전체 실행(주입): 저장·알림 호출 계약
   const calls: string[] = [];

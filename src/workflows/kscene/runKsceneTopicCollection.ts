@@ -93,7 +93,8 @@ async function defaultLoadExistingTopics(): Promise<string[]> {
   }
 
   const cutoff = Date.now() - KSCENE_TOPIC_CONFIG.proposalMemoryDays * 24 * 60 * 60 * 1000;
-  // 하루 run이 5건(엔터 3·사회 1·kscene 1)이라 제안 기억 기간(60일)을 덮으려면 300건 넘게 읽어야 한다.
+  // 하루 run이 4건(엔터 1·핫스타 1·사회 1·kscene 1, 2026-10-11 개편)이라 제안 기억 기간(60일)을 덮으려면
+  // 240건 넘게 읽어야 한다(전에는 하루 5건 = 300건).
   const runs = await listRecentDiscoveryRuns(400);
   for (const run of runs) {
     if (run.metadata?.kind !== KSCENE_JOB_KIND || Date.parse(run.started_at) < cutoff) continue;

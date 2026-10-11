@@ -27,6 +27,17 @@ export type ListCandidatesByTrendDateOptions = {
   status?: TrendCandidateStatus;
 };
 
+/** listActiveCollectedSince가 돌려주는 조각(metadata·id 등은 읽지 않는다). */
+export type TrendCandidateSlimRow = {
+  keyword: string;
+  topic: string;
+  topic_normalized: string;
+  source: string;
+  rank: number;
+  candidate_score: number | null;
+  collected_at: string;
+};
+
 export type ListLatestActiveCandidatesResult = {
   /** trend_candidates에 해당 source의 active row가 하나도 없으면 null. */
   trendDate: string | null;
@@ -71,6 +82,28 @@ export class TrendCandidateRepository {
 
     if (error) throw error;
     return data ?? [];
+  }
+
+  /**
+   * 지정 시각 이후에 수집된 active 후보를 **필요한 컬럼만** 돌려준다(2026-10-11, 핫이슈 스타 §B).
+   *
+   * 왜 슬림 select인가: trend_candidates.metadata가 row 크기의 대부분이고(뉴스 제목·링크), 당일분은
+   * 수백 건이 될 수 있다. 하루 한 번 읽는 알림에 metadata를 통째로 내려받을 이유가 없다(2026-10-09
+   * egress 사고와 같은 종류의 낭비 - 폴러 슬림 쿼리와 같은 방침).
+   *
+   * trend_date가 아니라 collected_at으로 보는 이유: trend_date는 collectedAt의 **UTC** 날짜라
+   * KST 00~09시에 수집된 run이 전날로 적힌다. "당일분"은 KST 기준으로 잘라야 한다.
+   */
+  static async listActiveCollectedSince(sinceIso: string): Promise<TrendCandidateSlimRow[]> {
+    const { data, error } = await supabase
+      .from("trend_candidates")
+      .select("keyword, topic, topic_normalized, source, rank, candidate_score, collected_at")
+      .eq("status", "active")
+      .gte("collected_at", sinceIso)
+      .order("candidate_score", { ascending: false, nullsFirst: false });
+
+    if (error) throw error;
+    return (data ?? []) as TrendCandidateSlimRow[];
   }
 
   /** status='active'인 row 중 가장 최신 trend_date("YYYY-MM-DD")를 반환한다. 없으면 null. */

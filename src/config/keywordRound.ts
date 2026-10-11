@@ -1,6 +1,11 @@
 // 엔터 트랙 키워드 수집 회차(2026-10-05 개편 - RESTRUCTURE-PLAN-2026-10.md §2).
-// 하루 3회(KST 09:00 / 13:00 / 18:00) 같은 job을 돌리므로, 알림 제목과 discovery_runs.metadata에
-// "몇 시 회차인지"를 남긴다.
+// 같은 job을 회차마다 돌리므로, 알림 제목과 discovery_runs.metadata에 "몇 시 회차인지"를 남긴다.
+//
+// **운영은 evening(18시) 1회다**(2026-10-11, KEYWORD-REFRESH-2026-10.md §A). 09·13시 회차는 알림 중복이
+// 많아 폐지했다(Worker cron에서 0·4 UTC를 뺐고 watchdog 기대 목록에서도 빠졌다). morning/noon을 코드에
+// 남겨 두는 이유: 수동 workflow_dispatch(round 입력)와 시각 추정 안전망이 쓰고, 돌리지 않으면 비용이 없다.
+// 회차가 하나뿐이면 제목의 "저녁(18시) 회차" 표기는 군더더기라 **운영 회차에서는 표기를 생략**하고,
+// 수동으로 다른 회차를 지정했을 때만 붙인다(formatEntertainmentHeader).
 //
 // 회차는 두 경로로 정해진다. ① 명시: 워크플로 입력 `round` -> 환경변수 KEYWORD_ROUND(Worker가 cron
 // 시각에서 계산해 넘긴다). ② 생략: 실행 시각(KST)으로 추정. 수동 dispatch나 GitHub 지연에도 job이
@@ -9,6 +14,12 @@
 
 export const KEYWORD_ROUNDS = ["morning", "noon", "evening"] as const;
 export type KeywordRound = (typeof KEYWORD_ROUNDS)[number];
+
+/**
+ * 지금 실제로 매일 도는 회차(2026-10-11부터 저녁 1회). 알림 제목의 회차 표기 생략 기준이고,
+ * 운영 시각을 다시 늘리면 Worker cron·watchdog 기대 목록과 **함께** 바꿀 값이다.
+ */
+export const OPERATING_ROUND: KeywordRound = "evening";
 
 export type KeywordRoundInfo = {
   round: KeywordRound;
@@ -59,7 +70,12 @@ export function resolveKeywordRound(
   return ROUND_INFO[inferKeywordRound(now)];
 }
 
-/** 엔터 알림 제목. */
+/**
+ * 엔터 알림 제목. 운영 회차(저녁 1회)에서는 회차 표기를 생략하고, 수동으로 다른 회차를 돌렸을 때만
+ * 어느 회차인지 붙인다 - 하루에 하나뿐인 알림에 "저녁(18시) 회차"를 적어 두면 읽는 쪽에 정보가 없다.
+ */
 export function formatEntertainmentHeader(info: KeywordRoundInfo): string {
-  return `🎬 <b>엔터 키워드 — ${info.label}</b>`;
+  return info.round === OPERATING_ROUND
+    ? "🎬 <b>엔터 키워드</b>"
+    : `🎬 <b>엔터 키워드 — ${info.label}</b>`;
 }

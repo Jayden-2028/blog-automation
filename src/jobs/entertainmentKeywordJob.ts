@@ -2,9 +2,12 @@
 //
 // 2026-10-05 개편(RESTRUCTURE-PLAN-2026-10.md §2.2): **자체 수집으로 독립했다.** 전에는 social job이
 // 먼저 trend_candidates를 채워 두면 이 job이 읽기만 했다(social 18:00 -> ent 19:00 순서 의존). 엔터가
-// 하루 3회(KST 09/13/18시) social과 무관하게 먼저 도므로 구글 트렌드·다음 실시간을 직접 수집한다.
-// 회차(오전/오후/저녁)는 KEYWORD_ROUND 또는 실행 시각으로 정해져 알림 제목과 run metadata에 남는다
-// (config/keywordRound.ts).
+// social과 무관하게 먼저 도므로 구글 트렌드·다음 실시간을 직접 수집한다. 회차는 KEYWORD_ROUND 또는
+// 실행 시각으로 정해져 알림 제목과 run metadata에 남는다(config/keywordRound.ts).
+//
+// **운영은 하루 1회(KST 18:00)다**(2026-10-11, KEYWORD-REFRESH-2026-10.md §A). 회차마다 수집을 자체
+// 수행하므로 오전·오후 run을 전제하는 데가 없고(이월·소진 상태를 두지 않는다), 1회만 돌아도 pool 구성은
+// 그대로다. Serper·NAVER 호출은 회차 수에 비례하므로 엔터 수집분이 약 1/3로 줄었다.
 //
 // Creator Advisor만은 여기서 크롤링하지 않는다 - 로그인된 브라우저 프로필이 필요해 클라우드에서
 // 못 돌고, 맥미니 폴러가 따로 trend_candidates에 넣는다. collectionSources에는 남겨 두어 그 값을
@@ -27,7 +30,7 @@ const job: SchedulerJob = {
     console.log(`▶ 엔터 키워드 수집 - ${round.label}`);
 
     const result = await runDailyKeywordWorkflow({
-      // 커뮤니티(더쿠·루리웹·에펨코리아)도 회차마다 함께 수집한다(§2.4 - 독립 커뮤니티 알림 폐지).
+      // 커뮤니티(더쿠·루리웹·에펨코리아)도 이 회차에 함께 수집한다(§2.4 - 독립 커뮤니티 알림 폐지).
       // 엔터·OTT로 분류된 것만 이 알림에 오르고, 사회 계열은 trend_candidates에 남아 20시 리포트가 수거한다.
       collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community"],
       // CA는 크롤링하지 않고 맥미니가 넣어 둔 값을 읽기만 한다. 구글·다음은 기본값(켜짐)으로 직접 수집한다.

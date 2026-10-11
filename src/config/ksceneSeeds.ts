@@ -7,6 +7,14 @@
 // ✅ 기획 세션(⑤) **확정본 100개**(라벨당 20, 2026-10-08 반영 - 임시본 60개 전량 유지 + 40개 추가,
 // `branding-2026-10/kscene-seeds.md` 스냅샷). 추가 후보가 생기면 그 문서가 아니라 이 배열에 직접 누적한다.
 // News in Context 라벨은 공식 축에서 제외 확정(에버그린 수집과 안 맞고 얇은 뉴스 요약은 애드센스 리스크).
+//
+// 📌 **2026-10-11 실용 축 확장**(KEYWORD-REFRESH-2026-10.md §C): 시드가 "입국 전 문화 소개"에 치중해
+// 한국에 **거주·체류 중인 외국인의 실용 정보**(환승·개통·본인인증·전입신고·공과금·분리수거·생활 앱 등)가
+// 덜 뽑혔다. 그래서 총 **100 -> 117개**로 늘렸다 - "Living in Korea" 20 -> 32, "Travel & Transit" 20 -> 25,
+// 나머지 세 라벨은 20 그대로. 라벨별 **하루 시드 배분은 그대로 균등**하다(pickSeedsForDay가 라벨마다
+// 4개씩 번갈아 뽑으므로 pool이 커진 라벨은 한 바퀴가 길어질 뿐 하루 비중은 같다 - Living 8일,
+// Travel 7일, 나머지 5일, 전체는 12일 안에 한 바퀴).
+// 기존 시드는 하나도 지우지 않았다(기획⑤ 확정본 유지 - 누적만 한다).
 // 시드를 DB `seed_queries`에 넣지 않은 이유: track 컬럼 추가가 migration(승인
 // 게이트)이고, 영문 시드가 한국 NAVER 수집 경로(seed_queries 전체를 읽는 엔터·사회 job)에 섞이면 안 된다.
 //
@@ -47,6 +55,12 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea winter travel",
     "korea travel budget",
     "incheon airport layover",
+    // 체류 실용 축(2026-10-11, §C) - 관광 동선이 아니라 매일 타는 사람에게 필요한 것들.
+    "korea bus subway transfer",
+    "t-money card recharge",
+    "korea traffic signals",
+    "jaywalking in korea",
+    "korea rush hour commute",
   ]),
   ...seeds("Food & Dining", [
     "korean bbq",
@@ -113,6 +127,20 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea gym membership",
     "korea apartment utilities",
     "korea emergency numbers",
+    // 체류 실용 축(2026-10-11, §C) - 입국 전 소개가 아니라 "지금 살면서 해야 하는 일"들.
+    // 기존 시드와 겹치지 않는 축만 골랐다(개통·본인인증·행정 후속 절차·공과금·쓰레기·생활 앱·의료 실무).
+    "korea prepaid usim",
+    "korea identity verification foreigner",
+    "korea resident registration move",
+    "korea arc renewal process",
+    "korea garbage bag rules",
+    "korea food waste disposal",
+    "korea utility bill payment",
+    "korea internet installation",
+    "korea karrot market app",
+    "korea mobile banking foreigner",
+    "korea clinic appointment foreigner",
+    "korea health insurance bill",
   ]),
   ...seeds("K-Wave Context", [
     "kpop fan culture",

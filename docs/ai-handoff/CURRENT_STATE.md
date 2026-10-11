@@ -1,6 +1,54 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-09 (Asia/Seoul)
+기준일: 2026-10-11 (Asia/Seoul)
+
+## 2026-10-11 — 키워드 개편: 엔터 18시 1회화 + 19시 핫이슈 스타 신설 + kscene 실용 축 (브랜치 `feat/keyword-refresh`, 워크트리 `keyword-refresh/`, 지시서 `KEYWORD-REFRESH-2026-10.md`)
+
+**상태: 구현·테스트 완료, push·Worker 배포·실발송 승인 대기.** 베이스: main 526948f. 스케줄 요약표는 `CLAUDE.md` "키워드 수집·알림 스케줄".
+
+- **§A 엔터 일 3회 → 18시 1회**: Worker cron `0 0,4,9,11,12 * * *` → **`0 9,10,11,12 * * *`**(`wrangler.toml` +
+  `schedule.ts` 동시 변경, 슬롯 수는 4/5 그대로). 09·13시(0·4 UTC) 분기 제거, 10 UTC에 핫스타 신설.
+  **`watchdogJob.ts`의 `WATCHED_JOBS`에서 엔터 morning/noon 제거**(안 하면 매일 거짓 경보) → 감시 대상 5개 → 3개
+  (엔터 18시 · 사회 · 사용설명서). 회차 체계(`keywordRound.ts`)는 코드로 유지하고 `OPERATING_ROUND="evening"`을
+  두어 **운영 회차에서는 알림 제목의 회차 표기를 생략**한다(수동 round 지정 시에만 "오후(13시) 회차" 표기).
+  `entertainment-keyword.yml`의 round 입력 스키마도 그대로.
+  - 확인한 것(지시서 §A 확인 항목): ① 일일 쿼리 풀은 **회차 수에 의존하지 않는다** - `buildDailyQueryPool`은
+    매 호출 seed_queries + trend_candidates를 즉석 merge할 뿐이고 소진·이월 상태(last_used 류)가 없다.
+    ② 저녁 회차가 오전·오후 산출물을 전제하는 데도 없다(회차마다 자체 수집). ③ trend_candidates TTL은
+    8~18시간이라 18시 수집분이 19시 핫스타까지 살아 있다.
+  - 부수 효과: 엔터 수집이 1/3로 줄어 Serper·NAVER 호출도 그만큼 감소(`cost.json` 크레딧 게이지로 확인 가능).
+- **§B 19:00 KST 핫이슈 스타 Top 5 신설**(알림 전용): 신규 `entertainment-hot-star.yml` + `job:entertainment-hot-star`.
+  모듈은 `src/workflows/hot-star/`(순수 선별·포매팅 `hotStarSelection.ts` / 오케스트레이션 `runHotStarCollection.ts`)
+  와 진입점 `src/jobs/entertainmentHotStarJob.ts`. **기존 6-factor scoring·relevance·clustering은 건드리지 않았다.**
+  - 재료는 그날 이미 쌓인 데이터뿐: 당일 엔터 run의 `keyword_rankings`(헤드라인 포함) + 당일 `trend_candidates`
+    (슬림 select - metadata를 안 읽는다, egress 방침). **보조 수집(NAVER·Serper) 호출 0건**, 인물·배경 추출만
+    `claude -p` 1콜(`CLAUDE_CODE_OAUTH_TOKEN` 재사용, 180초).
+  - **Go·제작 버튼 없음.** 18시 알림과 겹치는 인물은 제거하지 않고 "↳ 18시 알림에도 선정" 한 줄 표기(판정 범위는
+    18시에 실제로 올라간 rank ≤ 10). 5명 미만이면 "오늘은 N명"으로 보낸다. LLM 실패·인물 0명이면 **보내지 않는다**.
+  - run은 `discovery_runs`에 `kind=entertainment-hot-star`로 남기고 `keyword_rankings`는 만들지 않는다.
+    새 `config/discoveryRunKinds.ts`가 kind를 한 곳에 모으고, **`getLatestCompletedDiscoveryRun`이 이 kind를 건너뛴다** -
+    안 하면 19시 이후 `npm run notify:keywords`(runId 생략) 재발송이 랭킹 없는 run을 집어 조용히 `no_data`로 끝난다.
+  - 실측 dry-run(10-11, 발송·기록 없음): 재료 120건(랭킹 10 + 트렌드 110), 인물 5명 + 배경 정상 생성. **5명 전원이
+    18시 알림과 겹쳤다** - 지시서가 예상한 상황이고 표기로 처리되지만, 알림의 실제 효용은 사용자 확인 필요(§B 완료 판정).
+- **§C kscene 체류 실용 축**: 시드 **100 → 117**(기존 100개 삭제 없이 누적) - Living in Korea 20→32(USIM·본인인증·
+  전입신고·ARC 갱신·종량제·음식물쓰레기·공과금·인터넷 설치·당근·모바일뱅킹·병원 예약·건강보험 납부),
+  Travel & Transit 20→25(환승·카드 충전·신호·무단횡단·출퇴근). 라벨별 **하루 배분은 그대로 균등**(라벨마다 4개씩
+  번갈아 뽑는다 - pool이 큰 라벨만 한 바퀴가 길어진다: Living 8일 / Travel 7일 / 나머지 5일, 전체 12일).
+  - 선정 기준에도 반영: 라벨 상한(`perLabelCap`)과 짝이 되는 **체류 실용 하한**(`practicalFloor`, topN=8이면 3건)을
+    `selectTopics`에 넣었다. 상한만으로는 문화 라벨이 셋·실용 라벨이 하나라 실용 주제가 매일 0~1건으로 밀렸다.
+    실용 판정(`isPracticalTopic`)은 라벨 + 생활 행정·교통·통신·의료·주거 **영역어**로 하고 "rules/how to" 같은
+    범용 의도어는 넣지 않았다(문화 주제까지 실용으로 세면 하한이 의미를 잃는다). News in Context 제외는 유지.
+  - **이 트랙의 주제 선정에는 LLM 프롬프트가 없다**(순수 결정 규칙) - 지시서의 "선정 프롬프트에 명시"는 코드 규칙 +
+    주석으로 이행했다. 기획⑤ 문서는 뒤엎지 않고 `branding-2026-10/kscene-seeds.md` 끝에 "2026-10-11 실용 축 확장"
+    추기를 붙였다. 번역 지침(`kscene-ko-en.md`)은 건드리지 않았다.
+- **검증**: `test:relay-schedule`(0·4 폐지·10 신설·toml 대조·시각 수 4) · `test:watchdog`(폐지 회차 거짓 경보 없음,
+  핫스타 kind 미혼입) · `test:hot-star`(신규 - 파싱·중복 표기·5명 미만·LLM 실패·재료 0·트렌드 실패·저장 실패·dry-run·
+  인용부호 회귀) · `test:kscene-topics`(시드 117 분포·실용 하한 3건·후보 부족·라벨 상한 유지) · `test:keywords` ·
+  `test:daily-query-pool` · `test:notification`(실자격증명 읽기 왕복 - 최신 run 선택 회귀 확인) · `npm run build` 통과.
+  `test:notification`은 더미 Supabase에서는 main에서도 `fetch failed`다(실DB 필요 - 내 변경 무관).
+- **남은 것(승인 필요)**: ① push·main 병합 ② **Worker 배포**(cron 변경 반영 - 배포 전까지 09·13시가 계속 울리고
+  19시 핫스타는 안 돈다) ③ 핫스타 실발송 1회(§B 완료 판정) ④ kscene 21시 수집에서 실용 키워드 혼합 확인(§C 완료 판정).
+  결정 대기: 핫스타를 watchdog 감시 목록에 넣을지(지금은 미포함 - 넣으면 조용한 실패를 잡지만 도입 첫날 경보 1회).
 
 ## 2026-10-09 — Supabase egress 초과 전면 차단 + TKM 이미지 rehost 미작동 발견·수정 (메인 세션)
 
@@ -178,7 +226,9 @@ TISTORY_*, SOCIAL_*)까지 실측 확인. 발견된 결함과 정리 과제는 *
   클라우드에서 크롤링하지 않고 맥미니가 넣은 값을 읽기만 한다. 커뮤니티도 같은 회차에서 함께 수집한다.
 - **회차(round)**: `config/keywordRound.ts` - `KEYWORD_ROUND`(Worker가 넘김) 또는 실행 시각(KST)으로 morning/noon/evening 판정.
   알림 제목 "🎬 엔터 키워드 — 오전(09시) 회차", `discovery_runs.metadata.round`에 기록.
+  (⚠️ 2026-10-11부터 운영은 저녁 1회이고 운영 회차 제목은 "🎬 엔터 키워드"로 회차 표기를 생략한다)
 - **Worker cron 5개 -> 3개**: `0 0,4,9,11,12 * * *`(09/13/18시 엔터 회차, 20시 사회, 21시 대기) + analytics 2개. Worker가 발화 UTC 시로 분기
+  (⚠️ 2026-10-11 개편으로 이 표현식은 **`0 9,10,11,12 * * *`**로 바뀌었다 - 엔터 18시 1회 + 19시 핫스타. 위 10-11 항목 참고)
   (`cloudflare/telegram-relay/src/schedule.ts`). **`wrangler.toml` crons와 `KEYWORD_CRON`은 문자열이 같아야 한다**(`npm run test:relay-schedule`).
 - **커뮤니티 독립 알림 폐지**: `community-keyword.yml` 삭제, 커뮤니티발 키워드는 엔터 알림에서 📡 표시. 사회 계열로 분류된 것은
   `trend_candidates`에 남는다(2순위 사회 리포트가 수거).
