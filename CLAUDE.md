@@ -177,7 +177,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
 
 ## 측정·분석 운영 규칙 (2026-10-08)
 
-- **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: whynowissue → thekoreamanual → 티스토리).
+- **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: thekoreamanual → 티스토리. whynowissue.blogspot.com은 폐쇄돼 2026-10-11에 제외했다).
   비면 `GSC_SITE_URL` 단일 폴백. 속성 = `page_url` 호스트라 `search_performance_daily` 구조는 그대로다(migration 없음).
   새 속성 추가는 변수에 한 항목 덧붙이고 `analytics:search -- --site=<속성> --days=N --apply`로 백필.
 - **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 월요일 `analytics-index-health.yml`에 동승한다.

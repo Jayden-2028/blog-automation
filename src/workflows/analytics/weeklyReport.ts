@@ -83,7 +83,8 @@ function topBy(rows: PerfRow[], key: (r: PerfRow) => string): Array<{ key: strin
 
 /**
  * endDate(포함)까지 7일을 이번 주, 그 앞 7일을 전주로 속성별 요약을 만든다.
- * rows는 두 주를 포함하면 되고 속성은 page_url 호스트로 나눈다. `sites`를 주면 데이터가 없어도 그 속성을 항목에 넣는다.
+ * rows는 두 주를 포함하면 되고 속성은 page_url 호스트로 나눈다. `sites`를 주면 데이터가 없어도 그 속성을 항목에 넣고,
+ * **목록에 없는 호스트의 행은 무시한다**(폐쇄·제외한 속성의 과거 행이 DB에 남아 있어도 리포트에 나오지 않게).
  */
 export function buildWeeklyReport(rows: PerfRow[], endDate: string, sites: string[] = []): SiteWeek[] {
   const curStart = addDays(endDate, -6);
@@ -94,6 +95,7 @@ export function buildWeeklyReport(rows: PerfRow[], endDate: string, sites: strin
   for (const s of sites) bySite.set(s, []);
   for (const r of rows) {
     const s = siteOf(r.page_url);
+    if (sites.length > 0 && !bySite.has(s)) continue;
     bySite.set(s, [...(bySite.get(s) ?? []), r]);
   }
 

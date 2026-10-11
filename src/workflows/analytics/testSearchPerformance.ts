@@ -225,6 +225,9 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(buildSiteMessage(t, end).includes("축적 중") && !buildSiteMessage(t, end).includes("(전주"), "축적 중이면 추이 생략");
   assert(buildSiteMessage(a, end).includes("<b>⚠") === false && buildSiteMessage(a, end).includes("⚠️ <b>클릭 급락"), "경보는 굵게");
   assert(buildSiteMessage(e, end).includes("노출 기록이 없습니다"), "빈 속성 문구");
+  // 목록에서 빠진(폐쇄한) 속성의 과거 행은 리포트에 나오지 않는다.
+  const closed = buildWeeklyReport([...rows, mk("2026-10-19", "https://closed.blogspot.com/x.html", 5)], end, ["a.blogspot.com", "t.tistory.com"]);
+  assert(!closed.some((w) => w.site === "closed.blogspot.com") && closed.length === 2, "목록 밖 호스트 제외");
   console.log("✅ 주간 리포트 - 추이·축적 중 분기·경보·속성 분리");
 }
 
