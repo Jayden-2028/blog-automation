@@ -48,7 +48,15 @@
   `test:notification`은 더미 Supabase에서는 main에서도 `fetch failed`다(실DB 필요 - 내 변경 무관).
 - **남은 것(승인 필요)**: ① push·main 병합 ② **Worker 배포**(cron 변경 반영 - 배포 전까지 09·13시가 계속 울리고
   19시 핫스타는 안 돈다) ③ 핫스타 실발송 1회(§B 완료 판정) ④ kscene 21시 수집에서 실용 키워드 혼합 확인(§C 완료 판정).
-  결정 대기: 핫스타를 watchdog 감시 목록에 넣을지(지금은 미포함 - 넣으면 조용한 실패를 잡지만 도입 첫날 경보 1회).
+- **2026-10-12 진행**: 사용자가 ①②③을 승인했다. 브랜치 `feat/keyword-refresh`는 **origin에 push 완료**(커밋
+  `d454ca2`). **main 병합과 Worker 배포는 아직이다** - 자동 모드 분류기가 main 직접 push를 차단해 사용자 손이 필요하다.
+  순서가 중요하다: **main 병합 -> Worker 배포** 순으로 해야 한다. Worker cron이 `entertainment-hot-star.yml`을
+  workflow_dispatch로 깨우는데, main에 그 파일이 없으면 dispatch가 404다.
+- **핫스타 watchdog 미포함 확정**(2026-10-12 사용자 결정 - "아직 실험 단계"). `WATCHED_JOBS`는 3개(엔터 18시·사회·
+  사용설명서)로 유지한다. 실험이 끝나 상시 운영으로 올릴 때 추가한다.
+- **핫스타 실발송은 19시 이후 시각에만 의미가 있다**: 10-12 02:39 KST에 dry-run을 돌렸더니 당일(KST 기준) 엔터 run이
+  없어 `재료 0건 -> no_materials`로 끝났다(발송·기록 없음, 설계대로). 실발송 판정은 **18시 엔터 수집 이후**에 한다 -
+  배포가 끝나 있으면 19시 cron이 자동으로 첫 발송을 한다.
 
 ## 2026-10-09 — Supabase egress 초과 전면 차단 + TKM 이미지 rehost 미작동 발견·수정 (메인 세션)
 
