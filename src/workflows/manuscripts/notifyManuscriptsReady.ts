@@ -78,7 +78,8 @@ export function buildReadyKeyboard(
     rows.push([{ text: "📄 원고 페이지 열기", url }]);
   }
   // 수정/반려 줄은 링크 바로 아래에 둔다(2026-10-08 사용자 요청) - 발행 버튼 위에서 먼저 판단하게 한다.
-  if (track !== "kscene") rows.push(...reviewActionRows(job));
+  // 수정/반려 줄은 자동 승인된 job에만 붙는다(buildReviewActionRow). 사용설명서도 영어본 자동 승인(2026-10-12)부터 포함한다.
+  rows.push(...reviewActionRows(job));
   try {
     const publishButton: TelegramInlineKeyboardButton =
       track === "social"
@@ -171,6 +172,9 @@ function buildKsceneReadyMessage(
     "",
     "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.",
   ];
+  // 영어본 단독 재승인이 없어졌으니(자동 승인) 검수 요약·수정/반려 안내를 이 알림에서 보여 준다.
+  const notes = buildAutoApprovedNotes(job);
+  if (notes.length > 0) lines.splice(4, 0, "", ...notes);
 
   const buttons = buildReadyKeyboard(job, pagesUrl);
   if (!pagesUrl) {

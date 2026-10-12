@@ -84,12 +84,35 @@ const article = (id: number, platform: string | null, content: string, title = "
 
 type Harness = ReturnType<typeof harness>;
 function harness(job: ArticleJobRow, outputs: Array<string | { error: string }>, articles = [article(1, null, KO_CONTENT)]) {
-  const calls = { prompts: [] as string[], merges: [] as Record<string, unknown>[], saved: [] as { title: string; content: string }[], review: 0, failure: [] as string[] };
+  const calls = {
+    prompts: [] as string[],
+    merges: [] as Record<string, unknown>[],
+    saved: [] as { title: string; content: string }[],
+    review: 0,
+    failure: [] as string[],
+    approved: [] as { jobId: string; articleId: number }[],
+    revisions: [] as { before: string; after: string }[],
+    texts: [] as string[],
+    telegraph: 0,
+  };
   let run = 0;
   return {
     calls,
     options: {
       guide: "GUIDE-TEXT",
+      // 기본은 게이트 꺼짐(옛 영어 재승인 흐름) - 통합 흐름 테스트만 env를 비워 켠다.
+      env: { PIPELINE_SKIP_DRAFT_REVIEW: "false" } as NodeJS.ProcessEnv,
+      autoApprove: async (target: { jobId: string; articleId: number }) => {
+        calls.approved.push(target);
+        return { status: "approved" as const, dispatched: true as const };
+      },
+      applyRevision: async (_job: ArticleJobRow, before: string, after: string) => {
+        calls.revisions.push({ before, after });
+        return { plan: { kind: "keep" as const }, dispatched: true };
+      },
+      notifyText: async (_job: ArticleJobRow, text: string) => {
+        calls.texts.push(text);
+      },
       now: () => new Date("2026-10-07T12:30:00Z"),
       loadJob: async () => job,
       loadArticles: async () => articles,
@@ -105,7 +128,10 @@ function harness(job: ArticleJobRow, outputs: Array<string | { error: string }>,
       mergeMetadata: async (_id: string, patch: Record<string, unknown>) => {
         calls.merges.push(patch);
       },
-      publishTelegraph: async () => ({ ok: true as const, url: "https://telegra.ph/en-1" }),
+      publishTelegraph: async () => {
+        calls.telegraph += 1;
+        return { ok: true as const, url: "https://telegra.ph/en-1" };
+      },
       notifyReview: async () => {
         calls.review += 1;
       },
@@ -213,6 +239,42 @@ async function main(): Promise<void> {
   const retryFromFailed = harness(makeJob({}, { ksceneStage: "translation_failed" }), [output(EN_BODY)]);
   assert((await runTranslateJob(JOB_ID, retryFromFailed.options)).status === "success", "실패 단계에서 다시 만들기");
   console.log("  ✅ 수정 요청 재번역·실패 후 재시도");
+
+  // ---- 통합 흐름(2026-10-12): 영어본 단독 재승인 없이 자동 승인 -> 이미지 포함 원고 ----
+  const ON = {} as NodeJS.ProcessEnv;
+  const unified = harness(makeJob(), [output(EN_BODY)]);
+  const unifiedRun = await runTranslateJob(JOB_ID, { ...unified.options, env: ON });
+  assert(unifiedRun.status === "success" && unified.calls.review === 0 && unified.calls.telegraph === 0, "게이트 켜짐: 영어본 재승인 알림·Telegraph 없음");
+  assert(unified.calls.approved.length === 1 && unified.calls.approved[0].jobId === JOB_ID && unified.calls.approved[0].articleId === 2, "영어 article로 자동 승인 + 준비 발화");
+  assert(typeof unified.calls.merges.at(-1)!.englishApprovedAt === "string", "영어본 승인 시각 자동 기록");
+  const unifiedPrompt = unified.calls.prompts[0];
+  assert(unifiedPrompt.includes("<<<KOREAN_BODY"), "번역 입력은 그대로(한글 원고가 사실의 기준)");
+  const dispatchFail = harness(makeJob(), [output(EN_BODY)]);
+  await runTranslateJob(JOB_ID, {
+    ...dispatchFail.options,
+    env: ON,
+    autoApprove: async () => ({ status: "approved" as const, dispatched: false as const, error: "boom" }),
+  });
+  assert(dispatchFail.calls.texts.some((t) => t.includes("원고 준비 발화 실패")), "발화 실패는 사용자에게 알린다(영어본은 보존)");
+  const legacyAgain = harness(makeJob(), [output(EN_BODY)]);
+  await runTranslateJob(JOB_ID, legacyAgain.options);
+  assert(legacyAgain.calls.review === 1 && legacyAgain.calls.approved.length === 0 && legacyAgain.calls.telegraph === 1, "게이트 꺼짐: 옛 영어 재승인 흐름 그대로");
+  console.log("  ✅ 통합 흐름(영어 재승인 생략·자동 승인)");
+
+  // 이미 자동 승인된 영어본의 수정 요청: 상태가 approved여도 받고, 이미지 마커 diff 경로로 간다.
+  const approvedJob = makeJob({ status: "approved" }, { ksceneStage: "english_review", autoApprovedAt: "2026-10-12T00:00:00Z" });
+  const revisedUnified = harness(approvedJob, [output(EN_BODY)], [article(1, null, KO_CONTENT), article(2, "blogspot", "OLD ENGLISH BODY")]);
+  const revisedRun = await runTranslateJob(JOB_ID, { ...revisedUnified.options, env: ON, feedback: "Shorten the intro" });
+  assert(revisedRun.status === "success" && revisedUnified.calls.approved.length === 0, "승인 후 수정: 다시 자동 승인하지 않는다");
+  assert(revisedUnified.calls.revisions.length === 1 && revisedUnified.calls.revisions[0].before === "OLD ENGLISH BODY" && revisedUnified.calls.revisions[0].after === parsed.body, "직전 영어본 vs 새 영어본으로 마커 diff");
+  assert(revisedUnified.calls.review === 0 && revisedUnified.calls.texts.some((t) => t.includes("영어본 수정을 반영")), "재승인 알림 없이 안내만");
+  const approvedNoFeedback = harness(approvedJob, [output(EN_BODY)]);
+  assert((await runTranslateJob(JOB_ID, { ...approvedNoFeedback.options, env: ON })).status === "skipped", "승인 후 수정 요청 없이 다시 만들지 않는다");
+  const failedRevision = harness(approvedJob, [bad, bad], [article(1, null, KO_CONTENT), article(2, "blogspot", "OLD ENGLISH BODY")]);
+  const failedRun = await runTranslateJob(JOB_ID, { ...failedRevision.options, env: ON, feedback: "x" });
+  assert(failedRun.status === "failed" && failedRevision.calls.merges.at(-1)!.ksceneStage === "english_review" && failedRevision.calls.failure.length === 0, "승인 후 수정 실패: translation_failed(죽는 ✅ 버튼)로 가지 않고 english_review 유지");
+  assert(failedRevision.calls.texts.some((t) => t.includes("영어본 수정 반영 실패")), "실패 안내");
+  console.log("  ✅ 승인 후 영어본 수정(마커 diff·실패 격리)");
 
   // ---- 알림 메시지 ----
   const base = { job: makeJob(), englishTitle: "Title <1>", koreanTitle: "제목", koSummary: ["요지1", "요지2"], isRevision: false, englishBody: EN_BODY };

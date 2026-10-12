@@ -211,9 +211,16 @@ main().catch((error) => {
   const legacy = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
   if (rowsOf(legacy).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 수동 승인 job에는 수정 요청·반려 버튼이 없어야 한다(옛 알림 불변)");
 
-  // 사용설명서: 개편3 몫 - 자동 승인 기록이 있어도 붙이지 않는다.
-  const ks = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "kscene" })), "https://pages.example.dev");
-  if (rowsOf(ks).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 사용설명서 트랙은 이 버튼을 받지 않는다");
+  // 사용설명서: 영어본 자동 승인(2026-10-12)부터 같은 통합 알림 - 링크 / 수정·반려 / 이미지·내려받기 / Blogger 발행.
+  const ks = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "kscene", reviewChecks: [{ message: "근거 확인 필요" }] })), "https://pages.example.dev");
+  const ksTexts = rowsOf(ks).map((row) => row.map((b) => b.text.replace(/^\S+\s/, "")));
+  if (JSON.stringify(ksTexts) !== JSON.stringify([["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"], ["Blogger 발행"]])) {
+    throw new Error(`❌ 사용설명서 통합 알림 버튼 줄이 다르다 (${JSON.stringify(ksTexts)})`);
+  }
+  if (!ks.text.includes("검수 1건") || !ks.text.includes("근거 확인 필요")) throw new Error("❌ 사용설명서 통합 알림에도 검수 요약이 있어야 한다");
+  // 한글 승인 뒤 수동 승인(옛 영어 재승인 흐름, 게이트 꺼짐)으로 올라온 사용설명서 job은 옛 알림 그대로다.
+  const ksLegacy = buildManuscriptReadyMessage(successResult(job(JOB, { track: "kscene" })), "https://pages.example.dev");
+  if (rowsOf(ksLegacy).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 영어본 수동 승인 kscene job에는 수정·반려 줄이 없어야 한다");
 
   // 옛 초안 알림이 보여주던 의학 경고·검수 결과가 통합 알림으로 옮겨 온다(초안 단계가 없어졌으므로).
   const noted = buildManuscriptReadyMessage(

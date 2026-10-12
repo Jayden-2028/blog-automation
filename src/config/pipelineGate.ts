@@ -7,8 +7,9 @@
 //   · 기본 true(미설정·빈 값 포함) - 새 흐름.
 //   · false/0/off/no - 옛 2단계 흐름으로 복귀. 콜백·알림 코드는 양쪽을 1~2주 공존 지원한다.
 //
-// 사용설명서(kscene) 트랙은 게이트와 무관하게 옛 흐름이다. 한글 승인 -> 영어본 -> 영어 재승인 2게이트는
-// 개편3 지시서가 통합 흐름에 맞춰 재설계한다(PIPELINE-MERGE-2026-10.md §5) - 이 세션은 건드리지 않는다.
+// 사용설명서(kscene) 트랙의 **한글 초안 승인은 남긴다**(shouldSkipDraftReview=false). 대신 2026-10-12부터 그 뒤의
+// **영어본 단독 재승인**(영어본 + 한글 대역 요약 알림)만 같은 게이트로 뺀다(shouldSkipEnglishReview):
+//   한글 원고 -> ✅ 승인 -> 영어본 생성 -> 자동 승인 -> 이미지가 포함된 영어본 -> 통합 알림(발행/수정/반려).
 
 import { trackOfJob } from "../notifications/telegramTracks.js";
 import type { ArticleJobRow } from "../types/database.js";
@@ -31,6 +32,18 @@ export function shouldSkipDraftReview(
 ): boolean {
   if (!parseSkipDraftReview(env[PIPELINE_SKIP_DRAFT_REVIEW_ENV])) return false;
   return trackOfJob(job) !== "kscene";
+}
+
+/**
+ * 사용설명서 트랙의 영어본 단독 재승인 단계를 건너뛰는가(2026-10-12 사용자 결정). 게이트가 꺼져 있으면 false(옛 영어 재승인 흐름).
+ * 한글 초안 승인은 이 값과 무관하게 그대로다.
+ */
+export function shouldSkipEnglishReview(
+  job: Pick<ArticleJobRow, "metadata">,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  if (!parseSkipDraftReview(env[PIPELINE_SKIP_DRAFT_REVIEW_ENV])) return false;
+  return trackOfJob(job) === "kscene";
 }
 
 /**

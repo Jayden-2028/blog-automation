@@ -68,7 +68,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     2026-10 개편으로 엔터·사회 버튼에서는 빠졌고, 사용설명서 트랙(개편3, 2026-10-06)이 쓴다 - 트랙 버튼은
     `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다** -
     `BLOGGER_BLOG_ID`로 폴백하지 않는다). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
-    영어본 재승인 ✅ → 이미지·발행** 2단계 승인이고, 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
+    자동 승인 → 이미지가 포함된 영어본 → 통합 알림(발행/수정/반려)**이고(2026-10-12부터 영어본 단독 재승인 폐지, 게이트 꺼짐이면 옛 영어본 재승인 ✅ 복귀), 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
     (`docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`).
   - 티스토리(`wooahpapa.tistory.com`, 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
@@ -113,7 +113,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화 → 이미지 반영 원고 → 통합 알림 한 번(발행/수정/반려)**이다.
   옛 "원고 완료 알림(Telegraph 미리보기 + ✅/✏️/🗑)"은 폐지했다(Telegraph 서비스는 호출만 뺐다). 게이트
   **`PIPELINE_SKIP_DRAFT_REVIEW`**(미설정·빈 값 = 켜짐, `false`면 옛 2단계 흐름 복귀 - 승인 없이 바꾸지 않는다. 워크플로 repo
-  variable, `job-write.yml`·`job-revise.yml`). 사용설명서(kscene) 트랙은 게이트와 무관하게 옛 한글 ✅→영어본→영어 ✅ 흐름이다.
+  variable, `job-write.yml`·`job-revise.yml`). 사용설명서(kscene) 트랙은 **한글 초안 ✅는 남기고**(게이트 무관) 그 뒤 영어본 단독 재승인만 같은 게이트로 뺀다(2026-10-12): 한글 ✅ → 영어본 → 자동 승인(`autoApprovedAt`) → 이미지 포함 영어본의 통합 알림. 영어본 ✏️ 수정은 `job-translate`가 영어본만 다시 만들고 이미지는 마커 diff로 유지한다(`job-translate.yml`도 같은 게이트 변수).
   `review` 상태로 남은 옛 job은 옛 ✅/✏️/🗑으로 소진한다. 게이트·구흐름 제거는 1~2주 안정 확인 뒤 별도 커밋.
 - **원고 준비**: write가 끝나면 자동 승인되어(옛 흐름에서는 텔레그램 초안 ✅ 뒤에) `prepareApprovedManuscripts()`가 작성 단계 원고
   (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,

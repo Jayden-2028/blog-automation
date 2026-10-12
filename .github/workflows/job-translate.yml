@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  actions: write # 영어본 자동 승인 뒤 job-publish-prepare를 발화한다(PIPELINE_SKIP_DRAFT_REVIEW 켜짐일 때)
 
 concurrency:
   group: job-translate-${{ inputs.job_id }}
@@ -60,6 +61,10 @@ jobs:
           KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
           KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 2026-10-12: 미설정·빈 값이면 켜짐 - 영어본 단독 재승인을 건너뛰고 자동 승인 + 원고 준비를 발화한다.
+          # repo variable PIPELINE_SKIP_DRAFT_REVIEW=false면 옛 영어 재승인 흐름(job-write·job-revise와 같은 게이트).
+          PIPELINE_SKIP_DRAFT_REVIEW: ${{ vars.PIPELINE_SKIP_DRAFT_REVIEW }}
+          GITHUB_TOKEN: ${{ github.token }}
           # 사용자가 텔레그램에 입력한 원문이 들어올 수 있어 셸 명령에 직접 끼우지 않고 환경변수로 넘긴다.
           JOB_ID: ${{ inputs.job_id }}
           FEEDBACK: ${{ inputs.feedback }}

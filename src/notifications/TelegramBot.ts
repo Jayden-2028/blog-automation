@@ -41,7 +41,7 @@ import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.
 import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
 import { readJobManuscriptImages, removeManifestTopic } from "../workflows/manuscripts/manuscriptManifest.js";
 import { buildReadyKeyboard } from "../workflows/manuscripts/notifyManuscriptsReady.js";
-import { isAutoApproved } from "../config/pipelineGate.js";
+import { isAutoApproved, shouldSkipEnglishReview } from "../config/pipelineGate.js";
 import { listPublicationsByArticleIds } from "../services/supabase/repositories/publicationRepository.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
 import type { ImageEditRequest } from "../workflows/images/imageEditRequest.js";
@@ -846,7 +846,9 @@ export class TelegramBot {
         outcome: { status: "reviewed", action: "confirm", job },
         message:
           `✅ <b>한글 원고 승인됨</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
-          `🌏 영어본을 만듭니다(약 3~8분). 완료되면 영어본과 한글 대역 요약으로 한 번 더 승인을 요청합니다.`,
+          (shouldSkipEnglishReview(job)
+            ? `🌏 영어본을 만들고 이미지까지 준비합니다(약 10분). 완료되면 이미지가 포함된 영어본을 발행 버튼과 함께 보내드립니다.`
+            : `🌏 영어본을 만듭니다(약 3~8분). 완료되면 영어본과 한글 대역 요약으로 한 번 더 승인을 요청합니다.`),
       };
     }
 
@@ -917,6 +919,13 @@ export class TelegramBot {
 
     // 사용설명서 트랙의 영어본 재승인 단계에서 온 수정 요청은 **한글 원고를 다시 쓰지 않고** 영어본만 다시 만든다
     // (사실의 기준은 한글 원고 그대로). 한글 검수 단계의 수정 요청은 기존처럼 재작성(job:revise)이다.
+    if (trackOfJob(job) === "kscene" && isAutoApproved(job) && ksceneStageOf(job) === "translating") {
+      // 통합 흐름에서 영어본 수정이 이미 돌고 있다 - 한글 재작성(job:revise)으로 새지 않게 막는다.
+      return {
+        outcome: { status: "ignored", reason: "no_matching_job" },
+        message: `⏳ 영어본을 수정하는 중입니다.\n${escapeTelegramHtml(job.keyword)}\n\n완료된 뒤 새 알림에서 다시 요청해 주세요.`,
+      };
+    }
     if (trackOfJob(job) === "kscene" && ksceneStageOf(job) === "english_review") {
       // 영어본 재생성이 실패해도 "다시 만들기"가 이 수정 방향을 잃지 않게 남겨 둔다(성공하면 번역 단계가 지운다).
       await this.mergeJobMetadata(job.id, { translationFeedback: feedback });
@@ -925,7 +934,9 @@ export class TelegramBot {
         outcome: { status: "accepted", job },
         message:
           `🔄 <b>영어본 수정 반영 중</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
-          `말씀하신 방향으로 영어본을 다시 만들고 있습니다. 완료되면 새 영어본으로 다시 승인을 요청합니다.`,
+          (isAutoApproved(job)
+            ? `말씀하신 방향으로 영어본을 다시 만들고 있습니다. 완료되면 이미지를 맞춰 발행 버튼과 함께 다시 보내드립니다.`
+            : `말씀하신 방향으로 영어본을 다시 만들고 있습니다. 완료되면 새 영어본으로 다시 승인을 요청합니다.`),
       };
     }
     this.triggerRevision(job.id, feedback);
