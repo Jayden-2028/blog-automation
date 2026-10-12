@@ -100,13 +100,13 @@
 
 ## 2026-10-12 — 사용설명서(The Korea Manual) 영어본 단독 재승인 폐지 (브랜치 `feat/pipeline-merge-reorder`, 워크트리 `pipeline-merge/`)
 
-**상태: 구현·테스트 완료, push 승인 대기.** 사용자 결정: 한글 원고 → 승인 → **이미지가 포함된 영어본** → 승인 → 발행. 영어본 단독 알림(Telegraph 영어본 + 한글 대역 요약 + ✅/✏️/🗑)을 뺐다.
+**상태: main 배포 완료(6df333c)·실운영 확인 완료(2026-10-13 오늘자 키워드·원고로 사용자 확인, 문제 없음).** 사용자 결정: 한글 원고 → 승인 → **이미지가 포함된 영어본** → 승인 → 발행. 영어본 단독 알림(Telegraph 영어본 + 한글 대역 요약 + ✅/✏️/🗑)을 뺐다.
 
 - **새 흐름(게이트 켜짐=기본)**: 한글 ✅(그대로) → `job-translate`가 영어본 생성·저장 → **자동 승인**(`autoApproveDraft`: `autoApprovedAt`·`englishApprovedAt` 기록, job·영어 article `approved`) + `job-publish-prepare` 발화 → 이미지 붙은 영어본의 **통합 알림**(링크 / ✏️ 수정·🗑 반려 / 이미지 수정·내려받기 / 🔵 Blogger 발행 + 검수 요약). 발행은 사람 버튼 그대로.
 - **게이트**: 파이프라인 통합과 같은 `PIPELINE_SKIP_DRAFT_REVIEW`(`false`면 옛 영어본 재승인 흐름 복귀). `shouldSkipEnglishReview`(kscene 전용, `pipelineGate.ts`). `shouldSkipDraftReview`는 kscene에서 계속 false(한글 승인 유지). `job-translate.yml`에 게이트 변수·`GITHUB_TOKEN`·`actions: write` 추가.
 - **영어본 ✏️ 수정**(승인 뒤): 통합 알림의 ✏️ → 답장 → `job-translate`가 직전 영어본을 수정 방향으로 다시 쓴다(한글 재작성 아님) → `applyUnifiedRevision`이 영어본 이미지 마커 diff로 이미지를 유지·부분 갱신 → 원고 준비 재실행 → 통합 알림 재발송. 번역 중 들어온 ✏️ 답장은 막고, 수정 실패는 `translation_failed`(approved에서 죽는 ✅ 버튼)가 아니라 `english_review`를 유지하며 안내만 보낸다.
 - **🗑 반려**는 파이프라인 통합과 동일(7일 뒤 storage-cleanup). `buildReadyKeyboard`가 kscene에도 수정/반려 줄을 붙인다(자동 승인 job만).
-- 테스트: `test:translation`(통합·승인 후 수정·게이트 꺼짐 복귀 추가), `test:pipeline-gate`, `test:notify-manuscripts-ready`(kscene 줄 순서) 통과. 실왕복은 미실시(한글 ✅ → 알림 1건, ✏️ 영어본 수정 1건, 게이트 false 복귀는 사용자 판단).
+- 테스트: `test:translation`(통합·승인 후 수정·게이트 꺼짐 복귀 추가), `test:pipeline-gate`, `test:notify-manuscripts-ready`(kscene 줄 순서) 통과. 실왕복은 사용자가 오늘자 키워드·원고로 확인(문제 없음). 게이트 false 복귀 검증은 생략.
 
 ## 2026-10-11 — 키워드 개편: 엔터 18시 1회화 + 19시 핫이슈 스타 신설 + kscene 실용 축 (브랜치 `feat/keyword-refresh`, 워크트리 `keyword-refresh/`, 지시서 `KEYWORD-REFRESH-2026-10.md`)
 
