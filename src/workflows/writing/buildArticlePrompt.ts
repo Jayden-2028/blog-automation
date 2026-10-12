@@ -23,8 +23,8 @@ export const ARTICLE_OUTPUT_MARKERS = {
   hashtags: "### HASHTAGS",
 } as const;
 
-/** 해시태그 개수. writer.md §6-3 / seo-guide: 정확히 10개. */
-export const HASHTAG_COUNT = 10;
+/** 해시태그 상한. 가장 핵심 단어 5개 이하 - 전 채널 공통(2026-10-12 사용자 결정, core-rules.md·seo-guide §7). */
+export const HASHTAG_COUNT = 5;
 
 const COMMON_RULES = [
   "제공된 근거(팩트 카드)를 벗어난 구체적인 수치·날짜·인용을 절대 지어내지 않는다. 근거에 없는" +
@@ -203,7 +203,7 @@ export function buildArticlePrompt(input: BuildArticlePromptInput): string {
     "(검색 결과에 노출될 요약, 공백 포함 160자 이내 한 줄)",
     "",
     ARTICLE_OUTPUT_MARKERS.hashtags,
-    `(이 키워드로 검색될 만한 해시태그 정확히 ${HASHTAG_COUNT}개. 각 태그는 #으로 시작하고 공백 없이` +
+    `(이 키워드로 검색될 만한 가장 핵심 해시태그 최대 ${HASHTAG_COUNT}개. 각 태그는 #으로 시작하고 공백 없이` +
       " 붙여 쓰며(예: #근로장려금), 태그끼리는 공백으로 구분해 한 줄로 출력한다. 번호나 설명을 붙이지 않는다)",
   ]
     .filter((line): line is string => line !== null)

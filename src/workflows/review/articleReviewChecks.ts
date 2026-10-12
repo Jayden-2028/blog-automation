@@ -375,11 +375,12 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
 
   // 해시태그 - 코드가 붙이므로 실패할 일이 없어 보이지만, 붙이는 코드가 깨져도 조용히 지나가지
   // 않게 검사를 둔다(설계 4-4절).
-  if (input.hashtags.length !== HASHTAG_COUNT) {
+  // 2026-10-12: "정확히 10개" -> "5개 이하"(0개는 빠뜨린 것이므로 여전히 경고). 기존 글(10개)은 소급하지 않는다.
+  if (input.hashtags.length === 0 || input.hashtags.length > HASHTAG_COUNT) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: `해시태그 ${input.hashtags.length}개 (기대 ${HASHTAG_COUNT}개)`,
+      message: `해시태그 ${input.hashtags.length}개 (핵심 단어 1~${HASHTAG_COUNT}개여야 함)`,
     });
   }
 
