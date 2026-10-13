@@ -60,6 +60,7 @@ import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
 import { buildWritingPrompt } from "./buildWritingPrompt.js";
 import { parseDraftFile } from "./parseDraftFile.js";
+import { personBlockedWriteError } from "./personWriteGate.js";
 import { generateArticleImages } from "./generateArticleImages.js";
 import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
@@ -665,6 +666,19 @@ export async function runWritingStage(
         : { status: "failed", error: `[research] ${research.error}` };
     }
     sources = research.sources;
+  }
+
+  // 인물 백과는 verdict=blocked면 집필하지 않는다(A-8). status를 writing으로 바꾸기 전에 막아 job이 재시도 가능한 채로 남는다.
+  // 실패는 기존 경로(finishWrite → notifyWriteFailed)가 "자료가 부족해서…" + [자료조사 다시 하기]/[반려]로 알린다.
+  const blockedError = personBlockedWriteError(
+    job.category,
+    existsSync(researchPath)
+      ? await readFile(researchPath, "utf8").catch(() => null)
+      : ((job.metadata as Record<string, unknown> | null)?.researchFileContent as string | null | undefined)
+  );
+  if (blockedError) {
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${blockedError}` });
+    return { status: "failed", error: blockedError };
   }
 
   const startedAt = Date.now();
