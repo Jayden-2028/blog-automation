@@ -5,7 +5,8 @@
 //   entertainment        엔터 키워드 수집(회차는 metadata.round) - Go/Pass 알림, keyword_rankings 있음
 //   social_issue         사회 데일리 리포트 - Go/Pass 알림, keyword_rankings 있음
 //   kscene_topic         사용설명서 주제 제안 - Go/Pass 알림, keyword_rankings 있음
-//   entertainment-hot-star  19시 핫이슈 스타 Top 5 - **알림 전용**, keyword_rankings 없음
+//   entertainment-hot-star  19시 핫이슈 스타 Top 5 - keyword_rankings 없음. 인물별 `✍️ 인물글` 버튼(pgo:<run_id>:<rank>)은
+//                           metadata.people[]를 읽어 category=person job을 만든다(2026-10-13 인물 백과 트랙). Go/Pass 버튼은 없다
 
 /** 19시 핫이슈 스타 알림 run(KEYWORD-REFRESH-2026-10.md §B). 키워드 run과 섞이면 안 된다. */
 export const HOT_STAR_RUN_KIND = "entertainment-hot-star";

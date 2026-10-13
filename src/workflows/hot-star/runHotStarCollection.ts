@@ -1,8 +1,10 @@
 // 19:00 KST "오늘의 핫이슈 스타 Top 5" 수집 -> 저장 -> 알림(KEYWORD-REFRESH-2026-10.md §B).
 // Worker cron 10 UTC 슬롯이 entertainment-hot-star.yml을 깨운다.
 //
-// **알림 전용이다.** 엔터 메인봇으로 보내지만 키워드 선택(Go)·원고 제작 버튼을 붙이지 않는다 - 콘텐츠
-// 제작 연결은 카테고리 템플릿·기획 설계가 끝난 뒤 별도 발주다(사용자 2026-10-11 결정).
+// 엔터 메인봇으로 보내고, 인물별 `✍️ 인물글` 버튼(`pgo:<run_id>:<rank>`)을 붙인다(인물 백과 트랙,
+// 2026-10-13). 2026-10-11에는 알림 전용이었으나 인물 백과 트랙(PERSON-PROFILE-TRACK-2026-10.md)이 그 연결을
+// 대체했다. 누르면 TelegramBot이 run.metadata.people[rank]로 category=person job을 만들어 기존 엔터 트랙
+// 흐름(자료조사 → write 자동 → 통합 알림 → 🟢 네이버 발행)을 탄다. 키워드 Go/Pass 버튼은 여전히 없다.
 //
 // 재료는 **그날 이미 쌓인 수집 데이터뿐이다**: 18시 엔터 회차의 keyword_rankings + 당일 trend_candidates
 // (구글 트렌드·다음 실시간·커뮤니티·Creator Advisor). 보조 수집(NAVER·Serper)은 호출하지 않는다 -
@@ -10,16 +12,19 @@
 // 필요해지면 그때 호출량을 보고하고 켠다.
 //
 // 저장: discovery_runs에 kind=entertainment-hot-star로 남긴다(keyword_rankings는 쓰지 않는다 -
-// Go 버튼이 가리킬 행이 없어야 한다). watchdog·통계가 엔터 키워드 run과 섞어 보지 않게 하는 구분이다.
+// 키워드 Go/Pass가 가리킬 행이 없어야 한다). 인물 버튼의 근거는 metadata.people[]{rank,name,background}다.
+// watchdog·통계가 엔터 키워드 run과 섞어 보지 않게 하는 구분이기도 하다.
 
 import { HOT_STAR_RUN_KIND } from "../../config/discoveryRunKinds.js";
 import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
 import { TrendCandidateRepository } from "../../repositories/TrendCandidateRepository.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { listRecentDiscoveryRuns } from "../../services/supabase/repositories/discoveryRunRepository.js";
 import { listKeywordRankingsByRunId } from "../../services/supabase/repositories/keywordRankingRepository.js";
 import { saveRankingHistory } from "../keyword-ranking/saveRankingHistory.js";
 import {
+  buildHotStarKeyboard,
   buildHotStarMaterials,
   buildHotStarPrompt,
   formatHotStarMessage,
@@ -57,8 +62,8 @@ export type RunHotStarCollectionOptions = {
   runLlm?: (prompt: string) => Promise<{ ok: true; output: string } | { ok: false; error: string }>;
   /** 저장. 테스트 주입. */
   save?: typeof saveRankingHistory;
-  /** 발송. 테스트 주입. */
-  send?: (text: string) => Promise<void>;
+  /** 발송. 테스트 주입. replyMarkup은 인물별 `✍️ 인물글` 키보드(run 기록 실패 시 없다). */
+  send?: (text: string, replyMarkup?: TelegramReplyMarkup) => Promise<void>;
   log?: (line: string) => void;
 };
 
@@ -72,6 +77,11 @@ export type RunHotStarCollectionResult = {
   /** 18시 회차 run id. 못 찾았으면 null(그날 엔터 run이 실패했거나 아직 안 끝난 경우). */
   eveningRunId: number | null;
   message?: string;
+  /**
+   * 알림에 붙은 `✍️ 인물글` 버튼 라벨. dry-run은 run id가 없어 callback_data를 만들 수 없으므로 라벨만 보인다.
+   * run 기록 실패로 버튼 없이 나갔으면 빈 배열.
+   */
+  buttonLabels?: string[];
   /** 저장 실패는 알림을 막지 않는다 - 사유만 남긴다. */
   saveError?: string;
   error?: string;
@@ -115,7 +125,10 @@ export async function runHotStarCollection(
       return result.ok ? { ok: true as const, output: result.output } : { ok: false as const, error: result.error };
     });
   const save = options.save ?? saveRankingHistory;
-  const send = options.send ?? ((text: string) => TelegramNotifier.fromEnv("entertainment").send(text));
+  const send =
+    options.send ??
+    ((text: string, replyMarkup?: TelegramReplyMarkup) =>
+      TelegramNotifier.fromEnv("entertainment").sendMessages([{ text, replyMarkup }]));
 
   // 1) 1차 재료: 당일 엔터 회차의 keyword_rankings
   const runs = await fetchRecentRuns(RECENT_RUNS_LIMIT);
@@ -192,10 +205,10 @@ export async function runHotStarCollection(
   const message = formatHotStarMessage(people, { now, materialSummary });
 
   if (options.dryRun) {
-    return { status: "dry_run", runId: null, people, ...base, message };
+    return { status: "dry_run", runId: null, people, ...base, message, buttonLabels: people.map((p) => `✍️ ${p.rank}. ${p.name} 인물글`) };
   }
 
-  // 5) run 기록(알림 전용이므로 ranked는 비운다 - keyword_rankings 행을 만들지 않는다)
+  // 5) run 기록(keyword_rankings 행은 만들지 않는다 - ranked는 비운다. 인물글 버튼의 근거는 metadata.people)
   const saved = await save({
     startedAt: now,
     seedQueries: [],
@@ -207,6 +220,8 @@ export async function runHotStarCollection(
       people: people.map((person) => ({
         rank: person.rank,
         name: person.name,
+        // 인물글 버튼(pgo:)이 job을 만들 때 읽는다 - research의 §1(지금 화제인 이유) 출발점이 된다.
+        background: person.background,
         alsoInEveningNotification: person.alsoInEveningNotification,
       })),
     },
@@ -218,14 +233,25 @@ export async function runHotStarCollection(
   const saveError = saved.persisted ? undefined : (saved.error ?? "run 기록 실패");
   if (saveError) log(`⚠️ 핫이슈 스타 run 기록 실패(알림은 계속): ${saveError}`);
 
-  // 6) 엔터 메인봇으로 발송. **버튼 없음**(알림 전용).
+  // 6) 엔터 메인봇으로 발송. 인물별 `✍️ 인물글` 키보드를 붙인다. 버튼은 run id를 가리키므로 **run 기록이 성공했을 때만**
+  //    붙인다 - 기록이 없으면 눌러도 조회되지 않아 "만료" 답만 오는 죽은 버튼이 된다(알림 자체는 보낸다).
+  const replyMarkup = saved.persisted && saved.runId !== null ? (buildHotStarKeyboard(saved.runId, people) ?? undefined) : undefined;
+  if (!replyMarkup) log("⚠️ run 기록이 없어 인물글 버튼 없이 알림만 보냅니다");
   try {
-    await send(message);
+    await send(message, replyMarkup);
   } catch (error) {
     return { status: "notify_failed", runId: saved.runId, people, ...base, message, saveError, error: describe(error) };
   }
 
-  return { status: "notified", runId: saved.runId, people, ...base, message, saveError };
+  return {
+    status: "notified",
+    runId: saved.runId,
+    people,
+    ...base,
+    message,
+    buttonLabels: replyMarkup ? replyMarkup.inline_keyboard.map((row) => row[0].text) : [],
+    saveError,
+  };
 }
 
 function describe(error: unknown): string {

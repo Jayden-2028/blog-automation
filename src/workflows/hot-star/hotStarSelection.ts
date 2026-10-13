@@ -12,6 +12,8 @@
 // LLM을 쓰고 있고, 실패하면 알림을 보내지 않는 쪽을 택했다 - 틀린 인물 5명을 매일 받는 것보다 낫다.
 
 import { escapeTelegramHtml } from "../../notifications/TelegramNotifier.js";
+import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
+import { buildPersonGoCallbackData } from "../../notifications/telegramCallbackData.js";
 
 /** 알림에 올릴 인물 수 상한(§B: Top 5). 못 채우면 채운 만큼만 보낸다. */
 export const HOT_STAR_TOP_N = 5;
@@ -207,8 +209,8 @@ export type HotStarMessageOptions = {
 };
 
 /**
- * 텔레그램 본문(HTML). **버튼을 붙이지 않는다** - 이 알림은 읽는 용도이고 원고 제작 연결은
- * 카테고리 템플릿·기획 설계 후 별도 발주다(사용자 2026-10-11 결정). 호출자도 replyMarkup을 주지 않는다.
+ * 텔레그램 본문(HTML). 본문 아래에 인물별 `✍️ 인물글` 키보드가 붙는다(인물 백과 트랙, 2026-10-13 -
+ * 2026-10-11의 "알림 전용" 결정을 이 트랙이 대체했다). 키보드는 buildHotStarKeyboard가 만든다.
  */
 export function formatHotStarMessage(people: readonly HotStarPerson[], options: HotStarMessageOptions): string {
   const date = options.now.toLocaleDateString("ko-KR", {
@@ -235,8 +237,20 @@ export function formatHotStarMessage(people: readonly HotStarPerson[], options: 
     lines.push("");
   }
 
-  lines.push("ℹ️ 읽기용 알림입니다 - 원고 제작은 18시 키워드 알림의 ✍️ Go로 진행하세요.");
+  lines.push("✍️ 인물글 버튼을 누르면 그 인물의 백과형 원고 제작(자료조사 → 집필)이 시작됩니다. 키워드 원고는 18시 알림의 ✍️ Go로 진행하세요.");
   if (options.materialSummary) lines.push(`재료: ${options.materialSummary}`);
 
   return lines.join("\n");
+}
+
+/**
+ * 인물별 `✍️ 인물글` 키보드(최대 HOT_STAR_TOP_N개, 인물당 한 줄). callback_data는 `pgo:<run_id>:<rank>`다 -
+ * run_id는 이 알림의 discovery_runs 행이라 **run 기록에 성공했을 때만** 만들 수 있다(호출자가 null 처리).
+ * 인물이 없으면 null.
+ */
+export function buildHotStarKeyboard(runId: number, people: readonly Pick<HotStarPerson, "rank" | "name">[]): TelegramReplyMarkup | null {
+  const rows = people.slice(0, HOT_STAR_TOP_N).map((person) => [
+    { text: `✍️ ${person.rank}. ${person.name} 인물글`, callback_data: buildPersonGoCallbackData(runId, person.rank) },
+  ]);
+  return rows.length > 0 ? { inline_keyboard: rows } : null;
 }

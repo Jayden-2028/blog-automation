@@ -3,6 +3,7 @@
 import "dotenv/config";
 
 import {
+  buildHotStarKeyboard,
   buildHotStarMaterials,
   buildHotStarPrompt,
   formatHotStarMessage,
@@ -15,6 +16,8 @@ import {
 import { pickEveningRun, runHotStarCollection, startOfSeoulDay } from "./runHotStarCollection.js";
 import { HOT_STAR_RUN_KIND, isKeywordSelectionRunKind } from "../../config/discoveryRunKinds.js";
 import type { DiscoveryRunRow, KeywordRankingRow } from "../../types/database.js";
+import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
+import { pickHotStarPerson } from "./loadHotStarPerson.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -166,7 +169,7 @@ async function main(): Promise<void> {
   assert(full.includes("↳ 18시 알림에도 선정"), "중복 표기 줄이 보여야 한다");
   assert(full.includes("2026년 10월 11일"), "KST 날짜가 보여야 한다");
   assert(full.includes("재료: 엔터 run #501"), "재료 내역 꼬리말");
-  assert(full.includes("읽기용 알림입니다"), "알림 전용임을 본문에 밝혀야 한다(버튼이 없는 이유)");
+  assert(full.includes("인물글 버튼을 누르면"), "인물글 버튼의 용도를 본문에 밝혀야 한다");
   console.log("  ✅ 5명 채운 날 본문");
 
   const partial = formatHotStarMessage(markEveningOverlap([{ name: "아이유", background: "배경" }], []), { now });
@@ -322,6 +325,75 @@ async function main(): Promise<void> {
   });
   assert(dry.status === "dry_run" && dry.runId === null && dry.message, "dry-run은 본문만 만든다");
   console.log("  ✅ dry-run");
+
+  // ---------- 7-1) 인물글 버튼(2026-10-13, 인물 백과 트랙) ----------
+  // background가 metadata.people에 저장되고, 인물별 pgo:<run>:<rank> 키보드가 붙으며, run 기록이 없으면 죽은 버튼을 붙이지 않는다.
+  {
+    const llm = { runLlm: async () => ({ ok: true as const, output: "1|아이유|드라마 최종회가 자체 최고 시청률을 찍었다.\n2|차은우|신작 캐스팅 소식이 돌았다." }) };
+    const savedInputs: { metadata?: Record<string, unknown> }[] = [];
+    let markup: TelegramReplyMarkup | undefined;
+    const withButtons = await runHotStarCollection({
+      ...baseOptions,
+      ...llm,
+      save: async (input) => {
+        savedInputs.push(input as { metadata?: Record<string, unknown> });
+        return { runId: 900, persisted: true };
+      },
+      send: async (_text, replyMarkup) => {
+        markup = replyMarkup;
+      },
+    });
+    const savedPeople = savedInputs[0]?.metadata?.people as { rank: number; name: string; background?: string }[] | undefined;
+    assert(savedPeople?.[0].background === "드라마 최종회가 자체 최고 시청률을 찍었다." && savedPeople[1].background === "신작 캐스팅 소식이 돌았다.", `metadata.people에 background가 저장돼야 한다: ${JSON.stringify(savedPeople)}`);
+    const rows = markup?.inline_keyboard ?? [];
+    assert(rows.length === 2 && rows[0][0].callback_data === "pgo:900:1" && rows[1][0].callback_data === "pgo:900:2", `인물별 pgo 버튼이어야 한다: ${JSON.stringify(rows)}`);
+    assert(rows[0][0].text.includes("아이유") && rows[0][0].text.includes("인물글"), "버튼 라벨에 인물명과 '인물글'");
+    assert(withButtons.buttonLabels?.length === 2, "결과에 버튼 라벨이 있다");
+    const keyboard = buildHotStarKeyboard(7, [1, 2, 3, 4, 5, 6].map((rank) => ({ rank, name: `인물${rank}` })));
+    assert(keyboard?.inline_keyboard.length === HOT_STAR_TOP_N, "버튼은 최대 5개");
+    assert(buildHotStarKeyboard(7, []) === null, "인물이 없으면 키보드도 없다");
+    console.log("  ✅ background 저장 + 인물별 pgo 버튼(최대 5개)");
+
+    // run 기록 실패 -> 죽은 버튼을 붙이지 않는다(알림은 나간다)
+    let failMarkup: TelegramReplyMarkup | undefined = { inline_keyboard: [] };
+    const noRun = await runHotStarCollection({
+      ...baseOptions,
+      ...llm,
+      save: async () => ({ runId: null, persisted: false, error: "insert 실패" }),
+      send: async (_text, replyMarkup) => {
+        failMarkup = replyMarkup;
+      },
+      log: () => {},
+    });
+    assert(noRun.status === "notified" && failMarkup === undefined && noRun.buttonLabels?.length === 0, "run 기록이 없으면 버튼 없이 알림만 나간다");
+    console.log("  ✅ run 기록 실패 → 버튼 없이 알림만");
+
+    // dry-run: 저장·발송 없이 버튼 라벨만 보인다
+    const dryButtons = await runHotStarCollection({
+      ...baseOptions,
+      ...llm,
+      dryRun: true,
+      save: async () => {
+        throw new Error("저장하면 안 된다");
+      },
+      send: async () => {
+        throw new Error("보내면 안 된다");
+      },
+    });
+    assert(dryButtons.status === "dry_run" && dryButtons.buttonLabels?.[0] === "✍️ 1. 아이유 인물글", `dry-run은 버튼 라벨을 보여준다: ${JSON.stringify(dryButtons.buttonLabels)}`);
+    console.log("  ✅ dry-run → 버튼 라벨만 노출, 발송·저장 없음");
+  }
+
+  // pgo 조회: kind가 핫스타가 아닌 run·없는 rank·이름 없는 항목은 거부(위조 방어).
+  {
+    const run = { id: 900, metadata: { kind: HOT_STAR_RUN_KIND, people: [{ rank: 1, name: "아이유", background: "배경" }, { rank: 2, name: "  " }] } } as never;
+    assert(pickHotStarPerson(run, 1)?.name === "아이유" && pickHotStarPerson(run, 1)?.background === "배경", "정상 조회");
+    assert(pickHotStarPerson(run, 3) === null && pickHotStarPerson(run, 2) === null, "없는 rank·이름 없는 항목은 거부");
+    assert(pickHotStarPerson({ id: 1, metadata: { kind: "entertainment", people: [{ rank: 1, name: "아이유" }] } } as never, 1) === null, "핫스타 run이 아니면 거부(pgo:<엔터 run>:1 위조)");
+    assert(pickHotStarPerson(null, 1) === null && pickHotStarPerson({ id: 1, metadata: { kind: HOT_STAR_RUN_KIND } } as never, 1) === null, "run 없음·people 없음은 거부");
+    assert(pickHotStarPerson({ id: 1, metadata: { kind: HOT_STAR_RUN_KIND, people: [{ rank: 1, name: "옛 run" }] } } as never, 1)?.background === "", "background 저장 이전 run은 빈 배경으로 조회");
+    console.log("  ✅ pgo 조회 - 핫스타 run만, 위조·만료 거부");
+  }
 
   // ---------- 8) 키워드 알림과 섞이지 않는 kind ----------
   assert(HOT_STAR_RUN_KIND === "entertainment-hot-star", "run kind는 entertainment-hot-star");
