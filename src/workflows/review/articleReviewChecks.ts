@@ -201,7 +201,15 @@ export type CheckQualityInput = {
   researchThin?: boolean;
   /** 이 job의 메인 키워드. 제목 첫 마디에 들어갔는지 본다(2026-10-02). */
   keyword?: string | null;
+  /**
+   * job.category. person(인물 백과)이면 분량은 하한 1,250자 미달만 경고하고 상한 경고는 없다
+   * (2026-10-12 사용자 결정, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
+   */
+  category?: string | null;
 };
+
+/** 인물 백과 분량 하한(공백 제외). 상한은 없다. */
+export const PERSON_MIN_ARTICLE_LENGTH = 1250;
 
 /** 제목 꼬리의 "~정리/총정리/모음". 후킹을 죽이는 자리다(core-rules.md §5). */
 const TITLE_SUMMARY_TAIL = /(?:정리|총정리|모음|총집합)\s*$/;
@@ -291,17 +299,21 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
     .replace(/\[IMAGE[^\]]*\]/gi, "") // [IMAGE: ...] 마커
     .replace(/\s+/g, "");
   const length = prose.length;
-  if (length < TARGET_ARTICLE_LENGTH.min && input.researchThin) {
+  const isPerson = input.category === "person";
+  const minLength = isPerson ? PERSON_MIN_ARTICLE_LENGTH : TARGET_ARTICLE_LENGTH.min;
+  if (length < minLength && input.researchThin) {
     checks.push({
       category: "quality",
       severity: "warning",
       message: `자료 얇음(thin): 분량 ${length.toLocaleString()}자 - 하한 미달은 예상된 결과입니다. 늘려 쓰지 않았는지 확인하고, 자료조사를 보강할지 판단하세요`,
     });
-  } else if (length < TARGET_ARTICLE_LENGTH.min || length > TARGET_ARTICLE_LENGTH.max) {
+  } else if (isPerson ? length < minLength : length < minLength || length > TARGET_ARTICLE_LENGTH.max) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
+      message: isPerson
+        ? `분량 ${length.toLocaleString()}자 (인물 백과 하한 ${PERSON_MIN_ARTICLE_LENGTH.toLocaleString()}자 미달, 공백·목록 제외)`
+        : `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
     });
   }
 

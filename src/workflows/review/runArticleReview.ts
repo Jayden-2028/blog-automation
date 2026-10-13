@@ -53,6 +53,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
       isMedical: input.isMedical,
       researchThin: input.researchVerdict === "thin",
       keyword: input.keyword,
+      category: input.job.category,
     }),
     ...checkAttributionHedging(input.article.content),
     ...checkInstitutionAttribution(input.article.content, input.researchText),

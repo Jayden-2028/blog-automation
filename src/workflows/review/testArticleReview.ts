@@ -191,6 +191,22 @@ function main(): void {
   assert(tooLong.some((c) => c.message.includes("분량")), "분량 초과를 경고해야 한다");
   console.log("✅ 품질: 분량 목표 이탈 경고");
 
+  // 12-2) 인물 백과(2026-10-12): 하한 1,250자 미달만 경고, 상한 경고 없음. 다른 카테고리는 기존 2,000~3,000자.
+  {
+    const personBase = { title: "진선규 연기", hashtags: Array.from({ length: 5 }, (_, i) => `#태그${i}`), isMedical: false, category: "person" } as const;
+    const bodyOf = (chars: number): string => `${"가".repeat(chars)}\n\n## 참고 자료\n\n- [a](https://a.kr/)`;
+    const lengthWarn = (chars: number, category: string | null): boolean =>
+      checkQuality({ ...personBase, category, body: bodyOf(chars) }).some((c) => c.message.includes("분량"));
+    assert(lengthWarn(1200, "person"), "person 1,200자는 하한 미달 경고");
+    assert(!lengthWarn(1300, "person"), "person 1,300자는 통과");
+    assert(!lengthWarn(5000, "person"), "person 5,000자는 상한 경고 없이 통과");
+    assert(lengthWarn(1300, "entertainment"), "다른 카테고리는 1,300자도 기존 하한(2,000자) 미달 경고");
+    assert(lengthWarn(5000, "entertainment"), "다른 카테고리는 5,000자 상한 경고 유지");
+    const personTags = checkQuality({ ...personBase, hashtags: Array(6).fill("#t"), body: bodyOf(1300) });
+    assert(personTags.some((c) => c.message.includes("해시태그")), "person도 해시태그 5개 초과 경고는 유지");
+    console.log("✅ 품질: person 분량 - 1,200 경고 / 1,300·5,000 통과, 해시태그 검사 공통");
+  }
+
   // 13) 해시태그 개수가 다르면 경고한다(셔더링어택 원고가 0개로 실제로 걸린 항목).
   const noTags = checkQuality({
     title: "제목",
