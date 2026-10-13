@@ -44,6 +44,7 @@ import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
 import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
+import type { PersonAutocomplete } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
@@ -163,6 +164,8 @@ type DefaultResearcherInput = {
   retryHint?: string | null;
   /** 인물 백과(category=person): 핫스타 화제 배경(`metadata.personBackground`). 아니면 null. */
   personBackground?: string | null;
+  /** 인물 백과: Node가 모은 자동완성 원본(`collectSourcesForJob` person 모드). 아니면 null. */
+  personAutocomplete?: PersonAutocomplete | null;
 };
 
 /**
@@ -260,6 +263,7 @@ async function runDefaultResearcher(
     sourceContext: input.sourceContext,
     retryHint: input.retryHint,
     personBackground: input.personBackground,
+    personAutocomplete: input.personAutocomplete,
   });
   return defaultRunResearcher(prompt);
 }
@@ -336,7 +340,7 @@ async function runResearchStageInner(
 ): Promise<RunResearchStageResult> {
   // 1) 기준 자료(baseline) - NAVER 검색 API. 하이브리드의 감사 베이스라인이다. 비어 있어도
   //    바로 실패하지 않는다 - 에이전트가 WebSearch로 채울 수 있다(단, 그 사실을 프롬프트에 알린다).
-  const collected = await collectSourcesForJob(jobId, job.keyword);
+  const collected = await collectSourcesForJob(jobId, job.keyword, { category: job.category });
   let baseline = collected.sources;
   if (options.fetchOfficialContent !== false && baseline.length > 0) {
     const result = await enrichOfficialSources(baseline);
@@ -398,10 +402,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground, personAutocomplete: collected.personAutocomplete });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground, personAutocomplete: collected.personAutocomplete });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

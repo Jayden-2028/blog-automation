@@ -13,12 +13,36 @@ import { NaverBlogKeywordProvider } from "../../services/search/providers/NaverB
 import { NaverNewsKeywordProvider } from "../../services/search/providers/NaverNewsKeywordProvider.js";
 import { NaverWebKeywordProvider } from "../../services/search/providers/NaverWebKeywordProvider.js";
 import { NaverSimpleSearchProvider } from "../../services/search/providers/NaverSimpleSearchProvider.js";
+import { fetchNaverAutocomplete } from "../brief/fetchNaverAutocomplete.js";
+import type { FetchAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { classifySourceAuthority } from "../../config/sourceAuthorityRules.js";
 import type { KeywordProvider } from "../../services/search/providers/KeywordProvider.js";
 import type { RawKeyword } from "../../types/keywordDiscovery.js";
 import type { SourceInsert } from "../../types/database.js";
 
+/**
+ * 인물 백과(category=person) 모드의 자동완성 원본(2026-10-13, 설계서 §4.3 2단계).
+ * 인물명 **단독** 질의의 꼬리말을 걸러내지 않고 그대로 담는다 - 주제 묶음·동명이인 가드(person-researcher.md
+ * §4-1·§4-1-1)는 에이전트가 인물DB·나무위키와 대조해 수행하는 일이고, 에이전트는 TS 함수를 못 부르므로
+ * Node가 재료만 모아 프롬프트에 싣는다.
+ */
+export type PersonAutocomplete = {
+  /** 던진 질의(= 인물명). */
+  query: string;
+  /** 자동완성 원본 순서 그대로. */
+  suggestions: string[];
+  /** 조회가 예외로 끝났거나 결과가 비었다. fetchNaverAutocomplete는 실패를 빈 배열로 삼키므로 둘을 구분하지 못한다. */
+  failed: boolean;
+};
+
 export type CollectSourcesForJobOptions = {
+  /**
+   * job.category. `person`이면 person 모드: 카페·지식iN 소스를 수집하지 않고(설계서 §4.2) 인물명 단독 자동완성을
+   * 함께 모은다. 뉴스·웹문서 baseline은 그대로다. 그 외·미지정은 기존 동작.
+   */
+  category?: string | null;
+  /** person 모드 테스트 주입. 기본은 네이버 자동완성(비공식 엔드포인트). */
+  fetchAutocomplete?: FetchAutocomplete;
   /** 검색 소스별로 가져올 결과 수. 기본 5건씩(뉴스/웹/블로그/지식iN/카페) + 백과 2건. */
   displayPerSource?: number;
   /** 테스트에서 실제 API 호출을 대체하는 주입 지점. */
@@ -40,6 +64,8 @@ export type CollectSourcesForJobResult = {
   sources: SourceInsert[];
   /** 실패한 검색 소스만 담는다("naver_news" -> 에러 메시지). 전부 성공하면 빈 객체. */
   sourceErrors: Partial<Record<KnownSearchSource, string>>;
+  /** person 모드에서만 채워진다. 조회가 실패해도 리서치는 막지 않는다(`failed: true`). */
+  personAutocomplete: PersonAutocomplete | null;
 };
 
 /**
@@ -87,12 +113,23 @@ function dedupeByUrl(items: SourceInsert[]): SourceInsert[] {
   return result;
 }
 
+async function collectPersonAutocomplete(keyword: string, fetcher: FetchAutocomplete = fetchNaverAutocomplete): Promise<PersonAutocomplete> {
+  try {
+    const suggestions = await fetcher(keyword);
+    return { query: keyword, suggestions, failed: suggestions.length === 0 };
+  } catch (error) {
+    console.warn("⚠️ collectSourcesForJob: 자동완성 조회 실패 -", error instanceof Error ? error.message : String(error));
+    return { query: keyword, suggestions: [], failed: true };
+  }
+}
+
 export async function collectSourcesForJob(
   jobId: string,
   keyword: string,
   options: CollectSourcesForJobOptions = {}
 ): Promise<CollectSourcesForJobResult> {
   const displayPerSource = options.displayPerSource ?? 5;
+  const isPerson = options.category === "person";
 
   const injected = options.providers;
   const pick = (name: keyof NonNullable<typeof injected>, real: () => KeywordProvider): KeywordProvider | undefined =>
@@ -102,8 +139,13 @@ export async function collectSourcesForJob(
     ["naver_news", pick("news", () => new NaverNewsKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
     ["naver_web", pick("web", () => new NaverWebKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
     ["naver_blog", pick("blog", () => new NaverBlogKeywordProvider({ queries: [keyword], displayPerQuery: displayPerSource }))],
-    ["naver_kin", pick("kin", () => new NaverSimpleSearchProvider({ kind: "kin", queries: [keyword], displayPerQuery: displayPerSource }))],
-    ["naver_cafe", pick("cafe", () => new NaverSimpleSearchProvider({ kind: "cafearticle", queries: [keyword], displayPerQuery: displayPerSource }))],
+    // 인물 실명 글이라 카페·지식iN은 쓰지 않는다(설계서 §4.2) - 출처 불명 소문이 baseline에 섞이지 않게 수집 단계에서 뺀다.
+    ...(isPerson
+      ? []
+      : ([
+          ["naver_kin", pick("kin", () => new NaverSimpleSearchProvider({ kind: "kin", queries: [keyword], displayPerQuery: displayPerSource }))],
+          ["naver_cafe", pick("cafe", () => new NaverSimpleSearchProvider({ kind: "cafearticle", queries: [keyword], displayPerQuery: displayPerSource }))],
+        ] as [KnownSearchSource, KeywordProvider | undefined][])),
     // 백과사전은 정의 하나면 충분하다.
     ["naver_encyc", pick("encyc", () => new NaverSimpleSearchProvider({ kind: "encyc", queries: [keyword], displayPerQuery: 2 }))],
   ];
@@ -111,6 +153,9 @@ export async function collectSourcesForJob(
 
   const sourceErrors: CollectSourcesForJobResult["sourceErrors"] = {};
   const collected: RawKeyword[] = [];
+
+  // 자동완성 실패는 리서치를 막지 않는다 - "조회 실패"를 입력에 남기고 진행한다(발주서 A-7).
+  const personAutocomplete = isPerson ? await collectPersonAutocomplete(keyword, options.fetchAutocomplete) : null;
 
   for (const [name, provider] of jobs) {
     try {
@@ -126,12 +171,12 @@ export async function collectSourcesForJob(
   if (Object.keys(sourceErrors).length === jobs.length) {
     // 셋 다 실패 - 이 job의 자료조사는 완전히 실패했다. 빈 결과를 반환하되 에러를 그대로 전달해
     // 호출자(runArticleJob)가 status를 되돌리지 않고 재시도 가능하게 남겨두도록 한다.
-    return { sources: [], sourceErrors };
+    return { sources: [], sourceErrors, personAutocomplete };
   }
 
   const mapped = collected
     .map((raw) => toSourceInsert(jobId, raw))
     .filter((item): item is SourceInsert => item !== null);
 
-  return { sources: dedupeByUrl(mapped), sourceErrors };
+  return { sources: dedupeByUrl(mapped), sourceErrors, personAutocomplete };
 }

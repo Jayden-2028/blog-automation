@@ -39,6 +39,11 @@ export type BuildResearchPromptInput = {
    * person-researcher.md §6-0이 출력 §1(지금 화제인 이유)의 출발점으로 쓴다. person이 아니면 무시한다.
    */
   personBackground?: string | null;
+  /**
+   * 인물 백과: Node가 모은 인물명 단독 자동완성 원본(`collectSourcesForJob` person 모드). 에이전트가 §4-1 주제
+   * 묶음·동명이인 가드의 재료로 쓴다. null이면 수집 안 됨(싣지 않는다).
+   */
+  personAutocomplete?: { query: string; suggestions: string[]; failed: boolean } | null;
 };
 
 function formatBaseline(baselineSources: SourceInsert[]): string[] {
@@ -150,6 +155,24 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     .join("\n");
 }
 
+/** 자동완성 원본은 걸러내지 않고 그대로 싣는다. 실패·빈 결과는 그 사실을 적어 에이전트가 스스로 보강하게 한다. */
+function formatPersonAutocomplete(auto: { query: string; suggestions: string[]; failed: boolean } | null): string[] {
+  if (!auto) return [];
+  if (auto.failed) {
+    return [
+      `네이버 자동완성 원본(질의 "${auto.query}" - Node 수집): 자동완성 조회 실패(또는 결과 없음).`,
+      "순위 측정 재료가 없다. §4-1 2단계는 직접 검색(자동완성 화면·연관 검색)으로 보강하되, 확인하지 못했으면",
+      "§6 작품 외 활동에 \"자동완성 원본 확보 실패\"를 그대로 적는다.",
+      "",
+    ];
+  }
+  return [
+    `네이버 자동완성 원본(질의 "${auto.query}" - Node 수집, 걸러내지 않은 원본 순서). §4-1 주제 묶음·§4-1-1 동명이인 가드의 재료다:`,
+    ...auto.suggestions.map((s, i) => `${i + 1}. ${s}`),
+    "",
+  ];
+}
+
 /** category=person 전용. 읽을 규격은 person-researcher.md 하나(+ 주제 배분·문단 흐름)다. */
 function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLines: string[]): string {
   const { job, outputPath, today } = input;
@@ -180,6 +203,7 @@ function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLine
     "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹문서 검색 결과. 카페·지식iN은 수집하지 않았다):",
     ...baselineLines,
     "",
+    ...formatPersonAutocomplete(input.personAutocomplete ?? null),
     "파이프라인 오버라이드(person-researcher.md와 충돌하면 이 지시가 우선):",
     `- 출력 파일은 person-researcher.md §6의 이름 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못 채운 빈칸을",
