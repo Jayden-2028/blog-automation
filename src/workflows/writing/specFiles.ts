@@ -13,6 +13,8 @@ export function pickStyleFile(category: string | null): string {
   if (category === "incident") return "prompts/writing/style/incident.md";
   // 사용설명서 트랙(개편3): 해외 독자 대상 에버그린 안내. 한글 초고를 쓰고 승인 뒤 영어로 번역된다.
   if (category === "kscene") return "prompts/writing/style/kscene.md";
+  // 인물 백과(2026-10-13): incident 뒤에 둔다 - 수사·재판 키워드가 person job으로 들어와도 incident 라우팅이 이긴다.
+  if (category === "person") return "prompts/writing/style/person.md";
   if (category === "parenting") return "prompts/writing/style/parenting.md";
   if (category === "entertainment" || category === "ott") return "prompts/writing/style/entertainment.md";
   return "prompts/writing/style/trend.md";
