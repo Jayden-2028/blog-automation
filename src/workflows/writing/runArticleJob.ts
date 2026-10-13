@@ -161,6 +161,8 @@ type DefaultResearcherInput = {
   sourceContext: string | null;
   /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
   retryHint?: string | null;
+  /** 인물 백과(category=person): 핫스타 화제 배경(`metadata.personBackground`). 아니면 null. */
+  personBackground?: string | null;
 };
 
 /**
@@ -257,6 +259,7 @@ async function runDefaultResearcher(
     brief: input.brief,
     sourceContext: input.sourceContext,
     retryHint: input.retryHint,
+    personBackground: input.personBackground,
   });
   return defaultRunResearcher(prompt);
 }
@@ -378,6 +381,8 @@ async function runResearchStageInner(
   }
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
+  const rawBackground = (job.metadata as Record<string, unknown> | null)?.personBackground;
+  const personBackground = typeof rawBackground === "string" && rawBackground.trim() ? rawBackground.trim() : null;
 
   // [자료조사 다시 하기](2026-10-02): 봇이 metadata.forceFreshResearch를 켜 두면 2시간 내 파일이 있어도
   // 재사용하지 않고 새로 조사한다 - 안 그러면 자료 부족으로 막힌 그 파일이 그대로 다시 쓰인다.
@@ -393,10 +398,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

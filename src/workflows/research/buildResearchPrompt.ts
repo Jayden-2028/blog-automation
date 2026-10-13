@@ -34,6 +34,11 @@ export type BuildResearchPromptInput = {
    * 않는다. 없으면 일반 조사.
    */
   retryHint?: string | null;
+  /**
+   * 인물 백과 트랙(category=person): 핫스타 알림의 화제 배경 한 줄(`job.metadata.personBackground`).
+   * person-researcher.md §6-0이 출력 §1(지금 화제인 이유)의 출발점으로 쓴다. person이 아니면 무시한다.
+   */
+  personBackground?: string | null;
 };
 
 function formatBaseline(baselineSources: SourceInsert[]): string[] {
@@ -60,6 +65,10 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
   const { job, baselineSources, outputPath, today } = input;
 
   const baselineLines = formatBaseline(baselineSources);
+
+  // 인물 백과(2026-10-13): 규격이 researcher.md를 **대체**한다(self-contained). brief.type(celebrity) 판정에
+  // 맡기면 기존 프로파일이 골라지므로 kscene처럼 category로 분기한다. 브리프 §4-1 프로파일 오버라이드도 싣지 않는다.
+  if (job.category === "person") return buildPersonResearchPrompt(input, baselineLines);
 
   return [
     "너는 블로그 원고용 자료조사 에이전트다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",
@@ -134,6 +143,48 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     "  앱에서만 열리는 화면은 적지 않는다(찍으면 로그인 벽이 찍힌다).",
     "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
     "- §10 전체 출처 목록 표에는 baseline + 네가 새로 연 URL을 전부 등급과 함께 넣는다(감사기록).",
+    "",
+    "완료하면 파일을 저장한 뒤 마지막 줄에 `SAVED: <경로>`만 답하라. 다른 설명은 필요 없다.",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+/** category=person 전용. 읽을 규격은 person-researcher.md 하나(+ 주제 배분·문단 흐름)다. */
+function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLines: string[]): string {
+  const { job, outputPath, today } = input;
+  return [
+    "너는 블로그 원고용 자료조사 에이전트다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",
+    "규격을 못 읽으면 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
+    "",
+    "- prompts/research/person-researcher.md  (인물 백과 자료조사 계약서 - self-contained. researcher.md는 읽지 않는다)",
+    "- prompts/writing/rules/topic-allocation.md  (주제 배분 - 조사 분량도 이 비율을 따른다)",
+    "- prompts/writing/rules/article-structure.md (카테고리별 문단 흐름 - 이 단계들을 채울 자료를 찾는다)",
+    "",
+    "이 job의 입력:",
+    `- keyword: ${job.keyword}   (인물명. 이 문자열을 다듬거나 바꾸지 않는다)`,
+    "- topic: person",
+    job.headline && job.headline !== job.keyword ? `- headline: ${job.headline}   (현재 화제작)` : null,
+    input.personBackground ? `- background: ${input.personBackground}` : null,
+    `- 오늘 날짜: ${today}`,
+    "",
+    ...(input.retryHint
+      ? [
+          "이번은 재조사다. 직전 조사가 자료 부족으로 글쓰기를 막았다:",
+          `- ${input.retryHint}`,
+          "같은 검색을 되풀이하지 말고 이 부족분을 먼저 채울 출처를 새로 찾는다.",
+          "그래도 못 찾으면 억지로 채우지 말고 verdict를 사실대로 적는다.",
+          "",
+        ]
+      : []),
+    "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹문서 검색 결과. 카페·지식iN은 수집하지 않았다):",
+    ...baselineLines,
+    "",
+    "파이프라인 오버라이드(person-researcher.md와 충돌하면 이 지시가 우선):",
+    `- 출력 파일은 person-researcher.md §6의 이름 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
+    "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못 채운 빈칸을",
+    "  person-researcher.md §2 절차(고정 출처 → 뉴스 → 웹검색 → LLM 보강)로 보강하는 데 집중한다.",
+    "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
     "",
     "완료하면 파일을 저장한 뒤 마지막 줄에 `SAVED: <경로>`만 답하라. 다른 설명은 필요 없다.",
   ]
