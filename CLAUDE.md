@@ -58,23 +58,27 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   (`research/[키워드].md`, `drafts/[키워드].md`).
 - 자료조사 검색은 하이브리드다. Node가 NAVER API로 기준 sources(감사 베이스라인)를 모으고,
   researcher 에이전트가 WebSearch/WebFetch로 빈칸을 보강한다. 둘 다 `research/*.md`와 `sources`에 남는다.
-- **채널은 셋이다 - Blogspot, 네이버, 티스토리**(2026-10-05 개편2에서 티스토리 자동 발행 재개.
+- **채널은 셋이다 - Blogspot, 네이버, 티스토리**. 운영 블로그도 이 셋뿐이다(2026-10-13 사용자
+  확인): 네이버 "Whyissuenow"(엔터), 티스토리 "핫이슈 설명서"(사회 사건·사고), 블로그스팟
+  "The Korea Manual"(한국 사용설명서). 옛 육아 블로그("우아 아빠의 쌍둥이 키우기")는 미운영이고
+  `style/parenting.md`는 보존 규격이다. (2026-10-05 개편2에서 티스토리 자동 발행 재개.
   2026-09-15에 접었던 전제가 바뀌었다 - 사용자가 PC 앞에서 운영하므로 로그인 풀림에 바로 개입할
   수 있다. 상세는 `docs/ai-handoff/TISTORY_AUTO_PUBLISH_DESIGN.md`). 카테고리→채널 배정
   (`config/channelRouting.ts`)은 없다 - **어느 채널에 올릴지는 라우팅이 아니라 사람이 버튼으로
   정한다.** 다만 2026-10 개편부터 **트랙이 버튼 구성을 정한다** - 엔터 트랙은 🟢 네이버,
   사회 트랙은 🟠 티스토리, 사용설명서 트랙은 🔵 Blogger 버튼이 뜬다(`job.metadata.track`, 없으면 엔터).
-  - Blogspot(`whynowissue.blogspot.com`): 공식 API(Blogger v3). GitHub Actions에서 바로 끝난다.
-    2026-10 개편으로 엔터·사회 버튼에서는 빠졌고, 사용설명서 트랙(개편3, 2026-10-06)이 쓴다 - 트랙 버튼은
+  - Blogspot(`thekoreamanual.blogspot.com` - "The Korea Manual", 사용설명서 트랙): 공식 API(Blogger v3).
+    GitHub Actions에서 바로 끝난다. 옛 대상 `whynowissue.blogspot.com`은 **2026-10-11 폐쇄**됐고
+    2026-10 개편으로 엔터·사회 버튼에서도 빠졌다. 사용설명서 트랙(개편3, 2026-10-06)만 쓴다 - 트랙 버튼은
     `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다** -
     `BLOGGER_BLOG_ID`로 폴백하지 않는다). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
     자동 승인 → 이미지가 포함된 영어본 → 통합 알림(발행/수정/반려)**이고(2026-10-12부터 영어본 단독 재승인 폐지, 게이트 꺼짐이면 옛 영어본 재승인 ✅ 복귀), 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
     (`docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`).
-  - 티스토리(`wooahpapa.tistory.com`, 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
+  - 티스토리(`wooahpapa.tistory.com` - "핫이슈 설명서", 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
     Playwright(TinyMCE)로 발행한다. 로그인 풀림은 실패가 아니라 **대기(deferred)** - 재로그인하면
     자동 재개, 3일 지나면 버튼을 다시 눌러야 한다. 첫 운영은 비공개(`TISTORY_PUBLISH_VISIBILITY`).
-  - 네이버(`blog.naver.com/whyissuenow`): **공식 발행 API가 없다.** Playwright로 로그인된
+  - 네이버(`blog.naver.com/whyissuenow` - "Whyissuenow", 엔터 트랙): **공식 발행 API가 없다.** Playwright로 로그인된
     브라우저를 조작하므로 GitHub Actions에서 돌릴 수 없다 - 클라우드는 요청만 남기고
     **맥의 로컬 폴러**(`job:naver-poll`)가 집어 간다. 맥이 꺼져 있으면 켜질 때 처리된다.
     Creator Advisor가 보는 블로그(육아)와 **다른 계정**이라 세션 프로필도 분리돼 있다
