@@ -18,13 +18,14 @@ export const NAVER_DEFAULT_CATEGORY_NO = 1;
  * job.category -> categoryNo.
  *
  * 키는 `article_jobs.category`에 실제로 저장되는 값이다(소문자). DB 실측 기준으로
- * living / entertainment / ott / incident / community / parenting 여섯 가지가 쓰인다.
+ * living / entertainment / ott / incident / community / parenting 여섯 가지가 쓰였고, 2026-10-13부터 person이 더해진다.
  */
 export const NAVER_CATEGORY_NO: Record<string, number> = {
   living: 9, // 일상·팁 (사용자 결정 - 문화·생활보다 이쪽이 맞다)
   parenting: 9, // 일상·팁
   entertainment: 11, // 스포츠·연예인
   ott: 11, // 스포츠·연예인
+  person: 11, // 스포츠·연예인 (인물 백과 트랙, 2026-10-13 - entertainment·ott와 동일)
   incident: 6, // 정책·사회
   community: 1, // 지금 뜨는 이슈
 };
