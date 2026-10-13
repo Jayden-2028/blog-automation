@@ -16,10 +16,17 @@ import type { KeywordCategory } from "./keywordCategoryRules.js";
 
 export const EXCLUDED_CATEGORIES: readonly KeywordCategory[] = ["parenting"];
 
+// 2026-10-13 엔터 순도 보강(KEYWORD-ENT-PURITY-2026-10.md A-1): 10/13 18시 run #148의 Top 10에
+// "휴대폰 성지 옆커폰 논란 국감서"(4위) "김지용 임은정 인사 공개 비판 중수청"(8위)이 올라왔다.
+// `국정감사`는 있었지만 기사 제목에 쓰이는 축약형 `국감`이 없었고, 수사·사정기관 고유어도 없었다.
+// 추가한 것은 **기관·절차 고유어뿐**이다 - `수사`·`재판`·`검찰` 같은 일반어는 넣지 않는다.
+// 연예인 사건 기사("배우 검찰 송치")와 겹쳐 엔터 정당 후보를 죽인다.
 export const POLITICAL_EXCLUSION_TERMS: readonly string[] = [
   "여당", "야당", "국민의힘", "더불어민주당", "민주당", "조국혁신당", "개혁신당", "진보당",
   "대선", "총선", "지방선거", "국회의원 선거", "국회의원선거", "탄핵", "특검", "국정감사",
   "여야", "당대표", "원내대표", "공천", "대통령실", "여의도",
+  // 2026-10-13 추가
+  "국감", "중수청", "공수처", "감찰", "법사위", "상임위", "인사청문회",
 ];
 
 export function isPoliticalKeyword(keyword: string): boolean {
