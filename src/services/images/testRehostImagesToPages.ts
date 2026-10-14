@@ -20,23 +20,45 @@ const image = (index: number, url: string | null): ManuscriptImage =>
 
 type Site = Map<string, Uint8Array>;
 
+type World = {
+  site: Site;
+  deploys: { args: string[]; files: string[] }[];
+  sleeps: number;
+  liveAfter: number;
+  liveCalls: number;
+  siteDown: boolean;
+  deployCount: number | null;
+  active: number[];
+  activeCalls: number;
+  activeThrows: boolean;
+  onDeploy: null | ((world: World) => void);
+  sources: Record<string, string | null | Error>;
+};
+
 /** 가짜 Pages 사이트: 배포하면 스테이징 디렉터리 내용으로 사이트가 통째로 교체된다(스냅샷 의미 그대로). */
-function makeWorld(initialSite: Site = new Map(), sources: Record<string, string | null | Error> = {}) {
-  const world = {
+function makeWorld(initialSite: Site = new Map(), sources: Record<string, string | null | Error> = {}): { world: World; deps: RehostDeps } {
+  const world: World = {
     site: initialSite,
     deploys: [] as { args: string[]; files: string[] }[],
     sleeps: 0,
     liveAfter: 0, // isLive가 이 횟수만큼 거짓
     liveCalls: 0,
     siteDown: false, // true면 사이트 요청이 522처럼 던진다(미배포 프로젝트 재현)
-    deployCount: null as number | null, // countDeployments 응답(null이면 API 실패)
+    deployCount: null, // countDeployments 응답(null이면 API 실패)
+    active: [], // countActiveDeployments가 차례로 돌려줄 값(소진되면 0)
+    activeCalls: 0,
+    activeThrows: false,
+    /** 배포 직후 실행된다 - 동시 배포가 내 파일을 덮는 상황을 흉내 낸다. */
+    onDeploy: null,
     sources,
   };
   const deps: RehostDeps = {
     ...defaultRehostDeps(),
-    fetchBytes: async (url) => {
+    fetchBytes: async (rawUrl) => {
+      // manifest는 캐시 우회용 쿼리를 붙여 읽는다 - 가짜 사이트에서는 떼고 찾는다.
+      const url = rawUrl.split("?")[0];
       if (url.startsWith(`${BASE}/`)) {
-        if (world.siteDown) throw new Error(`522 <none> (${url})`);
+        if (world.siteDown) throw new Error(`522 <none> (${rawUrl})`);
         const file = world.site.get(url.slice(BASE.length + 1));
         return file ? { bytes: file, contentType: null } : null;
       }
@@ -61,11 +83,18 @@ function makeWorld(initialSite: Site = new Map(), sources: Record<string, string
       };
       await walk("");
       world.site = next; // 스냅샷 교체
+      world.siteDown = false; // 배포하면 사이트가 열린다(미배포 522 재현 뒤 정상화)
       world.deploys.push({ args, files: files.sort() });
+      world.onDeploy?.(world);
     },
     countDeployments: async () => {
       if (world.deployCount === null) throw new Error("Cloudflare API 503");
       return world.deployCount;
+    },
+    countActiveDeployments: async () => {
+      world.activeCalls += 1;
+      if (world.activeThrows) throw new Error("Cloudflare API 503");
+      return world.active.shift() ?? 0;
     },
     isLive: async (url) => {
       world.liveCalls += 1;
@@ -191,10 +220,67 @@ async function main(): Promise<void> {
     console.log("  ✅ 배포 후 서비스 확인(전파 대기·실패 시 미치환)");
   }
 
+  // 동시 배포 락: 진행 중인 배포가 끝나기를 기다린 뒤 재구성한다(2026-10-15 사고).
+  {
+    const { deps, world } = makeWorld(new Map(), { "https://supabase/l/1.webp": "LOCKED" });
+    world.active = [2, 1]; // 두 번 기다린 뒤 0
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/l/1.webp")], config: CONFIG }, deps);
+    assert(result.complete && world.deploys.length === 1 && world.sleeps === 2, `진행 중인 배포를 기다린 뒤 배포(대기 ${world.sleeps}회)`);
+    // 락 확인 자체가 실패하면 막지 않고 진행한다(사후 검증이 받는다)
+    const blind = makeWorld(new Map(), { "https://supabase/m/1.webp": "BLIND" });
+    blind.world.activeThrows = true;
+    const r = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/m/1.webp")], config: CONFIG }, blind.deps);
+    assert(r.complete && blind.world.deploys.length === 1 && blind.world.sleeps === 0, "락 확인 불가 -> 기다리지 않고 진행");
+    console.log("  ✅ 동시 배포 락(대기·확인 불가 시 진행)");
+  }
+
+  // 사후 검증: 배포 직후 다른 배포가 내 파일을 덮으면 다시 시도한다
+  {
+    const src = "https://supabase/n/1.webp";
+    const { deps, world } = makeWorld(new Map(), { [src]: "CLOBBER-ME" });
+    const mine = pagesImagePath(JOB, 1, bytes("CLOBBER-ME"), "webp");
+    // 첫 배포 직후에만 다른 배포가 끼어들어 내 파일 없는 스냅샷으로 사이트를 바꾼다.
+    world.onDeploy = (w) => {
+      w.onDeploy = null;
+      const theirs: Site = new Map<string, Uint8Array>([["zzzzzzzz/1-00000000.webp", bytes("THEIRS")]]);
+      theirs.set("manifest.json", bytes(JSON.stringify({ version: 1, files: { "zzzzzzzz/1-00000000.webp": { bytes: 6 } } })));
+      w.site = theirs;
+    };
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, src)], config: CONFIG }, deps);
+    assert(result.complete && result.images[0].url === `${BASE}/${mine}`, `덮인 뒤 재시도해서 성공해야 한다 (${JSON.stringify(result.failures)})`);
+    assert(world.deploys.length === 2, `재배포 1회 (배포 ${world.deploys.length}회)`);
+    assert(world.site.has(mine) && world.site.has("zzzzzzzz/1-00000000.webp"), "재시도 때는 끼어든 배포의 파일까지 보존한다");
+    console.log("  ✅ 사후 검증 - 덮이면 재구성·재배포");
+  }
+  {
+    // 계속 덮이면 포기하고 Supabase URL로 둔다(깨진 URL을 발행하지 않는다)
+    const src = "https://supabase/o/1.webp";
+    const { deps, world } = makeWorld(new Map(), { [src]: "ALWAYS-CLOBBERED" });
+    world.onDeploy = (w) => {
+      w.site = new Map<string, Uint8Array>([["manifest.json", bytes(JSON.stringify({ version: 1, files: {} }))]]);
+    };
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, src)], config: CONFIG }, deps);
+    assert(!result.complete && result.images[0].url === src, "끝내 덮이면 Supabase URL 유지");
+    assert(world.deploys.length === 3 && result.failures.some((f) => f.includes("덮였습니다")), `3회 시도 후 포기 (${world.deploys.length}회, ${JSON.stringify(result.failures)})`);
+    console.log("  ✅ 반복 덮임 -> 포기(깨진 URL 미발행)");
+  }
+
+  // manifest는 캐시를 우회해 읽는다 - 영구 캐시된 옛 목록을 읽으면 기존 이미지가 지워진다
+  {
+    const { deps, world } = makeWorld(new Map(), { "https://supabase/p/1.webp": "FRESH" });
+    const reads: string[] = [];
+    const spied: RehostDeps = { ...deps, fetchBytes: async (url) => (reads.push(url), deps.fetchBytes(url)) };
+    await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/p/1.webp")], config: CONFIG }, spied);
+    assert(reads.some((u) => u.includes("manifest.json?")), `manifest 요청에 캐시 우회 쿼리가 붙어야 한다 (${reads.filter((u) => u.includes("manifest")).join()})`);
+    const headers = Buffer.from(world.site.get("_headers")!).toString();
+    assert(headers.includes("/manifest.json") && headers.includes("no-store"), `_headers가 manifest.json을 캐시 예외로 둬야 한다 (${headers})`);
+    console.log("  ✅ manifest 캐시 우회(+ _headers 예외)");
+  }
+
   // 파일 한도 경고
   {
     const files = Object.fromEntries(Array.from({ length: 19_000 }, (_, i) => [`x/${i}.webp`, { bytes: 1 }]));
-    const full = makeWorld(new Map([["manifest.json", bytes(JSON.stringify({ version: 1, files }))]]), { "https://supabase/h/1.webp": "Z" });
+    const full = makeWorld(new Map<string, Uint8Array>([["manifest.json", bytes(JSON.stringify({ version: 1, files }))]]), { "https://supabase/h/1.webp": "Z" });
     const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/h/1.webp")], config: CONFIG }, full.deps);
     assert(!result.complete && full.world.deploys.length === 0 && result.failures.some((f) => f.includes("새 프로젝트")), "한도 근접 시 새 프로젝트로 바꾸라고 알리고 배포하지 않는다");
     console.log("  ✅ 파일 한도 근접 경고");
