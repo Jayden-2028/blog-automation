@@ -4,7 +4,7 @@
 // 엔터 메인봇으로 보내고, 인물별 `✍️ 인물글` 버튼(`pgo:<run_id>:<rank>`)을 붙인다(인물 백과 트랙,
 // 2026-10-13). 2026-10-11에는 알림 전용이었으나 인물 백과 트랙(PERSON-PROFILE-TRACK-2026-10.md)이 그 연결을
 // 대체했다. 누르면 TelegramBot이 run.metadata.people[rank]로 category=person job을 만들어 기존 엔터 트랙
-// 흐름(자료조사 → write 자동 → 통합 알림 → 🟢 네이버 발행)을 탄다. 키워드 Go/Pass 버튼은 여전히 없다.
+// 흐름(자료조사 → write 자동 → 통합 알림 → 뷰어까지; 발행은 수동 복붙, 자동 발행 없음 2026-10-14)을 탄다. 키워드 Go/Pass 버튼은 여전히 없다.
 //
 // 재료는 **그날 이미 쌓인 수집 데이터뿐이다**: 18시 엔터 회차의 keyword_rankings + 당일 trend_candidates
 // (구글 트렌드·다음 실시간·커뮤니티·Creator Advisor). 보조 수집(NAVER·Serper)은 호출하지 않는다 -

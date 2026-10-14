@@ -27,13 +27,13 @@
     ② 저녁 회차가 오전·오후 산출물을 전제하는 데도 없다(회차마다 자체 수집). ③ trend_candidates TTL은
     8~18시간이라 18시 수집분이 19시 핫스타까지 살아 있다.
   - 부수 효과: 엔터 수집이 1/3로 줄어 Serper·NAVER 호출도 그만큼 감소(`cost.json` 크레딧 게이지로 확인 가능).
-- **§B 19:00 KST 핫이슈 스타 Top 5 신설**(알림 전용): 신규 `entertainment-hot-star.yml` + `job:entertainment-hot-star`.
+- **§B 19:00 KST 핫이슈 스타 Top 5 신설**(2026-10-11 알림 전용 → 10-13 인물별 `✍️ 인물글` 버튼 추가; person은 뷰어까지만, 네이버 발행은 수동 복붙 - 2026-10-14): 신규 `entertainment-hot-star.yml` + `job:entertainment-hot-star`.
   모듈은 `src/workflows/hot-star/`(순수 선별·포매팅 `hotStarSelection.ts` / 오케스트레이션 `runHotStarCollection.ts`)
   와 진입점 `src/jobs/entertainmentHotStarJob.ts`. **기존 6-factor scoring·relevance·clustering은 건드리지 않았다.**
   - 재료는 그날 이미 쌓인 데이터뿐: 당일 엔터 run의 `keyword_rankings`(헤드라인 포함) + 당일 `trend_candidates`
     (슬림 select - metadata를 안 읽는다, egress 방침). **보조 수집(NAVER·Serper) 호출 0건**, 인물·배경 추출만
     `claude -p` 1콜(`CLAUDE_CODE_OAUTH_TOKEN` 재사용, 180초).
-  - **Go·제작 버튼 없음.** 18시 알림과 겹치는 인물은 제거하지 않고 "↳ 18시 알림에도 선정" 한 줄 표기(판정 범위는
+  - **Go/Pass 버튼 없음**(인물별 `✍️ 인물글` `pgo:` 버튼만, 인물 백과 트랙). 18시 알림과 겹치는 인물은 제거하지 않고 "↳ 18시 알림에도 선정" 한 줄 표기(판정 범위는
     18시에 실제로 올라간 rank ≤ 10). 5명 미만이면 "오늘은 N명"으로 보낸다. LLM 실패·인물 0명이면 **보내지 않는다**.
   - run은 `discovery_runs`에 `kind=entertainment-hot-star`로 남기고 `keyword_rankings`는 만들지 않는다.
     새 `config/discoveryRunKinds.ts`가 kind를 한 곳에 모으고, **`getLatestCompletedDiscoveryRun`이 이 kind를 건너뛴다** -

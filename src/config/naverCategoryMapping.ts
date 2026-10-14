@@ -25,7 +25,7 @@ export const NAVER_CATEGORY_NO: Record<string, number> = {
   parenting: 9, // 일상·팁
   entertainment: 11, // 스포츠·연예인
   ott: 11, // 스포츠·연예인
-  person: 11, // 스포츠·연예인 (인물 백과 트랙, 2026-10-13 - entertainment·ott와 동일)
+  person: 11, // 스포츠·연예인 (인물 백과 트랙, 2026-10-13 - entertainment·ott와 동일). 자동 발행 미사용(수동 복붙 운영, 2026-10-14)
   incident: 6, // 정책·사회
   community: 1, // 지금 뜨는 이슈
 };

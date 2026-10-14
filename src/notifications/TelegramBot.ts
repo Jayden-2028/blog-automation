@@ -625,7 +625,7 @@ export class TelegramBot {
 
   /**
    * "✍️ 인물글"(pgo:<run_id>:<rank>) 처리. 조회 실패 = 거부(go:와 같은 위조 검증 구조)이고, 이후 흐름은 기존 엔터
-   * 트랙 그대로다(자료조사 → write 자동 → 통합 알림). keyword_rankings 행은 만들지 않는다.
+   * 트랙 그대로다(자료조사 → write 자동 → 통합 알림 → 뷰어까지; 발행 버튼 없음, 수동 복붙 2026-10-14). keyword_rankings 행은 만들지 않는다.
    */
   private async handlePersonGo(
     query: TelegramCallbackQuery,
