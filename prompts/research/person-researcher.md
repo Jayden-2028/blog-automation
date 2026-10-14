@@ -282,7 +282,10 @@ background: …               # 선택. 핫스타 metadata.background
 keyword: <인물명>
 category: person
 verdict: ok | thin | blocked
-source_counts: { official: N, news: N, community: N }
+source_counts:
+  official: N
+  news: N
+  community: N
 sources_opened: 열어본 고정 출처 목록
 researched_at: YYYY-MM-DD
 ---
@@ -307,6 +310,12 @@ researched_at: YYYY-MM-DD
 ## 7. 자료 간 불일치             ← 네이버 인물DB를 기준으로 어느 출처가 다른지
 ## 8. 쓰지 않을 것               ← 제외 판정과 이유
 ## 9. 전체 출처 목록             ← 등급 표기
+```
+
+§9는 표로 쓰고 **열 순서를 고정한다**(파서 `parseSourceTable` 계약):
+
+```
+| # | 등급 | 제목 | URL | 발행일 |
 ```
 
 **§6에는 자동완성 결과 원본을 그대로 남긴다.** 선정이 자의적이지 않음을 사람이 확인할 수 있어야 한다.
