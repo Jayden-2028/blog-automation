@@ -112,6 +112,12 @@ function main(): void {
   assert(legalEnt.length === 1 && legalEnt[0].severity === "error", "연예 분야 추측성 표현은 error여야 한다");
   const legalLiving = checkLegal("출시될 가능성이 크다.", "living");
   assert(legalLiving.length === 1 && legalLiving[0].severity === "warning", "비연예 분야는 warning이어야 한다");
+  // person(인물 백과)도 실명 글이라 연예와 같이 error (2026-10-14, E-1)
+  const legalPerson = checkLegal("결별했다는 의혹이 제기됐다.", "person");
+  assert(legalPerson.length === 1 && legalPerson[0].severity === "error", "person 추측성 표현은 error여야 한다");
+  // ott는 현행 유지(warning)
+  const legalOtt = checkLegal("결별했다는 의혹이 제기됐다.", "ott");
+  assert(legalOtt.length === 1 && legalOtt[0].severity === "warning", "ott는 warning 유지");
   console.log("✅ 법적: 추측성 표현 탐지 + 분야별 심각도 구분");
 
   // 7) 회귀(실측 오탐 2): "이라는 설명이"의 "설"을 "~라는 설"로 오인하면 안 된다.
@@ -491,7 +497,12 @@ function main(): void {
       !living.some((c) => c.message.includes("웹 검색이 아닌 이미지 자리")),
       "엔터가 아니면 이 검사는 걸리지 않아야 한다"
     );
-    console.log("✅ 엔터·OTT - 웹 검색이 아닌 이미지 자리 경고");
+    const person = checkImagePrompts(body, "person");
+    assert(
+      person.some((c) => c.message.includes("웹 검색이 아닌 이미지 자리")),
+      "person 원고의 AI 생성·표 생성도 잡아야 한다"
+    );
+    console.log("✅ 엔터·OTT·인물 - 웹 검색이 아닌 이미지 자리 경고");
   }
 
   const imageOk = checkImagePrompts(

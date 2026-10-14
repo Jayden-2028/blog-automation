@@ -152,7 +152,7 @@ export function checkLegal(rawBody: string | null, category: string | null): Rev
   if (found.length === 0) return [];
 
   // 인물을 주로 다루는 분야에서는 error, 그 외에는 warning.
-  const isPersonHeavy = category === "entertainment";
+  const isPersonHeavy = category === "entertainment" || category === "person";
 
   return [
     {
@@ -160,7 +160,7 @@ export function checkLegal(rawBody: string | null, category: string | null): Rev
       severity: isPersonHeavy ? "error" : "warning",
       message:
         `추측성 표현 ${found.length}종: ${found.join(", ")}` +
-        (isPersonHeavy ? " (연예 분야는 명예훼손 위험이 커 확정 보도만 다뤄야 합니다)" : ""),
+        (isPersonHeavy ? " (연예·인물 분야는 명예훼손 위험이 커 확정 보도만 다뤄야 합니다)" : ""),
     },
   ];
 }
@@ -668,8 +668,8 @@ export function classifyImageMarker(description: string): ImageMarkerViolation |
   return null;
 }
 
-/** 엔터·연예·OTT는 웹 검색만 쓴다(2026-09-22 사용자 결정, images.md §8-1-2). */
-const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott"]);
+/** 엔터·연예·OTT·인물(person)은 웹 검색만 쓴다(2026-09-22 사용자 결정, images.md §8-1-2). */
+const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott", "person"]);
 
 export function checkImagePrompts(rawBody: string | null, category?: string | null): ReviewCheck[] {
   if (!rawBody) return [];
@@ -697,7 +697,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
         category: "quality",
         severity: "warning",
         message:
-          `연예·OTT 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
+          `연예·OTT·인물 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
           " (images.md §8-1-2 - 실사가 있는데 그리거나 표로 만들 이유가 없다, 웹 검색으로)",
       });
     }
