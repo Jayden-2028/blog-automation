@@ -97,6 +97,7 @@
     "test:upload-image-format": "tsx src/services/images/testUploadImageFormat.ts",
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",
     "test:blogger-client": "tsx src/services/publish/blogger/testBloggerClient.ts",
+    "test:manual-publish-only": "tsx src/workflows/publish/testManualPublishOnly.ts",
     "test:naver-queue": "tsx src/workflows/publish/testNaverPublishQueue.ts",
     "test:tistory-url": "tsx src/services/publish/tistory/testTistoryPublishedUrl.ts",
     "test:tistory-image": "tsx src/services/publish/tistory/testTistoryImageFormat.ts",

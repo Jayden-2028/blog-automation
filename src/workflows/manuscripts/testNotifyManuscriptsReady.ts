@@ -237,3 +237,25 @@ main().catch((error) => {
   if (!bad.text.includes("원고 준비 완료")) throw new Error("❌ UUID가 아니어도 알림 본문은 살아야 한다");
   console.log("✅ 통합 알림 - 자동 승인 job만 ✏️ 수정 요청/🗑 반려(엔터·사회), 의학·검수 요약 이전, 사용설명서·옛 흐름 불변");
 }
+
+// --- person(인물 백과, 2026-10-14 §F): 발행 버튼 없음 + 수동 복붙 안내. 다른 카테고리는 불변 -------------------
+{
+  const JOB = "154bfe0b-1234-4abc-8def-0123456789ab";
+  const personJob = { ...job(JOB), category: "person", metadata: { track: "entertainment" } } as ArticleJobRow;
+  const msg = buildManuscriptReadyMessage(successResult(personJob), "https://pages.example.dev");
+  const all = (msg.replyMarkup?.inline_keyboard ?? []).flat();
+  if (all.some((b) => /^publish:(naver|tistory|blogspot):/.test(b.callback_data ?? ""))) {
+    throw new Error("❌ person 알림에는 발행 버튼이 없어야 한다");
+  }
+  if (!all.some((b) => b.callback_data === `publish:images:${JOB}`) || !all.some((b) => b.callback_data === `publish:export:${JOB}`)) {
+    throw new Error("❌ person 알림에도 이미지 수정·내려받기는 있어야 한다");
+  }
+  if (!msg.text.includes("직접 붙여넣으세요") || msg.text.includes("🟢 네이버")) {
+    throw new Error(`❌ person 알림은 수동 복붙 안내를 싣고 네이버 발행 표기가 없어야 한다 (${msg.text})`);
+  }
+  const ent = buildManuscriptReadyMessage(successResult({ ...personJob, category: "entertainment" } as ArticleJobRow), "https://pages.example.dev");
+  if (!(ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`)) {
+    throw new Error("❌ 엔터 알림의 네이버 발행 버튼은 그대로여야 한다");
+  }
+  console.log("✅ person 통합 알림 - 발행 버튼 없음 + 수동 복붙 안내, 엔터 불변");
+}

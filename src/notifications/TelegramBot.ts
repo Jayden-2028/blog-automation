@@ -35,6 +35,7 @@ import { parseKeywordSelectionCallbackData, parsePersonGoCallbackData } from "./
 import { loadHotStarPerson } from "../workflows/hot-star/loadHotStarPerson.js";
 import type { HotStarPersonRef } from "../workflows/hot-star/loadHotStarPerson.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
+import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "../workflows/publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
@@ -211,6 +212,8 @@ export type HandlePublishDecisionOutcome =
   | { status: "edit_pending"; action: PublishDecisionAction }
   /** 반려된 원고라 발행을 받지 않았다(통합 알림에서 🗑 뒤에 남은 오래된 버튼). */
   | { status: "job_rejected"; action: PublishDecisionAction }
+  /** person(인물 백과)은 자동 발행 제외 - 수동 복붙 운영(2026-10-14). 오래된 메시지의 발행 버튼이 와도 접수하지 않는다. */
+  | { status: "manual_only"; action: PublishDecisionAction }
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
@@ -1111,6 +1114,14 @@ export class TelegramBot {
       };
     }
 
+    // person은 자동 발행 제외(수동 복붙 운영, 2026-10-14). 이미지 수정·내려받기는 그대로 받는다.
+    if (isManualPublishOnly(job) && (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot")) {
+      return {
+        outcome: { status: "manual_only", action: parsed.action },
+        message: `✋ <b>자동 발행하지 않는 원고입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n${escapeTelegramHtml(MANUAL_PUBLISH_ONLY_REASON)}`,
+      };
+    }
+
     // 서버 측 트랙-채널 검증(개편2.5 B-2): 버튼은 트랙별로 다르게 붙지만, 오래된 알림의 버튼이나 다른 트랙 채팅의
     // 콜백이 와도 job 트랙에 안 맞는 채널로는 발행하지 않는다.
     if (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot") {
@@ -1658,6 +1669,7 @@ export class TelegramBot {
         case "channel_mismatch":
         case "edit_pending":
         case "job_rejected":
+        case "manual_only":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
           return null;
         default:
@@ -1691,7 +1703,11 @@ export class TelegramBot {
       // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
       // 줄 나눔은 notifyManuscriptsReady의 배치와 같게 유지한다 - 한 줄에 4개를 몰면 텔레그램이
       // 글자를 잘라 무슨 버튼인지 안 보인다.
-      const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track);
+      const job = await this.loadJobById(parsed.jobId).catch(() => null);
+      // person은 발행 버튼이 없는 원고(수동 복붙 운영, 2026-10-14) - 트랙 기본 구성에서 발행 채널을 뺀다.
+      const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track)
+        .map((row) => (job && isManualPublishOnly(job) ? row.filter((a) => a === "images" || a === "export") : row))
+        .filter((row) => row.length > 0);
       keyboard = rows.map((row) =>
         row.map(
           (action) =>
@@ -1702,7 +1718,6 @@ export class TelegramBot {
         )
       );
       // 자동 승인으로 올라온 원고는 ✏️ 수정 요청 / 🗑 반려 줄이 있다 - 잠금 버튼으로 덮인 뒤에도 되살린다.
-      const job = await this.loadJobById(parsed.jobId).catch(() => null);
       // 링크 줄이 없는 상태에서 다시 세우므로 맨 위(= buildReadyKeyboard의 배치와 같은 자리)에 넣는다.
       const reviewRow = job && isAutoApproved(job)
         ? buildReadyKeyboard(job, null).find((row) =>

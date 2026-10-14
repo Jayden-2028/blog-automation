@@ -128,6 +128,16 @@ async function main(): Promise<void> {
     console.log("✅ 수정 반영·이미지 교체 진행 중인 건은 건너뛰고, stale은 통과+알림");
   }
 
+  // person은 자동 발행 제외 - 큐에 넣지 않는다(2026-10-14 §F-2).
+  {
+    let merged = 0;
+    const out = await requestNaverPublish({ ...job("p"), category: "person" } as ArticleJobRow, {
+      mergeMetadata: async () => { merged += 1; return null; },
+    });
+    assert(!out.queued && merged === 0 && (out.reason ?? "").includes("자동 발행하지 않습니다"), "person은 큐에 넣지 않는다");
+    console.log("✅ person - 네이버 큐 거부");
+  }
+
   console.log("\n🎉 네이버 발행 대기열 테스트 통과");
 }
 
