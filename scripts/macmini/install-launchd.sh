@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 로컬 launchd 6종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status]
+# 로컬 launchd 7종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status] [job이름]
 #   naver-poll(60초)  tistory-poll(60초)  instagram-capture-poll(60초)  export-poll(60초)  manuscript-export(30분)
 #   creator-advisor(매일 08:30, 17:30)
 # ⚠️ 옛 맥의 같은 job을 먼저 내려야 한다 - 둘이 동시에 돌면 네이버에 같은 글이 두 번 올라갈 수 있다.
@@ -21,7 +21,13 @@ JOBS=( "naver-poll|$REPO/scripts/macmini/poll-naver.sh|60"
        "instagram-capture-poll|$REPO/scripts/poll-instagram-capture.sh|60"
        "export-poll|$REPO/scripts/poll-manuscript-export.sh|60"
        "manuscript-export|$REPO/scripts/export-manuscripts.sh|1800"
-       "creator-advisor|$REPO/scripts/macmini/collect-creator-advisor.sh|08:30,17:30" )
+       "creator-advisor|$REPO/scripts/macmini/collect-creator-advisor.sh|08:30,17:30"
+       "person-pack|$REPO/scripts/macmini/poll-person-pack.sh|60" )
+
+# 두 번째 인자로 job 이름을 주면 그 하나만 다룬다(2026-10-15) - 세션별로 폴러 소유가 갈려 있어
+# 전체 재등록(install)이 남의 폴러를 리로드하면 안 된다. 예: install-launchd.sh install person-pack
+ONLY="${2:-}"
+match_only() { [[ -z "$ONLY" || "$1" == "$ONLY" ]]; }
 
 # 주기 문자열 -> plist 스케줄 항목. RunAtLoad도 여기서 갈린다:
 # 폴러는 등록 즉시 한 번 도는 게 맞지만, 하루 1회 수집을 등록할 때마다 돌리면 불필요한
@@ -69,6 +75,7 @@ case "${1:-status}" in
     bash "$REPO/scripts/macmini/doctor.sh" --quiet || { echo "❌ doctor 실패 - 먼저 고치세요."; exit 1; }
     mkdir -p "$AGENTS" "$HOME/Library/Logs"
     for j in "${JOBS[@]}"; do IFS='|' read -r n s i <<<"$j"
+      match_only "$n" || continue
       f="$AGENTS/$PFX.$n.plist"
       launchctl bootout "gui/$UID_/$PFX.$n" 2>/dev/null || true
       plist "$n" "$s" "$i" > "$f"
@@ -83,15 +90,17 @@ case "${1:-status}" in
     done ;;
   uninstall)
     for j in "${JOBS[@]}"; do IFS='|' read -r n _ _ <<<"$j"
+      match_only "$n" || continue
       launchctl bootout "gui/$UID_/$PFX.$n" 2>/dev/null || true
       launchctl disable "gui/$UID_/$PFX.$n" 2>/dev/null || true
       rm -f "$AGENTS/$PFX.$n.plist"; echo "🗑  해제: $PFX.$n"
     done ;;
   status)
     for j in "${JOBS[@]}"; do IFS='|' read -r n _ _ <<<"$j"
+      match_only "$n" || continue
       if launchctl print "gui/$UID_/$PFX.$n" >/dev/null 2>&1; then
         echo "🟢 $n  $(launchctl print "gui/$UID_/$PFX.$n" | grep -E 'last exit code|runs =' | tr -s ' ' | tr '\n' ' ')"
       else echo "⚪ $n  (미등록)"; fi
     done ;;
-  *) echo "사용: $0 [install|uninstall|status]"; exit 2 ;;
+  *) echo "사용: $0 [install|uninstall|status] [job이름]"; exit 2 ;;
 esac
