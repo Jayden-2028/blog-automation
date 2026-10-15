@@ -117,4 +117,45 @@ const bad = "말한 것으로 보도됐습니다. 지원금은 30만 원입니�
   console.log("✅ 에이전트 교정: 적용 / 위반 미감소 폐기 / 마커 변경 폐기 / 호출 실패 fail-open / 위반 없으면 미호출");
 }
 
+// 5) person 분기(2026-10-15) - 허용 어미(~거든요·~고요)는 교정 대상이 아니다. 나머지 어미·타 카테고리는 기존대로.
+{
+  const personBody = "두 작품이 같은 시기에 겹쳤거든요. 일정이 빠듯했고요.\n\n[IMAGE: 장면 — 웹 검색]";
+  assert(findRuleViolations(personBody, "person").length === 0, "person의 거든요·고요는 위반이 아니다");
+  assert(findRuleViolations(personBody, "entertainment").length === 2, "타 카테고리의 거든요·고요는 기존대로 위반(문장 2개)");
+  assert(findRuleViolations(personBody).length === 2, "category 미지정도 기존대로 위반(문장 2개)");
+  assert(findRuleViolations("분위기가 좋네요. 그랬잖아요.", "person").length === 2, "person도 네요·잖아요는 위반(문장 2개)");
+
+  let called = false;
+  const personRun = await enforceWritingRules({
+    body: personBody,
+    category: "person",
+    runFixer: async () => {
+      called = true;
+      return { ok: true, output: "", durationMs: 1 };
+    },
+  });
+  assert(!called && !personRun.agentApplied && personRun.body === personBody && personRun.violationsBefore === 0, "person 허용 어미만 있으면 에이전트를 부르지 않고 원고를 바꾸지 않는다");
+
+  let prompt = "";
+  await enforceWritingRules({
+    body: "분위기가 좋네요. 두 작품이 겹쳤거든요.",
+    category: "person",
+    runFixer: async (p: string) => {
+      prompt = p;
+      return { ok: false, error: "stub", output: "", durationMs: 1 } as never;
+    },
+  });
+  assert(prompt.includes("좋네요") && !prompt.includes("] 두 작품이 겹쳤거든요"), "person 교정 목록에는 금지 어미 문장만 들어간다");
+  assert(prompt.includes("`~거든요`·`~고요`를 허용"), "person 교정 지시에 허용 어미 안내가 있다");
+  console.log("✅ person 분기: 허용 어미 미교정 / 금지 어미 교정 / 타 카테고리 기존대로");
+}
+
+// 6) 직접 인용(따옴표 안)은 전 카테고리에서 구어 어미 교정 대상이 아니다. 인용 밖은 그대로 잡는다. 따옴표가 문장 경계를 넘어도 동일.
+{
+  assert(findRuleViolations('그는 "저희도 그랬잖아요. 처음엔 어렵더라고요."라고 말했습니다.', "living").length === 0, "인용 안 어미는 위반이 아니다(문장 경계를 넘는 인용 포함)");
+  assert(findRuleViolations('그는 "그랬잖아요."라고 했는데 본문은 좋네요.', "living").length === 1, "인용 밖 어미는 기존대로 위반");
+  assert(findRuleViolations("그는 “겹쳤거든요.”라고 했습니다.", "entertainment").length === 0, "큰따옴표(곡선) 인용도 제외");
+  console.log("✅ 직접 인용 안 어미 제외(문장 경계 넘는 인용 포함), 인용 밖은 기존대로");
+}
+
 console.log("\n🎉 규칙 집행 테스트 통과");
