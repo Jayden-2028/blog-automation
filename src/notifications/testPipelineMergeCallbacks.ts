@@ -1,6 +1,7 @@
 // 통합 알림 버튼(✏️ 수정 요청 / 🗑 반려) 콜백 테스트(PIPELINE-MERGE-2026-10.md §1-b, §7). 실행: npm run test:pipeline-merge-callbacks
 // 실제 Telegram·Supabase를 부르지 않는다 - TelegramBot 주입 지점으로 대체한다.
 import { TelegramBot } from "./TelegramBot.js";
+import { NAVER_PUBLISH_BUTTON_PAUSED } from "../workflows/publish/manualPublishOnly.js";
 import type { TelegramCallbackQuery, TelegramUpdate } from "./TelegramBot.js";
 import type { ArticleJobRow } from "../types/database.js";
 
@@ -108,7 +109,9 @@ const lastKeyboard = (state: State) => {
   assert(out.reviewResult?.outcome.status === "blocked", "발행 이력이 있으면 blocked");
   assert(state.statusUpdates.length === 0 && state.manifestRemoved.length === 0, "상태·manifest를 건드리지 않는다");
   const all = (lastKeyboard(state) ?? []).flat();
-  assert(all.some((b) => b.callback_data === `publish:naver:${JOB_ID}`) && all.some((b) => b.callback_data === `review:discard:${JOB_ID}`), "잠긴 키보드를 발행·수정·반려 버튼으로 복원");
+  // 네이버 버튼 일시 해제(2026-10-16) 중에는 복원 키보드에도 naver가 빠진다 - 복원(false) 시 자동으로 원래 기대값.
+  const hasNaver = all.some((b) => b.callback_data === `publish:naver:${JOB_ID}`);
+  assert((NAVER_PUBLISH_BUTTON_PAUSED ? !hasNaver : hasNaver) && all.some((b) => b.callback_data === `review:discard:${JOB_ID}`), "잠긴 키보드 복원이 일시 해제 토글을 따른다");
   console.log("✅ 발행 이력 있는 원고 반려 거부 + 키보드 복원");
 }
 
@@ -130,7 +133,8 @@ const lastKeyboard = (state: State) => {
   const patch = state.patches.find((p) => "editRequestMessageId" in p);
   assert(patch?.editRequestMessageId === 9001 && patch.reviewDecision === "needs_edit", "답장 매칭용 메시지 id 저장");
   const all = (lastKeyboard(state) ?? []).flat();
-  assert(all.some((b) => b.callback_data === `publish:naver:${JOB_ID}`), "잠금 뒤에도 발행 버튼이 살아 있어야 한다(이게 없으면 수정 요청 뒤 발행 불가)");
+  const naverAfterLock = all.some((b) => b.callback_data === `publish:naver:${JOB_ID}`);
+  assert(NAVER_PUBLISH_BUTTON_PAUSED ? !naverAfterLock : naverAfterLock, "잠금 복원 키보드의 발행 버튼이 일시 해제 토글을 따른다(복원 시: 수정 요청 뒤에도 발행 가능해야 한다)");
   assert(all.some((b) => b.text.includes("수정 요청됨")), "수정 요청 표시");
   console.log("✅ ✏️ 수정 요청 - 답장 대기 + 발행 버튼 포함 키보드 복원");
 

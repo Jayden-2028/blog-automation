@@ -35,7 +35,7 @@ import { parseKeywordSelectionCallbackData, parsePersonGoCallbackData } from "./
 import { loadHotStarPerson } from "../workflows/hot-star/loadHotStarPerson.js";
 import type { HotStarPersonRef } from "../workflows/hot-star/loadHotStarPerson.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
-import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "../workflows/publish/manualPublishOnly.js";
+import { isManualPublishOnly, isPublishActionPaused, MANUAL_PUBLISH_ONLY_REASON, NAVER_PUBLISH_PAUSED_REASON } from "../workflows/publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
@@ -1122,6 +1122,14 @@ export class TelegramBot {
       };
     }
 
+    // 네이버 발행 버튼 일시 해제(2026-10-16 미스클릭 방지) - 새 알림에는 버튼이 안 붙지만 옛 메시지의 버튼은 남아 있다.
+    if (isPublishActionPaused(parsed.action)) {
+      return {
+        outcome: { status: "manual_only", action: parsed.action },
+        message: `⏸ <b>발행 버튼이 일시 해제 상태입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n${escapeTelegramHtml(NAVER_PUBLISH_PAUSED_REASON)}`,
+      };
+    }
+
     // 서버 측 트랙-채널 검증(개편2.5 B-2): 버튼은 트랙별로 다르게 붙지만, 오래된 알림의 버튼이나 다른 트랙 채팅의
     // 콜백이 와도 job 트랙에 안 맞는 채널로는 발행하지 않는다.
     if (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot") {
@@ -1707,6 +1715,7 @@ export class TelegramBot {
       // person은 발행 버튼이 없는 원고(수동 복붙 운영, 2026-10-14) - 트랙 기본 구성에서 발행 채널을 뺀다.
       const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track)
         .map((row) => (job && isManualPublishOnly(job) ? row.filter((a) => a === "images" || a === "export") : row))
+        .map((row) => row.filter((a) => !isPublishActionPaused(a)))
         .filter((row) => row.length > 0);
       keyboard = rows.map((row) =>
         row.map(

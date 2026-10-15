@@ -13,3 +13,18 @@ export const MANUAL_PUBLISH_ONLY_REASON =
 export function isManualPublishOnly(job: { category?: string | null }): boolean {
   return MANUAL_PUBLISH_ONLY_CATEGORIES.has(job.category ?? "");
 }
+
+/**
+ * 🟢 네이버 발행 버튼 일시 해제(2026-10-16 사용자 요청 - 미스클릭 방지). 사회(🟠 티스토리)·
+ * TKM(🔵 Blogger) 버튼은 유지한다. 복원 = 이 값을 false로 바꾸는 1커밋.
+ * 알림 키보드(notifyManuscriptsReady)와 옛 메시지의 버튼 콜백(TelegramBot) 양쪽이 이 값을 본다.
+ */
+export const NAVER_PUBLISH_BUTTON_PAUSED = true;
+
+export const NAVER_PUBLISH_PAUSED_REASON =
+  "🟢 네이버 발행 버튼은 일시 해제 중입니다(미스클릭 방지, 2026-10-16). 발행은 뷰어에서 복사해 직접 올려주세요.";
+
+/** 이 발행 액션이 일시 해제 상태인가. 지금은 naver만 해당한다. */
+export function isPublishActionPaused(action: string): boolean {
+  return NAVER_PUBLISH_BUTTON_PAUSED && action === "naver";
+}

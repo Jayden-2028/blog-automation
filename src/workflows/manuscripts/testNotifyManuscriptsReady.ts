@@ -4,6 +4,8 @@ import { buildManuscriptReadyMessage } from "./notifyManuscriptsReady.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
+import { NAVER_PUBLISH_BUTTON_PAUSED } from "../publish/manualPublishOnly.js";
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
 }
@@ -91,17 +93,19 @@ main().catch((error) => {
   const rows = withUuid.replyMarkup?.inline_keyboard ?? [];
 
   // 버튼이 4개가 되면서 두 줄로 나눴다 - 한 줄에 몰면 텔레그램에서 글자가 잘려 구분이 안 된다.
-  if (rows.length !== 3) throw new Error(`❌ 페이지 열기 줄 + 액션 두 줄, 세 줄이어야 한다 (${JSON.stringify(rows)})`);
+  // 네이버 버튼 일시 해제(2026-10-16) 중에는 발행 줄이 빠져 두 줄이다 - 복원(false) 시 자동으로 원래 기대값.
+  const wantRows = NAVER_PUBLISH_BUTTON_PAUSED ? 2 : 3;
+  if (rows.length !== wantRows) throw new Error(`❌ 페이지 열기 줄 + 액션 ${wantRows - 1}줄이어야 한다 (${JSON.stringify(rows)})`);
   if (!rows[0][0].url?.includes(`#${JOB}`)) throw new Error("❌ 첫 줄은 원고 페이지 딥링크여야 한다");
 
-  const actions = [...rows[1], ...rows[2]];
-  if (rows[1].length !== 2 || rows[2].length !== 1) {
-    throw new Error(`❌ 액션 버튼은 2개 + 1개(네이버만)여야 한다 (${JSON.stringify(rows.slice(1))})`);
+  const actions = rows.slice(1).flat();
+  if (rows[1].length !== 2 || (!NAVER_PUBLISH_BUTTON_PAUSED && rows[2].length !== 1)) {
+    throw new Error(`❌ 액션 버튼 줄 구성이 틀렸다 (${JSON.stringify(rows.slice(1))})`);
   }
   const expected = [
     { needle: "이미지", data: `publish:images:${JOB}` },
     { needle: "내려받기", data: `publish:export:${JOB}` },
-    { needle: "네이버", data: `publish:naver:${JOB}` },
+    ...(NAVER_PUBLISH_BUTTON_PAUSED ? [] : [{ needle: "네이버", data: `publish:naver:${JOB}` }]),
   ];
   expected.forEach((want, i) => {
     if (!actions[i].text.includes(want.needle)) throw new Error(`❌ ${i + 1}번 버튼 문구에 "${want.needle}"이 있어야 한다 (${actions[i].text})`);
@@ -140,10 +144,11 @@ main().catch((error) => {
   if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 발행 안내가 있어야 한다");
   if (msg.text.includes("🟢 네이버")) throw new Error("❌ 사회 알림에 네이버 표기가 있으면 안 된다");
 
-  // 엔터 job은 그대로다(트랙 값이 없으면 엔터).
+  // 엔터 job(트랙 값이 없으면 엔터) - 네이버 버튼은 일시 해제 토글을 따른다(2026-10-16).
   const ent = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");
-  if (!(ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`)) {
-    throw new Error("❌ 엔터 알림에는 네이버 발행 버튼이 그대로 있어야 한다");
+  const entNaver = (ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`);
+  if (NAVER_PUBLISH_BUTTON_PAUSED ? entNaver : !entNaver) {
+    throw new Error("❌ 엔터 네이버 발행 버튼 상태가 일시 해제 토글과 어긋난다");
   }
   if (ent.replyMarkup?.inline_keyboard[0][0].url !== `https://pages.example.dev/#${JOB}`) {
     throw new Error("❌ 엔터 딥링크는 기존 루트 그대로여야 한다");
@@ -193,13 +198,20 @@ main().catch((error) => {
   const entRows = rowsOf(ent);
   // 줄 순서(2026-10-08): 링크 / 수정·반려 / 이미지 수정·내려받기 / 발행.
   const texts = entRows.map((row) => row.map((b) => b.text.replace(/^\S+\s/, "")));
-  const expectedOrder = [["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"], ["네이버 발행"]];
+  // 네이버 버튼 일시 해제(2026-10-16) 중에는 발행 줄이 빠진다 - 복원(false) 시 자동으로 원래 기대값.
+  const expectedOrder = NAVER_PUBLISH_BUTTON_PAUSED
+    ? [["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"]]
+    : [["원고 페이지 열기"], ["수정 요청", "반려"], ["이미지 수정", "맥으로 내려받기"], ["네이버 발행"]];
   if (JSON.stringify(texts) !== JSON.stringify(expectedOrder)) throw new Error(`❌ 버튼 줄 순서가 다르다 (${JSON.stringify(texts)})`);
   const last = entRows[1];
   if (last.length !== 2 || !last[0].text.includes("수정 요청") || !last[1].text.includes("반려")) throw new Error(`❌ 둘째 줄은 ✏️ 수정 요청 / 🗑 반려여야 한다 (${JSON.stringify(last)})`);
   if (last[0].callback_data !== `review:edit:${JOB}` || last[1].callback_data !== `review:discard:${JOB}`) throw new Error("❌ 콜백은 review:edit / review:discard여야 한다");
   const entAll = entRows.flat();
-  if (!entAll.some((b) => b.callback_data === `publish:naver:${JOB}`) || !entAll.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 기존 발행·이미지 수정 버튼은 그대로여야 한다");
+  if (NAVER_PUBLISH_BUTTON_PAUSED) {
+    if (entAll.some((b) => b.callback_data === `publish:naver:${JOB}`)) throw new Error("❌ 일시 해제 중엔 네이버 발행 버튼이 없어야 한다");
+    if (!ent.text.includes("일시 해제")) throw new Error(`❌ 일시 해제 안내 문구가 있어야 한다 (${ent.text})`);
+  } else if (!entAll.some((b) => b.callback_data === `publish:naver:${JOB}`)) throw new Error("❌ 네이버 발행 버튼이 있어야 한다");
+  if (!entAll.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 이미지 수정 버튼은 그대로여야 한다");
 
   // 사회: 티스토리 발행 + 같은 줄.
   const soc = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "social" })), "https://pages.example.dev");
@@ -254,8 +266,9 @@ main().catch((error) => {
     throw new Error(`❌ person 알림은 수동 복붙 안내를 싣고 네이버 발행 표기가 없어야 한다 (${msg.text})`);
   }
   const ent = buildManuscriptReadyMessage(successResult({ ...personJob, category: "entertainment" } as ArticleJobRow), "https://pages.example.dev");
-  if (!(ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`)) {
-    throw new Error("❌ 엔터 알림의 네이버 발행 버튼은 그대로여야 한다");
+  const entHasNaver = (ent.replyMarkup?.inline_keyboard ?? []).flat().some((b) => b.callback_data === `publish:naver:${JOB}`);
+  if (NAVER_PUBLISH_BUTTON_PAUSED ? entHasNaver : !entHasNaver) {
+    throw new Error("❌ 엔터 네이버 발행 버튼 상태가 일시 해제 토글과 어긋난다");
   }
   console.log("✅ person 통합 알림 - 발행 버튼 없음 + 수동 복붙 안내, 엔터 불변");
 }

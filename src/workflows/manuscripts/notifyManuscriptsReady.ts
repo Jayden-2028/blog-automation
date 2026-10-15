@@ -15,7 +15,7 @@ import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
 import { manuscriptPagePath, viewerPageLink } from "../../config/manuscriptViewerPages.js";
 import { TRACK_LABEL, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
-import { isManualPublishOnly } from "../publish/manualPublishOnly.js";
+import { isManualPublishOnly, isPublishActionPaused } from "../publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import { buildArticleReviewCallbackData } from "../../notifications/articleReviewCallbackData.js";
 import { isAutoApproved } from "../../config/pipelineGate.js";
@@ -94,7 +94,9 @@ export function buildReadyKeyboard(
       { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
     ]);
     // person(인물 백과)은 발행 버튼이 없다 - 뷰어에서 복사해 네이버에 직접 붙여넣는다(2026-10-14 사용자 결정).
-    if (!isManualPublishOnly(job)) rows.push([publishButton]);
+    // 네이버 버튼은 일시 해제 상태일 수 있다(2026-10-16 미스클릭 방지) - 사회·TKM 버튼은 그대로다.
+    const paused = publishButton.callback_data === buildPublishDecisionCallbackData(jobId, "naver") && isPublishActionPaused("naver");
+    if (!isManualPublishOnly(job) && !paused) rows.push([publishButton]);
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 발행 줄을 뺀다 - 여기서 던지면 알림 전체가 사라진다.
   }
@@ -228,6 +230,10 @@ export function buildManuscriptReadyMessage(
     lines0,
     ...withLeadingBlank(buildAutoApprovedNotes(job)),
     ...(manual ? ["", "✍️ 뷰어에서 복사해 네이버에 직접 붙여넣으세요(자동 발행 없음)."] : []),
+    // 네이버 버튼 일시 해제(2026-10-16 미스클릭 방지) - 엔터 트랙의 비(非)person 원고에만 안내한다.
+    ...(!manual && trackOfJob(job) === "entertainment" && isPublishActionPaused("naver")
+      ? ["", "⏸ 네이버 발행 버튼은 일시 해제 중입니다 - 발행은 뷰어에서 복사해 직접 올려주세요."]
+      : []),
   ];
   // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤** 누르는 공개 발행이다.
   // 사람이 곧 품질 게이트다 - 누르지 않은 원고는 올라가지 않는다. 버튼 구성(줄 나눔·트랙별 발행 버튼)은 buildReadyKeyboard 한 곳에 둔다.
