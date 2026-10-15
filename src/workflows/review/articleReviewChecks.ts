@@ -23,7 +23,7 @@ import {
   currentYearInDatePattern,
   kstYear,
   PERSON_ALLOWED_COLLOQUIAL_MAX,
-  countPersonAllowedEndings,
+  countAllowedEndings,
   findColloquialEndings,
 } from "../writing/bannedPatterns.js";
 
@@ -622,7 +622,8 @@ export function checkVoice(rawBody: string | null, category?: string | null): Re
   const checks: ReviewCheck[] = [];
 
   // 직접 인용(따옴표 안)은 원문 그대로가 원칙이라 전 카테고리에서 검사하지 않는다(2026-10-15).
-  // person은 ~거든요·~고요를 허용하므로 금지 대상에서 빼고, 허용 상한(3곳)만 따로 본다.
+  // 허용 어미는 카테고리별 집합이다(2026-10-16 voice.md §2 - 전 트랙 ~네요, person 추가 ~거든요·~고요,
+  // incident는 허용 없음). 허용분은 금지 경고에서 빼고 합산 상한(3곳)만 따로 본다.
   const found = findColloquialEndings(body, category);
   if (found.length > 0) {
     const unique = [...new Set(found)];
@@ -633,15 +634,13 @@ export function checkVoice(rawBody: string | null, category?: string | null): Re
     });
   }
 
-  if (category === "person") {
-    const allowed = countPersonAllowedEndings(body);
-    if (allowed > PERSON_ALLOWED_COLLOQUIAL_MAX) {
-      checks.push({
-        category: "quality",
-        severity: "warning",
-        message: `인물 백과 허용 어미(~거든요·~고요) ${allowed}곳: 허용 상한 ${PERSON_ALLOWED_COLLOQUIAL_MAX}곳 초과 (style/person.md)`,
-      });
-    }
+  const allowed = countAllowedEndings(body, category);
+  if (allowed > PERSON_ALLOWED_COLLOQUIAL_MAX) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `허용 구어 어미 ${allowed}곳: 원고당 상한 ${PERSON_ALLOWED_COLLOQUIAL_MAX}곳 초과 (style/voice.md §2)`,
+    });
   }
   return checks;
 }

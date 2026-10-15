@@ -33,7 +33,7 @@ const WRITTEN_AT = "2026-08-28T00:39:15.795Z";
  * (실제로 이 픽스처의 첫 버전이 그렇게 걸렸다 - 검사가 제대로 동작한다는 뜻이기도 하다).
  */
 function makeCleanBody(extra = ""): string {
-  // 분량 목표(공백 제외 2,000~3,000자, writer.md §6-5)를 채운다 - 짧으면 별개의 '분량 미달'
+  // 분량 목표(공백 제외 2,000~3,500자, writer.md §6-5)를 채운다 - 짧으면 별개의 '분량 미달'
   // 경고가 붙어 "깨끗한 원고" 테스트가 깨진다. checkQuality가 공백을 빼고 세므로 넉넉히 잡는다.
   // 서로 닮지 않은 문장 76개(같은 정보 반복 검사에도 안 걸려야 한다): 어휘 풀 네 개를 소수 간격으로 조합한다.
   const pools = [
@@ -207,7 +207,8 @@ function main(): void {
     assert(lengthWarns(3900, "person").length === 0, "person 3,900자는 통과");
     const over = lengthWarns(4100, "person");
     assert(over.length === 1 && over[0].severity === "warning" && over[0].message.includes("초과 신호") && over[0].message.includes("상한 위반이 아니"), "person 4,100자는 초과 신호 경고(상한 위반 아님 명시)");
-    assert(lengthWarns(3100, "entertainment").length === 1, "다른 카테고리는 3,100자도 기존 상한(3,000자) 초과 경고");
+    assert(lengthWarns(3100, "entertainment").length === 0, "상한 3,500자로 상향(2026-10-16) - 3,100자는 통과");
+    assert(lengthWarns(3600, "entertainment").length === 1, "다른 카테고리는 3,600자면 상한(3,500자) 초과 경고");
     assert(lengthWarns(3900, "entertainment").length === 1, "다른 카테고리는 3,900자 경고 유지");
     assert(lengthWarns(1900, "entertainment").length === 1, "다른 카테고리는 1,900자 하한 미달 경고 유지");
     const personTags = checkQuality({ ...personBase, hashtags: Array(6).fill("#t"), body: bodyOf(2500) });
@@ -459,10 +460,10 @@ function main(): void {
   const voiceBad = checkVoice("저희 쌍둥이도 그랬거든요. 처음엔 잘 안 되더라고요.\n지원금은 30만 원이라고 하네요.");
   assert(voiceBad.length === 1 && voiceBad[0].severity === "warning", "금지 구어 어미는 warning 1건으로 묶여야 한다");
   assert(
-    voiceBad[0].message.includes("3건") && voiceBad[0].message.includes("~거든요") && voiceBad[0].message.includes("~더라고요") && voiceBad[0].message.includes("~네요"),
-    `걸린 어미와 개수를 보여줘야 한다 (실제: ${voiceBad[0].message})`
+    voiceBad[0].message.includes("2건") && voiceBad[0].message.includes("~거든요") && voiceBad[0].message.includes("~더라고요") && !voiceBad[0].message.includes("~네요"),
+    `걸린 어미와 개수를 보여줘야 한다 - 네요는 허용(2026-10-16)이라 빠져야 한다 (실제: ${voiceBad[0].message})`
   );
-  console.log("✅ voice: 금지 구어 어미(거든요/더라고요/네요) 경고 + 어미 표시");
+  console.log("✅ voice: 금지 구어 어미(거든요/더라고요) 경고 + 네요는 허용으로 제외");
 
   // v2) 규칙대로 쓴 문장은 통과. "고요한"처럼 낱말 안의 "고요"는 종결이 아니라 안 걸린다.
   const voiceOk = checkVoice("지원금은 2026년 8월 기준 30만 원입니다. 저는 이 부분이 제일 반가웠어요.\n고요한 밤이었습니다. 신청 전에 지역부터 확인해 보세요.");
@@ -477,8 +478,8 @@ function main(): void {
   // v4) 직접 인용(따옴표 안)은 전 카테고리에서 어미 검사 제외(2026-10-15).
   const voiceQuoted = checkVoice('그는 "저희도 그랬잖아요. 처음엔 어렵더라고요."라고 말했습니다.', "living");
   assert(voiceQuoted.length === 0, `따옴표 안 구어 어미는 걸리면 안 된다 (실제: ${JSON.stringify(voiceQuoted)})`);
-  const voiceQuotedCurly = checkVoice("그는 “그랬잖아요.”라고 말했습니다. 그런데 본문은 좋네요.", null);
-  assert(voiceQuotedCurly.length === 1 && voiceQuotedCurly[0].message.includes("1건") && voiceQuotedCurly[0].message.includes("~네요"), "인용 밖의 어미만 센다");
+  const voiceQuotedCurly = checkVoice("그는 “그랬잖아요.”라고 말했습니다. 그런데 본문은 그렇더라고요.", null);
+  assert(voiceQuotedCurly.length === 1 && voiceQuotedCurly[0].message.includes("1건") && voiceQuotedCurly[0].message.includes("~더라고요"), "인용 밖의 어미만 센다(네요는 허용으로 전환)");
   console.log("✅ voice: 직접 인용 안 어미는 제외, 인용 밖은 그대로 경고");
 
   // v5) person(2026-10-15): ~거든요·~고요 허용, 합계 4곳부터 상한 초과 경고, 나머지 4종은 그대로.
@@ -490,8 +491,8 @@ function main(): void {
     `person 허용 어미 4곳은 상한 초과 경고 1건 (실제: ${JSON.stringify(personFour)})`
   );
   assert(checkVoice('그는 "겹쳤거든요. 그랬고요." 라고 했습니다.\n' + personEnd(3), "person").length === 0, "인용 안 허용 어미는 상한 합계에서도 제외");
-  const personBanned = checkVoice("본문이 좋네요.\n그랬잖아요.\n처음엔 겹쳤거든요.", "person");
-  assert(personBanned.length === 1 && personBanned[0].message.includes("2건") && !personBanned[0].message.includes("~거든요"), "person도 네요/잖아요 등 나머지 어미는 경고, 거든요는 제외");
+  const personBanned = checkVoice("본문이 그렇더라고요.\n그랬잖아요.\n처음엔 겹쳤거든요.", "person");
+  assert(personBanned.length === 1 && personBanned[0].message.includes("2건") && !personBanned[0].message.includes("~거든요"), "person도 더라고요/잖아요 등 나머지 어미는 경고, 허용 어미(거든요·네요)는 제외");
   assert(checkVoice("처음엔 겹쳤거든요.", "entertainment").length === 1, "타 카테고리의 ~거든요는 기존대로 경고");
   assert(checkVoice("처음엔 겹쳤거든요.", null).length === 1, "category 미지정도 기존대로 경고");
   console.log("✅ voice: person 허용 어미 3곳 통과 / 4곳 경고 / 나머지 4종 유지 / 타 카테고리 기존대로");

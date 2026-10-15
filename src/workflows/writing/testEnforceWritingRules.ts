@@ -123,7 +123,10 @@ const bad = "말한 것으로 보도됐습니다. 지원금은 30만 원입니�
   assert(findRuleViolations(personBody, "person").length === 0, "person의 거든요·고요는 위반이 아니다");
   assert(findRuleViolations(personBody, "entertainment").length === 2, "타 카테고리의 거든요·고요는 기존대로 위반(문장 2개)");
   assert(findRuleViolations(personBody).length === 2, "category 미지정도 기존대로 위반(문장 2개)");
-  assert(findRuleViolations("분위기가 좋네요. 그랬잖아요.", "person").length === 2, "person도 네요·잖아요는 위반(문장 2개)");
+  assert(findRuleViolations("분위기가 좋네요. 그랬잖아요.", "person").length === 1, "person에서 네요는 허용(2026-10-16), 잖아요만 위반");
+  assert(findRuleViolations("분위기가 좋네요.", "entertainment").length === 0, "엔터도 네요는 허용(2026-10-16 voice.md)");
+  assert(findRuleViolations("분위기가 좋네요.", "incident").length === 1, "incident는 구어 완화 예외 - 네요도 위반");
+  assert(findRuleViolations("그렇더라고요.", "entertainment").length === 1, "더라고요는 전 카테고리 금지 유지");
 
   let called = false;
   const personRun = await enforceWritingRules({
@@ -138,14 +141,14 @@ const bad = "말한 것으로 보도됐습니다. 지원금은 30만 원입니�
 
   let prompt = "";
   await enforceWritingRules({
-    body: "분위기가 좋네요. 두 작품이 겹쳤거든요.",
+    body: "그 장면이 압권이잖아요. 두 작품이 겹쳤거든요.",
     category: "person",
     runFixer: async (p: string) => {
       prompt = p;
       return { ok: false, error: "stub", output: "", durationMs: 1 } as never;
     },
   });
-  assert(prompt.includes("좋네요") && !prompt.includes("] 두 작품이 겹쳤거든요"), "person 교정 목록에는 금지 어미 문장만 들어간다");
+  assert(prompt.includes("압권이잖아요") && !prompt.includes("] 두 작품이 겹쳤거든요"), "person 교정 목록에는 금지 어미(잖아요) 문장만 들어간다 - 허용 어미(거든요) 문장은 목록 제외");
   assert(prompt.includes("`~거든요`·`~고요`를 허용"), "person 교정 지시에 허용 어미 안내가 있다");
   console.log("✅ person 분기: 허용 어미 미교정 / 금지 어미 교정 / 타 카테고리 기존대로");
 }
@@ -153,7 +156,7 @@ const bad = "말한 것으로 보도됐습니다. 지원금은 30만 원입니�
 // 6) 직접 인용(따옴표 안)은 전 카테고리에서 구어 어미 교정 대상이 아니다. 인용 밖은 그대로 잡는다. 따옴표가 문장 경계를 넘어도 동일.
 {
   assert(findRuleViolations('그는 "저희도 그랬잖아요. 처음엔 어렵더라고요."라고 말했습니다.', "living").length === 0, "인용 안 어미는 위반이 아니다(문장 경계를 넘는 인용 포함)");
-  assert(findRuleViolations('그는 "그랬잖아요."라고 했는데 본문은 좋네요.', "living").length === 1, "인용 밖 어미는 기존대로 위반");
+  assert(findRuleViolations('그는 "그랬잖아요."라고 했는데 본문은 그렇더라고요.', "living").length === 1, "인용 밖 금지 어미는 기존대로 위반(네요는 2026-10-16부터 허용)");
   assert(findRuleViolations("그는 “겹쳤거든요.”라고 했습니다.", "entertainment").length === 0, "큰따옴표(곡선) 인용도 제외");
   console.log("✅ 직접 인용 안 어미 제외(문장 경계 넘는 인용 포함), 인용 밖은 기존대로");
 }
