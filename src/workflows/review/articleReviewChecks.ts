@@ -22,7 +22,9 @@ import {
   ACCORDING_TO_PATTERN,
   currentYearInDatePattern,
   kstYear,
-  BANNED_COLLOQUIAL_ENDINGS,
+  PERSON_ALLOWED_COLLOQUIAL_MAX,
+  countPersonAllowedEndings,
+  findColloquialEndings,
 } from "../writing/bannedPatterns.js";
 
 export type ReviewSeverity = "error" | "warning";
@@ -614,21 +616,34 @@ export function checkInstitutionAttribution(
 // 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
 
 
-export function checkVoice(rawBody: string | null): ReviewCheck[] {
+export function checkVoice(rawBody: string | null, category?: string | null): ReviewCheck[] {
   if (!rawBody) return [];
   const body = stripReferencesSection(rawBody);
+  const checks: ReviewCheck[] = [];
 
-  const found = [...body.matchAll(BANNED_COLLOQUIAL_ENDINGS)].map((m) => m[1]);
-  if (found.length === 0) return [];
-
-  const unique = [...new Set(found)];
-  return [
-    {
+  // 직접 인용(따옴표 안)은 원문 그대로가 원칙이라 전 카테고리에서 검사하지 않는다(2026-10-15).
+  // person은 ~거든요·~고요를 허용하므로 금지 대상에서 빼고, 허용 상한(3곳)만 따로 본다.
+  const found = findColloquialEndings(body, category);
+  if (found.length > 0) {
+    const unique = [...new Set(found)];
+    checks.push({
       category: "quality",
       severity: "warning",
       message: `공통 문체가 금지한 구어 어미 ${found.length}건: ${unique.map((e) => `~${e}`).join(", ")} (style/voice.md §2 - 정보는 합니다체, 반응은 해요체)`,
-    },
-  ];
+    });
+  }
+
+  if (category === "person") {
+    const allowed = countPersonAllowedEndings(body);
+    if (allowed > PERSON_ALLOWED_COLLOQUIAL_MAX) {
+      checks.push({
+        category: "quality",
+        severity: "warning",
+        message: `인물 백과 허용 어미(~거든요·~고요) ${allowed}곳: 허용 상한 ${PERSON_ALLOWED_COLLOQUIAL_MAX}곳 초과 (style/person.md)`,
+      });
+    }
+  }
+  return checks;
 }
 
 /** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(images.md §8-1). */

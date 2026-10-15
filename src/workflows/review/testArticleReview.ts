@@ -474,6 +474,28 @@ function main(): void {
   assert(voiceRefs.length === 0, "참고 자료 링크 제목의 구어 어미는 걸리면 안 된다");
   console.log("✅ voice: 참고 자료 섹션 제외");
 
+  // v4) 직접 인용(따옴표 안)은 전 카테고리에서 어미 검사 제외(2026-10-15).
+  const voiceQuoted = checkVoice('그는 "저희도 그랬잖아요. 처음엔 어렵더라고요."라고 말했습니다.', "living");
+  assert(voiceQuoted.length === 0, `따옴표 안 구어 어미는 걸리면 안 된다 (실제: ${JSON.stringify(voiceQuoted)})`);
+  const voiceQuotedCurly = checkVoice("그는 “그랬잖아요.”라고 말했습니다. 그런데 본문은 좋네요.", null);
+  assert(voiceQuotedCurly.length === 1 && voiceQuotedCurly[0].message.includes("1건") && voiceQuotedCurly[0].message.includes("~네요"), "인용 밖의 어미만 센다");
+  console.log("✅ voice: 직접 인용 안 어미는 제외, 인용 밖은 그대로 경고");
+
+  // v5) person(2026-10-15): ~거든요·~고요 허용, 합계 4곳부터 상한 초과 경고, 나머지 4종은 그대로.
+  const personEnd = (n: number) => Array.from({ length: n }, (_, i) => `작품${i}이 겹쳤거든요.`).join("\n");
+  assert(checkVoice(personEnd(3), "person").length === 0, "person 허용 어미 3곳은 통과");
+  const personFour = checkVoice(personEnd(4), "person");
+  assert(
+    personFour.length === 1 && personFour[0].severity === "warning" && personFour[0].message.includes("4곳") && personFour[0].message.includes("상한 3곳"),
+    `person 허용 어미 4곳은 상한 초과 경고 1건 (실제: ${JSON.stringify(personFour)})`
+  );
+  assert(checkVoice('그는 "겹쳤거든요. 그랬고요." 라고 했습니다.\n' + personEnd(3), "person").length === 0, "인용 안 허용 어미는 상한 합계에서도 제외");
+  const personBanned = checkVoice("본문이 좋네요.\n그랬잖아요.\n처음엔 겹쳤거든요.", "person");
+  assert(personBanned.length === 1 && personBanned[0].message.includes("2건") && !personBanned[0].message.includes("~거든요"), "person도 네요/잖아요 등 나머지 어미는 경고, 거든요는 제외");
+  assert(checkVoice("처음엔 겹쳤거든요.", "entertainment").length === 1, "타 카테고리의 ~거든요는 기존대로 경고");
+  assert(checkVoice("처음엔 겹쳤거든요.", null).length === 1, "category 미지정도 기존대로 경고");
+  console.log("✅ voice: person 허용 어미 3곳 통과 / 4곳 경고 / 나머지 4종 유지 / 타 카테고리 기존대로");
+
   // ---------- 이미지 프롬프트 (2026-09-16) ----------
 
   // i1) 데이터형(대진표·일정표) 이미지를 AI 생성으로 지정하면 경고 - 실측(아시안게임 야구 대진표에 팀이 없음).
