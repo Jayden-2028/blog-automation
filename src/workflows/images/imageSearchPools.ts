@@ -81,7 +81,8 @@ export function searchPoolsFor(
   category: string | null | undefined,
   briefType?: string | null
 ): ImageSearchPool[] {
-  if (briefType === "celebrity") return PERSON_POOLS;
+  // person 트랙(2026-10-14)은 브리프 유형과 무관하게 인물 풀 - 브리프가 celebrity로 안 나와도 빈 풀을 받지 않는다.
+  if (category === "person" || briefType === "celebrity") return PERSON_POOLS;
   if (briefType === "drama") return ARTWORK_POOLS;
 
   switch (category) {

@@ -85,6 +85,39 @@ export class ArticleJobRepository {
   }
 
   /**
+   * 핫이슈 스타 "✍️ 인물글" 버튼으로 인물 백과 job을 만든다(2026-10-13). 알림 전용 run에는 keyword_rankings가
+   * 없으므로 createFromRanking을 못 쓴다. source_run_id/source_rank는 **핫이슈 스타 run의 id와 인물 rank**를 그대로
+   * 쓴다(FK 없음 - 마이그레이션 주석 참고) - (source_run_id, source_rank) 유니크가 곧 같은 버튼의 중복 클릭 방어다.
+   */
+  static async createFromHotStarPerson(
+    person: { runId: number; rank: number; name: string; background: string },
+    options: { metadata?: Record<string, unknown> } = {}
+  ): Promise<CreateArticleJobResult> {
+    const row: ArticleJobInsert = {
+      source_run_id: person.runId,
+      source_rank: person.rank,
+      keyword: person.name,
+      headline: null,
+      seed_query: null,
+      category: "person",
+      total_score: null,
+      score_breakdown: null,
+      status: "selected",
+      selected_via: "telegram",
+      metadata: { ...(options.metadata ?? {}), personBackground: person.background },
+    };
+
+    const { data, error } = await supabase.from("article_jobs").insert(row).select().single();
+    if (!error && data) return { job: data, created: true };
+
+    if (error?.code === UNIQUE_VIOLATION) {
+      const existing = await this.findByRunAndRank(person.runId, person.rank);
+      if (existing) return { job: existing, created: false };
+    }
+    throw error ?? new Error("article_jobs insert가 row를 반환하지 않았습니다.");
+  }
+
+  /**
    * discovery_run 없이 job을 만든다(인스타그램 수동 큐레이션 등). keyword_rankings를 거치지 않으므로
    * createFromRanking을 못 쓴다 - source_run_id/source_rank는 (run_id, rank) 유니크 인덱스를 만족시키기
    * 위한 자리채우기일 뿐, 실제 discovery_run을 가리키지 않는다.

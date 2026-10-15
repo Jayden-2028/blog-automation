@@ -22,7 +22,9 @@ import {
   ACCORDING_TO_PATTERN,
   currentYearInDatePattern,
   kstYear,
-  BANNED_COLLOQUIAL_ENDINGS,
+  PERSON_ALLOWED_COLLOQUIAL_MAX,
+  countPersonAllowedEndings,
+  findColloquialEndings,
 } from "../writing/bannedPatterns.js";
 
 export type ReviewSeverity = "error" | "warning";
@@ -152,7 +154,7 @@ export function checkLegal(rawBody: string | null, category: string | null): Rev
   if (found.length === 0) return [];
 
   // 인물을 주로 다루는 분야에서는 error, 그 외에는 warning.
-  const isPersonHeavy = category === "entertainment";
+  const isPersonHeavy = category === "entertainment" || category === "person";
 
   return [
     {
@@ -160,7 +162,7 @@ export function checkLegal(rawBody: string | null, category: string | null): Rev
       severity: isPersonHeavy ? "error" : "warning",
       message:
         `추측성 표현 ${found.length}종: ${found.join(", ")}` +
-        (isPersonHeavy ? " (연예 분야는 명예훼손 위험이 커 확정 보도만 다뤄야 합니다)" : ""),
+        (isPersonHeavy ? " (연예·인물 분야는 명예훼손 위험이 커 확정 보도만 다뤄야 합니다)" : ""),
     },
   ];
 }
@@ -201,7 +203,16 @@ export type CheckQualityInput = {
   researchThin?: boolean;
   /** 이 job의 메인 키워드. 제목 첫 마디에 들어갔는지 본다(2026-10-02). */
   keyword?: string | null;
+  /**
+   * job.category. person(인물 백과)이면 하한은 공통과 같고(2,000자) 상한만 4,000자로 넓다.
+   * 4,000자 초과는 집필 상한 위반이 아니라 목표 구간(2,500~4,000자) 초과 신호로 경고만 한다
+   * (2026-10-15 Q8 판정, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
+   */
+  category?: string | null;
 };
+
+/** 인물 백과 분량 경고 상한(공백 제외). 집필 상한이 아니라 목표 구간 초과 신호다. 하한은 공통 min. */
+export const PERSON_MAX_ARTICLE_LENGTH = 4000;
 
 /** 제목 꼬리의 "~정리/총정리/모음". 후킹을 죽이는 자리다(core-rules.md §5). */
 const TITLE_SUMMARY_TAIL = /(?:정리|총정리|모음|총집합)\s*$/;
@@ -291,17 +302,24 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
     .replace(/\[IMAGE[^\]]*\]/gi, "") // [IMAGE: ...] 마커
     .replace(/\s+/g, "");
   const length = prose.length;
-  if (length < TARGET_ARTICLE_LENGTH.min && input.researchThin) {
+  const isPerson = input.category === "person";
+  const minLength = TARGET_ARTICLE_LENGTH.min;
+  const maxLength = isPerson ? PERSON_MAX_ARTICLE_LENGTH : TARGET_ARTICLE_LENGTH.max;
+  if (length < minLength && input.researchThin) {
     checks.push({
       category: "quality",
       severity: "warning",
       message: `자료 얇음(thin): 분량 ${length.toLocaleString()}자 - 하한 미달은 예상된 결과입니다. 늘려 쓰지 않았는지 확인하고, 자료조사를 보강할지 판단하세요`,
     });
-  } else if (length < TARGET_ARTICLE_LENGTH.min || length > TARGET_ARTICLE_LENGTH.max) {
+  } else if (length < minLength || length > maxLength) {
     checks.push({
       category: "quality",
       severity: "warning",
-      message: `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
+      message: isPerson
+        ? length < minLength
+          ? `분량 ${length.toLocaleString()}자 (인물 백과 하한 ${minLength.toLocaleString()}자 미달, 공백·목록 제외)`
+          : `분량 ${length.toLocaleString()}자 (인물 백과 목표 구간 2,500~${maxLength.toLocaleString()}자 초과 신호입니다. 상한 위반이 아니니 늘어진 곳이 없는지만 확인하세요, 공백·목록 제외)`
+        : `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
     });
   }
 
@@ -598,21 +616,34 @@ export function checkInstitutionAttribution(
 // 지정"만 여기서 경고한다(문단 요약 여부 자체는 결정적으로 판정할 수 없다).
 
 
-export function checkVoice(rawBody: string | null): ReviewCheck[] {
+export function checkVoice(rawBody: string | null, category?: string | null): ReviewCheck[] {
   if (!rawBody) return [];
   const body = stripReferencesSection(rawBody);
+  const checks: ReviewCheck[] = [];
 
-  const found = [...body.matchAll(BANNED_COLLOQUIAL_ENDINGS)].map((m) => m[1]);
-  if (found.length === 0) return [];
-
-  const unique = [...new Set(found)];
-  return [
-    {
+  // 직접 인용(따옴표 안)은 원문 그대로가 원칙이라 전 카테고리에서 검사하지 않는다(2026-10-15).
+  // person은 ~거든요·~고요를 허용하므로 금지 대상에서 빼고, 허용 상한(3곳)만 따로 본다.
+  const found = findColloquialEndings(body, category);
+  if (found.length > 0) {
+    const unique = [...new Set(found)];
+    checks.push({
       category: "quality",
       severity: "warning",
       message: `공통 문체가 금지한 구어 어미 ${found.length}건: ${unique.map((e) => `~${e}`).join(", ")} (style/voice.md §2 - 정보는 합니다체, 반응은 해요체)`,
-    },
-  ];
+    });
+  }
+
+  if (category === "person") {
+    const allowed = countPersonAllowedEndings(body);
+    if (allowed > PERSON_ALLOWED_COLLOQUIAL_MAX) {
+      checks.push({
+        category: "quality",
+        severity: "warning",
+        message: `인물 백과 허용 어미(~거든요·~고요) ${allowed}곳: 허용 상한 ${PERSON_ALLOWED_COLLOQUIAL_MAX}곳 초과 (style/person.md)`,
+      });
+    }
+  }
+  return checks;
 }
 
 /** 정보가 글자로 전달되는 이미지 유형. AI 생성은 `no text` 규칙 때문에 정보가 통째로 사라진다(images.md §8-1). */
@@ -656,8 +687,8 @@ export function classifyImageMarker(description: string): ImageMarkerViolation |
   return null;
 }
 
-/** 엔터·연예·OTT는 웹 검색만 쓴다(2026-09-22 사용자 결정, images.md §8-1-2). */
-const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott"]);
+/** 엔터·연예·OTT·인물(person)은 웹 검색만 쓴다(2026-09-22 사용자 결정, images.md §8-1-2). */
+const SEARCH_ONLY_CATEGORIES = new Set(["entertainment", "ott", "person"]);
 
 export function checkImagePrompts(rawBody: string | null, category?: string | null): ReviewCheck[] {
   if (!rawBody) return [];
@@ -685,7 +716,7 @@ export function checkImagePrompts(rawBody: string | null, category?: string | nu
         category: "quality",
         severity: "warning",
         message:
-          `연예·OTT 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
+          `연예·OTT·인물 원고에 웹 검색이 아닌 이미지 자리 ${notSearch.length}개: "${notSearch[0].slice(0, 30)}…"` +
           " (images.md §8-1-2 - 실사가 있는데 그리거나 표로 만들 이유가 없다, 웹 검색으로)",
       });
     }

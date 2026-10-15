@@ -75,4 +75,15 @@ console.log("▶ 서치풀 테스트 시작\n");
   console.log("✅ 인물 서치풀 - 브리프 유형이 category보다 우선");
 }
 
+// 6) person 트랙은 브리프 유형이 없거나 다르게 나와도 인물 풀을 받는다(2026-10-14 E-1).
+{
+  for (const briefType of [undefined, null, "celebrity", "event"]) {
+    const pools = searchPoolsFor("person", briefType);
+    assert(pools.length === 3 && pools[2].label === "이름만", `person + brief=${briefType} -> 인물 풀`);
+  }
+  const lines = describeSearchPools("양준모", "person", null).join("\n");
+  assert(lines.includes("나무위키"), "person 프롬프트 블록에 인물 풀이 들어간다");
+  console.log("✅ person - 브리프 유형과 무관하게 인물 서치풀");
+}
+
 console.log("\n🎉 서치풀 테스트 통과");

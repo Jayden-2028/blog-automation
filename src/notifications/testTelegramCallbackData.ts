@@ -8,8 +8,10 @@
 
 import {
   buildKeywordSelectionCallbackData,
+  buildPersonGoCallbackData,
   CALLBACK_DATA_MAX_BYTES,
   parseKeywordSelectionCallbackData,
+  parsePersonGoCallbackData,
 } from "./telegramCallbackData.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -105,6 +107,27 @@ function main(): void {
     assert(threw, `build가 던져야 할 인자를 통과시켰다: runId=${runId}, rank=${rank}`);
   }
   console.log("✅ build는 잘못된 인자에 대해 예외 발생");
+
+  // pgo(인물글 버튼, 2026-10-13): 형식 고정 + 왕복 + 방어적 파싱 + go/pass 파서와 서로 배타적.
+  assert(buildPersonGoCallbackData(42, 2) === "pgo:42:2", "pgo 형식이 어긋났다");
+  const pgo = parsePersonGoCallbackData("pgo:42:2");
+  assert(pgo?.runId === 42 && pgo.rank === 2, "pgo 왕복 파싱");
+  assert(Buffer.byteLength(buildPersonGoCallbackData(Number.MAX_SAFE_INTEGER, 99), "utf8") <= CALLBACK_DATA_MAX_BYTES, "pgo는 64바이트 안");
+  for (const bad of [undefined, null, "", "pgo", "pgo:1", "pgo:1:2:3", "pgo:a:2", "pgo:1:0", "pgo:-1:2", "pgo: 1:2", "go:1:2", "pass:1:2", "PGO:1:2", "pgo:1:2 "]) {
+    assert(parsePersonGoCallbackData(bad as string | null | undefined) === null, `잘못된 pgo 입력은 null이어야 한다: ${JSON.stringify(bad)}`);
+  }
+  assert(parseKeywordSelectionCallbackData("pgo:42:2") === null, "go/pass 파서는 pgo를 받으면 안 된다(pgo가 Pass로 처리되는 사고 방지)");
+  assert(parsePersonGoCallbackData("go:42:2") === null && parsePersonGoCallbackData("sel:42:2") === null, "pgo 파서는 go/sel을 받으면 안 된다");
+  for (const [runId, rank] of [[-1, 1], [1, 0], [1.5, 1]] as const) {
+    let threw = false;
+    try {
+      buildPersonGoCallbackData(runId, rank);
+    } catch {
+      threw = true;
+    }
+    assert(threw, `pgo build는 잘못된 인자(${runId}, ${rank})에서 던져야 한다`);
+  }
+  console.log("✅ pgo callback_data: 형식 고정·왕복·방어적 파싱·go/pass와 배타");
 
   console.log("\n✅ callback_data 규약 테스트 완료");
 }

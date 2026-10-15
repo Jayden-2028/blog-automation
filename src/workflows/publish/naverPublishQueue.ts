@@ -16,6 +16,7 @@ import { EDIT_GUARD_METADATA_KEYS, filterEditPending } from "../manuscripts/view
 import type { EditGuardOptions } from "../manuscripts/viewerEditGuard.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
+import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "./manualPublishOnly.js";
 
 /** job.metadata 안의 키. 이름을 바꾸면 이미 쌓인 요청을 잃는다. */
 export const NAVER_REQUEST_KEY = "naverPublish";
@@ -55,6 +56,8 @@ export async function requestNaverPublish(
 ): Promise<{ queued: boolean; reason?: string }> {
   const mergeMetadata = options.mergeMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
   const now = options.now ?? (() => new Date());
+
+  if (isManualPublishOnly(job)) return { queued: false, reason: MANUAL_PUBLISH_ONLY_REASON };
 
   const existing = readNaverRequest(job);
   if (existing?.status === "requested") return { queued: false, reason: "이미 대기 중입니다." };

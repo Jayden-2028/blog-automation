@@ -120,3 +120,57 @@ main().catch((error) => {
   console.log("✅ 지식iN·카페 소스 - 이름 보존, community, 미주입 소스 건너뜀");
 }
 
+
+// --- 인물 백과 person 모드(2026-10-13, A-7) - 카페·지식iN 제외, 자동완성 원본 주입, 실패해도 진행 ----
+{
+  const boom = (name: string): KeywordProvider => ({
+    fetchKeywords: async () => {
+      throw new Error(`❌ person 모드에서 ${name}을 호출하면 안 된다`);
+    },
+  });
+  const providers = {
+    news: fakeProvider([makeRaw({ source: "naver_news", sourceUrl: "https://wikitree.co.kr/a" })]),
+    web: fakeProvider([makeRaw({ source: "naver_web", sourceUrl: "https://namu.wiki/w/x" })]),
+    kin: boom("kin"),
+    cafe: boom("cafe"),
+  };
+  const asked: string[] = [];
+  const person = await collectSourcesForJob("job-p", "진선규", {
+    category: "person",
+    providers,
+    fetchAutocomplete: async (q) => {
+      asked.push(q);
+      return ["진선규 와이프", "진선규 나무위키", "진선규 박보경"];
+    },
+  });
+  if (Object.keys(person.sourceErrors).length !== 0) throw new Error("❌ person 모드는 카페·지식iN을 건드리지 않아 에러가 없어야 한다");
+  if (person.sources.some((s) => s.source_name === "naver_kin" || s.source_name === "naver_cafe")) throw new Error("❌ person에 카페·지식iN 소스가 섞였다");
+  if (person.sources.length !== 2) throw new Error(`❌ 뉴스+웹 baseline은 유지돼야 한다 (${person.sources.length})`);
+  if (asked.join("|") !== "진선규") throw new Error(`❌ 자동완성은 인물명 단독 질의 1회여야 한다 (${asked})`);
+  if (person.personAutocomplete?.suggestions.join("|") !== "진선규 와이프|진선규 나무위키|진선규 박보경" || person.personAutocomplete.failed) {
+    throw new Error("❌ 자동완성 꼬리말 원본이 걸러지지 않고 그대로 실려야 한다");
+  }
+
+  // 조회 실패(예외·빈 결과)는 리서치를 막지 않고 failed로 남긴다.
+  const threw = await collectSourcesForJob("job-p", "진선규", {
+    category: "person",
+    providers,
+    fetchAutocomplete: async () => {
+      throw new Error("blocked");
+    },
+  });
+  if (threw.sources.length !== 2 || !threw.personAutocomplete?.failed) throw new Error("❌ 자동완성 예외여도 baseline은 수집되고 failed로 표시돼야 한다");
+
+  // 다른 카테고리는 자동완성을 부르지 않고 personAutocomplete가 null이다.
+  const other = await collectSourcesForJob("job-o", "x", { providers: { news: providers.news }, fetchAutocomplete: boom("autocomplete").fetchKeywords as never });
+  if (other.personAutocomplete !== null) throw new Error("❌ person이 아니면 자동완성을 모으지 않는다");
+
+  // 프롬프트에 원본이 그대로, 실패면 실패 사실이 실린다.
+  const { buildResearchPrompt } = await import("./buildResearchPrompt.js");
+  const base = { job: { keyword: "진선규", headline: null, category: "person" }, baselineSources: [], outputPath: "/r/진선규.md", today: "2026-10-13" };
+  const withAuto = buildResearchPrompt({ ...base, personAutocomplete: person.personAutocomplete });
+  if (!withAuto.includes("1. 진선규 와이프") || !withAuto.includes("3. 진선규 박보경")) throw new Error("❌ 프롬프트에 자동완성 원본이 순서대로 실려야 한다");
+  const failedPrompt = buildResearchPrompt({ ...base, personAutocomplete: threw.personAutocomplete });
+  if (!failedPrompt.includes("자동완성 조회 실패")) throw new Error("❌ 조회 실패 사실이 입력에 남아야 한다");
+  console.log("✅ person 모드 - 카페·지식iN 제외, 인물명 단독 자동완성 원본 주입, 실패해도 진행");
+}

@@ -4,7 +4,7 @@
 // 양쪽이 이 모듈 하나만 참조하게 한다. 문자열을 각자 조립하면 한쪽만 바뀌었을 때 버튼이 조용히
 // 동작하지 않는다.
 //
-// 형식: <action>:<run_id>:<rank>   예) go:18:3, pass:18:3
+// 형식: <action>:<run_id>:<rank>   예) go:18:3, pass:18:3, pgo:42:2
 //
 // 키워드를 넣지 않는 이유가 두 가지다.
 // 1. Telegram의 callback_data는 UTF-8 기준 64바이트 제한이다. 한글 키워드는 글자당 3바이트라
@@ -90,4 +90,53 @@ export function parseKeywordSelectionCallbackData(data: string | undefined | nul
   if (rank < 1) return null;
 
   return { action, runId, rank };
+}
+
+// ---------- pgo: 핫이슈 스타 "✍️ 인물글" 버튼 (인물 백과 트랙, 2026-10-13) ----------
+//
+// `pgo:<run_id>:<rank>` - run_id는 **핫이슈 스타 run**(discovery_runs.kind=entertainment-hot-star)이고
+// rank는 그 run의 metadata.people[].rank다. keyword_rankings를 가리키지 않는다(그 run에는 행이 없다).
+//
+// go/pass와 **타입을 따로 둔다.** KeywordSelectionAction에 "pgo"를 넣으면 handleCallbackQuery의
+// `action === "go" ? selected : rejected`가 pgo를 조용히 Pass로 처리한다. 그래서 parseKeywordSelectionCallbackData는
+// pgo를 모르는 채로 두고(null), 수신 측이 이 파서를 먼저 시도한다.
+
+const PERSON_GO_PREFIX = "pgo";
+
+export type PersonGoCallback = {
+  runId: number;
+  rank: number;
+};
+
+/** `pgo:<run_id>:<rank>` 문자열을 만든다. go/pass와 같은 검증(정수 범위, 64바이트)을 쓴다. */
+export function buildPersonGoCallbackData(runId: number, rank: number): string {
+  if (!Number.isInteger(runId) || runId < 0) {
+    throw new Error(`runId는 0 이상의 정수여야 합니다 (받은 값: ${runId})`);
+  }
+  if (!Number.isInteger(rank) || rank < 1) {
+    throw new Error(`rank는 1 이상의 정수여야 합니다 (받은 값: ${rank})`);
+  }
+
+  const data = `${PERSON_GO_PREFIX}:${runId}:${rank}`;
+  const bytes = Buffer.byteLength(data, "utf8");
+  if (bytes > CALLBACK_DATA_MAX_BYTES) {
+    throw new Error(`callback_data가 ${CALLBACK_DATA_MAX_BYTES}바이트를 초과합니다 (${bytes}바이트): ${data}`);
+  }
+  return data;
+}
+
+/** `pgo:<run_id>:<rank>`를 파싱한다. 형식이 맞지 않으면 null(던지지 않는다 - 위 parseKeywordSelectionCallbackData와 같은 이유). */
+export function parsePersonGoCallbackData(data: string | undefined | null): PersonGoCallback | null {
+  if (!data) return null;
+
+  const parts = data.split(":");
+  if (parts.length !== 3 || parts[0] !== PERSON_GO_PREFIX) return null;
+  if (!/^\d+$/.test(parts[1]) || !/^\d+$/.test(parts[2])) return null;
+
+  const runId = Number(parts[1]);
+  const rank = Number(parts[2]);
+  if (!Number.isSafeInteger(runId) || !Number.isSafeInteger(rank)) return null;
+  if (rank < 1) return null;
+
+  return { runId, rank };
 }

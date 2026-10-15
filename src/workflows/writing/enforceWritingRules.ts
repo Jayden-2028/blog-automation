@@ -18,6 +18,8 @@ import {
   currentYearInDatePattern,
   kstYear,
   BANNED_COLLOQUIAL_ENDINGS,
+  findColloquialEndings,
+  maskQuotedSpans,
   COMMENT_INVITE_PATTERN,
   COVERAGE_NARRATIVE_PATTERN,
   MEDIA_ATTRIBUTION_PATTERN,
@@ -108,16 +110,29 @@ export function applyDeterministicFixes(body: string, now: Date = new Date()): D
   return { body: cleaned + rest, removed };
 }
 
-/** 에이전트에게 맡길 위반 문장 목록. */
-export function findRuleViolations(body: string): RuleViolation[] {
+/**
+ * 에이전트에게 맡길 위반 문장 목록. category가 person이면 허용 어미(~거든요·~고요)는 위반이 아니다.
+ * 구어 어미는 직접 인용(따옴표 안)을 제외하고 본다(2026-10-15, 전 카테고리 공통 - checkVoice와 같은 기준).
+ * 따옴표가 문장 경계(". ")를 넘을 수 있어 줄 단위로 마스크한 뒤 같은 위치로 문장을 자른다.
+ */
+export function findRuleViolations(body: string, category?: string | null): RuleViolation[] {
   const { main } = splitAtReferences(body);
   const found: RuleViolation[] = [];
   for (const line of main.split("\n")) {
     if (isProtectedLine(line)) continue;
+    const masked = maskQuotedSpans(line);
+    let cursor = 0;
     for (const sentence of splitSentences(line)) {
+      const at = line.indexOf(sentence, cursor);
+      cursor = at + sentence.length;
+      const maskedSentence = masked.slice(at, at + sentence.length);
       for (const { rule, pattern } of AGENT_RULES) {
         pattern.lastIndex = 0;
-        if (pattern.test(sentence)) {
+        const hit =
+          pattern === BANNED_COLLOQUIAL_ENDINGS
+            ? findColloquialEndings(maskedSentence, category).length > 0
+            : pattern.test(sentence);
+        if (hit) {
           found.push({ rule, sentence: sentence.trim() });
           break;
         }
@@ -137,7 +152,9 @@ function buildFixPrompt(body: string, violations: RuleViolation[], category: str
     "먼저 prompts/writing/core-rules.md를 Read하고 그 규칙대로 고친다." +
       (category === "incident"
         ? " 어투는 prompts/writing/style/incident.md(습니다체·1인칭 금지)를 따른다."
-        : " 어투는 prompts/writing/style/voice.md를 따른다."),
+        : category === "person"
+          ? " 어투는 prompts/writing/style/voice.md를 따르되, 인물 백과는 `~거든요`·`~고요`를 허용하므로 그 어미는 고치지 않는다."
+          : " 어투는 prompts/writing/style/voice.md를 따른다."),
     "",
     "고치는 방법:",
     "- '삭제'로 표시된 규칙: 그 문장을 통째로 뺀다. 문단이 비면 문단도 뺀다. 새 문장으로 대체하지 않는다.",
@@ -178,7 +195,7 @@ const FIXER_TIMEOUT_MS = 10 * 60 * 1000;
 export async function enforceWritingRules(input: EnforceWritingRulesInput): Promise<EnforceWritingRulesResult> {
   const det = applyDeterministicFixes(input.body, input.now);
   let body = det.body;
-  const violations = findRuleViolations(body);
+  const violations = findRuleViolations(body, input.category);
   const result: EnforceWritingRulesResult = {
     body,
     deterministicRemoved: det.removed,
@@ -205,7 +222,7 @@ export async function enforceWritingRules(input: EnforceWritingRulesInput): Prom
   const marker = "### BODY";
   const at = ran.output.indexOf(marker);
   const candidate = (at >= 0 ? ran.output.slice(at + marker.length) : ran.output).trim();
-  const after = findRuleViolations(candidate);
+  const after = findRuleViolations(candidate, input.category);
   const okLength = candidate.length >= body.length * 0.7;
   const okMarkers = countMarkers(candidate) === countMarkers(body);
   if (!okLength || !okMarkers || after.length >= violations.length) {

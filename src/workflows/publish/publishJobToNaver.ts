@@ -32,6 +32,7 @@ import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
 import { removeReferencesBlock } from "../manuscripts/articleContentParts.js";
 import { removeRelatedPosts } from "../manuscripts/appendRelatedPosts.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
+import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "./manualPublishOnly.js";
 
 export const NAVER_PLATFORM = "naver";
 
@@ -41,7 +42,7 @@ const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "pu
 export type PublishJobToNaverResult =
   /** `warnings`: 올라갔지만 사람이 알아야 하는 차이(이미지 일부 누락 등). 폴러가 알림에 싣는다. */
   | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[] }
-  | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found" | "naver_failed"; detail: string };
+  | { ok: false; reason: "job_not_found" | "job_not_approved" | "manual_only" | "base_article_not_found" | "naver_failed"; detail: string };
 
 export type PublishJobToNaverOptions = {
   loadJob?: (jobId: string) => Promise<ArticleJobRow | null>;
@@ -90,6 +91,9 @@ export async function publishJobToNaver(
   if (job.status !== "approved") {
     return { ok: false, reason: "job_not_approved", detail: `job 상태가 approved가 아닙니다(현재: ${job.status}).` };
   }
+
+  // person은 자동 발행 제외(수동 복붙 운영, 2026-10-14) - 큐를 우회한 직접 호출도 막는다.
+  if (isManualPublishOnly(job)) return { ok: false, reason: "manual_only", detail: MANUAL_PUBLISH_ONLY_REASON };
 
   const articles = await loadArticles(jobId);
 
