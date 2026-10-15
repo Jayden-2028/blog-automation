@@ -486,6 +486,10 @@ export class TistoryPublisher {
       let cap = fig.querySelector("figcaption");
       if (!cap) { cap = ed.getDoc().createElement("figcaption"); fig.appendChild(cap); }
       cap.textContent = ${JSON.stringify(text)};
+      // 대체텍스트(alt)도 같은 값으로 넣는다(2026-10-16 사용자 요청 - 캡션과 동일해도 된다는 결정).
+      // 에디터의 "대체텍스트" 입력창이 쓰는 속성과 같은 자리라 저장 매크로({"alt":...})로 직렬화된다.
+      const img = fig.querySelector("img");
+      if (img) img.setAttribute("alt", ${JSON.stringify(text)});
       if (ed.setDirty) ed.setDirty(true);
       if (ed.fire) { ed.fire("change"); ed.fire("input"); }
       // 저장 형식([##_Image|...|{"caption":...}])은 특수문자를 엔티티로 바꾼다(2026-10-07 오탐 실측: "·" 포함 캡션이

@@ -188,7 +188,7 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
 | KST | UTC | 워크플로 | 알림 |
 |---|---|---|---|
 | 18:00 | 09 | `entertainment-keyword.yml` (round=evening) | 엔터 메인봇 · Go/Pass |
-| 19:00 | 10 | `entertainment-hot-star.yml` | 엔터 메인봇 · **알림 전용(버튼 없음)** |
+| 19:00 | 10 | `entertainment-hot-star.yml` | 엔터 메인봇 · 인물별 **`✍️ 인물글` 버튼**(`pgo:`, 인물 백과 트랙) |
 | 20:00 | 11 | `social-issue-keyword.yml` | 사회 봇 · Go/Pass |
 | 21:00 | 12 | `kscene-topic.yml` + `watchdog.yml` | 사용설명서 봇 · Go/Pass |
 
@@ -197,9 +197,10 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
   매일 거짓 경보). 회차 체계(`config/keywordRound.ts`)는 **코드로는 유지**한다(수동 `workflow_dispatch`의
   `round` 입력 + 시각 추정 안전망). 운영 회차에서는 알림 제목의 회차 표기를 생략한다(`OPERATING_ROUND`).
   엔터 수집이 1/3로 줄어 Serper·NAVER 호출도 그만큼 줄었다.
-- **19시 핫이슈 스타 Top 5**는 그날 가장 이슈가 된 인물 5명 + 화제 배경을 보낸다. **읽기용이고 원고
-  제작 버튼이 없다** - 콘텐츠 제작 연결은 카테고리 템플릿·기획 설계 후 별도 발주다(사용자 2026-10-11
-  결정). 재료는 그날 이미 쌓인 데이터뿐(18시 run의 `keyword_rankings` + 당일 `trend_candidates`)이고
+- **19시 핫이슈 스타 Top 5**는 그날 가장 이슈가 된 인물 5명 + 화제 배경을 보낸다. **인물별 `✍️ 인물글`
+  버튼**이 붙고(2026-10-13 인물 백과 트랙 - 2026-10-11의 "읽기용·버튼 없음"을 대체), 누르면
+  `category=person` job이 만들어져 기존 엔터 트랙 흐름(자료조사 → write 자동 → 통합 알림 → 뷰어 반영까지; 네이버 업로드는 뷰어에서 복사해 수동 복붙, 발행 버튼·자동 발행 없음 - 2026-10-14 사용자 결정)을 탄다.
+  버튼은 `discovery_runs.metadata.people[]`를 근거로 하며 `keyword_rankings`는 만들지 않는다. 재료는 그날 이미 쌓인 데이터뿐(18시 run의 `keyword_rankings` + 당일 `trend_candidates`)이고
   보조 수집(NAVER·Serper) 호출이 0건이며, 인물 추출만 `claude -p` 1콜을 쓴다. 18시 알림과 인물이 겹치면
   **중복 제거 없이** "18시 알림에도 선정" 한 줄을 붙인다. 5명을 못 채우면 채운 만큼 보내고 "오늘은 N명"
   이라고 적는다. run은 `discovery_runs`에 `kind=entertainment-hot-star`로 남고 `keyword_rankings`는

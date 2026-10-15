@@ -31,8 +31,11 @@ import {
 } from "./telegramTracks.js";
 import type { Track } from "./telegramTracks.js";
 import { parseArticleReviewCallbackData } from "./articleReviewCallbackData.js";
-import { parseKeywordSelectionCallbackData } from "./telegramCallbackData.js";
+import { parseKeywordSelectionCallbackData, parsePersonGoCallbackData } from "./telegramCallbackData.js";
+import { loadHotStarPerson } from "../workflows/hot-star/loadHotStarPerson.js";
+import type { HotStarPersonRef } from "../workflows/hot-star/loadHotStarPerson.js";
 import { buildResearchDecisionCallbackData, parseResearchDecisionCallbackData } from "./researchDecisionCallbackData.js";
+import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "../workflows/publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData, parsePublishDecisionCallbackData } from "./publishDecisionCallbackData.js";
 import type { PublishDecisionAction } from "./publishDecisionCallbackData.js";
 import { requestNaverPublish } from "../workflows/publish/naverPublishQueue.js";
@@ -209,6 +212,8 @@ export type HandlePublishDecisionOutcome =
   | { status: "edit_pending"; action: PublishDecisionAction }
   /** 반려된 원고라 발행을 받지 않았다(통합 알림에서 🗑 뒤에 남은 오래된 버튼). */
   | { status: "job_rejected"; action: PublishDecisionAction }
+  /** person(인물 백과)은 자동 발행 제외 - 수동 복붙 운영(2026-10-14). 오래된 메시지의 발행 버튼이 와도 접수하지 않는다. */
+  | { status: "manual_only"; action: PublishDecisionAction }
   /** 여기서 끝낼 수 없어 대기열에만 넣었다(네이버 - 맥의 로컬 폴러가 처리한다). */
   | { status: "queued"; action: PublishDecisionAction };
 
@@ -260,6 +265,10 @@ export type TelegramBotOptions = {
   // buildDailyQueryPool의 loadActiveSeeds, runCreatorAdvisorCollection의 fetchCandidates와 같은 패턴.
   loadRanking?: (runId: number, rank: number) => Promise<KeywordRankingRow | null>;
   createJob?: (ranking: KeywordRankingRow, status: ArticleJobStatus) => Promise<CreateArticleJobResult>;
+  /** 핫이슈 스타 "✍️ 인물글"(pgo:) - discovery_runs.metadata.people[rank] 조회. 못 찾으면 null(= 거부). */
+  loadPerson?: (runId: number, rank: number) => Promise<HotStarPersonRef | null>;
+  /** 인물글 job 생성. 같은 (run, rank)가 이미 있으면 created:false로 기존 job을 돌려준다. */
+  createPersonJob?: (person: HotStarPersonRef) => Promise<CreateArticleJobResult>;
   saveTitles?: (jobId: string, titles: string[]) => Promise<void>;
   updateJobStatus?: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   /** 의학 교차확인 처리에 쓴다. jobId로 job을 직접 조회한다(키워드 선택과 달리 run/rank가 없다). */
@@ -387,6 +396,8 @@ export class TelegramBot {
   private readonly generateTitles?: (job: ArticleJobRow) => Promise<string[]>;
   private readonly loadRanking: (runId: number, rank: number) => Promise<KeywordRankingRow | null>;
   private readonly createJob: (ranking: KeywordRankingRow, status: ArticleJobStatus) => Promise<CreateArticleJobResult>;
+  private readonly loadPerson: (runId: number, rank: number) => Promise<HotStarPersonRef | null>;
+  private readonly createPersonJob: (person: HotStarPersonRef) => Promise<CreateArticleJobResult>;
   private readonly saveTitles: (jobId: string, titles: string[]) => Promise<void>;
   private readonly updateJobStatus: (jobId: string, status: ArticleJobStatus) => Promise<ArticleJobRow | null>;
   private readonly loadJobById: (jobId: string) => Promise<ArticleJobRow | null>;
@@ -430,6 +441,11 @@ export class TelegramBot {
       options.createJob ??
       ((ranking, status) =>
         ArticleJobRepository.createFromRanking(ranking, { status, metadata: trackJobMetadata(this.track) }));
+    this.loadPerson = options.loadPerson ?? loadHotStarPerson;
+    // 인물글 job은 엔터 트랙이다. 설계서의 `track=ent`는 이 저장소의 트랙 이름 `entertainment`를 가리킨다.
+    this.createPersonJob =
+      options.createPersonJob ??
+      ((person) => ArticleJobRepository.createFromHotStarPerson(person, { metadata: { track: "entertainment" } }));
     this.saveTitles =
       options.saveTitles ??
       (async (jobId, titles) => {
@@ -537,6 +553,10 @@ export class TelegramBot {
    * 호출자(pollOnce)가 update 단위로 잡아 나머지 update 처리를 계속한다.
    */
   async handleCallbackQuery(query: TelegramCallbackQuery): Promise<HandleCallbackResult> {
+    // 핫이슈 스타 "✍️ 인물글"(pgo:)은 go/pass와 조회 대상이 달라(keyword_rankings가 아니라 run.metadata.people) 따로 처리한다.
+    const personGo = parsePersonGoCallbackData(query.data);
+    if (personGo) return this.handlePersonGo(query, personGo);
+
     const parsed = parseKeywordSelectionCallbackData(query.data);
     if (!parsed) {
       // 봇이 들어 있는 대화에는 다른 기능의 버튼이나 오래된 메시지가 섞일 수 있다. 정상 흐름이다.
@@ -601,6 +621,37 @@ export class TelegramBot {
     // rejected -> selected로 되돌렸으면 이제 제목이 필요하다.
     const result = await this.completeGo(updated);
     return { outcome: { status: "changed", job: updated, from }, message: result.message };
+  }
+
+  /**
+   * "✍️ 인물글"(pgo:<run_id>:<rank>) 처리. 조회 실패 = 거부(go:와 같은 위조 검증 구조)이고, 이후 흐름은 기존 엔터
+   * 트랙 그대로다(자료조사 → write 자동 → 통합 알림 → 뷰어까지; 발행 버튼 없음, 수동 복붙 2026-10-14). keyword_rankings 행은 만들지 않는다.
+   */
+  private async handlePersonGo(
+    query: TelegramCallbackQuery,
+    parsed: { runId: number; rank: number }
+  ): Promise<HandleCallbackResult> {
+    const fromChatId = query.message?.chat?.id;
+    if (fromChatId !== undefined && String(fromChatId) !== this.chatId) {
+      return { outcome: { status: "ignored", reason: "wrong_chat" }, message: "" };
+    }
+
+    const person = await this.loadPerson(parsed.runId, parsed.rank);
+    if (!person) {
+      return {
+        outcome: { status: "expired" },
+        message: "이미 만료된 항목입니다. 최신 핫이슈 스타 알림에서 다시 선택해주세요.",
+      };
+    }
+
+    const { job, created } = await this.createPersonJob(person);
+    if (created) return this.completeGo(job);
+
+    // 같은 인물 버튼을 다시 누른 경우(중복 탭·재전송). 되돌리기(Pass)가 없는 버튼이라 상태 전환은 하지 않는다.
+    return {
+      outcome: job.status === "selected" ? { status: "unchanged", job } : { status: "locked", job },
+      message: job.status === "selected" ? "이미 선택한 인물입니다." : "",
+    };
   }
 
   /** Go 확정 처리: 제목을 만들어 저장하고 확인 메시지를 만든다. */
@@ -1060,6 +1111,14 @@ export class TelegramBot {
       return {
         outcome: { status: "job_rejected", action: parsed.action },
         message: `🗑 <b>반려된 원고입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n발행을 접수하지 않았습니다.`,
+      };
+    }
+
+    // person은 자동 발행 제외(수동 복붙 운영, 2026-10-14). 이미지 수정·내려받기는 그대로 받는다.
+    if (isManualPublishOnly(job) && (parsed.action === "naver" || parsed.action === "tistory" || parsed.action === "blogspot")) {
+      return {
+        outcome: { status: "manual_only", action: parsed.action },
+        message: `✋ <b>자동 발행하지 않는 원고입니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n${escapeTelegramHtml(MANUAL_PUBLISH_ONLY_REASON)}`,
       };
     }
 
@@ -1610,6 +1669,7 @@ export class TelegramBot {
         case "channel_mismatch":
         case "edit_pending":
         case "job_rejected":
+        case "manual_only":
           // 아무 일도 일어나지 않았다 - 버튼을 그대로 되살린다(잠그면 안 된다).
           return null;
         default:
@@ -1643,7 +1703,11 @@ export class TelegramBot {
       // 누른 것 하나만 결과로 바꾸고 나머지는 원래대로 살린다.
       // 줄 나눔은 notifyManuscriptsReady의 배치와 같게 유지한다 - 한 줄에 4개를 몰면 텔레그램이
       // 글자를 잘라 무슨 버튼인지 안 보인다.
-      const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track);
+      const job = await this.loadJobById(parsed.jobId).catch(() => null);
+      // person은 발행 버튼이 없는 원고(수동 복붙 운영, 2026-10-14) - 트랙 기본 구성에서 발행 채널을 뺀다.
+      const rows: PublishDecisionAction[][] = publishActionRowsForTrack(this.track)
+        .map((row) => (job && isManualPublishOnly(job) ? row.filter((a) => a === "images" || a === "export") : row))
+        .filter((row) => row.length > 0);
       keyboard = rows.map((row) =>
         row.map(
           (action) =>
@@ -1654,7 +1718,6 @@ export class TelegramBot {
         )
       );
       // 자동 승인으로 올라온 원고는 ✏️ 수정 요청 / 🗑 반려 줄이 있다 - 잠금 버튼으로 덮인 뒤에도 되살린다.
-      const job = await this.loadJobById(parsed.jobId).catch(() => null);
       // 링크 줄이 없는 상태에서 다시 세우므로 맨 위(= buildReadyKeyboard의 배치와 같은 자리)에 넣는다.
       const reviewRow = job && isAutoApproved(job)
         ? buildReadyKeyboard(job, null).find((row) =>
@@ -1895,6 +1958,9 @@ export class TelegramBot {
       decided.status === "changed"
     ) {
       await this.markButtonDecided(query, decided.job.status).catch(() => {});
+    } else if (query.data && parsePersonGoCallbackData(query.data)) {
+      // 인물글 버튼: 만료·잠김이어도 릴레이가 덮어쓴 "⏳ 처리 중…" 키보드를 되살려야 다른 인물 버튼이 남는다.
+      await this.markButtonDecided(query, "selected").catch(() => {});
     }
 
     if (result.message) {
@@ -1913,6 +1979,23 @@ export class TelegramBot {
     const keyboard = query.message?.reply_markup?.inline_keyboard;
     const messageId = query.message?.message_id;
     if (!keyboard || messageId === undefined) return;
+
+    // 인물글 키보드는 한 메시지에 인물 버튼이 최대 5개다. 릴레이가 버튼을 누른 순간 키보드를 "⏳ 처리 중…" 하나로
+    // 덮어쓰므로(Worker 무변경), 콜백 payload에 실려 온 원래 키보드로 **나머지 인물 버튼을 되살리고** 누른 것만 ✅로 바꾼다.
+    if (query.data && parsePersonGoCallbackData(query.data)) {
+      await this.post("editMessageReplyMarkup", {
+        chat_id: this.chatId,
+        message_id: messageId,
+        reply_markup: {
+          inline_keyboard: keyboard.map((row) =>
+            row.map((button) =>
+              button.callback_data === query.data && !button.text.startsWith("✅") ? { ...button, text: `✅ ${button.text.replace(/^✍️\s*/, "")}` } : button
+            )
+          ),
+        },
+      });
+      return;
+    }
 
     const chosen = status === "rejected" ? "pass" : "go";
     const updated = keyboard.map((row) =>

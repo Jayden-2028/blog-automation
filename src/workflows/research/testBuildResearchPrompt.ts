@@ -54,6 +54,26 @@ function main(): void {
   assert(!empty.includes("재조사"), "일반 조사에는 재조사 안내가 없어야 한다");
   console.log("✅ 재조사 안내 - 모자랐던 점 전달, 일반 조사에는 없음");
 
+  // 인물 백과(2026-10-13): category로 분기한다. brief type(celebrity)이 있어도 researcher.md를 싣지 않는다.
+  const person = buildResearchPrompt({
+    job: { keyword: "진선규", headline: "100일의 거짓말", category: "person" },
+    baselineSources: [],
+    outputPath: "/repo/research/진선규.md",
+    today: "2026-10-13",
+    personBackground: "신작 공개 이후 연기 재조명",
+    brief: {
+      type: "celebrity",
+      questions: ["Q?"],
+      autocomplete: [],
+    } as unknown as NonNullable<Parameters<typeof buildResearchPrompt>[0]["brief"]>,
+  });
+  assert(person.includes("prompts/research/person-researcher.md"), "person은 person-researcher.md를 읽혀야 한다");
+  assert(!person.includes("- prompts/research/researcher.md"), "person은 researcher.md를 읽히면 안 된다");
+  assert(!person.includes("celebrity") && !person.includes("§4-1"), "person은 브리프 프로파일 오버라이드를 싣지 않는다");
+  assert(person.includes("/repo/research/진선규.md") && person.includes("신작 공개 이후 연기 재조명"), "person: 출력 경로와 background 주입");
+  assert(!buildResearchPrompt({ job: { keyword: "x", headline: null, category: "entertainment" }, baselineSources: [], outputPath: "/r/x.md", today: "2026-10-13" }).includes("person-researcher"), "다른 카테고리는 person 규격을 싣지 않는다");
+  console.log("✅ person 분기 - person-researcher.md만, 브리프 오버라이드 없음");
+
   console.log("\n✅ buildResearchPrompt 테스트 완료");
 }
 

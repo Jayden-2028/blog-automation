@@ -176,4 +176,15 @@ const lastKeyboard = (state: State) => {
   assert(out.outcome.status === "reviewed" && state.job.status === "approved" && prepared === 1, "게이트 false 시절 흐름(✅ -> approved -> prepare)이 그대로 동작");
   console.log("✅ 공존 - 옛 초안 ✅ 승인 흐름 불변");
 }
+// 8) person 원고는 오래된 발행 버튼이 와도 접수하지 않는다(2026-10-14 §F-2). 이미지 수정·내려받기는 받는다.
+{
+  const { bot } = makeBot(makeJob({ category: "person" }));
+  for (const action of ["naver", "tistory", "blogspot"]) {
+    const out = await bot.handlePublishDecisionCallback({ id: "c", data: `publish:${action}:${JOB_ID}`, message: { message_id: 1, chat: { id: CHAT_ID } } } as never);
+    assert(out.outcome.status === "manual_only" && out.message.includes("자동 발행하지 않는"), `person ${action} 발행 콜백 거부`);
+  }
+  const images = await bot.handlePublishDecisionCallback({ id: "c", data: `publish:images:${JOB_ID}`, message: { message_id: 1, chat: { id: CHAT_ID } } } as never);
+  assert(images.outcome.status !== "manual_only", "person도 이미지 수정은 받는다");
+  console.log("✅ person - 발행 콜백 거부(naver·tistory·blogspot), 이미지 수정은 허용");
+}
 console.log("\n✅ testPipelineMergeCallbacks 전체 통과");

@@ -19,6 +19,7 @@ import { listPublicationsByArticleId } from "../../services/supabase/repositorie
 import { publishArticleToNaver } from "../../services/publish/publishArticleToNaver.js";
 import { BLOGSPOT_PLATFORM, publishArticleToBlogspot } from "./publishArticleToBlogspot.js";
 import type { ArticleJobRow } from "../../types/database.js";
+import { isManualPublishOnly, MANUAL_PUBLISH_ONLY_REASON } from "./manualPublishOnly.js";
 
 export type ChannelName = "naver" | "blogspot";
 
@@ -111,6 +112,16 @@ export async function publishApprovedArticles(
 
   for (const job of jobs) {
     const channels: ChannelOutcome[] = [];
+
+    // person은 자동 발행 제외(수동 복붙 운영, 2026-10-14) - approved로 남겨 두고 건너뛴다.
+    if (isManualPublishOnly(job)) {
+      results.push({
+        job,
+        channels: activeChannels.map((channel) => ({ channel, status: "skipped" as const, reason: MANUAL_PUBLISH_ONLY_REASON })),
+        markedPublished: false,
+      });
+      continue;
+    }
 
     const blocker = await preflight(job);
     if (blocker) {

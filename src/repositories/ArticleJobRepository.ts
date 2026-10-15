@@ -85,6 +85,39 @@ export class ArticleJobRepository {
   }
 
   /**
+   * 핫이슈 스타 "✍️ 인물글" 버튼으로 인물 백과 job을 만든다(2026-10-13). 알림 전용 run에는 keyword_rankings가
+   * 없으므로 createFromRanking을 못 쓴다. source_run_id/source_rank는 **핫이슈 스타 run의 id와 인물 rank**를 그대로
+   * 쓴다(FK 없음 - 마이그레이션 주석 참고) - (source_run_id, source_rank) 유니크가 곧 같은 버튼의 중복 클릭 방어다.
+   */
+  static async createFromHotStarPerson(
+    person: { runId: number; rank: number; name: string; background: string },
+    options: { metadata?: Record<string, unknown> } = {}
+  ): Promise<CreateArticleJobResult> {
+    const row: ArticleJobInsert = {
+      source_run_id: person.runId,
+      source_rank: person.rank,
+      keyword: person.name,
+      headline: null,
+      seed_query: null,
+      category: "person",
+      total_score: null,
+      score_breakdown: null,
+      status: "selected",
+      selected_via: "telegram",
+      metadata: { ...(options.metadata ?? {}), personBackground: person.background },
+    };
+
+    const { data, error } = await supabase.from("article_jobs").insert(row).select().single();
+    if (!error && data) return { job: data, created: true };
+
+    if (error?.code === UNIQUE_VIOLATION) {
+      const existing = await this.findByRunAndRank(person.runId, person.rank);
+      if (existing) return { job: existing, created: false };
+    }
+    throw error ?? new Error("article_jobs insert가 row를 반환하지 않았습니다.");
+  }
+
+  /**
    * discovery_run 없이 job을 만든다(인스타그램 수동 큐레이션 등). keyword_rankings를 거치지 않으므로
    * createFromRanking을 못 쓴다 - source_run_id/source_rank는 (run_id, rank) 유니크 인덱스를 만족시키기
    * 위한 자리채우기일 뿐, 실제 discovery_run을 가리키지 않는다.
@@ -305,6 +338,29 @@ export class ArticleJobRepository {
 
     if (error) throw error;
     return data ?? null;
+  }
+
+  /**
+   * 인물 백과(category=person) job 중 맥 소스팩(`metadata.researchSourcePack`)이 아직 없는 것(B-1, 2026-10-15).
+   * 소스팩 본문(수십 KB)을 끌어오지 않도록 `fetchedAt` 하나만 JSON 경로로 선택해 egress를 아낀다(2026-10-09 용량 사고).
+   * 아직 조사 전·중인 job(selected/researching)만 본다 - 러너가 기다리는 것은 이 둘뿐이다.
+   */
+  static async listPersonJobsNeedingSourcePack(
+    sinceIso: string,
+    limit = 5
+  ): Promise<Array<{ id: string; keyword: string; status: ArticleJobStatus }>> {
+    const columns: string = "id,keyword,status,pack_at:metadata->researchSourcePack->>fetchedAt";
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select(columns)
+      .eq("category", "person")
+      .in("status", ["selected", "researching"])
+      .gte("selected_at", sinceIso)
+      .order("selected_at", { ascending: true })
+      .limit(50);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as Array<{ id: string; keyword: string; status: ArticleJobStatus; pack_at: string | null }>;
+    return rows.filter((row) => !row.pack_at).slice(0, limit).map(({ id, keyword, status }) => ({ id, keyword, status }));
   }
 
   /**

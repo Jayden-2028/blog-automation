@@ -15,6 +15,7 @@ import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
 import { manuscriptPagePath, viewerPageLink } from "../../config/manuscriptViewerPages.js";
 import { TRACK_LABEL, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
+import { isManualPublishOnly } from "../publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import { buildArticleReviewCallbackData } from "../../notifications/articleReviewCallbackData.js";
 import { isAutoApproved } from "../../config/pipelineGate.js";
@@ -88,13 +89,12 @@ export function buildReadyKeyboard(
           ? { text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }
           : // 엔터는 네이버 발행만 한다(RESTRUCTURE-PLAN-2026-10.md §2.5 - Blogspot 버튼은 2026-10-05에 뺐다).
             { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") };
-    rows.push(
-      [
-        { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
-        { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
-      ],
-      [publishButton]
-    );
+    rows.push([
+      { text: "🖼 이미지 수정", callback_data: buildPublishDecisionCallbackData(jobId, "images") },
+      { text: "⬇️ 맥으로 내려받기", callback_data: buildPublishDecisionCallbackData(jobId, "export") },
+    ]);
+    // person(인물 백과)은 발행 버튼이 없다 - 뷰어에서 복사해 네이버에 직접 붙여넣는다(2026-10-14 사용자 결정).
+    if (!isManualPublishOnly(job)) rows.push([publishButton]);
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 발행 줄을 뺀다 - 여기서 던지면 알림 전체가 사라진다.
   }
@@ -215,7 +215,10 @@ export function buildManuscriptReadyMessage(
   // 원고와 6개가 다 찬 원고가 알림에서 구분되지 않았다 - 뷰어를 열어야만 알 수 있었다.
   const markerCount = (outcome.topic.manuscript.body.match(/\[IMAGE:/g) ?? []).length;
   const emptyCount = Math.max(0, markerCount - imageCount);
-  const summary = imageCount > 0 ? `🟢 네이버 · 이미지 ${imageCount}장` : "🟢 네이버";
+  const manual = isManualPublishOnly(job);
+  const summary = manual
+    ? imageCount > 0 ? `👤 인물 백과 · 이미지 ${imageCount}장` : "👤 인물 백과"
+    : imageCount > 0 ? `🟢 네이버 · 이미지 ${imageCount}장` : "🟢 네이버";
   const lines0 = emptyCount > 0 ? `${summary} · ⬜ 빈 자리 ${emptyCount}개` : summary;
 
   const lines = [
@@ -224,6 +227,7 @@ export function buildManuscriptReadyMessage(
     `<b>${escapeTelegramHtml(job.keyword)}</b>`,
     lines0,
     ...withLeadingBlank(buildAutoApprovedNotes(job)),
+    ...(manual ? ["", "✍️ 뷰어에서 복사해 네이버에 직접 붙여넣으세요(자동 발행 없음)."] : []),
   ];
   // 발행 버튼(2026-09-19 사용자 결정): **이미지까지 반영된 최종 원고를 원고 페이지에서 본 뒤** 누르는 공개 발행이다.
   // 사람이 곧 품질 게이트다 - 누르지 않은 원고는 올라가지 않는다. 버튼 구성(줄 나눔·트랙별 발행 버튼)은 buildReadyKeyboard 한 곳에 둔다.

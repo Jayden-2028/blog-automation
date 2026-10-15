@@ -5,7 +5,7 @@
 //
 // 두 단계다.
 //  1) 결정적 교정(applyDeterministicFixes): 문장을 지워도 사실이 사라지지 않는 것만 코드가 직접 지운다
-//     (댓글 유도 문장, "○월 기준" 시점 표기). 판단이 필요한 것은 건드리지 않는다.
+//     (댓글 유도 문장, "○월 기준" 시점 표기, 연결어미 뒤 쉼표). 판단이 필요한 것은 건드리지 않는다.
 //  2) 에이전트 교정(enforceWritingRules): 남은 위반(보도 인용·확인 여부 서술·비공개 서술·구어 어미)은
 //     문장 목록을 주고 헤드리스 에이전트에게 한 번만 고치게 한다. 고친 결과가 위반을 줄이지 못했거나
 //     이미지 마커 수가 달라지면 원본을 그대로 쓴다(fail-open + 로그).
@@ -18,6 +18,8 @@ import {
   currentYearInDatePattern,
   kstYear,
   BANNED_COLLOQUIAL_ENDINGS,
+  findColloquialEndings,
+  maskQuotedSpans,
   COMMENT_INVITE_PATTERN,
   COVERAGE_NARRATIVE_PATTERN,
   MEDIA_ATTRIBUTION_PATTERN,
@@ -66,9 +68,52 @@ const AS_OF_DISCLAIMER_SENTENCE = /(?:\d{4}년|\d{1,2}월|\d{1,2}일)[^.!?\n]{0,
 export type DeterministicFixResult = { body: string; removed: string[] };
 
 /**
+ * C-11 연결어미 직후 습관성 쉼표(2026-10-15, rules/humanize.md §2). "교제를 인정했고, 약 8개월" -> "인정했고 약 8개월".
+ * 과교정이 더 나쁘므로 **확실한 경우만** 지운다:
+ *  - 연결어미는 앞 음절이 과거·존재 표지인 것만 본다(받침 ㅆ 음절·겠 + 고·으며·지만, 없/같 + 고·지만, 없 + 으며, 하/되 + 며, 아/어/해/여 + 서).
+ *    "신고, 광고"(명사)·"하지만, 그래서, 따라서"(문두 접속부사)·"이고/이며"(명사 병렬)는 건드리지 않는다.
+ *  - 직접 인용(따옴표 안)은 보지 않는다. 문장에 인용 밖 쉼표(뒤에 공백이 오는 것)가 **정확히 하나**일 때만 지운다 -
+ *    둘 이상이면 나열 구문이라 둔다. 숫자 천 단위 쉼표("1,200")는 뒤에 공백이 없어 세지 않는다.
+ */
+// 받침 ㅆ으로 끝나는 모든 음절(았·었·였·했·됐·갔·썼·왔·있 ...) = 과거형 어간. 명사가 이 음절로 끝나고 바로 고·으며·지만이 붙는 일은 없다.
+const PAST_SYLLABLE = Array.from({ length: 19 * 21 }, (_, i) => String.fromCharCode(0xac00 + i * 28 + 20)).join("");
+const CONNECTIVE_TOKEN = new RegExp(
+  `(?:[${PAST_SYLLABLE}겠]고|[없같]고|[${PAST_SYLLABLE}겠]으며|없으며|[하되]며|[${PAST_SYLLABLE}겠]지만|[없같]지만|[아어해여]서)$`
+);
+const NOT_CONNECTIVE_TOKENS = new Set(["이어서"]);
+
+export function removeConnectiveCommas(line: string): { text: string; removed: string[] } {
+  const t = line.trim();
+  if (t.startsWith("-") || t.startsWith("|") || t.startsWith(">") || /^[a-z_]+:\s/i.test(t) || /^\d+[.)]\s/.test(t)) {
+    return { text: line, removed: [] };
+  }
+  const masked = maskQuotedSpans(line);
+  const removed: string[] = [];
+  const dropAt: number[] = [];
+  let cursor = 0;
+  for (const sentence of splitSentences(line)) {
+    const at = line.indexOf(sentence, cursor);
+    cursor = at + sentence.length;
+    const m = masked.slice(at, at + sentence.length);
+    const commas = [...m.matchAll(/,(?=\s)/g)];
+    if (commas.length !== 1) continue;
+    const idx = commas[0].index ?? 0;
+    const token = m.slice(0, idx).split(/\s/).pop() ?? "";
+    if (!CONNECTIVE_TOKEN.test(token) || NOT_CONNECTIVE_TOKENS.has(token)) continue;
+    dropAt.push(at + idx);
+    removed.push(`연결어미 뒤 쉼표: ${token},`);
+  }
+  if (dropAt.length === 0) return { text: line, removed };
+  let text = line;
+  for (const i of dropAt.reverse()) text = text.slice(0, i) + text.slice(i + 1);
+  return { text, removed };
+}
+
+/**
  * 코드가 직접 지워도 안전한 것만 지운다.
  *  - 댓글·의견 유도 문장 -> 문장 삭제
  *  - "2026년 8월 기준", "9월 18일 기준" 같은 시점 표기 -> 표기만 삭제(값 문장은 남긴다)
+ *  - 연결어미 직후 습관성 쉼표(C-11) -> 쉼표만 삭제(인용·나열 구문 제외, removeConnectiveCommas 참고)
  */
 export function applyDeterministicFixes(body: string, now: Date = new Date()): DeterministicFixResult {
   const { main, rest } = splitAtReferences(body);
@@ -101,6 +146,12 @@ export function applyDeterministicFixes(body: string, now: Date = new Date()): D
       removed.push(`${year}년(올해 연도 표기)`);
       out = withoutYear;
     }
+    // 연결어미 뒤 습관성 쉼표(C-11) - 인용 제외, 단일 쉼표만
+    const commaFix = removeConnectiveCommas(out);
+    if (commaFix.removed.length > 0) {
+      removed.push(...commaFix.removed);
+      out = commaFix.text;
+    }
     return out;
   });
 
@@ -108,16 +159,29 @@ export function applyDeterministicFixes(body: string, now: Date = new Date()): D
   return { body: cleaned + rest, removed };
 }
 
-/** 에이전트에게 맡길 위반 문장 목록. */
-export function findRuleViolations(body: string): RuleViolation[] {
+/**
+ * 에이전트에게 맡길 위반 문장 목록. category가 person이면 허용 어미(~거든요·~고요)는 위반이 아니다.
+ * 구어 어미는 직접 인용(따옴표 안)을 제외하고 본다(2026-10-15, 전 카테고리 공통 - checkVoice와 같은 기준).
+ * 따옴표가 문장 경계(". ")를 넘을 수 있어 줄 단위로 마스크한 뒤 같은 위치로 문장을 자른다.
+ */
+export function findRuleViolations(body: string, category?: string | null): RuleViolation[] {
   const { main } = splitAtReferences(body);
   const found: RuleViolation[] = [];
   for (const line of main.split("\n")) {
     if (isProtectedLine(line)) continue;
+    const masked = maskQuotedSpans(line);
+    let cursor = 0;
     for (const sentence of splitSentences(line)) {
+      const at = line.indexOf(sentence, cursor);
+      cursor = at + sentence.length;
+      const maskedSentence = masked.slice(at, at + sentence.length);
       for (const { rule, pattern } of AGENT_RULES) {
         pattern.lastIndex = 0;
-        if (pattern.test(sentence)) {
+        const hit =
+          pattern === BANNED_COLLOQUIAL_ENDINGS
+            ? findColloquialEndings(maskedSentence, category).length > 0
+            : pattern.test(sentence);
+        if (hit) {
           found.push({ rule, sentence: sentence.trim() });
           break;
         }
@@ -137,7 +201,9 @@ function buildFixPrompt(body: string, violations: RuleViolation[], category: str
     "먼저 prompts/writing/core-rules.md를 Read하고 그 규칙대로 고친다." +
       (category === "incident"
         ? " 어투는 prompts/writing/style/incident.md(습니다체·1인칭 금지)를 따른다."
-        : " 어투는 prompts/writing/style/voice.md를 따른다."),
+        : category === "person"
+          ? " 어투는 prompts/writing/style/voice.md를 따르되, 인물 백과는 `~거든요`·`~고요`를 허용하므로 그 어미는 고치지 않는다."
+          : " 어투는 prompts/writing/style/voice.md를 따른다."),
     "",
     "고치는 방법:",
     "- '삭제'로 표시된 규칙: 그 문장을 통째로 뺀다. 문단이 비면 문단도 뺀다. 새 문장으로 대체하지 않는다.",
@@ -178,7 +244,7 @@ const FIXER_TIMEOUT_MS = 10 * 60 * 1000;
 export async function enforceWritingRules(input: EnforceWritingRulesInput): Promise<EnforceWritingRulesResult> {
   const det = applyDeterministicFixes(input.body, input.now);
   let body = det.body;
-  const violations = findRuleViolations(body);
+  const violations = findRuleViolations(body, input.category);
   const result: EnforceWritingRulesResult = {
     body,
     deterministicRemoved: det.removed,
@@ -187,7 +253,7 @@ export async function enforceWritingRules(input: EnforceWritingRulesInput): Prom
     agentApplied: false,
   };
   if (det.removed.length > 0) {
-    console.log(`ℹ️ [rules] 코드 교정: ${det.removed.length}건 삭제(댓글 유도·기준 시점)`);
+    console.log(`ℹ️ [rules] 코드 교정: ${det.removed.length}건(댓글 유도·기준 시점·올해 연도·연결어미 뒤 쉼표)`);
   }
   if (violations.length === 0) return result;
 
@@ -205,7 +271,7 @@ export async function enforceWritingRules(input: EnforceWritingRulesInput): Prom
   const marker = "### BODY";
   const at = ran.output.indexOf(marker);
   const candidate = (at >= 0 ? ran.output.slice(at + marker.length) : ran.output).trim();
-  const after = findRuleViolations(candidate);
+  const after = findRuleViolations(candidate, input.category);
   const okLength = candidate.length >= body.length * 0.7;
   const okMarkers = countMarkers(candidate) === countMarkers(body);
   if (!okLength || !okMarkers || after.length >= violations.length) {

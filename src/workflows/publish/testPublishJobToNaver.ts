@@ -206,6 +206,18 @@ async function main(): Promise<void> {
     console.log("✅ 미승인 job 차단");
   }
 
+  // person은 큐를 우회한 직접 호출도 막는다(2026-10-14 §F-2).
+  {
+    let published = 0;
+    const out = await publishJobToNaver("job-1", {
+      ...baseDeps,
+      loadJob: async () => job({ category: "person" }),
+      publish: async () => { published += 1; return okPublish(); },
+    });
+    assert(!out.ok && out.reason === "manual_only" && published === 0, "person은 네이버 발행을 시도하지 않는다");
+    console.log("✅ person - 직접 호출도 거부");
+  }
+
   console.log("\n✅ 전체 통과");
 }
 

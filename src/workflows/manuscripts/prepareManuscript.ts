@@ -45,6 +45,7 @@ import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
 import { splitTrailingHashtags } from "./articleContentParts.js";
 import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
+import { viewerBodyForCategory } from "./manualPasteView.js";
 import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
 import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
@@ -347,7 +348,8 @@ export async function prepareManuscript(
     }
     const split = splitTrailingHashtags(withLinks);
     title = baseArticle.title ?? job.keyword;
-    content = split.body;
+    // 수동 복붙 트랙(person)은 뷰어 본문에서만 내부 링크·참고 자료를 뺀다(2026-10-15 B-2). 위 DB 저장분은 그대로다.
+    content = viewerBodyForCategory(job.category, split.body);
     searchDescription = meta.searchDescription;
     slug = meta.slug;
     shortName = meta.shortName;

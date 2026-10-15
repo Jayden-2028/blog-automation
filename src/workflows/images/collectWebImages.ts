@@ -74,7 +74,7 @@ const ARTWORK_MIN_WIDTH = 900;
  */
 const ARTWORK_FALLBACK_MIN_WIDTH = 600;
 /** 이 카테고리는 공식 스틸이 존재한다고 보고 하한을 올린다. */
-const ARTWORK_CATEGORIES: ReadonlySet<string> = new Set(["entertainment", "ott"]);
+const ARTWORK_CATEGORIES: ReadonlySet<string> = new Set(["entertainment", "ott", "person"]);
 /** 가로/세로가 이보다 작으면 정사각·세로다 - 디스커버 썸네일 후보에서 빠진다(images.md §8). */
 const MIN_LANDSCAPE_RATIO = 1.3;
 
@@ -525,7 +525,7 @@ export function buildPrompt(
     // 공공누리는 **정책·행정 주제에서만** 1순위다(2026-10-01). 전에는 카테고리와 무관하게 "먼저
     // 뒤진다"고 지시했는데, 연예·작품 자리에서는 거기에 있을 리 없는 사진을 먼저 찾게 만든다 -
     // 그 자리의 1순위는 공식 스틸이다(image-maker.md §4-1). 저작권으로 서치풀을 정하지 않는다.
-    ...(category === "entertainment" || category === "ott"
+    ...(category === "entertainment" || category === "ott" || category === "person"
       ? []
       : [
           "**정책·행정 주제라면 한국 공공저작물을 먼저 뒤진다.** 정부·공공기관 자료는 아래에 공공누리로",

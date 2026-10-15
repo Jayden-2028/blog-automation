@@ -13,7 +13,7 @@ import { buildFactCard, summarizeSourcesByAuthority } from "../research/buildFac
 import type { ArticleJobRow, SourceRow } from "../../types/database.js";
 
 /** 목표 본문 길이(자, 공백 포함). writer.md §6-5 / seo-guide 기준: 공백 제외 2,000~3,000자. */
-export const TARGET_ARTICLE_LENGTH = { min: 2000, max: 3000 } as const;
+export const TARGET_ARTICLE_LENGTH = { min: 2000, max: 3500 } as const; // max 3000->3500 (2026-10-16 사용자 확정 - 감상·맥락 레이어 추가에 맞춤)
 
 // 레거시 마커 기반 파서용 구분자(buildArticlePrompt/parseArticleOutput 전용).
 export const ARTICLE_OUTPUT_MARKERS = {

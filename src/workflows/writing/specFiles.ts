@@ -13,6 +13,8 @@ export function pickStyleFile(category: string | null): string {
   if (category === "incident") return "prompts/writing/style/incident.md";
   // 사용설명서 트랙(개편3): 해외 독자 대상 에버그린 안내. 한글 초고를 쓰고 승인 뒤 영어로 번역된다.
   if (category === "kscene") return "prompts/writing/style/kscene.md";
+  // 인물 백과(2026-10-13): incident 뒤에 둔다 - 수사·재판 키워드가 person job으로 들어와도 incident 라우팅이 이긴다.
+  if (category === "person") return "prompts/writing/style/person.md";
   if (category === "parenting") return "prompts/writing/style/parenting.md";
   if (category === "entertainment" || category === "ott") return "prompts/writing/style/entertainment.md";
   return "prompts/writing/style/trend.md";
@@ -22,6 +24,7 @@ export function writingSpecFiles(category: string | null): SpecFile[] {
   const isIncident = category === "incident";
   const files: SpecFile[] = [
     { path: "prompts/writing/core-rules.md", purpose: "한 페이지 핵심 규칙 - 금지 표현·어투·마무리·서식. 다른 문서와 부딪히면 이 파일이 이긴다" },
+    { path: "prompts/writing/rules/humanize.md", purpose: "저장 직전 자체 윤문 - 의미·사실·인용 불변 철칙 + 명료성 7원칙 + AI 티 제거(스킬 대체, 전 카테고리)" },
     { path: "prompts/writing/writer.md", purpose: "입력 계약·카테고리 라우팅·제목" },
     { path: "prompts/writing/rules/facts-and-hedging.md", purpose: "사실 태도 상세 사례(핵심 원칙은 core-rules §1)" },
     isIncident

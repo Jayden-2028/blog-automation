@@ -44,8 +44,11 @@ import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
 import { describeError } from "../../services/describeError.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
+import type { PersonAutocomplete } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import type { PersonSourcePack } from "../research/personSourcePack.js";
+import { resolvePersonSourcePack, waitForPersonSourcePack } from "../research/personSourcePackWait.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
 import { reviseBriefWithResearch } from "../brief/reviseBriefWithResearch.js";
 import type { ReviseBriefInput, ReviseBriefResult } from "../brief/reviseBriefWithResearch.js";
@@ -59,6 +62,7 @@ import type { ResearchVerdict } from "../research/parseResearchFile.js";
 import { buildMedicalDisclaimer } from "./buildArticlePrompt.js";
 import { buildWritingPrompt } from "./buildWritingPrompt.js";
 import { parseDraftFile } from "./parseDraftFile.js";
+import { personBlockedWriteError } from "./personWriteGate.js";
 import { generateArticleImages } from "./generateArticleImages.js";
 import type { GenerateArticleImagesResult } from "./generateArticleImages.js";
 import { runArticleReview } from "../review/runArticleReview.js";
@@ -67,7 +71,7 @@ import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, Sou
 
 /**
  * 헤드리스 writer는 writer.md(500줄+) + seo-guide.md(500줄+) + research 파일(20~30KB)을 읽고,
- * content-blog·korean-humanize 스킬을 순서대로 돌린 뒤 2,000~3,000자 원고를 쓴다. 실측 10분+
+ * 규격 Read와 rules/humanize.md 자체 윤문을 거쳐 2,000~3,000자 원고를 쓴다. 실측 10분+
  * (2026-09-01 E2E에서 10분 타임아웃에 걸림) - 20분으로 늘린다.
  */
 export const WRITE_TIMEOUT_MS = 20 * 60 * 1000;
@@ -86,6 +90,11 @@ export const RESEARCH_TIMEOUT_MS = 18 * 60 * 1000;
 export type RunResearchStageOptions = {
   /** 공공 도메인 본문 fetch를 건너뛴다(테스트/디버그용). 기본 활성화. */
   fetchOfficialContent?: boolean;
+  /**
+   * 인물 백과 소스팩 대기(2026-10-15, B-1). 기본은 DB의 `metadata.researchSourcePack`을 최대 8분(30초 간격) 기다린다.
+   * 테스트는 이 함수로 대체한다(실제 대기·DB 접근 금지). null이면 소스팩 없이 진행한다.
+   */
+  waitForSourcePack?: (jobId: string) => Promise<PersonSourcePack | null>;
   /** 테스트 주입: 헤드리스 researcher 실행을 대체한다. */
   runResearcher?: (prompt: string, outputPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 테스트 주입: research 파일 읽기를 대체한다. */
@@ -161,6 +170,12 @@ type DefaultResearcherInput = {
   sourceContext: string | null;
   /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
   retryHint?: string | null;
+  /** 인물 백과(category=person): 핫스타 화제 배경(`metadata.personBackground`). 아니면 null. */
+  personBackground?: string | null;
+  /** 인물 백과: Node가 모은 자동완성 원본(`collectSourcesForJob` person 모드). 아니면 null. */
+  personAutocomplete?: PersonAutocomplete | null;
+  /** 인물 백과: 맥이 수집한 인물DB·나무위키 원문(`metadata.researchSourcePack`). 못 받았으면 null. */
+  personSourcePack?: PersonSourcePack | null;
 };
 
 /**
@@ -257,6 +272,9 @@ async function runDefaultResearcher(
     brief: input.brief,
     sourceContext: input.sourceContext,
     retryHint: input.retryHint,
+    personBackground: input.personBackground,
+    personAutocomplete: input.personAutocomplete,
+    personSourcePack: input.personSourcePack,
   });
   return defaultRunResearcher(prompt);
 }
@@ -333,7 +351,7 @@ async function runResearchStageInner(
 ): Promise<RunResearchStageResult> {
   // 1) 기준 자료(baseline) - NAVER 검색 API. 하이브리드의 감사 베이스라인이다. 비어 있어도
   //    바로 실패하지 않는다 - 에이전트가 WebSearch로 채울 수 있다(단, 그 사실을 프롬프트에 알린다).
-  const collected = await collectSourcesForJob(jobId, job.keyword);
+  const collected = await collectSourcesForJob(jobId, job.keyword, { category: job.category });
   let baseline = collected.sources;
   if (options.fetchOfficialContent !== false && baseline.length > 0) {
     const result = await enrichOfficialSources(baseline);
@@ -378,6 +396,8 @@ async function runResearchStageInner(
   }
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
+  const rawBackground = (job.metadata as Record<string, unknown> | null)?.personBackground;
+  const personBackground = typeof rawBackground === "string" && rawBackground.trim() ? rawBackground.trim() : null;
 
   // [자료조사 다시 하기](2026-10-02): 봇이 metadata.forceFreshResearch를 켜 두면 2시간 내 파일이 있어도
   // 재사용하지 않고 새로 조사한다 - 안 그러면 자료 부족으로 막힌 그 파일이 그대로 다시 쓰인다.
@@ -390,13 +410,24 @@ async function runResearchStageInner(
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
   } else {
+    // 인물 백과: 맥이 인물DB·나무위키 원문을 DB에 채워 줄 때까지 기다린다(클라우드 IP는 두 곳이 403 - 2026-10-15 실측).
+    // 이미 있으면 바로 쓰고, 8분 안에 안 오면(맥 꺼짐 등) 지금처럼 재료 없이 진행한다. 다른 카테고리는 무영향.
+    const personSourcePack = await resolvePersonSourcePack({
+      category: job.category,
+      metadata: jobMeta,
+      jobId,
+      wait:
+        options.waitForSourcePack ??
+        (async (id: string) =>
+          (await waitForPersonSourcePack({ readMetadata: async () => ((await ArticleJobRepository.findById(id))?.metadata ?? null) as Record<string, unknown> | null })).pack),
+    });
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
@@ -658,6 +689,19 @@ export async function runWritingStage(
     sources = research.sources;
   }
 
+  // 인물 백과는 verdict=blocked면 집필하지 않는다(A-8). status를 writing으로 바꾸기 전에 막아 job이 재시도 가능한 채로 남는다.
+  // 실패는 기존 경로(finishWrite → notifyWriteFailed)가 "자료가 부족해서…" + [자료조사 다시 하기]/[반려]로 알린다.
+  const blockedError = personBlockedWriteError(
+    job.category,
+    existsSync(researchPath)
+      ? await readFile(researchPath, "utf8").catch(() => null)
+      : ((job.metadata as Record<string, unknown> | null)?.researchFileContent as string | null | undefined)
+  );
+  if (blockedError) {
+    await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[writing] ${blockedError}` });
+    return { status: "failed", error: blockedError };
+  }
+
   const startedAt = Date.now();
   await ArticleJobRepository.updateStatus(jobId, "writing");
 
@@ -810,7 +854,7 @@ async function runWritingStageInner(
     title,
     content,
     status: "review",
-    ai_model: "claude-headless(writer.md+korean-humanize)",
+    ai_model: "claude-headless(writer.md+rules/humanize.md 자체 윤문)",
   });
 
   // 생성된 이미지를 images 테이블에 기록한다(article.id가 생긴 뒤에만 가능하다).

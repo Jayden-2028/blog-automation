@@ -88,6 +88,14 @@ async function main(): Promise<void> {
   assert(prompt.includes("자리 1") && prompt.includes("자리 2"), "자리 번호가 실려야 한다");
   console.log("✅ 프롬프트 - 검색 기준 + 저작권 우선순위 + 자리별 문단");
 
+  // 2-b) person은 공공누리(정책·행정) 안내 없이 인물 서치풀을 받는다(2026-10-14 E-1).
+  const personPrompt = buildPrompt("양준모", slots, new Map(), "person", null, null);
+  assert(!personPrompt.includes("kogl.or.kr"), "person 프롬프트에 공공누리 안내가 섞이면 안 된다");
+  assert(personPrompt.includes("나무위키"), "person 프롬프트에 인물 서치풀이 실려야 한다");
+  const livingPrompt = buildPrompt("양준모", slots, new Map(), "living", null, null);
+  assert(livingPrompt.includes("kogl.or.kr"), "비연예 카테고리는 공공누리 안내 유지");
+  console.log("✅ person 프롬프트 - 공공누리 제외 + 인물 서치풀");
+
   const dir = await mkdtemp(resolve(tmpdir(), "collect-web-images-"));
   try {
     // 3) 정상 경로: 파일과 사이드카(web-images.json)가 쓰인다.

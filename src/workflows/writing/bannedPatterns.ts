@@ -49,6 +49,54 @@ export const UNPUBLISHED_PATTERN =
 export const BANNED_COLLOQUIAL_ENDINGS =
   /(더라고요|거든요|잖아요|답니다|네요|고요)(?=[.!?)"'”’\s]|$)/gm;
 
+/** person(인물 백과)에서만 허용하는 구어 어미(2026-10-15 사용자 결정, voice.md §2·style/person.md). 원고당 합계 3곳까지. */
+export const PERSON_ALLOWED_COLLOQUIAL_ENDINGS: ReadonlySet<string> = new Set(["거든요", "고요"]);
+export const PERSON_ALLOWED_COLLOQUIAL_MAX = 3;
+
+/**
+ * 카테고리별 허용 구어 어미(2026-10-16 사용자 확정, voice.md §2).
+ * - 전 카테고리: `~네요` 허용(발행본 실측 - 사용자가 매번 다시 넣던 어미. `~는데요`는 정규식 밖이라 문서로만 다룬다)
+ * - person: 추가로 `거든요`·`고요`
+ * - incident: 허용 없음(사건·사고는 구어 완화 예외 - style/incident.md)
+ * 상한은 허용 집합 전체 합산 3곳(PERSON_ALLOWED_COLLOQUIAL_MAX 재사용).
+ */
+export function allowedColloquialEndingsFor(category?: string | null): ReadonlySet<string> {
+  if (category === "incident") return new Set();
+  if (category === "person") return new Set(["네요", ...PERSON_ALLOWED_COLLOQUIAL_ENDINGS]);
+  return new Set(["네요"]);
+}
+
+/**
+ * 직접 인용(큰따옴표 "…" · “…” · 작은따옴표 ‘…’ 안)의 글자를 같은 길이의 "□"로 덮는다.
+ * 인용은 원문 그대로가 원칙이라 어미 검사·교정 대상에서 뺀다(2026-10-15, 전 카테고리 공통).
+ * 줄 단위로만 짝을 찾으며(줄바꿈을 넘는 따옴표는 짝으로 보지 않는다), 길이를 유지하므로
+ * 마스크한 문자열의 위치를 원문 위치로 그대로 쓸 수 있다.
+ */
+export function maskQuotedSpans(text: string): string {
+  return text.replace(/"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’/g, (m) => "□".repeat(m.length));
+}
+
+/**
+ * 구어 어미 위반 목록(인용 제외). 카테고리별 허용 어미(allowedColloquialEndingsFor)는 위반이 아니다.
+ * 입력은 이미 maskQuotedSpans를 거친 문자열이어야 하는 경우를 위해 mask 여부를 호출자가 정한다.
+ */
+export function findColloquialEndings(text: string, category?: string | null): string[] {
+  const allowed = allowedColloquialEndingsFor(category);
+  const found = [...maskQuotedSpans(text).matchAll(BANNED_COLLOQUIAL_ENDINGS)].map((m) => m[1]);
+  return found.filter((e) => !allowed.has(e));
+}
+
+/** 허용 구어 어미가 인용 밖에서 쓰인 횟수(카테고리별 집합 합산). 상한(3곳) 집행용. */
+export function countAllowedEndings(text: string, category?: string | null): number {
+  const allowed = allowedColloquialEndingsFor(category);
+  return [...maskQuotedSpans(text).matchAll(BANNED_COLLOQUIAL_ENDINGS)].filter((m) => allowed.has(m[1])).length;
+}
+
+/** @deprecated person 전용 구버전 - countAllowedEndings(text, "person")을 쓴다. */
+export function countPersonAllowedEndings(text: string): number {
+  return countAllowedEndings(text, "person");
+}
+
 /**
  * "○○에 따르면/에 의하면" 출처 표기(2026-09-30). 기관을 주어로 직접 쓰거나 사실을 단정한다 - 원문을 안 열고 뉴스가 전한
  * 기관 이름을 앞세우면 확인 안 된 출처 표기가 된다. ("보도에 따르면"은 MEDIA_ATTRIBUTION_PATTERN이 따로 잡는다.)

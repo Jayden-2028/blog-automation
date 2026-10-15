@@ -4,6 +4,7 @@
 // 이 함수는 그 규격을 "읽고 따르라"고 지시하고 job 컨텍스트 + baseline 자료 + 정확한 출력 경로만
 // 박아 넣는다. 조사 방법·품질 기준·파일 템플릿은 전부 researcher.md에 있다.
 
+import type { PersonSourcePack } from "./personSourcePack.js";
 import type { ArticleJobRow, SourceInsert } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
@@ -34,6 +35,21 @@ export type BuildResearchPromptInput = {
    * 않는다. 없으면 일반 조사.
    */
   retryHint?: string | null;
+  /**
+   * 인물 백과 트랙(category=person): 핫스타 알림의 화제 배경 한 줄(`job.metadata.personBackground`).
+   * person-researcher.md §6-0이 출력 §1(지금 화제인 이유)의 출발점으로 쓴다. person이 아니면 무시한다.
+   */
+  personBackground?: string | null;
+  /**
+   * 인물 백과: Node가 모은 인물명 단독 자동완성 원본(`collectSourcesForJob` person 모드). 에이전트가 §4-1 주제
+   * 묶음·동명이인 가드의 재료로 쓴다. null이면 수집 안 됨(싣지 않는다).
+   */
+  personAutocomplete?: { query: string; suggestions: string[]; failed: boolean } | null;
+  /**
+   * 인물 백과: 맥이 수집한 네이버 인물DB·나무위키 원문(2026-10-15, B-1 - 클라우드 IP는 두 곳이 403이다).
+   * null이면 수집 안 됨(맥 꺼짐·대기 만료)이라 싣지 않고 지금처럼 §2-1 직접 열람을 시도한다.
+   */
+  personSourcePack?: PersonSourcePack | null;
 };
 
 function formatBaseline(baselineSources: SourceInsert[]): string[] {
@@ -60,6 +76,10 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
   const { job, baselineSources, outputPath, today } = input;
 
   const baselineLines = formatBaseline(baselineSources);
+
+  // 인물 백과(2026-10-13): 규격이 researcher.md를 **대체**한다(self-contained). brief.type(celebrity) 판정에
+  // 맡기면 기존 프로파일이 골라지므로 kscene처럼 category로 분기한다. 브리프 §4-1 프로파일 오버라이드도 싣지 않는다.
+  if (job.category === "person") return buildPersonResearchPrompt(input, baselineLines);
 
   return [
     "너는 블로그 원고용 자료조사 에이전트다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",
@@ -120,7 +140,8 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
         " 방문자·거주자가 알고 싶은 것)에 답할 자료를 찾는다. 공식·1차 자료(한국관광공사 visitkorea.or.kr, 정부·지자체·" +
         "운영 기관 공식 사이트, 철도·지하철 공식 안내)를 우선하고 영문 페이지와 한글 페이지를 **둘 다** 본다. 요금·운영시간·" +
         "정책처럼 바뀌는 값은 출처의 **기준 시점**을 반드시 적는다. 조사 파일은 기존 규격대로 **한국어**로 쓴다." +
-        " 시의성 기사(최근 사건·논란)는 근거로 쓰지 않는다 - 에버그린 안내만 다룬다."
+        " 시의성 기사(최근 사건·논란)는 근거로 쓰지 않는다 - 에버그린 안내만 다룬다. 단 운영 변경" +
+        " 공지(요금 인상·휴무·코스 변경·운영 중단)는 예외다(researcher.md §4-2)."
       : null,
     `- 출력 파일은 researcher.md §7의 이름 규칙·충돌 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못",
@@ -134,6 +155,90 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     "  앱에서만 열리는 화면은 적지 않는다(찍으면 로그인 벽이 찍힌다).",
     "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
     "- §10 전체 출처 목록 표에는 baseline + 네가 새로 연 URL을 전부 등급과 함께 넣는다(감사기록).",
+    "",
+    "완료하면 파일을 저장한 뒤 마지막 줄에 `SAVED: <경로>`만 답하라. 다른 설명은 필요 없다.",
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+/** 자동완성 원본은 걸러내지 않고 그대로 싣는다. 실패·빈 결과는 그 사실을 적어 에이전트가 스스로 보강하게 한다. */
+function formatPersonAutocomplete(auto: { query: string; suggestions: string[]; failed: boolean } | null): string[] {
+  if (!auto) return [];
+  if (auto.failed) {
+    return [
+      `네이버 자동완성 원본(질의 "${auto.query}" - Node 수집): 자동완성 조회 실패(또는 결과 없음).`,
+      "순위 측정 재료가 없다. §4-1 2단계는 직접 검색(자동완성 화면·연관 검색)으로 보강하되, 확인하지 못했으면",
+      "§6 작품 외 활동에 \"자동완성 원본 확보 실패\"를 그대로 적는다.",
+      "",
+    ];
+  }
+  return [
+    `네이버 자동완성 원본(질의 "${auto.query}" - Node 수집, 걸러내지 않은 원본 순서). §4-1 주제 묶음·§4-1-1 동명이인 가드의 재료다:`,
+    ...auto.suggestions.map((s, i) => `${i + 1}. ${s}`),
+    "",
+  ];
+}
+
+/**
+ * 맥이 수집한 인물DB·나무위키 원문 절(2026-10-15, B-1). 규격 파일은 건드리지 않고 파이프라인 오버라이드로 얹는다 -
+ * 등급(인물DB official / 나무위키 community)·교차확인·인용 규칙은 person-researcher.md 그대로다.
+ */
+function formatPersonSourcePack(pack: PersonSourcePack | null): string[] {
+  if (!pack) return [];
+  const block = (label: string, text: string, failure: string | undefined): string[] =>
+    text
+      ? [`### ${label} 원문 (맥 수집, ${pack.fetchedAt})`, "```text", text, "```", ""]
+      : [`### ${label}: 맥 수집 실패 - ${failure ?? "내용 없음"}. 이 출처는 §2-1대로 직접 열어 보고, 못 열면 대조 미완으로 기록한다.`, ""];
+  const failureOf = (prefix: string) => pack.errors.find((e) => e.startsWith(prefix))?.slice(prefix.length).trim();
+  return [
+    "아래는 **맥이 수집한 네이버 인물DB 카드와 나무위키 원문**이다(클라우드에서는 두 사이트가 차단돼 열리지 않는다).",
+    "person-researcher.md §2-1의 이 두 고정 출처 열람은 아래 원문으로 갈음할 수 있다 - 같은 곳을 다시 열려고 시도하지 않는다.",
+    "등급·교차확인·인용 규칙은 규격과 동일하다(인물DB = official, 나무위키 = community, 인물DB와 충돌하면 인물DB가 이긴다).",
+    "§6 출처 표(§10)에는 두 출처를 URL(`https://search.naver.com/search.naver?query=<이름>`, `https://namu.wiki/w/<이름>`)로 올린다.",
+    "",
+    ...block("네이버 인물DB", pack.personDb, failureOf("personDb:")),
+    ...block("나무위키", pack.namuwiki, failureOf("namuwiki:")),
+  ];
+}
+
+/** category=person 전용. 읽을 규격은 person-researcher.md 하나(+ 주제 배분·문단 흐름)다. */
+function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLines: string[]): string {
+  const { job, outputPath, today } = input;
+  return [
+    "너는 블로그 원고용 자료조사 에이전트다. 아래 규격 문서를 Read로 읽고 그 계약을 그대로 따른다.",
+    "규격을 못 읽으면 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
+    "",
+    "- prompts/research/person-researcher.md  (인물 백과 자료조사 계약서 - self-contained. researcher.md는 읽지 않는다)",
+    "- prompts/writing/rules/topic-allocation.md  (주제 배분 - 조사 분량도 이 비율을 따른다)",
+    "- prompts/writing/rules/article-structure.md (카테고리별 문단 흐름 - 이 단계들을 채울 자료를 찾는다)",
+    "",
+    "이 job의 입력:",
+    `- keyword: ${job.keyword}   (인물명. 이 문자열을 다듬거나 바꾸지 않는다)`,
+    "- topic: person",
+    job.headline && job.headline !== job.keyword ? `- headline: ${job.headline}   (현재 화제작)` : null,
+    input.personBackground ? `- background: ${input.personBackground}` : null,
+    `- 오늘 날짜: ${today}`,
+    "",
+    ...(input.retryHint
+      ? [
+          "이번은 재조사다. 직전 조사가 자료 부족으로 글쓰기를 막았다:",
+          `- ${input.retryHint}`,
+          "같은 검색을 되풀이하지 말고 이 부족분을 먼저 채울 출처를 새로 찾는다.",
+          "그래도 못 찾으면 억지로 채우지 말고 verdict를 사실대로 적는다.",
+          "",
+        ]
+      : []),
+    "이미 수집된 기준 자료(baseline - NAVER 뉴스/웹문서 검색 결과. 카페·지식iN은 수집하지 않았다):",
+    ...baselineLines,
+    "",
+    ...formatPersonAutocomplete(input.personAutocomplete ?? null),
+    ...formatPersonSourcePack(input.personSourcePack ?? null),
+    "파이프라인 오버라이드(person-researcher.md와 충돌하면 이 지시가 우선):",
+    `- 출력 파일은 person-researcher.md §6의 이름 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
+    "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못 채운 빈칸을",
+    "  person-researcher.md §2 절차(고정 출처 → 뉴스 → 웹검색 → LLM 보강)로 보강하는 데 집중한다.",
+    "- frontmatter의 keyword는 위 입력 keyword와 한 글자도 다르지 않아야 한다.",
     "",
     "완료하면 파일을 저장한 뒤 마지막 줄에 `SAVED: <경로>`만 답하라. 다른 설명은 필요 없다.",
   ]

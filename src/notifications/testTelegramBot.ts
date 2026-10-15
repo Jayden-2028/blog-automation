@@ -171,6 +171,116 @@ async function main(): Promise<void> {
     console.log("✅ 조회 실패(만료/위조) -> expired, job 생성 없음");
   }
 
+  // 3-1) 인물글 버튼(pgo:, 2026-10-13): keyword_rankings가 아니라 run.metadata.people[rank]를 조회한다.
+  //      조회 실패 = 거부, 정상이면 category=person·엔터 트랙·personBackground로 job 생성, 같은 버튼 재클릭은 job을 또 만들지 않는다.
+  {
+    const person = { runId: 42, rank: 2, name: "진선규", background: "신작 공개 이후 연기 재조명" };
+    const make = (opts: { person: typeof person | null; created?: boolean; existingStatus?: ArticleJobRow["status"] }) => {
+      const calls = { loadRanking: 0, loadPerson: 0, createPerson: 0, titles: 0 };
+      let made: typeof person | null = null;
+      const bot = new TelegramBot({
+        botToken: "test-token",
+        chatId: CHAT_ID,
+        loadRanking: async () => {
+          calls.loadRanking++;
+          return null;
+        },
+        loadPerson: async () => {
+          calls.loadPerson++;
+          return opts.person;
+        },
+        createPersonJob: async (p) => {
+          calls.createPerson++;
+          made = p;
+          const created = opts.created ?? true;
+          return {
+            job: makeJob({ keyword: p.name, category: "person", source_run_id: p.runId, source_rank: p.rank, status: created ? "selected" : (opts.existingStatus ?? "selected") }),
+            created,
+          };
+        },
+        saveTitles: async () => {},
+        generateTitles: async () => {
+          calls.titles++;
+          return [];
+        },
+      });
+      return { bot, calls, made: () => made };
+    };
+
+    const ok = make({ person });
+    const created = await ok.bot.handleCallbackQuery(makeQuery("pgo:42:2"));
+    assert(created.outcome.status === "created" && created.outcome.job.category === "person", `pgo 정상은 person job 생성이어야 한다 (${created.outcome.status})`);
+    assert(ok.calls.loadRanking === 0 && ok.calls.loadPerson === 1, "pgo는 keyword_rankings가 아니라 run.metadata.people을 조회해야 한다");
+    assert(ok.made()?.name === "진선규" && ok.made()?.background === "신작 공개 이후 연기 재조명", "인물명·배경이 job 생성에 전달돼야 한다");
+    assert(jobFromFreshSelection(created.outcome) !== null, "pgo로 만든 job은 자료조사 자동 시작 대상이다");
+    assert(created.message.includes("진선규"), "확인 메시지에 인물명");
+
+    const forged = make({ person: null });
+    const expired = await forged.bot.handleCallbackQuery(makeQuery("pgo:999:9"));
+    assert(expired.outcome.status === "expired" && forged.calls.createPerson === 0, "조회 실패(위조·만료)는 expired, job 생성 없음");
+
+    const dup = make({ person, created: false });
+    const unchanged = await dup.bot.handleCallbackQuery(makeQuery("pgo:42:2"));
+    assert(unchanged.outcome.status === "unchanged" && dup.calls.titles === 0, "같은 버튼 재클릭은 unchanged, 제목 재생성 없음");
+    assert(jobFromFreshSelection(unchanged.outcome) === null, "재클릭은 자료조사를 다시 시작하지 않는다");
+
+    const inProgress = make({ person, created: false, existingStatus: "writing" });
+    const locked = await inProgress.bot.handleCallbackQuery(makeQuery("pgo:42:2"));
+    assert(locked.outcome.status === "locked", "진행 중인 job은 locked");
+
+    const otherChat = make({ person });
+    const wrong = await otherChat.bot.handleCallbackQuery(makeQuery("pgo:42:2", "999999"));
+    assert(wrong.outcome.status === "ignored" && otherChat.calls.loadPerson === 0, "다른 chat은 거부, 조회도 하지 않는다");
+
+    // go:/pass: 처리는 영향받지 않는다 - pgo가 Pass로 오인되면 안 된다.
+    const notSelection = await make({ person }).bot.handleCallbackQuery(makeQuery("pgox:42:2"));
+    assert(notSelection.outcome.status === "ignored", "pgo 아닌 접두사는 선택 형식이 아니다");
+    console.log("✅ 인물글 버튼(pgo): run.metadata.people 조회·조회 실패 거부·중복 클릭·chat 검증");
+  }
+
+  // 3-2) 인물글 키보드: 릴레이가 눌린 순간 키보드를 "처리 중"으로 덮어쓰므로, 러너가 콜백 payload의 원래 키보드로
+  //      나머지 인물 버튼을 되살리고 누른 것만 ✅로 바꾼다.
+  {
+    const requests: { method: string; body: Record<string, unknown> }[] = [];
+    const bot = new TelegramBot({
+      botToken: "test-token",
+      chatId: CHAT_ID,
+      loadPerson: async () => ({ runId: 42, rank: 2, name: "진선규", background: "배경" }),
+      createPersonJob: async (p) => ({ job: makeJob({ keyword: p.name, category: "person" }), created: true }),
+      saveTitles: async () => {},
+      triggerResearch: () => {},
+      sendTelegramRequest: async (method, body) => {
+        requests.push({ method, body });
+        return null;
+      },
+    });
+    const processed = await bot.processUpdate({
+      update_id: 1,
+      callback_query: {
+        id: "cbq-pgo",
+        data: "pgo:42:2",
+        message: {
+          message_id: 77,
+          chat: { id: CHAT_ID },
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "✍️ 1. 박보검 인물글", callback_data: "pgo:42:1" }],
+              [{ text: "✍️ 2. 진선규 인물글", callback_data: "pgo:42:2" }],
+              [{ text: "✍️ 3. 김고은 인물글", callback_data: "pgo:42:3" }],
+            ],
+          },
+        },
+      },
+    } as TelegramUpdate);
+    assert(processed.handled && processed.researchTrigger?.job.keyword === "진선규", "pgo는 자료조사를 시작한다(기존 엔터 트랙 흐름)");
+    const edit = requests.find((r) => r.method === "editMessageReplyMarkup");
+    assert(edit, "키보드를 되살려야 한다");
+    const rows = (edit.body.reply_markup as { inline_keyboard: { text: string; callback_data: string }[][] }).inline_keyboard;
+    assert(rows.length === 3 && rows[0][0].text === "✍️ 1. 박보검 인물글" && rows[2][0].text === "✍️ 3. 김고은 인물글", "나머지 인물 버튼은 그대로 남아야 한다");
+    assert(rows[1][0].text === "✅ 2. 진선규 인물글" && rows[1][0].callback_data === "pgo:42:2", "누른 버튼만 ✅로 바뀌고 callback_data는 유지");
+    console.log("✅ 인물글 키보드 - 처리 후 나머지 인물 버튼 복원, 누른 것만 ✅");
+  }
+
   // 4) 정상 선택: job 생성 + 제목 생성 + metadata 저장 + 확인 메시지.
   //    자동 흐름(2026-08-31): 추천 제목은 확인 메시지가 아니라 조사 완료 알림에서 보여준다.
   //    확인 메시지 문구는 2026-09-16부터 "자료조사 시작"이 아니라 "원고 초안 준비중"을 안내한다 -

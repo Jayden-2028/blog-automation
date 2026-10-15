@@ -159,6 +159,41 @@ async function main(): Promise<void> {
   }
   console.log("✅ 내부 링크를 DB 원고에도 저장(참고 자료 앞·해시태그 유지), 재실행 시 중복·재저장 없음, 실패해도 계속");
 
+  // 2-2) person(수동 복붙 트랙, 2026-10-15 B-2): 뷰어 본문에서만 "함께 보면 좋은 글"·"참고 자료"를 뺀다. DB 원문에는 남는다.
+  {
+    const original = "도입 문단입니다.\n\n**소제목**\n본문 문단입니다.\n\n**참고 자료**\n- [출처](https://example.com/src)\n\n#태그1 #태그2";
+    const posts = [
+      { jobId: "other", keyword: "테스트 키워드 다른 글", category: "living", title: "다른 글", url: "https://whynowissue.blogspot.com/2026/09/other.html" },
+    ];
+    const runWith = async (category: string | null) => {
+      const saved: string[] = [];
+      const result = await prepareManuscript(job("a", category), {
+        loadArticles: async () => [baseArticle(original)],
+        writeManuscriptFile: async () => {},
+        mergeJobMetadata: async () => {},
+        generateImages: false,
+        collectWebImages: false,
+        capturePages: false,
+        loadPublishedPosts: async () => posts as never,
+        saveArticleContent: async (_id, body) => void saved.push(body),
+      });
+      assert(result.status === "success", "준비 성공");
+      return { body: result.topic.manuscript.body, saved };
+    };
+
+    const person = await runWith("person");
+    assert(!person.body.includes("함께 보면 좋은 글") && !person.body.includes("참고 자료") && !person.body.includes("example.com/src"), `person 뷰어 본문에는 내부 링크·참고 자료가 없다 (${person.body})`);
+    assert(person.body.includes("도입 문단입니다.") && person.body.includes("**소제목**\n본문 문단입니다."), "본문은 그대로");
+    assert(person.saved.length === 1 && person.saved[0].includes("**함께 보면 좋은 글**") && person.saved[0].includes("**참고 자료**"), "DB 원문에는 두 블록이 남는다");
+    assert(!person.body.includes("#태그1") && person.body.trimEnd().endsWith("본문 문단입니다."), "해시태그는 기존대로 tags로 분리, 본문은 깔끔히 끝난다");
+
+    for (const category of ["entertainment", "living", null]) {
+      const other = await runWith(category);
+      assert(other.body.includes("함께 보면 좋은 글") && other.body.includes("**참고 자료**"), `${category}: 다른 카테고리의 뷰어 본문은 무변경`);
+    }
+  }
+  console.log("✅ person 뷰어 본문: 내부 링크·참고 자료 제외, DB 원문 유지, 타 카테고리 무변경");
+
   // 3) 기준 원고가 곧 최종본: LLM 호출 없이 파일 1개 + draftMeta + imagePrompts 전달
   const writes: Record<string, string> = {};
   const r3 = await prepareManuscript(
