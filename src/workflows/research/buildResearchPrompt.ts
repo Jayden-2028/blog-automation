@@ -4,6 +4,7 @@
 // 이 함수는 그 규격을 "읽고 따르라"고 지시하고 job 컨텍스트 + baseline 자료 + 정확한 출력 경로만
 // 박아 넣는다. 조사 방법·품질 기준·파일 템플릿은 전부 researcher.md에 있다.
 
+import type { PersonSourcePack } from "./personSourcePack.js";
 import type { ArticleJobRow, SourceInsert } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
@@ -44,6 +45,11 @@ export type BuildResearchPromptInput = {
    * 묶음·동명이인 가드의 재료로 쓴다. null이면 수집 안 됨(싣지 않는다).
    */
   personAutocomplete?: { query: string; suggestions: string[]; failed: boolean } | null;
+  /**
+   * 인물 백과: 맥이 수집한 네이버 인물DB·나무위키 원문(2026-10-15, B-1 - 클라우드 IP는 두 곳이 403이다).
+   * null이면 수집 안 됨(맥 꺼짐·대기 만료)이라 싣지 않고 지금처럼 §2-1 직접 열람을 시도한다.
+   */
+  personSourcePack?: PersonSourcePack | null;
 };
 
 function formatBaseline(baselineSources: SourceInsert[]): string[] {
@@ -173,6 +179,28 @@ function formatPersonAutocomplete(auto: { query: string; suggestions: string[]; 
   ];
 }
 
+/**
+ * 맥이 수집한 인물DB·나무위키 원문 절(2026-10-15, B-1). 규격 파일은 건드리지 않고 파이프라인 오버라이드로 얹는다 -
+ * 등급(인물DB official / 나무위키 community)·교차확인·인용 규칙은 person-researcher.md 그대로다.
+ */
+function formatPersonSourcePack(pack: PersonSourcePack | null): string[] {
+  if (!pack) return [];
+  const block = (label: string, text: string, failure: string | undefined): string[] =>
+    text
+      ? [`### ${label} 원문 (맥 수집, ${pack.fetchedAt})`, "```text", text, "```", ""]
+      : [`### ${label}: 맥 수집 실패 - ${failure ?? "내용 없음"}. 이 출처는 §2-1대로 직접 열어 보고, 못 열면 대조 미완으로 기록한다.`, ""];
+  const failureOf = (prefix: string) => pack.errors.find((e) => e.startsWith(prefix))?.slice(prefix.length).trim();
+  return [
+    "아래는 **맥이 수집한 네이버 인물DB 카드와 나무위키 원문**이다(클라우드에서는 두 사이트가 차단돼 열리지 않는다).",
+    "person-researcher.md §2-1의 이 두 고정 출처 열람은 아래 원문으로 갈음할 수 있다 - 같은 곳을 다시 열려고 시도하지 않는다.",
+    "등급·교차확인·인용 규칙은 규격과 동일하다(인물DB = official, 나무위키 = community, 인물DB와 충돌하면 인물DB가 이긴다).",
+    "§6 출처 표(§10)에는 두 출처를 URL(`https://search.naver.com/search.naver?query=<이름>`, `https://namu.wiki/w/<이름>`)로 올린다.",
+    "",
+    ...block("네이버 인물DB", pack.personDb, failureOf("personDb:")),
+    ...block("나무위키", pack.namuwiki, failureOf("namuwiki:")),
+  ];
+}
+
 /** category=person 전용. 읽을 규격은 person-researcher.md 하나(+ 주제 배분·문단 흐름)다. */
 function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLines: string[]): string {
   const { job, outputPath, today } = input;
@@ -204,6 +232,7 @@ function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLine
     ...baselineLines,
     "",
     ...formatPersonAutocomplete(input.personAutocomplete ?? null),
+    ...formatPersonSourcePack(input.personSourcePack ?? null),
     "파이프라인 오버라이드(person-researcher.md와 충돌하면 이 지시가 우선):",
     `- 출력 파일은 person-researcher.md §6의 이름 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못 채운 빈칸을",

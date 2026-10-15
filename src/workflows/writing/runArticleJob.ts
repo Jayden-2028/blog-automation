@@ -47,6 +47,8 @@ import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import type { PersonAutocomplete } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import type { PersonSourcePack } from "../research/personSourcePack.js";
+import { resolvePersonSourcePack, waitForPersonSourcePack } from "../research/personSourcePackWait.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
 import { reviseBriefWithResearch } from "../brief/reviseBriefWithResearch.js";
 import type { ReviseBriefInput, ReviseBriefResult } from "../brief/reviseBriefWithResearch.js";
@@ -88,6 +90,11 @@ export const RESEARCH_TIMEOUT_MS = 18 * 60 * 1000;
 export type RunResearchStageOptions = {
   /** 공공 도메인 본문 fetch를 건너뛴다(테스트/디버그용). 기본 활성화. */
   fetchOfficialContent?: boolean;
+  /**
+   * 인물 백과 소스팩 대기(2026-10-15, B-1). 기본은 DB의 `metadata.researchSourcePack`을 최대 8분(30초 간격) 기다린다.
+   * 테스트는 이 함수로 대체한다(실제 대기·DB 접근 금지). null이면 소스팩 없이 진행한다.
+   */
+  waitForSourcePack?: (jobId: string) => Promise<PersonSourcePack | null>;
   /** 테스트 주입: 헤드리스 researcher 실행을 대체한다. */
   runResearcher?: (prompt: string, outputPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 테스트 주입: research 파일 읽기를 대체한다. */
@@ -167,6 +174,8 @@ type DefaultResearcherInput = {
   personBackground?: string | null;
   /** 인물 백과: Node가 모은 자동완성 원본(`collectSourcesForJob` person 모드). 아니면 null. */
   personAutocomplete?: PersonAutocomplete | null;
+  /** 인물 백과: 맥이 수집한 인물DB·나무위키 원문(`metadata.researchSourcePack`). 못 받았으면 null. */
+  personSourcePack?: PersonSourcePack | null;
 };
 
 /**
@@ -265,6 +274,7 @@ async function runDefaultResearcher(
     retryHint: input.retryHint,
     personBackground: input.personBackground,
     personAutocomplete: input.personAutocomplete,
+    personSourcePack: input.personSourcePack,
   });
   return defaultRunResearcher(prompt);
 }
@@ -400,13 +410,24 @@ async function runResearchStageInner(
   if (freshFile) {
     console.log(`ℹ️ [research] 최근 research 파일 재사용(재조사 생략): ${outputPath}`);
   } else {
+    // 인물 백과: 맥이 인물DB·나무위키 원문을 DB에 채워 줄 때까지 기다린다(클라우드 IP는 두 곳이 403 - 2026-10-15 실측).
+    // 이미 있으면 바로 쓰고, 8분 안에 안 오면(맥 꺼짐 등) 지금처럼 재료 없이 진행한다. 다른 카테고리는 무영향.
+    const personSourcePack = await resolvePersonSourcePack({
+      category: job.category,
+      metadata: jobMeta,
+      jobId,
+      wait:
+        options.waitForSourcePack ??
+        (async (id: string) =>
+          (await waitForPersonSourcePack({ readMetadata: async () => ((await ArticleJobRepository.findById(id))?.metadata ?? null) as Record<string, unknown> | null })).pack),
+    });
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground, personAutocomplete: collected.personAutocomplete });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground, personAutocomplete: collected.personAutocomplete });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
