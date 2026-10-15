@@ -202,14 +202,15 @@ export type CheckQualityInput = {
   /** 이 job의 메인 키워드. 제목 첫 마디에 들어갔는지 본다(2026-10-02). */
   keyword?: string | null;
   /**
-   * job.category. person(인물 백과)이면 분량은 하한 1,250자 미달만 경고하고 상한 경고는 없다
-   * (2026-10-12 사용자 결정, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
+   * job.category. person(인물 백과)이면 하한은 공통과 같고(2,000자) 상한만 4,000자로 넓다.
+   * 4,000자 초과는 집필 상한 위반이 아니라 목표 구간(2,500~4,000자) 초과 신호로 경고만 한다
+   * (2026-10-15 Q8 판정, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
    */
   category?: string | null;
 };
 
-/** 인물 백과 분량 하한(공백 제외). 상한은 없다. */
-export const PERSON_MIN_ARTICLE_LENGTH = 1250;
+/** 인물 백과 분량 경고 상한(공백 제외). 집필 상한이 아니라 목표 구간 초과 신호다. 하한은 공통 min. */
+export const PERSON_MAX_ARTICLE_LENGTH = 4000;
 
 /** 제목 꼬리의 "~정리/총정리/모음". 후킹을 죽이는 자리다(core-rules.md §5). */
 const TITLE_SUMMARY_TAIL = /(?:정리|총정리|모음|총집합)\s*$/;
@@ -300,19 +301,22 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
     .replace(/\s+/g, "");
   const length = prose.length;
   const isPerson = input.category === "person";
-  const minLength = isPerson ? PERSON_MIN_ARTICLE_LENGTH : TARGET_ARTICLE_LENGTH.min;
+  const minLength = TARGET_ARTICLE_LENGTH.min;
+  const maxLength = isPerson ? PERSON_MAX_ARTICLE_LENGTH : TARGET_ARTICLE_LENGTH.max;
   if (length < minLength && input.researchThin) {
     checks.push({
       category: "quality",
       severity: "warning",
       message: `자료 얇음(thin): 분량 ${length.toLocaleString()}자 - 하한 미달은 예상된 결과입니다. 늘려 쓰지 않았는지 확인하고, 자료조사를 보강할지 판단하세요`,
     });
-  } else if (isPerson ? length < minLength : length < minLength || length > TARGET_ARTICLE_LENGTH.max) {
+  } else if (length < minLength || length > maxLength) {
     checks.push({
       category: "quality",
       severity: "warning",
       message: isPerson
-        ? `분량 ${length.toLocaleString()}자 (인물 백과 하한 ${PERSON_MIN_ARTICLE_LENGTH.toLocaleString()}자 미달, 공백·목록 제외)`
+        ? length < minLength
+          ? `분량 ${length.toLocaleString()}자 (인물 백과 하한 ${minLength.toLocaleString()}자 미달, 공백·목록 제외)`
+          : `분량 ${length.toLocaleString()}자 (인물 백과 목표 구간 2,500~${maxLength.toLocaleString()}자 초과 신호입니다. 상한 위반이 아니니 늘어진 곳이 없는지만 확인하세요, 공백·목록 제외)`
         : `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
     });
   }
