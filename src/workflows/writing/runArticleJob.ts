@@ -71,7 +71,7 @@ import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, Sou
 
 /**
  * 헤드리스 writer는 writer.md(500줄+) + seo-guide.md(500줄+) + research 파일(20~30KB)을 읽고,
- * content-blog 스킬과 rules/humanize.md 자체 윤문을 거쳐 2,000~3,000자 원고를 쓴다. 실측 10분+
+ * 규격 Read와 rules/humanize.md 자체 윤문을 거쳐 2,000~3,000자 원고를 쓴다. 실측 10분+
  * (2026-09-01 E2E에서 10분 타임아웃에 걸림) - 20분으로 늘린다.
  */
 export const WRITE_TIMEOUT_MS = 20 * 60 * 1000;
