@@ -1000,6 +1000,9 @@ export function renderManuscriptPage(
 
       h += '<div class="toolbar">';
       h += '<button class="btn primary" id="c-body">📋 본문 복사 (서식 유지)</button>';
+      // 서식 없는 복사(2026-10-16 사용자 요청 복원): 폰트·볼드 없이 text/plain만. 문단 구분·줄바꿈·
+      // [[이미지 N]] 마커는 collectPlainText가 유지한다(서식 유지 복사의 text/plain과 같은 내용).
+      h += '<button class="btn" id="c-body-plain">📋 본문 복사 (서식 없음)</button>';
       // 네이버 복사 버튼과 배리에이션 없음 문구는 2026-10-03에 뺐다 - 배리에이션
       // 단계가 09-30에 폐지돼 새 원고는 전부 "없음"으로만 떴다. 네이버 발행은 텔레그램 버튼이 한다.
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
@@ -1082,6 +1085,10 @@ export function renderManuscriptPage(
 
       document.getElementById("c-body").addEventListener("click", function () {
         copyRich(collectRichHtml(topic), collectPlainText(topic));
+      });
+
+      document.getElementById("c-body-plain").addEventListener("click", function () {
+        copyText(collectPlainText(topic));
       });
 
       // 캡션 자리별 수정(2026-10-03). 누르면 그 캡션만 편집 상태가 되고, 다시 누르면 저장한다.

@@ -64,6 +64,9 @@ async function main(): Promise<void> {
   assert(!html.includes("네이버 배리에이션 없음"), "'네이버 배리에이션 없음' 문구는 없어야 한다");
   assert(!html.includes("네이버용 원고 복사"), "네이버 복사 버튼은 없어야 한다");
   assert(!html.includes('"naver":'), "manifest의 naver 본문을 페이지 JSON에 싣지 않는다");
+  // 서식 없는 본문 복사(2026-10-16 사용자 요청 복원) - 버튼과 리스너가 함께 있어야 한다.
+  assert(html.includes('id="c-body-plain"'), "'본문 복사 (서식 없음)' 버튼이 있어야 한다");
+  assert(html.includes('getElementById("c-body-plain")'), "서식 없음 복사 버튼의 리스너가 있어야 한다");
   for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Function(match[1]); // 문법 오류면 여기서 던진다
   console.log("✅ 정적 - 사이드바 제목, 초안 안내·채울 것 표 제거, 네이버 버튼 제거, 스크립트 문법");
 
