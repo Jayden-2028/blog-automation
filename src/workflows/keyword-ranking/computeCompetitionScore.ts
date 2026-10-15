@@ -52,6 +52,13 @@ export function computeSaturation(
  * KeywordScoreInput.contentCountPercentile을 그대로 넘긴다.
  * 프로브 실패(saturation=null)면 config.neutralScoreRatio를 반환한다 -
  * "측정 실패"를 "완전 포화"와 같게 취급하지 않기 위함.
+ *
+ * 2026-10-16(사용자 승인) 두 개의 하한이 추가됐다. 근거는 keywordCompetition.ts의
+ * minDemandPercentile / thinTotalThreshold 주석에 있다.
+ * - (A) 수요 하한: 수요 신호가 minDemandPercentile 미만이면 기회도 0. 선점은 **수요를 통과한
+ *   것들 사이의 동점자 처리 기준**이지, 아무도 안 찾는 키워드를 끌어올리는 장치가 아니다.
+ * - (B) 희소 하한: 블로그 문서가 thinTotalThreshold보다 적으면 포화도를 thinSaturation까지
+ *   끌어올려 가점을 절반으로 깎는다. "글이 없다"가 "수요가 없다"일 수 있기 때문이다.
  */
 export function computeOpportunityRatio(
   blogTotal: number | null,
@@ -60,13 +67,27 @@ export function computeOpportunityRatio(
     lowTotalThreshold: number;
     highTotalThreshold: number;
     neutralScoreRatio: number;
+    minDemandPercentile?: number;
+    thinTotalThreshold?: number;
+    thinSaturation?: number;
   } = BLOG_COMPETITION_CONFIG
 ): number {
   const saturation = computeSaturation(blogTotal, config);
   if (saturation === null) return clamp(config.neutralScoreRatio, 0, 1);
 
   const demand = clamp(demandSignal, 0, 1);
-  return clamp((1 - saturation) * demand, 0, 1);
+
+  // (A) 수요 하한. 미지정이면 0이라 기존 동작과 같다.
+  if (demand < (config.minDemandPercentile ?? 0)) return 0;
+
+  // (B) 희소 하한. 미지정이면 포화도를 그대로 쓴다(기존 동작).
+  const thinThreshold = config.thinTotalThreshold ?? 0;
+  const effectiveSaturation =
+    blogTotal !== null && blogTotal < thinThreshold
+      ? Math.max(saturation, clamp(config.thinSaturation ?? 0, 0, 1))
+      : saturation;
+
+  return clamp((1 - effectiveSaturation) * demand, 0, 1);
 }
 
 /** 관측 리포트용 사람이 읽는 등급. 임계값 확정 전 분포를 눈으로 보기 위한 보조 표시다. */

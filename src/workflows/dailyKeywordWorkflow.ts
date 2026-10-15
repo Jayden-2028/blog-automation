@@ -22,6 +22,11 @@ import { runDaumRealtimeCollection } from "./daum-realtime/runDaumRealtimeCollec
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
+import { ENT_TREND_GATE_CONFIG } from "../config/entertainmentTrendGate.js";
+import {
+  evaluateEntertainmentTrendGate,
+  type EntTrendGateResult,
+} from "./keyword-discovery/entertainmentTrendGate.js";
 import { aggregateClusterSignals } from "./keyword-ranking/aggregateClusterSignals.js";
 import { buildReason } from "./keyword-ranking/buildReason.js";
 import { CompositeSimilarityClusterer } from "./keyword-ranking/clustering/CompositeSimilarityClusterer.js";
@@ -406,6 +411,12 @@ export type DailyKeywordWorkflowOptions = {
    * 다른 카테고리 몫까지 검색량을 낭비하지 않는다. 생략하면 필터링 없음(기존 동작).
    */
   includeCategories?: readonly string[];
+  /**
+   * 동적 소스(creator_advisor 등) 유래 후보에 엔터 게이트를 적용할지(2026-10-16, A-3).
+   * 엔터 트랙만 켠다 - 사회 트랙은 전 분야 트렌드가 들어오는 것이 정상이다.
+   * 켜도 기본은 preview(로그·metadata만)다. 실제 탈락은 ENT_TREND_GATE_APPLY=true일 때만.
+   */
+  entertainmentTrendGate?: boolean;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -427,6 +438,11 @@ export type DailyKeywordWorkflowResult = {
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
   queryPool: BuildDailyQueryPoolResult | null;
   collected: CollectNaverCandidatesResult | null;
+  /**
+   * 엔터 트렌드 게이트 판정(options.entertainmentTrendGate가 켜져 있고 preview/apply 중 하나라도
+   * 켜져 있을 때만). 기본 설정에서는 계산·기록만 하고 후보는 그대로 통과한다.
+   */
+  trendGate: EntTrendGateResult | null;
   relevance: FilterCandidatesByRelevanceResult | null;
   clusters: KeywordCluster<KeywordCandidate>[] | null;
   /**
@@ -481,6 +497,7 @@ export async function runDailyKeywordWorkflow(
     communityCollection: null,
     queryPool: null,
     collected: null,
+    trendGate: null,
     relevance: null,
     clusters: null,
     topicMerge: null,
@@ -495,6 +512,8 @@ export async function runDailyKeywordWorkflow(
   // seed_queries(사람이 등록한 상시 검색어)만 모은다. Creator Advisor에서 온 그날의 화제 키워드는
   // 주제 그 자체이므로 분류어로 취급하면 안 된다(topicGrouping.ts 참고).
   let stableSeedTerms: string[] | undefined;
+  // 동적 소스 유래 검색어(= seed_queries가 아닌 것). 엔터 트렌드 게이트의 판정 대상 범위다.
+  let trendQueries: string[] = [];
   // 이번 pool에서 커뮤니티(source=community)로 들어온 키워드 - 알림에서 📡로 표시한다.
   let communityQueries: string[] = [];
 
@@ -631,6 +650,10 @@ export async function runDailyKeywordWorkflow(
     stableSeedTerms = scopedEntries
       .filter((entry) => entry.origin === "seed" || entry.origin === "merged")
       .map((entry) => entry.keyword);
+    // merged는 seed_queries에도 있는 키워드라 동적 소스로 보지 않는다(사람이 큐레이션한 쪽이 우선).
+    trendQueries = scopedEntries
+      .filter((entry) => entry.origin !== "seed" && entry.origin !== "merged")
+      .map((entry) => entry.keyword);
   }
 
   const collectOptions: CollectCandidatesOptions = {
@@ -645,8 +668,37 @@ export async function runDailyKeywordWorkflow(
   }
   result.collected = collected;
 
+  // 엔터 트렌드 게이트(2026-10-16, A-3). 동적 소스 유래 후보만 본다. 기본은 **preview만** -
+  // 무엇이 떨어질지 로그·metadata에 남기고 후보는 그대로 통과시킨다(ENT_TREND_GATE_APPLY).
+  // 근거와 strict/loose의 차이는 config/entertainmentTrendGate.ts 상단에 있다.
+  let gatedCandidates = collected.candidates;
+  if (
+    options.entertainmentTrendGate &&
+    trendQueries.length > 0 &&
+    (ENT_TREND_GATE_CONFIG.previewEnabled || ENT_TREND_GATE_CONFIG.apply)
+  ) {
+    const gate = evaluateEntertainmentTrendGate(collected.candidates, { trendQueries });
+    result.trendGate = gate;
+    gatedCandidates = gate.candidates;
+
+    const mode = gate.applied ? "적용" : "preview";
+    console.log(
+      `ℹ️ [엔터게이트/${mode}] 동적 소스 유래 후보 ${gate.evaluated}건 중 ` +
+        `비엔터 확정 ${gate.strictDrops.length}건 / 엔터 신호 없음 ${gate.looseDrops.length}건` +
+        (gate.applied ? ` -> ${collected.candidates.length}건에서 ${gate.candidates.length}건으로` : "")
+    );
+    for (const drop of gate.strictDrops) {
+      console.log(`   ✂️ [${drop.classified}] ${drop.keyword}  (시드: ${drop.seedQuery})`);
+    }
+    // loose에만 걸린 것은 "더 센 기준을 쓰면 함께 죽는 후보"다. 켜기 전에 이 목록을 봐야 한다.
+    const looseOnly = gate.looseDrops.filter((d) => !gate.strictDrops.includes(d));
+    for (const drop of looseOnly) {
+      console.log(`   ⚠️ loose에만 해당(현재 통과): ${drop.keyword}  (시드: ${drop.seedQuery})`);
+    }
+  }
+
   const relevance = await runStage(stageLog, "relevance", async () =>
-    filterRelevantCandidates(collected.candidates)
+    filterRelevantCandidates(gatedCandidates)
   );
   if (!relevance) {
     skipRemaining(stageLog, ["cluster", "rank", "competition", "save", "notify"]);
@@ -811,6 +863,22 @@ export async function runDailyKeywordWorkflow(
               blogCompetition: {
                 applied: ranked.competition.applied,
                 entries: ranked.competition.entries,
+              },
+            }
+          : {}),
+        // 엔터 트렌드 게이트 판정(A-3). preview에서도 남긴다 - "무엇을 잃었는지 사후에 셀 수 없는
+        // 필터는 못 믿는다"가 이 게이트의 설계 원칙이라, 적용 전부터 기록이 쌓여야 한다.
+        ...(result.trendGate
+          ? {
+              trendGate: {
+                applied: result.trendGate.applied,
+                evaluated: result.trendGate.evaluated,
+                strictDropCount: result.trendGate.strictDrops.length,
+                looseDropCount: result.trendGate.looseDrops.length,
+                strictDrops: result.trendGate.strictDrops,
+                looseOnly: result.trendGate.looseDrops.filter(
+                  (drop) => !result.trendGate!.strictDrops.includes(drop)
+                ),
               },
             }
           : {}),

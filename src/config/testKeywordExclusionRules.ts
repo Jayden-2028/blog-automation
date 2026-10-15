@@ -61,6 +61,31 @@ function main(): void {
   }
   console.log(`✅ run #148 Top 10 고정: 4위·8위 차단, 나머지 8건 통과(2위는 원인 ③ 소관으로 통과가 기대값)`);
 
+  // ---- 2026-10-16 K리그 어휘 보강(사용자 승인) ----
+  // run #158(10/15 18시 엔터) Top 10의 비엔터 4건을 고정한다. 6위(포항스틸러스)만 어휘로 잡힌다.
+  // 3·7위는 시드 `스틸` 교체(공식 스틸)로, 8위는 원인 ③(CA가 topic=방송으로 라벨링)으로 처리한다 -
+  // 어휘 차단의 몫이 아니므로 **통과가 기대값**이다.
+  assert(
+    shouldExcludeCandidate("포항스틸러스 18일 안양과 올 시즌 마지막 홈경기", "ott", "스틸") === true,
+    "run#158 6위: K리그 구단 별칭 '스틸러스'로 차단돼야 한다"
+  );
+  assert(isSportsKeyword("프로축구 승점 3점 원정경기 승리") === true, "축구 경기 보도 어휘가 차단돼야 한다");
+  assert(isSportsKeyword("인천유나이티드 홈경기 매진") === true, "'유나이티드'·'홈경기'가 차단돼야 한다");
+  assert(
+    shouldExcludeCandidate("스틸시리즈 센세이 라이벌 프로 라인업 공개", "ott", "공식 스틸") === false,
+    "run#158 3위: 어휘로는 안 걸린다 - 시드 교체가 담당한다(통과가 기대값)"
+  );
+  assert(
+    shouldExcludeCandidate("인천 흉기난동 살인미수 사건 5개월 만에 공개된 CCTV", "entertainment", "인천 흉기난동 사건") === false,
+    "run#158 8위: 어휘로는 안 걸린다 - 원인 ③ 트렌드 게이트 소관(통과가 기대값)"
+  );
+  // 기업명과 겹쳐 **일부러 넣지 않은** 단어들. 넣었다면 아래가 전부 죽는다(실측 10/01~10/16).
+  assert(isSportsKeyword("현대캐피탈도 해킹 피해 주택대출 모집인 정보 유출") === false, "'현대'는 스포츠 어휘가 아니다");
+  assert(isSportsKeyword("이랜드 스파오 26FW 발열내의 웜테크 캠페인 공개") === false, "'이랜드'는 스포츠 어휘가 아니다");
+  assert(isSportsKeyword("신인감독 김연경 원더독스 2기 제8구단 창단") === false, "'구단'은 예능을 죽이므로 넣지 않았다");
+  assert(isSportsKeyword("해운대 아이파크 입주 일정") === false, "'아이파크'는 아파트 브랜드와 겹쳐 넣지 않았다");
+  console.log("✅ K리그 구단·경기 어휘 차단, 기업명 겹침 단어는 미채택");
+
   assert(isPoliticalKeyword("티빙 국감서 보안 관리 도마") === true, "'국감' 축약형이 차단돼야 한다");
   assert(isPoliticalKeyword("중수청 1호 감찰 지시") === true, "사정기관 고유어가 차단돼야 한다");
   assert(isPoliticalKeyword("공수처 수사 착수") === true, "공수처가 차단돼야 한다");

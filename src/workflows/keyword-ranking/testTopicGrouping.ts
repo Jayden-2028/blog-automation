@@ -221,6 +221,28 @@ function main(): void {
     assert(netflix.length === 2, `분류어 seedQuery "넷플릭스"는 서로 다른 작품 2건이 남아야 한다 (실제 ${netflix.length}건)`);
     console.log('  ✅ 분류어 seedQuery "넷플릭스" -> 서로 다른 작품 2건 유지');
   }
+  {
+    // ---------- 3-1. 2026-10-16: seed_queries 유래라는 이유만으로는 면제되지 않는다 ----------
+    // run #158 실측 재현. 시드 `스틸`(ott, seed_queries) 하나가 Top 10의 3칸을 가져갔다 -
+    // 스틸시리즈(게이밍 기어) 3위 · 포항스틸러스 6위 · 스틸 대미투자 7위. 전부 비엔터다.
+    // 원인은 selectDiverseTopN이 그날의 seed_queries 전체를 분류어로 올려 maxPerSeedQuery를
+    // 면제했던 것이다. 고정 목록(TOPIC_GROUPING_CONFIG.categoryTerms)에 없는 시드는 이제 1건이다.
+    assert(
+      DIVERSITY_CONFIG.exemptAllSeedQueriesFromSeedCap === false,
+      "이 회귀 테스트는 exemptAllSeedQueriesFromSeedCap=false 전제다"
+    );
+    const steelBatch = [
+      makeCandidate("스틸시리즈 센세이 라이벌 프로 라인업 공개 사전 예약", "스틸", "ott", 54),
+      makeCandidate("포항스틸러스 18일 안양과 올 시즌 마지막 홈경기", "스틸", "ott", 49),
+      makeCandidate("스틸 대미투자 이행 비관세장벽 차별말라", "스틸", "ott", 49),
+      ...makeFillerCandidates(200),
+    ].sort((a, b) => b.totalScore - a.totalScore);
+    // 그날의 seed_queries를 전부 넘기는 운영 호출과 같은 형태다.
+    const steelTop = selectDiverseTopN(steelBatch, 10, { categoryTerms: ["스틸", "배우", "개봉"] });
+    const steel = steelTop.filter((item) => item.seedQuery === "스틸");
+    assert(steel.length === 1, `seed_queries 유래 "스틸"은 Top 10에 1건만 있어야 한다 (실제 ${steel.length}건)`);
+    console.log('  ✅ seed_queries 유래 "스틸" -> Top 10에 1건(고정 분류어가 아니므로 면제 없음)');
+  }
 
   // ---------- 5. LLM 주제어를 넘기면 주제 판정이 그쪽을 쓴다(2026-10-01) ----------
   {

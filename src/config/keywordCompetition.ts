@@ -28,6 +28,12 @@ function parseIntEnv(value: string | undefined, defaultValue: number): number {
   return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
+function parseFloatEnv(value: string | undefined, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
+  const parsed = Number.parseFloat(value);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
 export const BLOG_COMPETITION_CONFIG = {
   /**
    * 프로브(측정) 자체의 on/off. false면 daily workflow가 competition 단계를 건너뛴다.
@@ -80,6 +86,38 @@ export const BLOG_COMPETITION_CONFIG = {
    */
   lowTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_LOW_TOTAL, 100),
   highTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_HIGH_TOTAL, 100000),
+
+  /**
+   * (A) 기회도 가점을 받기 위한 **수요 하한**. contentCountPercentile이 이 값 미만이면 기회도를
+   * 0으로 본다(가점 없음). 2026-10-16 도입, 사용자 승인.
+   *
+   * 왜(run #158 실측): 경쟁도 60건 중 **51건이 가점**(평균 블로그 1,518건)이고 감점은 8건
+   * (평균 16,955건)이었다. 거의 전원 가점이면 변별력이 아니라 편향이다. 원인은 기존
+   * contentDemand가 "cluster 안의 blog/web 항목 수"라 얕은 cluster에 0점을 주던 자리를,
+   * 기회도가 누구에게나 몇 점씩 주는 값으로 바꿔 놓았기 때문이다 - 15점이 통째로 평탄해졌다.
+   *
+   * 0.3을 고른 근거: 기회도의 수요 신호는 batch 내 백분위라, 하위 30%는 "그날 배치 안에서도
+   * 논의되지 않는" 자리다. run #158 3위 "스틸시리즈 센세이"(게이밍 기어 신제품)의 수요 백분위가
+   * 0.21로 바로 이 구간이었다. 임계값은 실측이 쌓이면 재검토한다 - env로 조정 가능하다.
+   */
+  minDemandPercentile: parseFloatEnv(process.env.BLOG_COMPETITION_MIN_DEMAND, 0.3),
+
+  /**
+   * (B) **희소 하한**. 블로그 문서가 이 수보다 적으면 "선점 기회"가 아니라 "수요 부재 의심"으로
+   * 보고 포화도를 thinSaturation으로 올려 가점을 절반으로 깎는다. 2026-10-16 도입, 사용자 승인.
+   *
+   * 왜: "블로그 글이 없다"에는 두 가지 뜻이 있는데 지금은 하나로 취급한다 -
+   *   ① 오늘 터진 이슈라 아직 아무도 안 썼다(노리는 것)
+   *   ② 애초에 아무도 관심이 없다(지금 같이 올라오는 것)
+   * 구분 신호는 뉴스 속도와 검색 트렌드인데 기회도 계산은 둘 다 안 본다. 그래서 ②를 완전히
+   * 걸러내는 대신 **가점 폭만 절반으로** 줄인다 - 진짜 속보 선점까지 죽이지 않기 위함이다.
+   *
+   * 100을 고른 근거: lowTotalThreshold와 같은 자리다. 지금은 100건 이하가 곧바로 포화도 0(가점
+   * 최대)인데, 그 구간이 바로 run #158에서 ▲11~▲15칸씩 올라온 자리였다(블로그 60·131·139·149건).
+   */
+  thinTotalThreshold: parseIntEnv(process.env.BLOG_COMPETITION_THIN_TOTAL, 100),
+  /** 희소 하한에 걸린 후보에게 적용할 포화도 하한. 0.5 = 가점이 절반으로 깎인다. */
+  thinSaturation: 0.5,
 
   /**
    * 프로브 실패(API 오류 등)로 total을 모르는 경우 적용할 중립 비율(0~1).

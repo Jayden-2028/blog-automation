@@ -36,6 +36,10 @@ const job: SchedulerJob = {
       // CA는 크롤링하지 않고 맥미니가 넣어 둔 값을 읽기만 한다. 구글·다음은 기본값(켜짐)으로 직접 수집한다.
       trendCollectOptions: { enabled: false },
       includeCategories: ["entertainment", "ott"],
+      // 동적 소스 유래 후보에 엔터 게이트를 건다(2026-10-16, A-3). 기본은 preview - 무엇이 떨어질지
+      // 로그·run metadata에만 남긴다. 1주 실측 후 ENT_TREND_GATE_APPLY로 켠다.
+      // 사회 트랙은 켜지 않는다 - 거기선 전 분야 트렌드가 들어오는 것이 정상이다.
+      entertainmentTrendGate: true,
       metadata: { kind: "entertainment", round: round.round },
       notifyOptions: { headerTitle: formatEntertainmentHeader(round) },
     });
@@ -50,6 +54,14 @@ const job: SchedulerJob = {
       console.log(
         `\n▶ relevance filter: ${result.relevance.totalBefore}건 → ${result.relevance.totalAfter}건 ` +
           `(제외 ${result.relevance.droppedCount}건)`
+      );
+    }
+
+    if (result.trendGate) {
+      const mode = result.trendGate.applied ? "적용" : "preview";
+      console.log(
+        `\n▶ 엔터 트렌드 게이트(${mode}): 동적 소스 후보 ${result.trendGate.evaluated}건 중 ` +
+          `비엔터 확정 ${result.trendGate.strictDrops.length}건 / 엔터 신호 없음 ${result.trendGate.looseDrops.length}건`
       );
     }
 

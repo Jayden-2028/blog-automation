@@ -3,8 +3,8 @@
 //
 // 규칙(DIVERSITY_CONFIG, config로 조절 가능):
 // 1) 동일 seedQuery는 최대 maxPerSeedQuery개까지만.
-//    단 seedQuery가 분류어(넷플릭스/티빙/지원금 등 TOPIC_GROUPING_CONFIG.categoryTerms +
-//    그날의 seed_queries)면 이 cap을 적용하지 않는다 - "넷플릭스" 하나에 서로 다른 작품 2편이
+//    단 seedQuery가 분류어(넷플릭스/티빙/지원금 등 TOPIC_GROUPING_CONFIG.categoryTerms 고정 목록)면
+//    이 cap을 적용하지 않는다 - "넷플릭스" 하나에 서로 다른 작품 2편이
 //    묶이면 안 되기 때문이다(topicGrouping과 같은 철학). 실제 도배는 "황재균 지연", "상생페이백
 //    사용"처럼 구체적인 seedQuery에서 같은 사건 기사 2건이 나오는 경우이고, 이건 여전히 막는다.
 // 2) 동일 topic은 최대 maxPerCanonicalTopic개까지만.
@@ -69,10 +69,17 @@ export function selectDiverseTopN<T extends DiversityCandidate>(
     extraCategoryTerms: options.categoryTerms,
   });
 
-  // 분류어로 취급할 seedQuery(고정 목록 + 그날의 seed_queries). 이 seedQuery에는 maxPerSeedQuery를
-  // 적용하지 않는다 - "넷플릭스" 하나에 서로 다른 작품이 묶이는 것을 막기 위함.
+  // 분류어로 취급할 seedQuery. 이 seedQuery에는 maxPerSeedQuery를 적용하지 않는다 -
+  // "넷플릭스" 하나에 서로 다른 작품이 묶이는 것을 막기 위함.
+  //
+  // 2026-10-16: 기본값이 **고정 목록만**으로 좁아졌다(DIVERSITY_CONFIG.exemptAllSeedQueriesFromSeedCap).
+  // 그날의 seed_queries까지 면제하면 `스틸`·`육아지원금` 같은 평범한 시드가 Top 10을 여러 칸
+  // 가져간다 - 근거와 실측은 그 설정 주석에 있다. 아래 topicQueryExcluded는 그대로 전체를 쓴다.
   const classifierSeedTerms = new Set(
-    [...TOPIC_GROUPING_CONFIG.categoryTerms, ...(options.categoryTerms ?? [])].map((term) => term.trim().toLowerCase())
+    [
+      ...TOPIC_GROUPING_CONFIG.categoryTerms,
+      ...(DIVERSITY_CONFIG.exemptAllSeedQueriesFromSeedCap ? options.categoryTerms ?? [] : []),
+    ].map((term) => term.trim().toLowerCase())
   );
   const isClassifierSeed = (seedQuery: string): boolean => classifierSeedTerms.has(seedQuery.trim().toLowerCase());
 

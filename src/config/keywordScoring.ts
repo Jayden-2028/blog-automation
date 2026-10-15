@@ -460,6 +460,24 @@ export const DIVERSITY_CONFIG = {
   // false로 두면 위 판정이 예전처럼 canonical keyword 문자열 완전 일치로 돌아간다.
   // 주제 판정이 과하게 묶는 날이 관측되면 코드 수정 없이 이 값만 내려 원복할 수 있게 남겨둔다.
   enableTopicGrouping: true,
+  // maxPerSeedQuery 면제(= "분류어 시드")를 **그날의 seed_queries 전체**에도 줄지.
+  //
+  // 2026-10-16 true -> false(사용자 승인). 면제의 원래 목적은 "넷플릭스 하나에 서로 다른 작품 2편이
+  // 묶이면 안 된다"였고, 그건 TOPIC_GROUPING_CONFIG.categoryTerms 고정 목록(플랫폼·장르어)이 담당한다.
+  // 그런데 selectDiverseTopN이 seed_queries 전체를 면제 대상에 얹으면서 `스틸`·`육아지원금` 같은
+  // 평범한 시드까지 상한을 벗어났다 - run #158에서 `스틸` 한 건이 Top 10의 3칸(스틸시리즈·포항
+  // 스틸러스·스틸 대미투자)을 가져간 직접 원인이다.
+  //
+  // 실측(10/01~10/16 랭킹 620행): false로 두면 Top 10에서 **15행**이 빠지고 영향 run은 10개다.
+  // 빠지는 15행은 전부 중복이다 - `육아지원금` 3건(나주시·해피아이·다문화 지원 안내 페이지),
+  // `신작 드라마` 3건(미르4 게임 + 2022년 라인업), `민생지원금` 2건, `출산지원금` 2건, `열애` 2건.
+  // run #158의 `스틸` 3건은 이 집계 시점에 이미 교체돼 빠져 있다(실제로는 2행이 더 걸린다).
+  // 고정 분류어(`티빙` 3건 등 6행)는 그대로 남는다 - 서로 다른 작품이라 묶으면 안 되는 쪽이다.
+  //
+  // 주제 판정(buildTopicIndex의 extraCategoryTerms, topicQueryExcluded)에서는 **여전히** seed_queries
+  // 전체를 분류어로 쓴다. 그쪽은 "시드 단어가 주제를 대표하지 못한다"는 별개 판단이라 건드리지 않는다.
+  // 되돌리려면 이 값만 true로 올린다.
+  exemptAllSeedQueriesFromSeedCap: false,
   // category별 최소 1개 포함을 시도할 대상 category 목록.
   // "community"는 2026-08-29 추가(커뮤니티/다음/구글 소스 확장). backfill은 pool에 해당 category
   // 후보가 실제로 있을 때만 동작하므로(selectDiverseTopN 3번 규칙), 커뮤니티 수집이 붙기 전까지는
