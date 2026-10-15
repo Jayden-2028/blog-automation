@@ -1,7 +1,7 @@
 // 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 작성 단계 원고를
 // 다시 쓴다(2026-09-15 사용자 요청). 이 원고가 곧 최종본이다(2026-09-30 배리에이션 폐지).
 //
-// 헤드리스 경로(claude -p + moai-marketer:content-blog + moai-writer:korean-humanize)를 쓴다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
+// 헤드리스 경로(claude -p + moai-marketer:content-blog + rules/humanize.md 자체 윤문)를 쓴다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
 // 추적성이 깨진다(팩트는 기존 원고에서만 가져온다 - 문체·구성·분량만 피드백대로 바꾼다).
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
@@ -50,7 +50,7 @@ function buildPrompt(input: ReviseArticleInput): string {
 
   return [
     `당신은 이미 쓴 블로그 원고를, 편집자(사람)의 수정 지시에 맞춰 다시 쓴다.`,
-    `moai-marketer:content-blog 스킬로 다듬고 moai-writer:korean-humanize로 마무리한다.`,
+    `moai-marketer:content-blog 스킬로 다듬고, 저장 직전 rules/humanize.md 체크리스트로 직접 윤문한다(의미·사실·인용 불변).`,
     ``,
     `먼저 아래 규격 문서를 번호 순서대로 전부 Read해 그 원칙을 따른다. 부딪히면 1번(core-rules.md)이 이긴다.`,
     `원문이 그 규칙(금지 표현·구어 어미·댓글 유도 등)에 어긋나 있었다면 이번 재작성에서 함께 바로잡는다.`,
