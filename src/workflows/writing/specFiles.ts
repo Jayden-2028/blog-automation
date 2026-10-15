@@ -24,6 +24,7 @@ export function writingSpecFiles(category: string | null): SpecFile[] {
   const isIncident = category === "incident";
   const files: SpecFile[] = [
     { path: "prompts/writing/core-rules.md", purpose: "한 페이지 핵심 규칙 - 금지 표현·어투·마무리·서식. 다른 문서와 부딪히면 이 파일이 이긴다" },
+    { path: "prompts/writing/rules/humanize.md", purpose: "저장 직전 자체 윤문 - 의미·사실·인용 불변 철칙 + 명료성 7원칙 + AI 티 제거(스킬 대체, 전 카테고리)" },
     { path: "prompts/writing/writer.md", purpose: "입력 계약·카테고리 라우팅·제목" },
     { path: "prompts/writing/rules/facts-and-hedging.md", purpose: "사실 태도 상세 사례(핵심 원칙은 core-rules §1)" },
     isIncident

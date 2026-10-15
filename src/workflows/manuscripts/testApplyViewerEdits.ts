@@ -372,6 +372,22 @@ async function main(): Promise<void> {
   }
   console.log("✅ 제목 적용부 - final article 행·manifest 동기화, 본문·slug 불변");
 
+  // person(수동 복붙, 2026-10-15 B-2): 뷰어 본문에는 내부 링크·참고 자료가 없고 DB 원문에는 있다. 수정은 원문 텍스트로 찾으므로 안전하다.
+  {
+    const dbBody = ["도입 문단입니다.", "**소제목**\n본문 문단입니다.", "마무리 문단입니다.", "**함께 보면 좋은 글**\n- [다른 글](https://x.example/1)", "**참고 자료**\n- [출처](https://example.com/src)", "#태그1 #태그2"].join("\n\n");
+    const viewerBody = ["도입 문단입니다.", "**소제목**\n본문 문단입니다.", "마무리 문단입니다."].join("\n\n");
+    const result = applyViewerEdits({
+      manifestBody: viewerBody,
+      imagePrompts: [],
+      articleContent: dbBody,
+      images: [],
+      edits: { "2": { from: "마무리 문단입니다.", to: "고친 마무리입니다." } },
+    });
+    assert(result.applied.includes("2") && result.skipped.length === 0, `꼬리 블록이 DB에만 있어도 수정이 반영된다 (${JSON.stringify(result.skipped)})`);
+    assert(result.articleContent.includes("고친 마무리입니다.") && result.articleContent.includes("**함께 보면 좋은 글**") && result.articleContent.includes("**참고 자료**") && result.articleContent.endsWith("#태그1 #태그2"), "DB 원문의 내부 링크·참고 자료·해시태그는 그대로 남는다");
+    console.log("✅ person 뷰어 수정 - 꼬리 블록(내부 링크·참고 자료)이 DB에만 있어도 같은 문단을 찾아 반영, 꼬리는 보존");
+  }
+
   console.log("\n✅ 뷰어 수정본 반영 테스트 전부 통과");
 }
 

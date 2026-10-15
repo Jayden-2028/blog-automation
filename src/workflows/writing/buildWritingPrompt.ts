@@ -6,8 +6,8 @@
 //
 // 파이프라인 오버라이드가 필요한 이유:
 // - writer.md §2 스킬 라우팅(/parenting-blog-writer 등)은 anthropic-skills 네임스페이스라 헤드리스
-//   `claude -p`에서 로드되지 않는다(실측) - moai-marketer:content-blog + moai-writer:korean-humanize로
-//   대체한다(둘 다 헤드리스 가용). 문체는 대신 `prompts/writing/style/*.md`를 Read해서 따른다 -
+//   `claude -p`에서 로드되지 않는다(실측) - 스킬 없이 style 파일 Read로 문체를 잡고, 윤문도 스킬이 아니라
+//   rules/humanize.md 체크리스트로 직접 한다(2026-10-15: 윤문 스킬은 클라우드 러너에서 로드되지 않아 사문화였다). 문체는 대신 `prompts/writing/style/*.md`를 Read해서 따른다 -
 //   이건 계정 레벨 Skill이 아니라 일반 파일이라 Read 도구로 항상 로드된다(2026-09-03, 원고 퀄리티
 //   점검에서 발견: 기존에는 이 스텝이 아예 없어서 세 스킬이 갖고 있던 실제 발행본 기반 문체 디테일이
 //   pickStyleRules의 2분류(PERSONAL/EDITORIAL) 요약본으로만 대체되고 있었다).
@@ -79,10 +79,11 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
       : []),
     `- 출력은 writer.md §9의 이름·경로 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${draftFilePath}`,
     "- writer.md §9 frontmatter(keyword·title·char_count·hashtags·verdict_from_research 등)를 그대로 채운다.",
-    "- writer.md §2의 Skill 호출(/parenting-blog-writer 등) 대신 moai-marketer:content-blog 스킬로",
-    `  초안을 쓰되, 구조·흐름은 위에서 Read한 ${styleFile}를, 어투·어미는 style/voice.md를 그대로 따른다`,
-    "  (§2의 문체 표보다 이 파일들이 우선 - 더 구체적이고 실제 발행본 기반이다). §10대로",
-    "  moai-writer:korean-humanize로 마무리한다.",
+    "- writer.md §2의 Skill 호출(/parenting-blog-writer 등)은 쓰지 않는다. 스킬 없이 직접 초안을 쓰되,",
+    `  구조·흐름은 위에서 Read한 ${styleFile}를, 어투·어미는 style/voice.md를 그대로 따른다`,
+    "  (§2의 문체 표보다 이 파일들이 우선 - 더 구체적이고 실제 발행본 기반이다). 저장 직전에는",
+    "  §10과 rules/humanize.md의 체크리스트로 직접 윤문한다(외부 윤문 스킬은 호출하지 않는다 -",
+    "  의미·사실·수치·인용은 한 글자도 바꾸지 않는다).",
     // 사건·사고는 문체 선택의 문제가 아니라 무죄추정·신원보호·자극적 묘사 금지 규칙이라,
     // "문체는 style 파일을 따른다"에 묻히면 안 된다. 구속력을 따로 못박는다.
     job.category === "incident"

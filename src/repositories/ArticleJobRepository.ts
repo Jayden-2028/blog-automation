@@ -341,6 +341,29 @@ export class ArticleJobRepository {
   }
 
   /**
+   * 인물 백과(category=person) job 중 맥 소스팩(`metadata.researchSourcePack`)이 아직 없는 것(B-1, 2026-10-15).
+   * 소스팩 본문(수십 KB)을 끌어오지 않도록 `fetchedAt` 하나만 JSON 경로로 선택해 egress를 아낀다(2026-10-09 용량 사고).
+   * 아직 조사 전·중인 job(selected/researching)만 본다 - 러너가 기다리는 것은 이 둘뿐이다.
+   */
+  static async listPersonJobsNeedingSourcePack(
+    sinceIso: string,
+    limit = 5
+  ): Promise<Array<{ id: string; keyword: string; status: ArticleJobStatus }>> {
+    const columns: string = "id,keyword,status,pack_at:metadata->researchSourcePack->>fetchedAt";
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select(columns)
+      .eq("category", "person")
+      .in("status", ["selected", "researching"])
+      .gte("selected_at", sinceIso)
+      .order("selected_at", { ascending: true })
+      .limit(50);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as Array<{ id: string; keyword: string; status: ArticleJobStatus; pack_at: string | null }>;
+    return rows.filter((row) => !row.pack_at).slice(0, limit).map(({ id, keyword, status }) => ({ id, keyword, status }));
+  }
+
+  /**
    * metadata를 병합한다(덮어쓰지 않는다). 단계별로 서로 다른 키를 추가하므로
    * (titleSuggestions -> factCards -> imageRefs ...) 통째로 교체하면 앞 단계 결과가 사라진다.
    */

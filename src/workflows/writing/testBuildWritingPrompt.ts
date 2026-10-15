@@ -27,7 +27,9 @@ function main(): void {
   assert(prompt.includes("/repo/drafts/한강-불꽃축제-2026.md"), "정확한 출력 경로가 박혀 있어야 한다");
   assert(prompt.includes("한강 불꽃축제 2026"), "키워드");
   assert(prompt.includes("2026-09-01"), "오늘 날짜");
-  assert(prompt.includes("moai-marketer:content-blog") && prompt.includes("moai-writer:korean-humanize"), "헤드리스 가용 스킬로 오버라이드");
+  assert(!prompt.includes("content-blog"), "스킬 지시 없이 style 파일 Read로 문체를 잡는다(2026-10-15)");
+  assert(!prompt.includes("korean-humanize"), "죽은 윤문 스킬 참조가 없어야 한다(2026-10-15)");
+  assert(prompt.includes("rules/humanize.md") && prompt.includes("한 글자도 바꾸지 않는다"), "자체 윤문 지시 + 의미 불변 철칙");
   assert(prompt.includes("**소제목**") && prompt.includes("볼드"), "소제목 볼드 규격 지시(2026-09-06부터)");
   assert(!prompt.includes("`## `"), "더 이상 ## 마크다운 헤더를 쓰라고 하면 안 된다");
   assert(prompt.includes("[IMAGE: 설명]") && prompt.includes("최소 5개"), "이미지 마커 지시");
