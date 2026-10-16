@@ -11,9 +11,9 @@ import { resolve } from "node:path";
 
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
-import { attachGoogleAiAnswer, collectPersonSourcePacks, defaultCollectPersonSourcePackDeps } from "../workflows/research/collectPersonSourcePack.js";
+import { attachAiAnswer, collectPersonSourcePacks, defaultCollectPersonSourcePackDeps } from "../workflows/research/collectPersonSourcePack.js";
 
-/** 수동 보조 경로(§A-3): `npm run job:person-pack -- --job-id <id> --google-ai-file <txt>` - 폴러 주기 실행이 아니라 사용자가 한 번 실행한다. */
+/** 수동 보조 경로(§A-3): `npm run job:person-pack -- --job-id <id> --google-ai-file <txt>`(또는 `--naver-ai-file`) - 폴러 주기 실행이 아니라 사용자가 한 번 실행한다. */
 function argValue(name: string): string | undefined {
   const i = process.argv.indexOf(name);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -21,16 +21,19 @@ function argValue(name: string): string | undefined {
 
 async function main(): Promise<void> {
   const googleFile = argValue("--google-ai-file");
-  if (googleFile) {
+  const naverFile = argValue("--naver-ai-file");
+  if (googleFile || naverFile) {
     const jobId = argValue("--job-id");
-    if (!jobId) throw new Error("--google-ai-file에는 --job-id <id>가 필요하다");
-    const pack = await attachGoogleAiAnswer(jobId, readFileSync(resolve(googleFile), "utf8"), {
+    if (!jobId) throw new Error("--google-ai-file/--naver-ai-file에는 --job-id <id>가 필요하다");
+    const field = googleFile ? ("googleAiAnswer" as const) : ("naverAiAnswer" as const);
+    const file = (googleFile ?? naverFile)!;
+    const pack = await attachAiAnswer(jobId, field, readFileSync(resolve(file), "utf8"), {
       readMetadata: async (id) => ((await ArticleJobRepository.findById(id))?.metadata ?? null) as Record<string, unknown> | null,
       mergeMetadata: async (id, patch) => {
         await ArticleJobRepository.mergeMetadata(id, patch);
       },
     });
-    console.log(`✅ [person-pack] 구글 AI 답변 첨부: ${(pack.googleAiAnswer ?? "").length.toLocaleString()}자 (job ${jobId})`);
+    console.log(`✅ [person-pack] ${field === "googleAiAnswer" ? "구글" : "네이버"} AI 답변 첨부: ${(pack[field] ?? "").length.toLocaleString()}자 (job ${jobId})`);
     return;
   }
   const lock = acquireSingleInstanceLock(resolve("logs/.person-pack.lock"));

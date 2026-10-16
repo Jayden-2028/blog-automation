@@ -60,7 +60,10 @@ export function defaultCollectPersonSourcePackDeps(): CollectPersonSourcePackDep
     listCandidates: (sinceIso, limit) => ArticleJobRepository.listPersonJobsNeedingSourcePack(sinceIso, limit),
     fetchPack: (keyword) =>
       fetchPersonSourcePack(keyword, {
-        fetchNaverAi: (name) => fetchNaverAiAnswer(name),
+        // AI 탭 자동 수집은 기본 꺼짐(2026-10-17 실측: headless·headful 모두 네이버가 자동화 브라우저를
+        // 차단 - "잘못된 접근입니다"). 켜 두면 job마다 헛 브라우저 최대 25초 + errors 노이즈만 남는다.
+        // 차단이 풀렸는지 재시도할 때만 PERSON_AI_TAB=1로 켠다. 평시 공급 경로는 수동 첨부(--naver-ai-file)다.
+        ...(process.env.PERSON_AI_TAB === "1" ? { fetchNaverAi: (name: string) => fetchNaverAiAnswer(name) } : {}),
         fetchReferenceBlogs: (name) => collectReferenceBlogPosts(name, { search: searchNaverBlogs }),
       }),
     savePack: async (jobId, pack) => {
@@ -90,15 +93,26 @@ export type AttachGoogleAiDeps = {
 };
 
 /**
- * 구글 AI 모드 답변 수동 첨부(§A-3): 사용자가 공유 링크 내용을 저장한 텍스트를 기존 소스팩에 `googleAiAnswer`(6KB)로 넣는다.
+ * AI 답변 수동 첨부(§A-3 + 2026-10-17 확장): 사용자가 AI 답변을 저장한 텍스트를 기존 소스팩에 넣는다
+ * (구글은 공유 링크 내용, 네이버는 자동 수집이 차단돼 수동 복사가 평시 경로다). 6KB 상한.
  * 소스팩이 아직 없으면(맥 수집 전) 거부한다 - 수집이 나중에 팩을 통째로 덮어쓰기 때문이다.
  */
-export async function attachGoogleAiAnswer(jobId: string, text: string, deps: AttachGoogleAiDeps): Promise<PersonSourcePack> {
+export async function attachAiAnswer(
+  jobId: string,
+  field: "googleAiAnswer" | "naverAiAnswer",
+  text: string,
+  deps: AttachGoogleAiDeps
+): Promise<PersonSourcePack> {
   const pack = readPersonSourcePack(await deps.readMetadata(jobId));
   if (!pack) throw new Error("소스팩이 아직 없다 - person-pack 수집이 끝난 뒤 다시 실행한다");
   const answer = capUtf8(text.trim(), PERSON_AI_ANSWER_MAX_BYTES);
   if (!answer) throw new Error("첨부할 텍스트가 비어 있다");
-  const next = fitPersonSourcePack({ ...pack, googleAiAnswer: answer });
+  const next = fitPersonSourcePack({ ...pack, [field]: answer });
   await deps.mergeMetadata(jobId, { researchSourcePack: next });
   return next;
+}
+
+/** @deprecated attachAiAnswer(jobId, "googleAiAnswer", ...)를 쓴다. */
+export async function attachGoogleAiAnswer(jobId: string, text: string, deps: AttachGoogleAiDeps): Promise<PersonSourcePack> {
+  return attachAiAnswer(jobId, "googleAiAnswer", text, deps);
 }
