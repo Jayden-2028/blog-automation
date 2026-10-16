@@ -6,7 +6,7 @@ import { naverGetJson, NAVER_API_HUB_BASE_URL } from "../../services/search/nave
 import { fetchNaverAiAnswer } from "./naverAiAnswer.js";
 import { PERSON_AI_ANSWER_MAX_BYTES, capUtf8, fetchPersonSourcePack, fitPersonSourcePack, readPersonSourcePack } from "./personSourcePack.js";
 import type { PersonSourcePack } from "./personSourcePack.js";
-import { collectReferenceBlogPosts } from "./referenceBlogPosts.js";
+import { collectReferenceBlogPosts, fetchPoolRssHits } from "./referenceBlogPosts.js";
 import type { BlogSearchItem } from "./referenceBlogPosts.js";
 
 /** 이 시간 안에 선택된 job만 본다(오래된 job의 뒤늦은 수집으로 DB를 흔들지 않는다). */
@@ -64,7 +64,11 @@ export function defaultCollectPersonSourcePackDeps(): CollectPersonSourcePackDep
         // 차단 - "잘못된 접근입니다"). 켜 두면 job마다 헛 브라우저 최대 25초 + errors 노이즈만 남는다.
         // 차단이 풀렸는지 재시도할 때만 PERSON_AI_TAB=1로 켠다. 평시 공급 경로는 수동 첨부(--naver-ai-file)다.
         ...(process.env.PERSON_AI_TAB === "1" ? { fetchNaverAi: (name: string) => fetchNaverAiAnswer(name) } : {}),
-        fetchReferenceBlogs: (name) => collectReferenceBlogPosts(name, { search: searchNaverBlogs }),
+        fetchReferenceBlogs: (name) =>
+          collectReferenceBlogPosts(name, {
+            search: searchNaverBlogs,
+            listRssHits: (kw) => fetchPoolRssHits(kw, (url, init) => fetch(url, init)),
+          }),
       }),
     savePack: async (jobId, pack) => {
       await ArticleJobRepository.mergeMetadata(jobId, { researchSourcePack: pack });

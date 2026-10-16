@@ -9,7 +9,9 @@ import { PERSON_REFERENCE_BLOGS } from "../../config/personReferenceBlogs.js";
 import { SOURCE_PACK_USER_AGENT, capUtf8 } from "./personSourcePack.js";
 import type { FetchLike } from "./personSourcePack.js";
 
-export const REFERENCE_BLOG_SEARCH_DISPLAY = 30;
+// 2026-10-17 검수 실측: 핫 키워드는 상위 30이 핫이슈 블로그로 덮여 풀 적중이 0이었다(display 100에서 1건).
+// 풀 블로그 RSS(최근 ~50건) 제목 매칭이 훨씬 잘 잡힌다(이규한 3건·차정원 1건·김지원 다수) - RSS 우선, API 검색은 보조.
+export const REFERENCE_BLOG_SEARCH_DISPLAY = 100;
 export const REFERENCE_BLOG_MAX_POSTS = 3;
 /** 건당·합계 상한(UTF-8 바이트). */
 export const REFERENCE_BLOG_POST_MAX_BYTES = 8 * 1024;
@@ -81,10 +83,52 @@ export function extractBlogPostText(html: string, maxBytes: number = REFERENCE_B
 
 export type SearchBlogFn = (query: string, display: number) => Promise<BlogSearchItem[]>;
 
+export type ReferenceBlogHit = { blogId: string; logNo: string; title: string; postedAt?: string };
+
+/**
+ * 풀 블로그 RSS에서 제목에 인물명이 든 글을 찾는다(블로그당 최근 ~50건). 실패한 블로그는 건너뛴다(비치명).
+ * 핫이슈 인물은 테마 블로그가 바로 다루므로 최근 50건 창이면 충분하다 - 더 오래된 글은 API 검색 보조가 줍는다.
+ */
+export async function fetchPoolRssHits(
+  keyword: string,
+  fetchImpl: FetchLike,
+  options: { pool?: readonly { blogId: string }[]; timeoutMs?: number } = {}
+): Promise<{ hits: ReferenceBlogHit[]; errors: string[] }> {
+  const pool = options.pool ?? PERSON_REFERENCE_BLOGS;
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const hits: Array<ReferenceBlogHit & { sortKey: string }> = [];
+  const errors: string[] = [];
+  const needle = keyword.trim();
+  for (const blog of pool) {
+    try {
+      const xml = await fetchHtml(`https://rss.blog.naver.com/${blog.blogId}.xml`, fetchImpl, timeoutMs);
+      for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+        const item = m[1];
+        const rawTitle = /<title>([\s\S]*?)<\/title>/.exec(item)?.[1] ?? "";
+        const title = stripTags(rawTitle.replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "")).trim();
+        if (!title.includes(needle)) continue;
+        const link = /<link>([\s\S]*?)<\/link>/.exec(item)?.[1] ?? "";
+        const logNo = logNoOf(link);
+        if (!logNo) continue;
+        const pub = /<pubDate>([\s\S]*?)<\/pubDate>/.exec(item)?.[1];
+        const d = pub ? new Date(pub) : null;
+        const postedAt = d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : undefined;
+        hits.push({ blogId: blog.blogId.toLowerCase(), logNo, title, ...(postedAt ? { postedAt } : {}), sortKey: postedAt ?? "0000-00-00" });
+      }
+    } catch (error) {
+      errors.push(`referenceBlogs: RSS ${blog.blogId} ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  hits.sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0));
+  return { hits: hits.map(({ sortKey: _unused, ...hit }) => hit), errors };
+}
+
 export type CollectReferenceBlogOptions = {
   search: SearchBlogFn;
   fetchImpl?: FetchLike;
   timeoutMs?: number;
+  /** RSS 우선 수집(2026-10-17). 없으면 API 검색만 쓴다(기존 단위 테스트 경로). */
+  listRssHits?: (keyword: string) => Promise<{ hits: ReferenceBlogHit[]; errors: string[] }>;
 };
 
 async function fetchHtml(url: string, fetchImpl: FetchLike, timeoutMs: number): Promise<string> {
@@ -120,11 +164,28 @@ export async function collectReferenceBlogPosts(
   const errors: string[] = [];
   const fetchImpl = options.fetchImpl ?? ((url, init) => fetch(url, init));
   const timeoutMs = options.timeoutMs ?? 20_000;
-  let hits: ReturnType<typeof filterReferenceBlogItems> = [];
-  try {
-    hits = filterReferenceBlogItems(await options.search(keyword.trim(), REFERENCE_BLOG_SEARCH_DISPLAY));
-  } catch (error) {
-    return { posts: [], errors: [`referenceBlogs: 검색 실패 - ${error instanceof Error ? error.message : String(error)}`] };
+  // 1차: 풀 RSS 제목 매칭(실측상 주 공급원). 2차: API 검색(풀 글이 RSS 창 밖이거나 제목에 이름이 없는 경우 보조).
+  let hits: ReferenceBlogHit[] = [];
+  if (options.listRssHits) {
+    const rss = await options.listRssHits(keyword.trim());
+    hits = rss.hits.slice(0, REFERENCE_BLOG_MAX_POSTS);
+    errors.push(...rss.errors);
+  }
+  if (hits.length < REFERENCE_BLOG_MAX_POSTS) {
+    try {
+      const searched = filterReferenceBlogItems(await options.search(keyword.trim(), REFERENCE_BLOG_SEARCH_DISPLAY));
+      const seen = new Set(hits.map((h) => h.logNo));
+      for (const hit of searched) {
+        if (hits.length >= REFERENCE_BLOG_MAX_POSTS) break;
+        if (seen.has(hit.logNo)) continue;
+        seen.add(hit.logNo);
+        hits.push(hit);
+      }
+    } catch (error) {
+      const msg = `referenceBlogs: 검색 실패 - ${error instanceof Error ? error.message : String(error)}`;
+      if (hits.length === 0) return { posts: [], errors: [...errors, msg] };
+      errors.push(msg);
+    }
   }
   const posts: ReferenceBlogPost[] = [];
   for (const hit of hits) {
