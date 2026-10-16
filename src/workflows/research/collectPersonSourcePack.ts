@@ -2,8 +2,12 @@
 // `job.metadata.researchSourcePack`에 저장한다. 이 원격 DB 쓰기는 파이프라인 운영 기능이며 사용자가
 // 2026-10-15 ①안으로 승인했다. 실패는 비치명이다(errors에 남기고 팩을 저장해 러너가 불필요하게 기다리지 않게 한다).
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
-import { fetchPersonSourcePack, readPersonSourcePack } from "./personSourcePack.js";
+import { naverGetJson, NAVER_API_HUB_BASE_URL } from "../../services/search/naver/naverClient.js";
+import { fetchNaverAiAnswer } from "./naverAiAnswer.js";
+import { PERSON_AI_ANSWER_MAX_BYTES, capUtf8, fetchPersonSourcePack, fitPersonSourcePack, readPersonSourcePack } from "./personSourcePack.js";
 import type { PersonSourcePack } from "./personSourcePack.js";
+import { collectReferenceBlogPosts, fetchPoolRssHits } from "./referenceBlogPosts.js";
+import type { BlogSearchItem } from "./referenceBlogPosts.js";
 
 /** 이 시간 안에 선택된 job만 본다(오래된 job의 뒤늦은 수집으로 DB를 흔들지 않는다). */
 export const SOURCE_PACK_LOOKBACK_MS = 12 * 60 * 60 * 1000;
@@ -42,6 +46,7 @@ export async function collectPersonSourcePacks(deps: CollectPersonSourcePackDeps
     const ok = pack.errors.length === 0;
     log(
       `${ok ? "✅" : "⚠️"} [person-pack] ${job.keyword}: 인물DB ${pack.personDb.length.toLocaleString()}자 · 나무위키 ${pack.namuwiki.length.toLocaleString()}자` +
+        ` · AI탭 ${(pack.naverAiAnswer ?? "").length.toLocaleString()}자 · 레퍼런스 블로그 ${pack.referenceBlogPosts?.length ?? 0}건` +
         `${saved ? "" : " · 저장 확인 실패"}${ok ? "" : ` · ${pack.errors.join(" / ")}`}`
     );
     processed.push({ jobId: job.id, keyword: job.keyword, saved, errors: pack.errors });
@@ -53,7 +58,18 @@ export async function collectPersonSourcePacks(deps: CollectPersonSourcePackDeps
 export function defaultCollectPersonSourcePackDeps(): CollectPersonSourcePackDeps {
   return {
     listCandidates: (sinceIso, limit) => ArticleJobRepository.listPersonJobsNeedingSourcePack(sinceIso, limit),
-    fetchPack: (keyword) => fetchPersonSourcePack(keyword),
+    fetchPack: (keyword) =>
+      fetchPersonSourcePack(keyword, {
+        // AI 탭 자동 수집은 기본 꺼짐(2026-10-17 실측: headless·headful 모두 네이버가 자동화 브라우저를
+        // 차단 - "잘못된 접근입니다"). 켜 두면 job마다 헛 브라우저 최대 25초 + errors 노이즈만 남는다.
+        // 차단이 풀렸는지 재시도할 때만 PERSON_AI_TAB=1로 켠다. 평시 공급 경로는 수동 첨부(--naver-ai-file)다.
+        ...(process.env.PERSON_AI_TAB === "1" ? { fetchNaverAi: (name: string) => fetchNaverAiAnswer(name) } : {}),
+        fetchReferenceBlogs: (name) =>
+          collectReferenceBlogPosts(name, {
+            search: searchNaverBlogs,
+            listRssHits: (kw) => fetchPoolRssHits(kw, (url, init) => fetch(url, init)),
+          }),
+      }),
     savePack: async (jobId, pack) => {
       await ArticleJobRepository.mergeMetadata(jobId, { researchSourcePack: pack });
     },
@@ -62,4 +78,45 @@ export function defaultCollectPersonSourcePackDeps(): CollectPersonSourcePackDep
       return readPersonSourcePack(job?.metadata as Record<string, unknown> | null) !== null;
     },
   };
+}
+
+/**
+ * 블로그 검색(display 30, 정확도순). 기존 NAVER API HUB 블로그 엔드포인트를 쓴다(저장소의 모든 검색이 이 경로 -
+ * 발주서의 openapi.naver.com 대신 이미 검증된 같은 키·경로를 재사용).
+ */
+async function searchNaverBlogs(query: string, display: number): Promise<BlogSearchItem[]> {
+  const body = await naverGetJson<{ items?: BlogSearchItem[] }>(`${NAVER_API_HUB_BASE_URL}/search/v1/blog`, {
+    params: { query, display, sort: "sim" },
+  });
+  return body.items ?? [];
+}
+
+export type AttachGoogleAiDeps = {
+  readMetadata: (jobId: string) => Promise<Record<string, unknown> | null>;
+  mergeMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
+};
+
+/**
+ * AI 답변 수동 첨부(§A-3 + 2026-10-17 확장): 사용자가 AI 답변을 저장한 텍스트를 기존 소스팩에 넣는다
+ * (구글은 공유 링크 내용, 네이버는 자동 수집이 차단돼 수동 복사가 평시 경로다). 6KB 상한.
+ * 소스팩이 아직 없으면(맥 수집 전) 거부한다 - 수집이 나중에 팩을 통째로 덮어쓰기 때문이다.
+ */
+export async function attachAiAnswer(
+  jobId: string,
+  field: "googleAiAnswer" | "naverAiAnswer",
+  text: string,
+  deps: AttachGoogleAiDeps
+): Promise<PersonSourcePack> {
+  const pack = readPersonSourcePack(await deps.readMetadata(jobId));
+  if (!pack) throw new Error("소스팩이 아직 없다 - person-pack 수집이 끝난 뒤 다시 실행한다");
+  const answer = capUtf8(text.trim(), PERSON_AI_ANSWER_MAX_BYTES);
+  if (!answer) throw new Error("첨부할 텍스트가 비어 있다");
+  const next = fitPersonSourcePack({ ...pack, [field]: answer });
+  await deps.mergeMetadata(jobId, { researchSourcePack: next });
+  return next;
+}
+
+/** @deprecated attachAiAnswer(jobId, "googleAiAnswer", ...)를 쓴다. */
+export async function attachGoogleAiAnswer(jobId: string, text: string, deps: AttachGoogleAiDeps): Promise<PersonSourcePack> {
+  return attachAiAnswer(jobId, "googleAiAnswer", text, deps);
 }

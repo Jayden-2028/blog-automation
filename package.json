@@ -230,6 +230,7 @@
     "job:naver-poll": "tsx src/jobs/naverPublishPollJob.ts",
     "job:person-pack": "tsx src/jobs/personSourcePackPollJob.ts",
     "test:person-source-pack": "tsx src/workflows/research/testPersonSourcePack.ts",
+    "test:person-research-sources": "tsx src/workflows/research/testPersonResearchSources.ts",
     "test:tistory-poll": "tsx src/jobs/testTistoryPublishPollJob.ts",
     "job:tistory-poll": "tsx src/jobs/tistoryPublishPollJob.ts",
     "job:publish-request": "tsx src/jobs/publishRequestCli.ts",

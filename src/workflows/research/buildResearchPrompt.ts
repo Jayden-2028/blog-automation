@@ -199,6 +199,50 @@ function formatPersonSourcePack(pack: PersonSourcePack | null): string[] {
     "",
     ...block("네이버 인물DB", pack.personDb, failureOf("personDb:")),
     ...block("나무위키", pack.namuwiki, failureOf("namuwiki:")),
+    ...formatAiAnswer("네이버 AI", pack.naverAiAnswer, pack.fetchedAt),
+    ...formatAiAnswer("구글 AI", pack.googleAiAnswer, pack.fetchedAt),
+    ...formatReferenceBlogPosts(pack.referenceBlogPosts),
+  ];
+}
+
+/**
+ * AI 답변 절(2026-10-17, PERSON-RESEARCH-SOURCES §A-2). 구조·커버리지 참고 전용이다 - 실측으로 사실 오류가 확인됐다
+ * (데뷔를 1998년 '사랑과 성공'으로 답변 - 인물DB·나무위키는 1996년 '스타트'). 비어 있으면 절을 싣지 않는다.
+ */
+function formatAiAnswer(source: string, text: string | undefined, fetchedAt: string): string[] {
+  if (!text) return [];
+  return [
+    `## ${source} 답변 (구조 참고 전용)`,
+    `아래는 ${source === "네이버 AI" ? "네이버 검색 AI" : "구글 AI"}의 생성 답변이다. **어떤 축(드라마/영화/예능/광고)을 다루고 각 축의`,
+    "대표를 무엇으로 뽑았는지 - 조사 커버리지 체크리스트로만 쓴다.** 개별 사실(연도·작품명·",
+    "수상)은 오류가 실측된 바 있으므로 인용하지 않는다. 사실은 인물DB > 나무위키 > news",
+    "우선순위로 별도 확인한 것만 쓴다. 위 출처와 충돌하면 이 답변을 버린다.",
+    `(수집 ${fetchedAt})`,
+    "```text",
+    text,
+    "```",
+    "",
+  ];
+}
+
+/** 테마 블로그 풀 글 절(§B-4). 구성·커버리지 참고 전용 - 사실 근거 금지, 문장·표현 차용 금지. */
+function formatReferenceBlogPosts(posts: PersonSourcePack["referenceBlogPosts"]): string[] {
+  if (!posts || posts.length === 0) return [];
+  return [
+    "## 레퍼런스 블로그 포스팅 (구성 참고 전용)",
+    "같은 인물을 다룬 상위 테마 블로그 글이다. **어떤 꼭지를 다뤘는지(커버리지)와 문단 구성만",
+    "참고한다.** 사실 근거로 쓰지 않는다(개인 블로그 - 검증 안 됨). 문장·표현을 가져오지",
+    "않는다(표절·유사문서 판정 리스크). 이 글들이 다룬 꼭지 중 우리 조사에 없는 것이 있으면",
+    "그 꼭지를 공식·뉴스 소스로 다시 조사한다.",
+    "",
+    ...posts.flatMap((post, i) => [
+      `### 레퍼런스 ${i + 1}: ${post.title} (${post.blogId}${post.postedAt ? `, ${post.postedAt}` : ""})`,
+      post.url,
+      "```text",
+      post.excerpt,
+      "```",
+      "",
+    ]),
   ];
 }
 
