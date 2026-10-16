@@ -7,6 +7,8 @@
 // 로그인·Playwright 없이 plain fetch로 충분하다. 실패는 비치명이다 - errors에 남기고 빈 문자열로 둔다.
 import { parse } from "node-html-parser";
 
+import type { ReferenceBlogPost } from "./referenceBlogPosts.js";
+
 /** 항목(personDb / namuwiki)당 UTF-8 바이트 상한. 프롬프트는 stdin으로 넘어가 argv 제한은 없지만 조사 에이전트의 읽기 비용이 있다. */
 export const PERSON_SOURCE_PACK_MAX_BYTES = 40 * 1024;
 
@@ -15,10 +17,24 @@ export type PersonSourcePack = {
   personDb: string;
   /** 나무위키 문서 본문(편집 UI·각주·둘러보기 제외). 실패하면 빈 문자열. */
   namuwiki: string;
+  /**
+   * 네이버 AI 탭 답변(2026-10-17, PERSON-RESEARCH-SOURCES §A). **구조·커버리지 참고 전용** - 사실 출처가 아니다.
+   * 상한 6KB. 없으면(차단·미수집) 비어 있거나 필드 자체가 없다.
+   */
+  naverAiAnswer?: string;
+  /** 구글 AI 모드 답변 - 사용자가 `--google-ai-file`로 수동 첨부한 것만(자동화 안 함). 같은 참고 전용 등급, 상한 6KB. */
+  googleAiAnswer?: string;
+  /** 드라마 테마 블로그 풀의 같은 인물 글(§B). 구성 참고 전용, 건당 8KB·합계 20KB. */
+  referenceBlogPosts?: ReferenceBlogPost[];
   fetchedAt: string;
-  /** 항목별 실패·누락 사유. 비어 있으면 둘 다 받았다. */
+  /** 항목별 실패·누락 사유. 비어 있으면 모두 받았다. */
   errors: string[];
 };
+
+/** AI 답변 항목 상한(UTF-8 바이트). */
+export const PERSON_AI_ANSWER_MAX_BYTES = 6 * 1024;
+/** 소스팩 총량 상한 = 기존 두 항목(인물DB·나무위키) 상한의 합. 새 항목을 넣어도 이 총량은 늘지 않는다. */
+export const PERSON_SOURCE_PACK_TOTAL_MAX_BYTES = 2 * PERSON_SOURCE_PACK_MAX_BYTES;
 
 export const SOURCE_PACK_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -151,6 +167,35 @@ export function fitSections(sections: string[], maxBytes: number): string {
   return sections.map((text) => cutTo(text, lo)).join(joiner);
 }
 
+/**
+ * 소스팩 총량을 맞춘다(§공통 3). 우선순위: 인물DB > 나무위키 > 네이버 AI > 구글 AI > 블로그 글.
+ * 앞 항목이 자기 몫을 먼저 가져가고, 총량을 넘으면 **뒤(우선순위 낮은) 항목부터** 잘린다. 새 항목이 없으면 그대로다.
+ */
+export function fitPersonSourcePack(pack: PersonSourcePack, totalMax: number = PERSON_SOURCE_PACK_TOTAL_MAX_BYTES): PersonSourcePack {
+  const bytes = (t: string) => Buffer.byteLength(t, "utf8");
+  let remaining = totalMax;
+  const take = (text: string | undefined): string => {
+    if (!text) return "";
+    const out = remaining <= 0 ? "" : capUtf8(text, remaining);
+    remaining -= bytes(out);
+    return out;
+  };
+  const personDb = take(pack.personDb);
+  const namuwiki = take(pack.namuwiki);
+  const naverAiAnswer = take(pack.naverAiAnswer);
+  const googleAiAnswer = take(pack.googleAiAnswer);
+  const posts: ReferenceBlogPost[] = [];
+  for (const post of pack.referenceBlogPosts ?? []) {
+    const excerpt = remaining < 200 ? "" : take(post.excerpt);
+    if (excerpt) posts.push({ ...post, excerpt });
+  }
+  const next: PersonSourcePack = { ...pack, personDb, namuwiki };
+  if (pack.naverAiAnswer !== undefined) next.naverAiAnswer = naverAiAnswer;
+  if (pack.googleAiAnswer !== undefined) next.googleAiAnswer = googleAiAnswer;
+  if (pack.referenceBlogPosts !== undefined) next.referenceBlogPosts = posts;
+  return next;
+}
+
 export type FetchLike = (
   url: string,
   init: { headers: Record<string, string>; signal: AbortSignal }
@@ -161,6 +206,10 @@ export type FetchPersonSourcePackOptions = {
   now?: () => Date;
   timeoutMs?: number;
   maxBytes?: number;
+  /** 네이버 AI 탭 답변 수집(Playwright - 맥 전용). 없으면 수집하지 않는다(필드 생략). 비치명: 사유는 error. */
+  fetchNaverAi?: (keyword: string) => Promise<{ answer: string; error?: string }>;
+  /** 테마 블로그 풀 글 수집. 없으면 수집하지 않는다(필드 생략). 비치명. */
+  fetchReferenceBlogs?: (keyword: string) => Promise<{ posts: ReferenceBlogPost[]; errors: string[] }>;
 };
 
 async function fetchHtml(url: string, fetchImpl: FetchLike, timeoutMs: number): Promise<string> {
@@ -208,7 +257,34 @@ export async function fetchPersonSourcePack(
     errors.push(`namuwiki: ${message(error)}`);
   }
 
-  return { personDb, namuwiki, fetchedAt: (options.now ?? (() => new Date()))().toISOString(), errors };
+  let naverAiAnswer: string | undefined;
+  if (options.fetchNaverAi) {
+    try {
+      const r = await options.fetchNaverAi(name);
+      naverAiAnswer = capUtf8(r.answer, PERSON_AI_ANSWER_MAX_BYTES);
+      if (r.error) errors.push(r.error);
+    } catch (error) {
+      naverAiAnswer = "";
+      errors.push(`naverAiAnswer: ${message(error)}`);
+    }
+  }
+
+  let referenceBlogPosts: ReferenceBlogPost[] | undefined;
+  if (options.fetchReferenceBlogs) {
+    try {
+      const r = await options.fetchReferenceBlogs(name);
+      referenceBlogPosts = r.posts;
+      errors.push(...r.errors);
+    } catch (error) {
+      referenceBlogPosts = [];
+      errors.push(`referenceBlogs: ${message(error)}`);
+    }
+  }
+
+  const pack: PersonSourcePack = { personDb, namuwiki, fetchedAt: (options.now ?? (() => new Date()))().toISOString(), errors };
+  if (naverAiAnswer !== undefined) pack.naverAiAnswer = naverAiAnswer;
+  if (referenceBlogPosts !== undefined) pack.referenceBlogPosts = referenceBlogPosts;
+  return fitPersonSourcePack(pack);
 }
 
 /** metadata에서 소스팩을 읽는다. 수집 시도 흔적(fetchedAt)이 있어야 "채워짐"이다 - 실패 팩도 채워진 것으로 본다. */
@@ -217,10 +293,19 @@ export function readPersonSourcePack(metadata: Record<string, unknown> | null | 
   if (!raw || typeof raw !== "object") return null;
   const pack = raw as Record<string, unknown>;
   if (typeof pack.fetchedAt !== "string") return null;
-  return {
+  const out: PersonSourcePack = {
     personDb: typeof pack.personDb === "string" ? pack.personDb : "",
     namuwiki: typeof pack.namuwiki === "string" ? pack.namuwiki : "",
     fetchedAt: pack.fetchedAt,
     errors: Array.isArray(pack.errors) ? pack.errors.filter((e): e is string => typeof e === "string") : [],
   };
+  if (typeof pack.naverAiAnswer === "string") out.naverAiAnswer = pack.naverAiAnswer;
+  if (typeof pack.googleAiAnswer === "string") out.googleAiAnswer = pack.googleAiAnswer;
+  if (Array.isArray(pack.referenceBlogPosts)) {
+    out.referenceBlogPosts = pack.referenceBlogPosts.filter(
+      (p): p is ReferenceBlogPost =>
+        !!p && typeof p === "object" && typeof (p as ReferenceBlogPost).excerpt === "string" && typeof (p as ReferenceBlogPost).url === "string"
+    );
+  }
+  return out;
 }
