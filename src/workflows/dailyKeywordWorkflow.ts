@@ -882,6 +882,20 @@ export async function runDailyKeywordWorkflow(
               },
             }
           : {}),
+        // query pool 변형 접기(2026-10-17). 접기는 수집 진입 전에 일어나므로 랭킹 로그에는
+        // 흔적이 남지 않는다 - 무엇을 접었는지 run 단위로 남겨야 과접힘을 사후에 셀 수 있다.
+        ...(result.queryPool && result.queryPool.foldedGroups.length > 0
+          ? {
+              queryPoolFold: {
+                groupCount: result.queryPool.foldedGroups.length,
+                droppedCount: result.queryPool.foldedGroups.reduce(
+                  (sum, group) => sum + group.dropped.length,
+                  0
+                ),
+                groups: result.queryPool.foldedGroups,
+              },
+            }
+          : {}),
         ...options.metadata,
       },
       candidatesCount: collected.candidates.length,
