@@ -66,6 +66,12 @@ export type BuildDailyQueryPoolResult = {
   /** seed_queries와 keyword가 겹쳐 origin="merged"로 흡수된 동적 후보 수. */
   trendMergedCount: number;
   /**
+   * 변형 접기로 대표만 남긴 그룹. 접기가 꺼져 있거나 접을 그룹이 없으면 빈 배열이다.
+   * dailyKeywordWorkflow가 discovery_runs.metadata.queryPoolFold로 저장한다 - 접기는 수집
+   * 진입 전에 일어나므로 랭킹 로그만 봐서는 무엇이 사라졌는지 셀 수 없다.
+   */
+  foldedGroups: QueryPoolFoldGroup[];
+  /**
    * 조회에 실패한 소스가 있을 때만 채워진다. 실패해도 entries는 나머지 소스로 채워져 반환된다.
    * 단수형 trendError는 하위 호환용으로, 실패한 소스 중 첫 번째 메시지를 담는다.
    */
@@ -92,6 +98,11 @@ export type BuildDailyQueryPoolOptions = {
   loadLatestCreatorAdvisorCandidates?: LoadTrendCandidates;
   /** source별 loader 주입. 지정하지 않은 소스는 TrendCandidateRepository를 쓴다. */
   loadCandidatesBySource?: Partial<Record<TrendSource, LoadTrendCandidates>>;
+  /**
+   * 변형 접기 스위치를 테스트에서만 덮어쓴다(creatorAdvisorEnabled와 같은 성격의 주입 지점).
+   * 운영 호출은 이 옵션을 넘기지 않고 env QUERY_POOL_VARIANT_FOLD를 그대로 쓴다.
+   */
+  variantFoldEnabled?: boolean;
 };
 
 // 동적 소스 기반 entry의 기본 priority. seed_queries 기본값(5)보다 낮게 둬서, 같은 우선순위
@@ -200,6 +211,193 @@ function mergeEntries(
   return { entries: [...byKeyword.values()], mergedCount };
 }
 
+// ---------- 변형 키워드 접기 (2026-10-17, QUERY-POOL-VARIANT-FOLD-2026-10.md) ----------
+//
+// 왜: 10/17 엔터 run 166 Top 10에서 "나솔사계"가 4칸(4·5·6·9위)을 먹었다. Creator Advisor가 같은
+// 프로그램의 검색어 변형 13건("나솔사계", "나솔사계 현커", "나솔사계 라방", "나솔사계 최종커플"…)을
+// 상위로 올렸고, **변형마다 seedQuery가 달라** selectDiverseTopN의 maxPerSeedQuery=1을 각자
+// 통과했다. maxPerCanonicalTopic=1도 못 막았다 - "나솔사계" 토큰이 그날 batch 520건에서 희소
+// 기준(df ≤ 11)을 넘어 주제 신호로 인정되지 않았기 때문이다.
+//
+// 그래서 **수집 진입 전** query pool 단계에서 접는다. 여기서 접으면 NAVER 검색 fan-out도 줄고
+// Top N의 칸 수도 자연히 줄어든다. clustering·scoring·relevance·selectDiverseTopN·topicGrouping은
+// 한 줄도 건드리지 않는다(CLAUDE.md "승인 없이는 금지" 영역이고, 이 파일의 역할 분리 선언도 그렇다).
+//
+// trend_candidates 자체는 바꾸지 않는다 - 19시 핫스타가 원본을 그대로 쓰므로 접기는 그날의
+// query pool에만 적용된다.
+
+export const QUERY_POOL_VARIANT_FOLD_ENV = "QUERY_POOL_VARIANT_FOLD";
+
+/** 한 변형 그룹에서 pool에 남길 대표 수. */
+export const QUERY_POOL_VARIANT_KEEP = 2;
+
+// pipelineGate.ts와 같은 해석 규칙이다: 미설정·빈 값은 켜짐(워크플로가 `vars.X`를 빈 값으로
+// 넘기는 경우를 기본값으로 흘리기 위함), 끄는 값만 명시적으로 나열한다.
+const FOLD_OFF_VALUES = new Set(["false", "0", "off", "no"]);
+
+/** QUERY_POOL_VARIANT_FOLD 해석. 미설정·빈 값이면 켜짐이고, false/0/off/no면 접기를 생략한다(롤백용). */
+export function parseVariantFoldEnabled(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return true;
+  return !FOLD_OFF_VALUES.has(normalized);
+}
+
+export type QueryPoolFoldGroup = {
+  /** 그룹의 base 키워드(토큰이 가장 적은 대표 - 보통 프로그램·인물명 단독). kept[0]과 같다. */
+  base: string;
+  /** pool에 남긴 대표 키워드(최대 QUERY_POOL_VARIANT_KEEP개). */
+  kept: string[];
+  /** pool에서 뺀 변형 키워드. */
+  dropped: string[];
+};
+
+type FoldableEntry = {
+  entry: QueryPoolEntry;
+  /** entries 배열에서의 원래 위치. 접고 난 뒤 순서를 보존하기 위해 들고 다닌다. */
+  index: number;
+  tokens: string[];
+};
+
+function tokenizeKeyword(keyword: string): string[] {
+  return normalizeKeyword(keyword).split(/\s+/).filter(Boolean);
+}
+
+/**
+ * 같은 주제의 검색어 변형인가. 보수적으로 두 조건을 동시에 요구한다.
+ *   ① 첫 토큰이 같다(CA 검색어는 프로그램·인물명이 맨 앞에 오는 형태가 대부분이다).
+ *   ② 짧은 쪽의 토큰 집합이 긴 쪽의 부분집합이다.
+ *
+ * "나솔사계 현커" vs "나솔사계 라방"은 이 판정으로는 직접 묶이지 않는다 - 둘 다 base "나솔사계"와
+ * 묶여 **전이적으로만** 한 그룹이 된다. base가 pool에 없으면 형제 변형끼리는 **안 묶인다**.
+ * 의도된 보수성이다: 첫 토큰만 같다고 묶으면 "김지원 닥터X"와 "김지원 광고"처럼 서로 다른 이슈를
+ * 한 주제로 죽일 수 있다.
+ */
+function isSameVariantGroup(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+  if (a[0] !== b[0]) return false;
+
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  const longerTokens = new Set(longer);
+  return shorter.every((token) => longerTokens.has(token));
+}
+
+function toRankValue(value: unknown): number {
+  const rank = Number(value);
+  // rank가 없는 소스(구글 트렌드 등)는 맨 뒤로 보낸다 - "없음"을 1위로 취급하면 안 된다.
+  return Number.isFinite(rank) ? rank : Number.POSITIVE_INFINITY;
+}
+
+function toScoreValue(value: unknown): number {
+  const score = Number(value);
+  return Number.isFinite(score) ? score : 0;
+}
+
+/** base 선정 순서: 토큰 수 오름차순 -> CA rank 오름차순 -> candidateScore 내림차순 -> 키워드 사전순. */
+function compareForBase(a: FoldableEntry, b: FoldableEntry): number {
+  if (a.tokens.length !== b.tokens.length) return a.tokens.length - b.tokens.length;
+  return compareForRank(a, b);
+}
+
+/**
+ * 2순위 대표 선정 순서: CA rank 오름차순 -> candidateScore 내림차순 -> 키워드 사전순.
+ * 마지막 사전순까지 두는 이유는 동률에서 run마다 결과가 흔들리지 않게 하기 위함이다(결정적 선정).
+ */
+function compareForRank(a: FoldableEntry, b: FoldableEntry): number {
+  const rankDiff = toRankValue(a.entry.metadata.rank) - toRankValue(b.entry.metadata.rank);
+  if (rankDiff !== 0) return rankDiff;
+
+  const scoreDiff = toScoreValue(b.entry.metadata.candidateScore) - toScoreValue(a.entry.metadata.candidateScore);
+  if (scoreDiff !== 0) return scoreDiff;
+
+  return a.entry.keyword.localeCompare(b.entry.keyword, "ko");
+}
+
+/**
+ * 같은 주제의 검색어 변형을 대표 QUERY_POOL_VARIANT_KEEP개로 접는다.
+ *
+ * 접기 대상은 **동적 entry(origin=creator_advisor|trend)만**이다. seed와 merged(seed 키워드에
+ * 동적 신호가 흡수된 것)는 사람이 큐레이션한 상시 검색어라 접지 않고, 그룹 anchor로도 쓰지 않는다 -
+ * 후보 목록에서 아예 빼므로 "seed가 base라서 변형들이 묶이는" 일도 일어나지 않는다.
+ *
+ * 카테고리는 보지 않는다. mergeEntries가 이미 같은 키워드의 ent/ott 중복을 1 entry로 흡수했고,
+ * 접힌 entry의 category·metadata는 대표 것을 그대로 유지한다.
+ */
+function foldVariantQueries(
+  entries: QueryPoolEntry[],
+  options: { enabled: boolean }
+): { entries: QueryPoolEntry[]; foldedGroups: QueryPoolFoldGroup[] } {
+  if (!options.enabled) return { entries, foldedGroups: [] };
+
+  const foldable: FoldableEntry[] = [];
+  entries.forEach((entry, index) => {
+    if (!isTrendOrigin(entry.origin)) return;
+    const tokens = tokenizeKeyword(entry.keyword);
+    if (tokens.length === 0) return;
+    foldable.push({ entry, index, tokens });
+  });
+
+  // union-find. 쌍 판정이 전이성을 보장하지 않으므로(현커-라방은 base를 거쳐야 한다) 묶기는
+  // 집합 연산으로 한다. 동적 entry는 하루 최대 수십 건이라 O(n^2) 쌍 비교로 충분하다.
+  const parent = foldable.map((_, index) => index);
+  const find = (index: number): number => {
+    let node = index;
+    while (parent[node] !== node) {
+      parent[node] = parent[parent[node]];
+      node = parent[node];
+    }
+    return node;
+  };
+  const union = (a: number, b: number): void => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootB] = rootA;
+  };
+
+  for (let i = 0; i < foldable.length; i++) {
+    for (let j = i + 1; j < foldable.length; j++) {
+      if (isSameVariantGroup(foldable[i].tokens, foldable[j].tokens)) union(i, j);
+    }
+  }
+
+  const buckets = new Map<number, number[]>();
+  for (let i = 0; i < foldable.length; i++) {
+    const root = find(i);
+    const bucket = buckets.get(root);
+    if (bucket) bucket.push(i);
+    else buckets.set(root, [i]);
+  }
+
+  const droppedIndexes = new Set<number>();
+  const foldedGroups: QueryPoolFoldGroup[] = [];
+
+  for (const bucket of buckets.values()) {
+    if (bucket.length <= QUERY_POOL_VARIANT_KEEP) continue;
+
+    const byBase = [...bucket].sort((a, b) => compareForBase(foldable[a], foldable[b]));
+    const base = byBase[0];
+    const rest = byBase.slice(1).sort((a, b) => compareForRank(foldable[a], foldable[b]));
+
+    const keptIndexes = [base, ...rest.slice(0, QUERY_POOL_VARIANT_KEEP - 1)];
+    const droppedList = rest.slice(QUERY_POOL_VARIANT_KEEP - 1);
+    for (const item of droppedList) droppedIndexes.add(foldable[item].index);
+
+    const group: QueryPoolFoldGroup = {
+      base: foldable[base].entry.keyword,
+      kept: keptIndexes.map((item) => foldable[item].entry.keyword),
+      dropped: droppedList.map((item) => foldable[item].entry.keyword),
+    };
+    foldedGroups.push(group);
+
+    console.log(
+      `ℹ️ [buildDailyQueryPool] 변형 접기: ${group.base} (${bucket.length}→${group.kept.length}) — ` +
+        `대표 [${group.kept.join(", ")}], 접힘 [${group.dropped.join(", ")}]`
+    );
+  }
+
+  if (droppedIndexes.size === 0) return { entries, foldedGroups };
+  return { entries: entries.filter((_, index) => !droppedIndexes.has(index)), foldedGroups };
+}
+
 /**
  * 이 소스를 이번 run에서 조회할지 판정한다. 우선순위가 높은 것부터:
  *
@@ -274,7 +472,14 @@ export async function buildDailyQueryPool(
     }
   }
 
-  const { entries, mergedCount } = mergeEntries(seedEntries, trendEntries);
+  const { entries: mergedEntries, mergedCount } = mergeEntries(seedEntries, trendEntries);
+
+  // 접기는 merge가 끝난 뒤에 돈다. seed와 흡수분(origin="merged")이 먼저 확정돼야
+  // "사람이 큐레이션한 것은 접지 않는다"를 지킬 수 있다.
+  const { entries, foldedGroups } = foldVariantQueries(mergedEntries, {
+    enabled:
+      options.variantFoldEnabled ?? parseVariantFoldEnabled(process.env[QUERY_POOL_VARIANT_FOLD_ENV]),
+  });
 
   const trendCountBySource: Partial<Record<TrendSource, number>> = {};
   for (const entry of entries) {
@@ -291,6 +496,7 @@ export async function buildDailyQueryPool(
     trendCount,
     trendCountBySource,
     trendMergedCount: mergedCount,
+    foldedGroups,
     ...(firstError ? { trendError: firstError } : {}),
     trendErrorBySource,
   };
