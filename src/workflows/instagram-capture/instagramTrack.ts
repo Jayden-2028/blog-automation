@@ -17,8 +17,10 @@ import { trackJobMetadata } from "../../notifications/telegramTracks.js";
 import type { InstagramQueueEntry } from "./types.js";
 
 // living/tech(2026-10-19, KEYWORD-INPUT-TOOL-2026-10.md A-2)는 입력 툴 전용 트랙이다: 문체·자료조사는 사회(incident) 규격을
-// 쓰고, 발행 버튼 없이 뷰어 복붙(person 선례). 알림 봇은 메인봇이다(telegramTracks.Track에 없는 값은 엔터로 읽힌다).
-export type InstagramTrack = "entertainment" | "social" | "living" | "tech";
+// 쓰고, 발행 버튼 없이 뷰어 복붙. 알림 봇·뷰어는 **사회**다(trackOfJob이 living/tech를 social로 해석 - 2026-10-19 사용자 결정).
+// person(2026-10-19 추가)은 인물 백과 트랙 그대로다: category=person만 주면 소스팩 폴러(job:person-pack)·person 리서처·
+// 메인봇 알림·엔터 뷰어·복붙 발행이 핫스타 ✍️ 인물글 버튼과 동일하게 흐른다(metadata.track 없음 = 엔터).
+export type InstagramTrack = "entertainment" | "social" | "living" | "tech" | "person";
 
 /** 입력 툴 전용 트랙(telegramTracks.Track에 없다). job.metadata.track에 그대로 적는다. */
 export const INPUT_ONLY_TRACKS = ["living", "tech"] as const;
@@ -27,22 +29,23 @@ export function isInputOnlyTrack(track: unknown): track is "living" | "tech" {
 }
 
 /**
- * 트랙이 job에 남기는 metadata 조각. 엔터는 비어 있고(값이 없으면 엔터), 사회는 {track:"social"}, 일상·테크는
- * {track:"living"|"tech"}다 - telegramTracks.Track에 없는 값이라 알림 봇은 메인봇(엔터)으로 읽히고(trackOfJob 폴백),
- * 문체·발행 판정(specFiles·manualPublishOnly)만 이 값을 본다.
+ * 트랙이 job에 남기는 metadata 조각. 엔터·인물은 비어 있고(값이 없으면 엔터 봇·뷰어), 사회는 {track:"social"},
+ * 일상·테크는 {track:"living"|"tech"}다 - trackOfJob이 living/tech를 사회 봇·사회 뷰어로 해석하고(2026-10-19),
+ * 문체·발행 판정(specFiles·manualPublishOnly)도 이 값을 본다. 인물은 category=person이 전부를 가른다.
  */
 export function jobMetadataForTrack(track: InstagramTrack | undefined): Record<string, unknown> {
   if (isInputOnlyTrack(track)) return { track };
+  if (track === "person") return {}; // 인물 백과 선례: metadata.track 없음(엔터 기본), category=person이 전부를 가른다.
   return trackJobMetadata(track ?? "entertainment");
 }
 
-/** 트랙이 정하는 article_jobs.category. 일상=living(기존 카테고리 재사용), 테크=tech. 그 외는 null(호출자가 쓰던 값 유지). */
-export function categoryForTrack(track: InstagramTrack | undefined): "living" | "tech" | null {
-  return track === "living" ? "living" : track === "tech" ? "tech" : null;
+/** 트랙이 정하는 article_jobs.category. 일상=living(기존 카테고리 재사용), 테크=tech, 인물=person. 그 외는 null(호출자가 쓰던 값 유지). */
+export function categoryForTrack(track: InstagramTrack | undefined): "living" | "tech" | "person" | null {
+  return track === "living" ? "living" : track === "tech" ? "tech" : track === "person" ? "person" : null;
 }
 
 export function isInstagramTrack(value: unknown): value is InstagramTrack {
-  return value === "entertainment" || value === "social" || isInputOnlyTrack(value);
+  return value === "entertainment" || value === "social" || value === "person" || isInputOnlyTrack(value);
 }
 
 /** 단어 → 트랙. 사용자가 실제로 쓸 법한 말을 넓게 받는다(네이버/티스토리는 채널 이름으로 트랙을 뜻한다). */
@@ -51,6 +54,7 @@ const TRACK_WORDS: ReadonlyArray<[RegExp, InstagramTrack]> = [
   [/^(사회|시사|사회이슈|사회\s?이슈|티스토리|social)$/i, "social"],
   [/^(일상|living)$/i, "living"],
   [/^(테크|tech)$/i, "tech"],
+  [/^(인물|인물백과|프로필|person)$/i, "person"],
 ];
 
 export function trackFromWord(word: string): InstagramTrack | null {
@@ -83,6 +87,7 @@ export const TRACK_LABEL: Readonly<Record<InstagramTrack, string>> = {
   social: "🏛 사회",
   living: "🏠 일상",
   tech: "💻 테크",
+  person: "👤 인물",
 };
 
 /** 클라우드 접수 답장. 트랙이 정해졌으면 그 사실을, 아니면 어떻게 고르는지를 한 줄로. */
@@ -90,16 +95,16 @@ export function ackMessage(track: InstagramTrack | null): string {
   if (track) return `링크 접수했습니다 → ${TRACK_LABEL[track]} 트랙. 원고 초안이 준비되면 알려드립니다.`;
   return [
     "링크 접수했습니다. 어느 트랙으로 쓸까요?",
-    "이 메시지에 **엔터** / **사회** / **일상** / **테크**라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
+    "이 메시지에 **엔터** / **사회** / **일상** / **테크** / **인물**이라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
     "· 엔터 → 네이버 원고·네이버 뷰어   · 사회 → 티스토리 원고·티스토리 뷰어",
-    "· 일상·테크 → 사회 규격 원고·뷰어 복붙(발행 버튼 없음)",
+    "· 일상·테크 → 사회 규격 원고·사회 뷰어 복붙   · 인물 → 인물 백과 원고·엔터 뷰어 복붙",
   ].join("\n");
 }
 
 /** 맥 폴러가 답을 못 붙여 다시 물을 때(기다리는 링크가 여럿이라 어느 것인지 모를 때). */
 export function trackQuestion(entry: Pick<InstagramQueueEntry, "instagramUrl" | "userTopic">): string {
   const subject = entry.instagramUrl || entry.userTopic || "";
-  return ["📌 어느 트랙으로 쓸까요? 이 메시지에 엔터 / 사회 / 일상 / 테크로 답장해 주세요.", "", subject].join("\n");
+  return ["📌 어느 트랙으로 쓸까요? 이 메시지에 엔터 / 사회 / 일상 / 테크 / 인물로 답장해 주세요.", "", subject].join("\n");
 }
 
 /** 버튼 선택을 수신함 topic_reply 행의 reply_text에 담는 형식. 수신함 모양을 안 바꾸려고 글자로 싣는다. */
