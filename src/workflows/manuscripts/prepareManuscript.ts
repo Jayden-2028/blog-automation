@@ -349,7 +349,7 @@ export async function prepareManuscript(
     const split = splitTrailingHashtags(withLinks);
     title = baseArticle.title ?? job.keyword;
     // 수동 복붙 트랙(person)은 뷰어 본문에서만 내부 링크·참고 자료를 뺀다(2026-10-15 B-2). 위 DB 저장분은 그대로다.
-    content = viewerBodyForCategory(job.category, split.body);
+    content = viewerBodyForCategory(job.category, split.body, job.metadata);
     searchDescription = meta.searchDescription;
     slug = meta.slug;
     shortName = meta.shortName;

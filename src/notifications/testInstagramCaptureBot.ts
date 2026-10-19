@@ -54,24 +54,29 @@ async function testEnqueuesUrlWithCaption(): Promise<void> {
   console.log("✅ URL+캡션 메시지 -> 큐 적재, 나머지 텍스트가 캡션으로 보존됨");
 }
 
-async function testIgnoresMessageWithoutUrl(): Promise<void> {
-  let enqueuedCount = 0;
+// 2026-10-19 종합 키워드 입력 툴: URL 없는 일반 글은 더 이상 버려지지 않고 **직접 입력**으로 큐에 선다(텍스트 출처, 트랙 대기).
+async function testPlainTextBecomesDirectInput(): Promise<void> {
+  const enqueued: import("../workflows/instagram-capture/types.js").InstagramQueueEntry[] = [];
+  const replies: string[] = [];
   const bot = new InstagramCaptureBot({
     botToken: "test-token",
-    fetchUpdates: async () => [makeUpdate(2, "111", "안녕하세요 그냥 인사입니다")],
-    sendMessage: async () => 1,
+    fetchUpdates: async () => [makeUpdate(2, "111", "민찌는 무슨 고기일까?")],
+    sendMessage: async (_chat, text) => {
+      replies.push(text);
+      return 1;
+    },
     getStoredOffset: async () => 1,
     advanceStoredOffset: async () => {},
-    enqueue: async () => {
-      enqueuedCount += 1;
+    enqueue: async (entry) => {
+      enqueued.push(entry);
     },
   });
 
   const result = await bot.pollOnce();
-  assert(result.enqueued === 0, "URL 없는 메시지는 큐에 안 들어가야 한다");
-  assert(result.ignored === 1, "무시 카운트가 1이어야 한다");
-  assert(enqueuedCount === 0, "enqueue가 호출되지 않아야 한다");
-  console.log("✅ URL 없는 메시지는 무시된다");
+  assert(result.enqueued === 1 && result.ignored === 0, "일반 글은 직접 입력으로 적재된다");
+  assert(enqueued[0].source === "text" && enqueued[0].status === "needs_track" && enqueued[0].userTopic === "민찌는 무슨 고기일까?", "질문형은 그대로 주제, 트랙 대기");
+  assert(replies[0].includes("접수: 주제") && replies[0].includes("일상"), "접수 답장에 해석 결과와 4트랙 안내");
+  console.log("✅ URL 없는 일반 글은 직접 입력으로 접수된다");
 }
 
 async function testRejectsOtherChat(): Promise<void> {
@@ -185,23 +190,26 @@ async function testTopicReplyWithoutReplyTo(): Promise<void> {
 }
 
 async function testAmbiguousTopicReplyIgnored(): Promise<void> {
-  // 둘 이상 기다리는데 답장도 아니면 어느 것인지 알 수 없다. 엉뚱한 게시물에 붙이는 것보다
-  // 무시하는 편이 낫다.
+  // 둘 이상 기다리는데 답장도 아니면 어느 것인지 알 수 없다. 엉뚱한 게시물에 붙이지 않는다.
+  // (2026-10-19부터 버려지지 않고 새 직접 입력으로 접수된다 - 접수 답장이 해석 결과를 보여주므로 사용자가 알아본다.)
   const applied: string[] = [];
+  let enqueuedAsInput = 0;
   const bot = new InstagramCaptureBot({
     botToken: "t",
     fetchUpdates: async () => [replyUpdate(22, "무슨 주제")],
     sendMessage: async () => 1,
     getStoredOffset: async () => null,
     advanceStoredOffset: async () => {},
-    enqueue: async () => {},
+    enqueue: async () => {
+      enqueuedAsInput += 1;
+    },
     listAwaitingTopic: () => [waitingEntry("a", 777), waitingEntry("b", 888)],
     applyTopic: (id) => applied.push(id),
   });
 
   const result = await bot.pollOnce();
   assert(result.topicsAnswered === 0, "모호하면 받지 않는다");
-  assert(result.ignored === 1, "무시로 집계돼야 한다");
+  assert(result.ignored === 0 && enqueuedAsInput === 1 && applied.length === 0, "기다리는 항목에는 안 붙고 직접 입력으로 접수된다");
   assert(applied.length === 0, "아무 항목에도 붙이면 안 된다");
   console.log("✅ 기다리는 항목이 여럿인데 답장이 아니면 받지 않는다");
 }
@@ -233,7 +241,7 @@ async function testUrlStillWinsOverTopicReply(): Promise<void> {
 async function main(): Promise<void> {
   console.log("▶ InstagramCaptureBot 테스트 시작\n");
   await testEnqueuesUrlWithCaption();
-  await testIgnoresMessageWithoutUrl();
+  await testPlainTextBecomesDirectInput();
   await testRejectsOtherChat();
   await testAdvancesOffsetForEveryUpdate();
   await testTopicReplyByReplyTo();

@@ -5,13 +5,17 @@
 // 수동 CLI·뷰어 요청 경로가 남으므로, 발행 진입점들이 같은 판정을 쓴다(한 곳에서 정의).
 
 /** 자동 발행하지 않는 카테고리. */
-const MANUAL_PUBLISH_ONLY_CATEGORIES: ReadonlySet<string> = new Set(["person"]);
+const MANUAL_PUBLISH_ONLY_CATEGORIES: ReadonlySet<string> = new Set(["person", "tech"]);
 
 export const MANUAL_PUBLISH_ONLY_REASON =
   "인물 백과(person) 원고는 자동 발행하지 않습니다. 뷰어에서 복사해 네이버에 직접 붙여넣어 주세요.";
 
-export function isManualPublishOnly(job: { category?: string | null }): boolean {
-  return MANUAL_PUBLISH_ONLY_CATEGORIES.has(job.category ?? "");
+export function isManualPublishOnly(job: { category?: string | null; metadata?: unknown }): boolean {
+  if (MANUAL_PUBLISH_ONLY_CATEGORIES.has(job.category ?? "")) return true;
+  // 종합 키워드 입력 툴의 일상·테크 트랙(2026-10-19): 뷰어 복붙. 일상은 category가 기존 living과 같아서 category로는 못 가르고
+  // metadata.track으로 잡는다 - 트렌드 경로의 living job은 계속 발행 버튼이 붙는다.
+  const track = job.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>).track : null;
+  return track === "living" || track === "tech";
 }
 
 /**

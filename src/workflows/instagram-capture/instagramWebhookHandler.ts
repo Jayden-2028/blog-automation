@@ -14,7 +14,10 @@
 import { splitInstagramUrlAndCaption } from "../../notifications/InstagramCaptureBot.js";
 import type { InstagramInboxRow } from "../../services/supabase/repositories/instagramInboxRepository.js";
 import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
-import { ackMessage, encodeTrackPick, isBareTrackWord, splitTrackWord, TRACK_LABEL } from "./instagramTrack.js";
+import { classifyUrl, directInputAck, extractFirstUrl, interpretDirectInput, UNSUPPORTED_URL_REPLY } from "./directInput.js";
+import { encodeLinkSource, linkSourceAck, resolveLinkSource } from "./linkInput.js";
+import type { ExtractResult } from "../input-extract/extractLinkSource.js";
+import { ackMessage, encodeTrackPick, isBareTrackWord, isInstagramTrack, splitTrackWord, TRACK_LABEL } from "./instagramTrack.js";
 import type { InstagramTrack } from "./instagramTrack.js";
 
 /** 버튼 callback_data. `igtrack:<큐 id>:<트랙>`. 큐 id는 `tg-<update_id>`(수신함 행 id와 같다). */
@@ -30,7 +33,7 @@ export function parseTrackCallbackData(data: string | undefined | null): { queue
   const parts = data.split(":");
   if (parts.length !== 3 || parts[0] !== TRACK_CALLBACK_PREFIX) return null;
   if (!QUEUE_ID_RE.test(parts[1])) return null;
-  if (parts[2] !== "entertainment" && parts[2] !== "social") return null;
+  if (!isInstagramTrack(parts[2])) return null;
   return { queueId: parts[1], track: parts[2] };
 }
 
@@ -40,6 +43,10 @@ export function trackButtons(queueId: string): TelegramReplyMarkup {
       [
         { text: TRACK_LABEL.entertainment, callback_data: buildTrackCallbackData(queueId, "entertainment") },
         { text: TRACK_LABEL.social, callback_data: buildTrackCallbackData(queueId, "social") },
+      ],
+      [
+        { text: TRACK_LABEL.living, callback_data: buildTrackCallbackData(queueId, "living") },
+        { text: TRACK_LABEL.tech, callback_data: buildTrackCallbackData(queueId, "tech") },
       ],
     ],
   };
@@ -67,6 +74,11 @@ export type InstagramWebhookDeps = {
   insertInbox: (row: InstagramInboxRow) => Promise<unknown>;
   sendMessage: (chatId: string, text: string, replyMarkup?: TelegramReplyMarkup) => Promise<unknown>;
   editReplyMarkup: (chatId: string, messageId: number, replyMarkup: TelegramReplyMarkup) => Promise<unknown>;
+  /**
+   * 블로그·뉴스·유튜브 링크를 소스 본문으로 읽는다(B부, 비치명 - 예외를 던지지 않는다). 없으면 그 링크들은 "지원 예정" 안내로 간다.
+   * `hint`는 링크와 함께 보낸 말(트랙 단어를 뗀 것).
+   */
+  extractLink?: (url: string, hint: string) => Promise<ExtractResult>;
   now?: () => Date;
 };
 
@@ -74,7 +86,9 @@ export type InstagramWebhookOutcome =
   | { handled: "link"; queueId: string; track: InstagramTrack | null }
   | { handled: "track_pick"; queueId: string; track: InstagramTrack }
   | { handled: "reply"; replyToMessageId: number | null }
-  | { handled: "ignored"; reason: "wrong_chat" | "empty" | "not_relevant" | "bad_callback" };
+  | { handled: "input"; queueId: string; kind: "topic" | "source" }
+  | { handled: "source"; queueId: string; track: InstagramTrack | null }
+  | { handled: "ignored"; reason: "wrong_chat" | "empty" | "not_relevant" | "bad_callback" | "unsupported_url" | "extract_failed" };
 
 export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps: InstagramWebhookDeps): Promise<InstagramWebhookOutcome> {
   const now = deps.now ?? (() => new Date());
@@ -116,7 +130,38 @@ export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps
   const text = (message.text ?? message.caption ?? "").trim();
   if (!text) return { handled: "ignored", reason: "empty" };
 
-  const parsed = splitInstagramUrlAndCaption(text);
+  // URL이 있으면 종류를 먼저 가른다(KEYWORD-INPUT-TOOL A-1): 인스타·스레드는 같은 수동 캡처 큐, 그 외는 B부 경로.
+  const firstUrl = extractFirstUrl(text);
+  const urlKind = firstUrl ? classifyUrl(firstUrl) : null;
+  if (firstUrl && urlKind === "other") {
+    if (!deps.extractLink) {
+      await deps.sendMessage(chatId, UNSUPPORTED_URL_REPLY).catch(() => {});
+      return { handled: "ignored", reason: "unsupported_url" };
+    }
+    // 링크 자동 추출(B부): 읽는 데 실패해도 job을 막지 않고 "본문을 붙여넣어 달라"고 답한다.
+    const resolved = await resolveLinkSource(firstUrl, text.replace(firstUrl, "").trim(), deps.extractLink);
+    if (!resolved.ok) {
+      await deps.sendMessage(chatId, resolved.reply).catch(() => {});
+      return { handled: "ignored", reason: "extract_failed" };
+    }
+    const { payload } = resolved;
+    await deps.insertInbox({
+      id: rowId,
+      kind: "source",
+      instagramUrl: payload.url,
+      rawCaption: encodeLinkSource(payload),
+      telegramChatId: chatId,
+      telegramMessageId: message.message_id,
+      replyToMessageId: null,
+      replyText: null,
+      receivedAt: now().toISOString(),
+    });
+    if (payload.track) await deps.sendMessage(chatId, `${linkSourceAck(payload).split(" — ")[0]} → ${TRACK_LABEL[payload.track]} 트랙.`).catch(() => {});
+    else await deps.sendMessage(chatId, linkSourceAck(payload), trackButtons(rowId)).catch(() => {});
+    return { handled: "source", queueId: rowId, track: payload.track ?? null };
+  }
+
+  const parsed = urlKind === "threads" ? { url: firstUrl!, caption: text.replace(firstUrl!, "").trim() } : splitInstagramUrlAndCaption(text);
   if (parsed) {
     // 캡션은 그대로 저장한다(트랙 단어 포함) - 떼어 내는 건 맥 폴러가 한다(폴링 시절과 같은 모양).
     const { track } = splitTrackWord(parsed.caption);
@@ -141,7 +186,24 @@ export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps
 
   // URL 없는 글자: 주제 답장(맥이 물은 것에 대한 답) 또는 "엔터"/"사회" 단어. 어느 항목인지는 맥만 안다.
   const replyToMessageId = message.reply_to_message?.message_id ?? null;
-  if (replyToMessageId === null && !isBareTrackWord(text)) return { handled: "ignored", reason: "not_relevant" };
+  if (replyToMessageId === null && !isBareTrackWord(text)) {
+    // 답장도 트랙 단어도 아닌 일반 글 = **직접 입력**(종합 키워드 입력 툴, A-1). 명령구 꼬리를 떼고 남은 것을 주제로 쓰거나,
+    // 긴 글이면 소스 본문으로 보관한다. 원문은 그대로 수신함에 두고 맥이 같은 규칙으로 풀어 읽는다(수신함 모양 불변).
+    const interpreted = interpretDirectInput(text);
+    await deps.insertInbox({
+      id: rowId,
+      kind: "input",
+      instagramUrl: null,
+      rawCaption: text,
+      telegramChatId: chatId,
+      telegramMessageId: message.message_id,
+      replyToMessageId: null,
+      replyText: null,
+      receivedAt: now().toISOString(),
+    });
+    await deps.sendMessage(chatId, directInputAck(interpreted), trackButtons(rowId)).catch(() => {});
+    return { handled: "input", queueId: rowId, kind: interpreted.kind };
+  }
   await deps.insertInbox({
     id: rowId,
     kind: "topic_reply",

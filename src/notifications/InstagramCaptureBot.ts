@@ -9,6 +9,17 @@
 
 import { listAwaitingTopic, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { ackMessage, isBareTrackWord, splitTrackWord } from "../workflows/instagram-capture/instagramTrack.js";
+import { linkSourceAck, queueFieldsForLinkSource, resolveLinkSource } from "../workflows/instagram-capture/linkInput.js";
+import type { ExtractResult } from "../workflows/input-extract/extractLinkSource.js";
+import {
+  classifyUrl,
+  directInputAck,
+  extractFirstUrl,
+  interpretDirectInput,
+  queueFieldsForDirectInput,
+  sourceOfUrl,
+  UNSUPPORTED_URL_REPLY,
+} from "../workflows/instagram-capture/directInput.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 /** 메시지 안에서 인스타그램 게시물/릴스 URL만 골라낸다(프로필 URL은 제외). */
@@ -60,6 +71,11 @@ export type InstagramCaptureBotOptions = {
     replyToMessageId: number | null;
     text: string;
   }) => Promise<void>;
+  /**
+   * 블로그·뉴스·유튜브 링크를 소스 본문으로 읽는다(B부, 비치명). 없으면 그 링크들은 "지원 예정" 안내만 보낸다.
+   * 폴링 모드(IG_INBOX_MODE=false)에서만 쓰인다 - 기본 경로는 웹훅 핸들러의 같은 이름 의존이다.
+   */
+  extractLink?: (url: string, hint: string) => Promise<ExtractResult>;
   /** 주제를 기다리는 항목들. 답장을 어디에 붙일지 고를 때 쓴다. */
   listAwaitingTopic?: () => import("../workflows/instagram-capture/types.js").InstagramQueueEntry[];
   /** 답으로 받은 주제를 항목에 붙이고 다시 대기로 돌린다. */
@@ -82,6 +98,7 @@ export class InstagramCaptureBot {
   private readonly getStoredOffset: () => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number) => Promise<unknown>;
   private readonly enqueue: NonNullable<InstagramCaptureBotOptions["enqueue"]>;
+  private readonly extractLink: InstagramCaptureBotOptions["extractLink"];
   private readonly onUnmatchedReply: InstagramCaptureBotOptions["onUnmatchedReply"];
   private readonly listAwaitingTopic: NonNullable<InstagramCaptureBotOptions["listAwaitingTopic"]>;
   private readonly applyTopic: NonNullable<InstagramCaptureBotOptions["applyTopic"]>;
@@ -116,6 +133,7 @@ export class InstagramCaptureBot {
         return TelegramOffsetRepository.setLastUpdateId(updateId, "instagram-capture-bot");
       });
     this.onUnmatchedReply = options.onUnmatchedReply;
+    this.extractLink = options.extractLink;
     this.enqueue =
       options.enqueue ??
       (async (entry) => {
@@ -207,7 +225,15 @@ export class InstagramCaptureBot {
       const chatId = message ? String(message.chat.id) : null;
       const allowed = !!message && !!chatId && (!this.allowedChatId || chatId === this.allowedChatId);
 
-      const parsed = text ? InstagramCaptureBot.splitUrlAndCaption(text) : null;
+      // URL 종류(KEYWORD-INPUT-TOOL A-1): 인스타·스레드는 같은 캡처 큐, 그 외는 B부 경로(A부 시점엔 안내만).
+      const firstUrl = text ? extractFirstUrl(text) : null;
+      const urlKind = firstUrl ? classifyUrl(firstUrl) : null;
+      const parsed =
+        urlKind === "threads"
+          ? { url: firstUrl!, caption: text.replace(firstUrl!, "").trim() }
+          : text && urlKind !== "other"
+            ? InstagramCaptureBot.splitUrlAndCaption(text)
+            : null;
 
       if (!allowed || !message || !chatId) {
         ignored += 1;
@@ -223,11 +249,36 @@ export class InstagramCaptureBot {
           telegramMessageId: message.message_id,
           receivedAt: new Date().toISOString(),
           status: "pending",
+          source: sourceOfUrl(parsed.url),
         });
         enqueued += 1;
         await this.sendMessage(chatId, ackMessage(track)).catch(() => {
           // 알림 실패는 큐 적재를 막지 않는다.
         });
+      } else if (urlKind === "other") {
+        const resolved = this.extractLink ? await resolveLinkSource(firstUrl!, text.replace(firstUrl!, "").trim(), this.extractLink) : null;
+        if (resolved?.ok) {
+          const fields = queueFieldsForLinkSource(resolved.payload);
+          const askedMessageId =
+            fields.status === "needs_topic"
+              ? await this.sendMessage(chatId, `📌 이 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요.\n\n${resolved.payload.url}`).catch(() => null)
+              : null;
+          await this.enqueue({
+            id: `tg-${update.update_id}`,
+            instagramUrl: "",
+            rawCaption: "",
+            telegramChatId: chatId,
+            telegramMessageId: message.message_id,
+            receivedAt: new Date().toISOString(),
+            ...fields,
+            ...(askedMessageId ? { askedMessageId } : {}),
+          });
+          enqueued += 1;
+          await this.sendMessage(chatId, linkSourceAck(resolved.payload)).catch(() => {});
+        } else {
+          await this.sendMessage(chatId, resolved ? resolved.reply : UNSUPPORTED_URL_REPLY).catch(() => {});
+          ignored += 1;
+        }
       } else if (text.trim() && this.matchAwaitingEntry(message.reply_to_message?.message_id)) {
         // URL이 없는 메시지는 원래 버린다. 단, 주제를 물어본 항목이 있으면 그 답으로 본다.
         const target = this.matchAwaitingEntry(message.reply_to_message?.message_id);
@@ -251,6 +302,27 @@ export class InstagramCaptureBot {
           text: text.trim(),
         });
         topicsAnswered += 1;
+      } else if (text.trim()) {
+        // 답장도 트랙 단어도 아닌 일반 글 = 직접 입력(종합 키워드 입력 툴 A-1). 해석 결과를 접수 답장으로 보여준다.
+        const interpreted = interpretDirectInput(text);
+        const fields = queueFieldsForDirectInput(text);
+        // 긴 글은 주제 한 줄을 이 봇이 묻는다 - 그 메시지에 답장해야 항목에 붙는다(askedMessageId).
+        const askedMessageId =
+          interpreted.kind === "source"
+            ? await this.sendMessage(chatId, "📌 붙여넣은 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요.").catch(() => null)
+            : null;
+        await this.enqueue({
+          id: `tg-${update.update_id}`,
+          instagramUrl: "",
+          rawCaption: "",
+          telegramChatId: chatId,
+          telegramMessageId: message.message_id,
+          receivedAt: new Date().toISOString(),
+          ...fields,
+          ...(askedMessageId ? { askedMessageId } : {}),
+        });
+        enqueued += 1;
+        await this.sendMessage(chatId, directInputAck(interpreted)).catch(() => {});
       } else {
         ignored += 1;
       }

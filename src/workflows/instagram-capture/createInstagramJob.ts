@@ -10,8 +10,9 @@
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { markEntry } from "./instagramQueue.js";
-import { trackJobMetadata } from "../../notifications/telegramTracks.js";
-import type { InstagramCaptureResult } from "./types.js";
+import { inputJobFields } from "./inputJobFields.js";
+import { categoryForTrack, jobMetadataForTrack } from "./instagramTrack.js";
+import type { InstagramCaptureResult, InstagramQueueEntry } from "./types.js";
 
 export type CreateInstagramJobResult = { jobId: string };
 
@@ -19,18 +20,29 @@ export async function createInstagramJob(capture: InstagramCaptureResult): Promi
   const { job } = await ArticleJobRepository.createManual({
     keyword: capture.searchKeyword,
     headline: capture.caption.slice(0, 120) || null,
-    category: capture.category,
+    category: categoryForTrack(capture.track) ?? capture.category,
     metadata: {
       source: "instagram_manual",
       instagramUrl: capture.instagramUrl,
       instagramCaption: capture.caption,
       instagramBurnedInText: capture.burnedInText,
       // 사용자가 링크를 보낼 때 고른 트랙(instagramTrack.ts). 엔터면 값이 없다(=메인봇·네이버).
-      ...trackJobMetadata(capture.track ?? "entertainment"),
+      ...jobMetadataForTrack(capture.track),
     },
   });
 
   markEntry(capture.queueEntryId, { status: "done", jobId: job.id });
 
+  return { jobId: job.id };
+}
+
+/**
+ * 직접 입력 항목(source=text) -> article_jobs 1건. 캡처가 없다: 주제(userTopic)가 곧 keyword이고, 긴 글을 붙여넣었으면
+ * 그 본문이 metadata.sourceText로 간다(조사 프롬프트의 "사용자 제공 소스 텍스트" 절, buildResearchPrompt).
+ */
+export async function createInputJob(entry: InstagramQueueEntry): Promise<CreateInstagramJobResult> {
+  const { job } = await ArticleJobRepository.createManual(inputJobFields(entry));
+
+  markEntry(entry.id, { status: "done", jobId: job.id });
   return { jobId: job.id };
 }

@@ -4,6 +4,11 @@
 //
 // 2026-09-23 재설계: 게시물 **이미지는 쓰지 않는다**. 글자(캡션 + 번인 텍스트)만 자료로 가져오고,
 // 원고 이미지는 주제가 정해진 뒤 기존 파이프라인이 검색·생성한다. 저작권 판단이 통째로 빠진다.
+//
+// 2026-10-19 종합 키워드 입력 툴(KEYWORD-INPUT-TOOL-2026-10.md): 같은 큐가 스레드 링크와 **직접 입력 글**(캡처 없음)도 담는다.
+
+import type { InputSource } from "./directInput.js";
+import type { InstagramTrack } from "./instagramTrack.js";
 
 /** 텔레그램에서 받은 원문 그대로. 큐 파일(JSONL) 한 줄 = 이 타입 하나. */
 export type InstagramQueueEntry = {
@@ -24,8 +29,17 @@ export type InstagramQueueEntry = {
    */
   // needs_track(2026-10-06): 엔터/사회 트랙을 아직 고르지 않아 캡처 전에 답을 기다리는 상태(instagramTrack.ts).
   status: "pending" | "needs_track" | "needs_topic" | "done" | "skipped";
-  /** 엔터(네이버) / 사회(티스토리). job.metadata.track으로 옮겨져 알림 봇·뷰어·발행 채널을 가른다. */
-  track?: "entertainment" | "social";
+  /** 엔터(네이버) / 사회(티스토리) / 일상·테크(입력 툴 전용, 뷰어 복붙). job.metadata.track으로 옮겨져 알림 봇·뷰어·발행 채널·문체를 가른다. */
+  track?: InstagramTrack;
+  /**
+   * 입력 출처(2026-10-19). 없으면 instagram(옛 항목). threads는 같은 수동 캡처 세션 경로를 쓰고(자동 캡처는 인스타 전용이라
+   * 건너뛴다), text는 캡처 없이 userTopic/sourceText로 바로 job이 된다(instagramUrl은 빈 문자열).
+   */
+  source?: InputSource;
+  /** 긴 글(카페글 등)을 그대로 보관한 소스 본문. job.metadata.sourceText로 옮겨져 조사의 1차 근거가 된다. */
+  sourceText?: string;
+  /** 소스 본문을 읽어 온 원본 링크(블로그·뉴스·유튜브, B부). job.metadata.sourceUrl로 옮겨져 조사 프롬프트 라벨에 쓰인다. */
+  sourceUrl?: string;
   /** 맥 폴러가 "어느 트랙?"을 다시 물은 메시지 id. 답장을 어느 링크에 붙일지 짚는다(askedMessageId와 같은 구실). */
   askedTrackMessageId?: number;
   /** done/skipped로 바뀐 뒤 생성된 article_jobs.id. */
@@ -60,5 +74,5 @@ export type InstagramCaptureResult = {
   searchKeyword: string;
   category: string | null;
   /** 큐 항목에서 이어받은 트랙. createInstagramJob이 job.metadata.track으로 남긴다. */
-  track?: "entertainment" | "social";
+  track?: InstagramTrack;
 };

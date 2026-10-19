@@ -13,14 +13,44 @@
 //
 // 순수 모듈 - 파일·네트워크 없음. 봇(클라우드)과 폴러(맥) 양쪽이 쓴다.
 
+import { trackJobMetadata } from "../../notifications/telegramTracks.js";
 import type { InstagramQueueEntry } from "./types.js";
 
-export type InstagramTrack = "entertainment" | "social";
+// living/tech(2026-10-19, KEYWORD-INPUT-TOOL-2026-10.md A-2)는 입력 툴 전용 트랙이다: 문체·자료조사는 사회(incident) 규격을
+// 쓰고, 발행 버튼 없이 뷰어 복붙(person 선례). 알림 봇은 메인봇이다(telegramTracks.Track에 없는 값은 엔터로 읽힌다).
+export type InstagramTrack = "entertainment" | "social" | "living" | "tech";
+
+/** 입력 툴 전용 트랙(telegramTracks.Track에 없다). job.metadata.track에 그대로 적는다. */
+export const INPUT_ONLY_TRACKS = ["living", "tech"] as const;
+export function isInputOnlyTrack(track: unknown): track is "living" | "tech" {
+  return track === "living" || track === "tech";
+}
+
+/**
+ * 트랙이 job에 남기는 metadata 조각. 엔터는 비어 있고(값이 없으면 엔터), 사회는 {track:"social"}, 일상·테크는
+ * {track:"living"|"tech"}다 - telegramTracks.Track에 없는 값이라 알림 봇은 메인봇(엔터)으로 읽히고(trackOfJob 폴백),
+ * 문체·발행 판정(specFiles·manualPublishOnly)만 이 값을 본다.
+ */
+export function jobMetadataForTrack(track: InstagramTrack | undefined): Record<string, unknown> {
+  if (isInputOnlyTrack(track)) return { track };
+  return trackJobMetadata(track ?? "entertainment");
+}
+
+/** 트랙이 정하는 article_jobs.category. 일상=living(기존 카테고리 재사용), 테크=tech. 그 외는 null(호출자가 쓰던 값 유지). */
+export function categoryForTrack(track: InstagramTrack | undefined): "living" | "tech" | null {
+  return track === "living" ? "living" : track === "tech" ? "tech" : null;
+}
+
+export function isInstagramTrack(value: unknown): value is InstagramTrack {
+  return value === "entertainment" || value === "social" || isInputOnlyTrack(value);
+}
 
 /** 단어 → 트랙. 사용자가 실제로 쓸 법한 말을 넓게 받는다(네이버/티스토리는 채널 이름으로 트랙을 뜻한다). */
 const TRACK_WORDS: ReadonlyArray<[RegExp, InstagramTrack]> = [
   [/^(엔터|연예|엔터테인먼트|네이버|ent|entertainment)$/i, "entertainment"],
   [/^(사회|시사|사회이슈|사회\s?이슈|티스토리|social)$/i, "social"],
+  [/^(일상|living)$/i, "living"],
+  [/^(테크|tech)$/i, "tech"],
 ];
 
 export function trackFromWord(word: string): InstagramTrack | null {
@@ -48,21 +78,28 @@ export function splitTrackWord(rawCaption: string): { track: InstagramTrack | nu
   return { track: null, caption: tokens.join(" ") };
 }
 
-export const TRACK_LABEL: Readonly<Record<InstagramTrack, string>> = { entertainment: "🎬 엔터", social: "🏛 사회" };
+export const TRACK_LABEL: Readonly<Record<InstagramTrack, string>> = {
+  entertainment: "🎬 엔터",
+  social: "🏛 사회",
+  living: "🏠 일상",
+  tech: "💻 테크",
+};
 
 /** 클라우드 접수 답장. 트랙이 정해졌으면 그 사실을, 아니면 어떻게 고르는지를 한 줄로. */
 export function ackMessage(track: InstagramTrack | null): string {
   if (track) return `링크 접수했습니다 → ${TRACK_LABEL[track]} 트랙. 원고 초안이 준비되면 알려드립니다.`;
   return [
     "링크 접수했습니다. 어느 트랙으로 쓸까요?",
-    "이 메시지에 **엔터** 또는 **사회**라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
+    "이 메시지에 **엔터** / **사회** / **일상** / **테크**라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
     "· 엔터 → 네이버 원고·네이버 뷰어   · 사회 → 티스토리 원고·티스토리 뷰어",
+    "· 일상·테크 → 사회 규격 원고·뷰어 복붙(발행 버튼 없음)",
   ].join("\n");
 }
 
 /** 맥 폴러가 답을 못 붙여 다시 물을 때(기다리는 링크가 여럿이라 어느 것인지 모를 때). */
-export function trackQuestion(entry: Pick<InstagramQueueEntry, "instagramUrl">): string {
-  return ["📌 이 링크는 어느 트랙으로 쓸까요? 이 메시지에 엔터 또는 사회로 답장해 주세요.", "", entry.instagramUrl].join("\n");
+export function trackQuestion(entry: Pick<InstagramQueueEntry, "instagramUrl" | "userTopic">): string {
+  const subject = entry.instagramUrl || entry.userTopic || "";
+  return ["📌 어느 트랙으로 쓸까요? 이 메시지에 엔터 / 사회 / 일상 / 테크로 답장해 주세요.", "", subject].join("\n");
 }
 
 /** 버튼 선택을 수신함 topic_reply 행의 reply_text에 담는 형식. 수신함 모양을 안 바꾸려고 글자로 싣는다. */
@@ -75,7 +112,7 @@ export function encodeTrackPick(queueId: string, track: InstagramTrack): string 
 export function parseTrackPick(text: string | null | undefined): { queueId: string; track: InstagramTrack } | null {
   if (!text || !text.startsWith(TRACK_PICK_PREFIX)) return null;
   const [queueId, track] = text.slice(TRACK_PICK_PREFIX.length).split(":");
-  if (!queueId || (track !== "entertainment" && track !== "social")) return null;
+  if (!queueId || !isInstagramTrack(track)) return null;
   return { queueId, track };
 }
 

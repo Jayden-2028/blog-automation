@@ -30,6 +30,13 @@ export type BuildResearchPromptInput = {
    */
   sourceContext?: string | null;
   /**
+   * 종합 키워드 입력 툴(2026-10-19)에서 사용자가 직접 전달한 소스 텍스트(카페글 붙여넣기 · 블로그 본문 추출 · 유튜브 요점).
+   * `job.metadata.sourceText`. 1차 근거이되 출처 불명이라 사실은 공식·뉴스 소스로 재확인한다. 없으면 null.
+   */
+  userSourceText?: string | null;
+  /** 소스 텍스트의 출처 URL(링크 자동 추출 경로, B부). 라벨에 함께 적는다. 없으면 null. */
+  userSourceUrl?: string | null;
+  /**
    * 재조사 안내(2026-10-02). 직전 조사가 자료 부족(verdict blocked)으로 글쓰기를 막았을 때, 사람이
    * [자료조사 다시 하기]를 눌러 다시 돌리는 경우다. 무엇이 모자랐는지 알려 줘야 같은 조사를 반복하지
    * 않는다. 없으면 일반 조사.
@@ -72,6 +79,21 @@ function formatBaseline(baselineSources: SourceInsert[]): string[] {
   });
 }
 
+/** 사용자 제공 소스 텍스트 절(A-3). 인스타 `sourceContext`와 별개로 라벨을 붙여 싣는다. 없으면 빈 배열. */
+export function buildUserSourceTextSection(text: string | null | undefined, url?: string | null): string[] {
+  const body = (text ?? "").trim();
+  if (!body) return [];
+  return [
+    "## 사용자 제공 소스 텍스트 (1차 근거·출처 불명)",
+    "사용자가 직접 전달한 글이다. 주제 파악과 조사 방향의 1차 근거로 쓰되, 사실은 공식·뉴스",
+    "소스로 재확인한다. 문장·표현을 그대로 가져오지 않는다(표절·유사문서 리스크).",
+    ...(url ? [`출처 URL: ${url}`] : []),
+    "",
+    body,
+    "",
+  ];
+}
+
 export function buildResearchPrompt(input: BuildResearchPromptInput): string {
   const { job, baselineSources, outputPath, today } = input;
 
@@ -106,6 +128,7 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
           "",
         ]
       : []),
+    ...buildUserSourceTextSection(input.userSourceText, input.userSourceUrl),
     ...(input.retryHint
       ? [
           "이번은 재조사다. 직전 조사가 자료 부족으로 글쓰기를 막았다:",

@@ -49,8 +49,12 @@ export function parseTrack(value: unknown): Track | null {
 export function trackOfJob(job: { metadata?: unknown } | null | undefined): Track {
   const metadata = job?.metadata;
   if (metadata && typeof metadata === "object") {
-    const track = parseTrack((metadata as Record<string, unknown>).track);
+    const raw = (metadata as Record<string, unknown>).track;
+    const track = parseTrack(raw);
     if (track) return track;
+    // 종합 키워드 입력 툴의 일상(living)·테크(tech) 트랙(2026-10-19 사용자 결정): 알림·뷰어는 **사회**로 간다.
+    // 발행 버튼은 isManualPublishOnly가 먼저 걸러서(뷰어 복붙 전용) 사회 트랙의 티스토리 버튼이 붙지 않는다.
+    if (raw === "living" || raw === "tech") return "social";
   }
   return DEFAULT_TRACK;
 }

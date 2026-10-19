@@ -67,6 +67,11 @@ jobs:
           # 인스타 변환기 봇(2026-10-06 웹훅 전환) - 링크 수신·트랙 버튼 처리가 여기서 돈다.
           INSTAGRAM_BOT_TOKEN: ${{ secrets.INSTAGRAM_BOT_TOKEN }}
           INSTAGRAM_BOT_CHAT_ID: ${{ secrets.INSTAGRAM_BOT_CHAT_ID }}
+          # 종합 키워드 입력 툴(B부) 링크 자동 추출: 네이버 뉴스 링크 -> 검색 API로 언론사 원문 링크를 찾는다 / 유튜브는 Data API 메타만.
+          # YOUTUBE_API_KEY가 없으면 유튜브 기능만 꺼진다(비치명) - 발급은 사용자 작업(구글 클라우드 콘솔 -> YouTube Data API v3).
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           TELEGRAM_UPDATE_JSON: ${{ toJson(github.event.client_payload) }}

@@ -8,7 +8,7 @@ import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
 import { enforceWritingRules } from "./enforceWritingRules.js";
-import { formatSpecList, writingSpecFiles } from "./specFiles.js";
+import { formatSpecList, specCategoryOf, writingSpecFiles } from "./specFiles.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
 // 배리에이션과 같은 부하(writer.md 500줄+ 재독 + skill 2개) - 같은 타임아웃을 쓴다.
@@ -31,6 +31,8 @@ export type ReviseArticleResult =
 export type ReviseArticleInput = {
   keyword: string;
   category: string | null;
+  /** job.metadata. 입력 툴 일상·테크 job은 category가 아니라 metadata.track으로 incident 규격을 받는다(specCategoryOf). */
+  metadata?: unknown;
   originalTitle: string;
   /** 기존 기준 원고 본문(마크다운, 해시태그 줄·이미지 마커 포함). */
   originalBody: string;
@@ -54,7 +56,7 @@ function buildPrompt(input: ReviseArticleInput): string {
     ``,
     `먼저 아래 규격 문서를 번호 순서대로 전부 Read해 그 원칙을 따른다. 부딪히면 1번(core-rules.md)이 이긴다.`,
     `원문이 그 규칙(금지 표현·구어 어미·댓글 유도 등)에 어긋나 있었다면 이번 재작성에서 함께 바로잡는다.`,
-    ...formatSpecList(writingSpecFiles(category)),
+    ...formatSpecList(writingSpecFiles(specCategoryOf({ category, metadata: input.metadata }))),
     `단, 출력은 output-format.md §9(파일 저장)가 아니라 아래 ### 마커 형식으로 한다.`,
     ``,
     `## 절대 규칙 - 사실 보존`,

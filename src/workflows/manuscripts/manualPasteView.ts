@@ -12,7 +12,7 @@ import { removeRelatedPosts } from "./appendRelatedPosts.js";
 import { removeReferencesBlock } from "./articleContentParts.js";
 
 /** category가 수동 복붙 트랙이면 뷰어용 본문에서 내부 링크·참고 자료를 뺀다. 그 외에는 그대로 돌려준다. */
-export function viewerBodyForCategory(category: string | null | undefined, body: string): string {
-  if (!isManualPublishOnly({ category })) return body;
+export function viewerBodyForCategory(category: string | null | undefined, body: string, metadata?: unknown): string {
+  if (!isManualPublishOnly({ category, metadata })) return body;
   return removeReferencesBlock(removeRelatedPosts(body));
 }
