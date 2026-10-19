@@ -15,6 +15,9 @@ console.log("✅ parseTrack");
 assert(trackOfJob({ metadata: {} }) === DEFAULT_TRACK, "metadata.track 없음 -> 엔터");
 assert(trackOfJob({ metadata: { track: "social" } }) === "social", "metadata.track=social");
 assert(trackOfJob({ metadata: { track: "unknown" } }) === DEFAULT_TRACK, "모르는 값은 던지지 않고 엔터");
+// 종합 키워드 입력 툴(2026-10-19 사용자 결정): 일상·테크는 사회 봇·사회 뷰어로 간다.
+assert(trackOfJob({ metadata: { track: "living" } }) === "social", "입력 툴 일상 -> 사회");
+assert(trackOfJob({ metadata: { track: "tech" } }) === "social", "입력 툴 테크 -> 사회");
 assert(trackOfJob(null) === DEFAULT_TRACK && trackOfJob(undefined) === DEFAULT_TRACK, "job이 없어도 엔터");
 console.log("✅ trackOfJob - 하위 호환");
 
