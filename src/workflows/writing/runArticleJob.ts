@@ -168,6 +168,10 @@ type DefaultResearcherInput = {
   brief: KeywordBrief | null;
   /** 인스타그램 수동 큐레이션 job의 원본 자료(2026-09-21). 아니면 null. */
   sourceContext: string | null;
+  /** 종합 키워드 입력 툴의 사용자 제공 소스 텍스트(`metadata.sourceText`, 2026-10-19). 아니면 null. */
+  userSourceText?: string | null;
+  /** 그 소스 텍스트의 출처 URL(`metadata.sourceUrl`). 아니면 null. */
+  userSourceUrl?: string | null;
   /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
   retryHint?: string | null;
   /** 인물 백과(category=person): 핫스타 화제 배경(`metadata.personBackground`). 아니면 null. */
@@ -197,6 +201,13 @@ function buildInstagramSourceContext(metadata: Record<string, unknown> | null): 
   if (burnedIn.length > 0) parts.push(`이미지에 적힌 텍스트:\n${burnedIn.map((t, i) => `${i + 1}. ${t}`).join("\n")}`);
 
   return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+/** 종합 키워드 입력 툴이 job에 실어 둔 소스 텍스트·출처 URL(A-3/B). 없으면 둘 다 null. */
+function readUserSource(metadata: Record<string, unknown> | null): { userSourceText: string | null; userSourceUrl: string | null } {
+  const text = typeof metadata?.sourceText === "string" ? metadata.sourceText.trim() : "";
+  const url = typeof metadata?.sourceUrl === "string" ? metadata.sourceUrl.trim() : "";
+  return { userSourceText: text || null, userSourceUrl: url || null };
 }
 
 /**
@@ -271,6 +282,8 @@ async function runDefaultResearcher(
     today: input.today,
     brief: input.brief,
     sourceContext: input.sourceContext,
+    userSourceText: input.userSourceText,
+    userSourceUrl: input.userSourceUrl,
     retryHint: input.retryHint,
     personBackground: input.personBackground,
     personAutocomplete: input.personAutocomplete,
@@ -396,6 +409,7 @@ async function runResearchStageInner(
   }
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
+  const { userSourceText, userSourceUrl } = readUserSource(job.metadata as Record<string, unknown> | null);
   const rawBackground = (job.metadata as Record<string, unknown> | null)?.personBackground;
   const personBackground = typeof rawBackground === "string" && rawBackground.trim() ? rawBackground.trim() : null;
 
@@ -424,10 +438,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

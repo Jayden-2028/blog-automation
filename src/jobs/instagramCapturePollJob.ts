@@ -13,6 +13,7 @@ import { InstagramCaptureBot } from "../notifications/InstagramCaptureBot.js";
 import { listUnclaimed, markClaimed } from "../services/supabase/repositories/instagramInboxRepository.js";
 import { appendQueueEntry, applyTrackPick, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { parseTrackPick, resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
+import { queueFieldsForDirectInput, sourceOfUrl } from "../workflows/instagram-capture/directInput.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
@@ -40,7 +41,7 @@ async function main(): Promise<void> {
     let links = 0;
     let topics = 0;
     // 링크를 먼저 큐에 넣고 답(버튼 선택·답장)을 붙인다 - 같은 배치에 링크와 그 답이 함께 오면 순서가 중요하다.
-    const ordered = [...inbox].sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "link" ? -1 : 1));
+    const ordered = [...inbox].sort((a, b) => Number(a.kind === "topic_reply") - Number(b.kind === "topic_reply"));
     for (const row of ordered) {
       if (row.kind === "topic_reply") {
         // 버튼 선택(웹훅 핸들러가 `track:<큐id>:<트랙>`으로 적는다)은 큐 id로 바로 붙인다(2026-10-06).
@@ -78,9 +79,34 @@ async function main(): Promise<void> {
         // 어느 항목에 대한 답인지는 **여기서만** 안다 - askedMessageId가 맥의 큐에 있다.
         const target = listAwaitingTopic().find((e) => e.askedMessageId === row.replyToMessageId);
         if (target && row.replyText) {
-          markEntry(target.id, { status: "pending", userTopic: row.replyText });
+          // 긴 글 직접 입력은 트랙을 아직 못 받았을 수 있다 - 그러면 트랙부터 마저 받는다.
+          markEntry(target.id, { status: target.source === "text" && !target.track ? "needs_track" : "pending", userTopic: row.replyText });
           topics += 1;
         }
+        continue;
+      }
+      if (row.kind === "input") {
+        // 직접 입력(종합 키워드 입력 툴): 원문(rawCaption)을 같은 규칙으로 풀어 큐에 세운다. 캡처 없이 주제·소스 본문으로 job이 된다.
+        // 주제 입력은 트랙을 기다리고(클라우드 접수 답장이 이미 버튼으로 물었다), 긴 글은 주제 한 줄부터 이 봇으로 묻는다.
+        const fields = queueFieldsForDirectInput(row.rawCaption);
+        await appendQueueEntry({
+          id: row.id,
+          instagramUrl: "",
+          rawCaption: "",
+          telegramChatId: row.telegramChatId,
+          telegramMessageId: row.telegramMessageId,
+          receivedAt: row.receivedAt,
+          attempts: 0,
+          ...fields,
+        });
+        if (fields.status === "needs_topic") {
+          const askedMessageId = await bot.ask(
+            row.telegramChatId,
+            "📌 붙여넣은 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요."
+          );
+          if (askedMessageId) markEntry(row.id, { askedMessageId });
+        }
+        links += 1;
         continue;
       }
       if (!row.instagramUrl) continue;
@@ -96,6 +122,7 @@ async function main(): Promise<void> {
         receivedAt: row.receivedAt,
         status: track ? "pending" : "needs_track",
         ...(track ? { track } : {}),
+        source: sourceOfUrl(row.instagramUrl),
         attempts: 0,
       });
       links += 1;

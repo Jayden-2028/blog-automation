@@ -71,9 +71,12 @@ export function listAwaitingTopic(path: string = INSTAGRAM_QUEUE_PATH): Instagra
   return readQueue(path).filter((e) => e.status === "needs_topic");
 }
 
-/** 엔터/사회 트랙 답을 기다리는 항목(2026-10-06, instagramTrack.ts). */
+/**
+ * 트랙 답을 기다리는 항목(2026-10-06, instagramTrack.ts). 긴 글 직접 입력은 주제를 기다리는 동안(needs_topic)에도
+ * 트랙이 아직 없을 수 있어 함께 센다(2026-10-19). 인스타·스레드 항목은 source가 text가 아니라 옛 동작 그대로다.
+ */
 export function listAwaitingTrack(path: string = INSTAGRAM_QUEUE_PATH): InstagramQueueEntry[] {
-  return readQueue(path).filter((e) => e.status === "needs_track");
+  return readQueue(path).filter((e) => e.status === "needs_track" || (e.status === "needs_topic" && e.source === "text" && !e.track));
 }
 
 export function markEntry(
@@ -106,6 +109,11 @@ export function applyTrackPick(
 ): TrackPickResult {
   const entry = readQueue(path).find((e) => e.id === queueId);
   if (!entry) return "not_found";
+  // 긴 글 직접 입력: 주제 답을 기다리는 중에 트랙이 먼저 오면 트랙만 붙이고 상태는 그대로 둔다(주제가 오면 pending으로).
+  if (entry.status === "needs_topic" && entry.source === "text" && !entry.track) {
+    markEntry(queueId, { track }, path);
+    return "applied";
+  }
   if (entry.status !== "needs_track") return "already_handled";
   markEntry(queueId, { status: "pending", track }, path);
   return "applied";

@@ -25,7 +25,7 @@
 import type { ArticleJobRow } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
-import { formatSpecList, pickStyleFile, writingSpecFiles } from "./specFiles.js";
+import { formatSpecList, pickStyleFile, specCategoryOf, writingSpecFiles } from "./specFiles.js";
 
 export type BuildWritingPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
@@ -44,15 +44,17 @@ export type BuildWritingPromptInput = {
 
 export function buildWritingPrompt(input: BuildWritingPromptInput): string {
   const { job, researchFilePath, draftFilePath, isMedical, today } = input;
-  const styleFile = pickStyleFile(job.category);
+  // 입력 툴 일상·테크 job은 incident 규격(specCategoryOf). 그 외는 job.category 그대로다.
+  const specCategory = specCategoryOf(job);
+  const styleFile = pickStyleFile(specCategory);
 
   return [
     "너는 블로그(Blogspot) 원고를 쓰는 편집자다. 아래 규격 문서를 **번호 순서대로 전부** Read로 읽고 그 계약을 그대로 따른다.",
     "규격이나 자료조사 파일을 못 읽으면 draft 파일을 만들지 말고 그 사실만 한 줄로 답하라.",
     "문서끼리 부딪히면 1번(core-rules.md)이 이긴다.",
     "",
-    ...formatSpecList(writingSpecFiles(job.category)),
-    `${writingSpecFiles(job.category).length + 1}. ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
+    ...formatSpecList(writingSpecFiles(specCategory)),
+    `${writingSpecFiles(specCategory).length + 1}. ${researchFilePath}   (이 원고의 사실 전부. 여기 없는 수치·날짜·기관명·인용은 쓰지 않는다)`,
     "",
     "이 job의 입력:",
     `- keyword: ${job.keyword}`,

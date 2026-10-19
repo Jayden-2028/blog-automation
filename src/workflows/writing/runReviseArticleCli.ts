@@ -55,6 +55,7 @@ async function main(): Promise<void> {
   const result = await reviseArticleWithFeedback({
     keyword: job.keyword,
     category: job.category,
+    metadata: job.metadata,
     originalTitle: baseArticle.title ?? job.keyword,
     originalBody: baseArticle.content,
     feedback,

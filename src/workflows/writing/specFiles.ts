@@ -7,6 +7,20 @@
 
 export type SpecFile = { path: string; purpose: string };
 
+/**
+ * 종합 키워드 입력 툴의 일상(living)·테크(tech) 트랙은 **사회(incident) 문체·규격**을 쓴다(KEYWORD-INPUT-TOOL-2026-10.md A-2).
+ *
+ * 분기 기준은 category가 아니라 `job.metadata.track`이다: 일상 카테고리는 기존 `living`을 재사용하므로, category로 갈라
+ * incident를 주면 **트렌드 경로의 living job까지 문체가 바뀐다.** 입력 툴 job만 metadata.track으로 잡는다
+ * (tech 카테고리는 입력 툴에서만 생기므로 category로도 잡는다).
+ */
+export function specCategoryOf(job: { category?: string | null; metadata?: unknown }): string | null {
+  const meta = job.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>) : null;
+  const track = meta?.track;
+  if (track === "living" || track === "tech" || job.category === "tech") return "incident";
+  return job.category ?? null;
+}
+
 /** 카테고리 → 구조·제목 참고 파일. writer.md §2 라우팅과 1:1. */
 export function pickStyleFile(category: string | null): string {
   // incident(사건·사고)는 반드시 맨 앞이다. 다른 카테고리로 폴백되면 사망 사건에 개인 블로거 톤이 적용된다.

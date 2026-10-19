@@ -208,6 +208,7 @@
     "test:ig-queue-guard": "tsx src/workflows/instagram-capture/testInstagramQueueGuard.ts",
     "test:ig-track": "tsx src/workflows/instagram-capture/testInstagramTrack.ts",
     "test:ig-webhook": "tsx src/workflows/instagram-capture/testInstagramWebhookHandler.ts",
+    "test:keyword-input": "tsx src/workflows/instagram-capture/testKeywordInput.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
     "test:cloud-fallback": "tsx src/jobs/lib/testWarnLocalFallback.ts",
     "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",

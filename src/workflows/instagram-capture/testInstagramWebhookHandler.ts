@@ -63,10 +63,11 @@ async function main(): Promise<void> {
     assert(reply.handled === "reply" && h.rows[0].kind === "topic_reply" && h.rows[0].replyToMessageId === 3 && h.rows[0].replyText === "주제는 이것", "주제 답장은 그대로 수신함");
     const bare = await handleInstagramUpdate({ update_id: 14, message: { message_id: 9, chat: { id: 99 }, text: "엔터" } }, h.deps);
     assert(bare.handled === "reply" && h.rows[1].replyToMessageId === null && h.rows[1].replyText === "엔터", "단어만 보내도 수신함");
+    // 2026-10-19: 일반 글은 무시가 아니라 직접 입력(수신함 kind=input)이다. 상세는 testKeywordInput.ts.
     const chat = await handleInstagramUpdate({ update_id: 15, message: { message_id: 10, chat: { id: 99 }, text: "안녕" } }, h.deps);
-    assert(chat.handled === "ignored" && h.rows.length === 2, "잡담은 무시");
+    assert(chat.handled === "input" && h.rows.length === 3 && h.rows[2].kind === "input", "일반 글은 직접 입력으로 수신함");
     const other = await handleInstagramUpdate({ update_id: 16, message: { message_id: 11, chat: { id: 1 }, text: "https://www.instagram.com/p/X/" } }, h.deps);
-    assert(other.handled === "ignored" && other.reason === "wrong_chat" && h.rows.length === 2, "다른 chat은 거부");
+    assert(other.handled === "ignored" && other.reason === "wrong_chat" && h.rows.length === 3, "다른 chat은 거부");
     const bad = await handleInstagramUpdate({ update_id: 17, callback_query: { id: "cb", data: "igtrack:nope:social", message: { message_id: 1, chat: { id: 99 } } } }, h.deps);
     assert(bad.handled === "ignored" && bad.reason === "bad_callback", "깨진 콜백은 무시");
     console.log("✅ 답장/단어/잡담/다른 chat/깨진 콜백");

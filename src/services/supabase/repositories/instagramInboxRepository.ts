@@ -10,8 +10,12 @@ const TABLE = "instagram_capture_inbox";
 
 export type InstagramInboxRow = {
   id: string;
-  /** `link`는 인스타 주소, `topic_reply`는 "주제가 뭔가요"에 대한 답장이다. */
-  kind: "link" | "topic_reply";
+  /**
+   * `link`는 인스타·스레드 주소, `topic_reply`는 "주제가 뭔가요"에 대한 답장이다.
+   * `input`(2026-10-19 종합 키워드 입력 툴)은 URL 없는 **직접 입력 글** - 원문이 rawCaption에 들어 있고 instagramUrl은 null이다.
+   * kind는 평범한 text 컬럼이라 migration이 필요 없다.
+   */
+  kind: "link" | "topic_reply" | "input";
   instagramUrl: string | null;
   rawCaption: string;
   telegramChatId: string;
@@ -57,7 +61,7 @@ export async function listUnclaimed(limit = 50): Promise<InstagramInboxRow[]> {
   if (error) throw error;
   return (data ?? []).map((r) => ({
     id: r.id as string,
-    kind: (r.kind as "link" | "topic_reply") ?? "link",
+    kind: (r.kind as "link" | "topic_reply" | "input") ?? "link",
     instagramUrl: (r.instagram_url as string | null) ?? null,
     rawCaption: (r.raw_caption as string) ?? "",
     telegramChatId: r.telegram_chat_id as string,

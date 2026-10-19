@@ -31,7 +31,10 @@ export type KeywordCategory =
   | "ott"
   | "parenting"
   | "living"
-  | "community";
+  | "community"
+  // tech(2026-10-19): 종합 키워드 입력 툴의 직접 입력 경로에서만 지정된다. 아래 KEYWORD_CATEGORY_RULES에는 규칙이 없고
+  // classifyKeywordCategory가 돌려주지도 않는다(트렌드 수집·분류는 비접촉).
+  | "tech";
 
 export type KeywordCategoryRule = {
   category: KeywordCategory;

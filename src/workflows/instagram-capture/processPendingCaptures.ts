@@ -21,7 +21,7 @@ import { listPendingEntries, markEntry } from "./instagramQueue.js";
 import { parseCaptureFile } from "./parseCaptureFile.js";
 import type { LoginState } from "./checkInstagramLogin.js";
 import type { runCaptureSession } from "./runCaptureSession.js";
-import type { createInstagramJob } from "./createInstagramJob.js";
+import type { createInputJob, createInstagramJob } from "./createInstagramJob.js";
 import type { InstagramCaptureResult, InstagramQueueEntry } from "./types.js";
 
 export const MAX_ATTEMPTS = 3;
@@ -41,6 +41,8 @@ export type ProcessDeps = {
   listPending?: () => InstagramQueueEntry[];
   runSession?: typeof runCaptureSession;
   createJob?: typeof createInstagramJob;
+  /** 직접 입력(source=text) 항목의 job 생성. 캡처가 없다. */
+  createInput?: typeof createInputJob;
   triggerResearch?: (jobId: string) => Promise<void>;
   mark?: typeof markEntry;
   /** 주제를 물어보는 텔레그램 메시지를 보내고 message_id를 돌려준다. */
@@ -98,10 +100,14 @@ function giveUpMessage(entry: InstagramQueueEntry, error: string, login: LoginSt
 }
 
 export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<ProcessResult> {
-  const listPending = deps.listPending ?? (() => listPendingEntries());
+  // 스레드 링크는 같은 큐에 쌓이지만 **자동 캡처는 인스타 전용**이다(canonicalPostUrl이 instagram.com만 받는다) -
+  // 자동 경로가 집으면 3번 실패하고 포기 알림만 쌓이므로 수동 캡처 세션 몫으로 남긴다.
+  const listPending = deps.listPending ?? (() => listPendingEntries().filter((e) => e.source !== "threads"));
   const mark = deps.mark ?? markEntry;
   const runSession =
     deps.runSession ?? (async (...args) => (await import("./runCaptureSession.js")).runCaptureSession(...args));
+  const createInput =
+    deps.createInput ?? (async (entry) => (await import("./createInstagramJob.js")).createInputJob(entry));
   const createJob =
     deps.createJob ?? (async (capture) => (await import("./createInstagramJob.js")).createInstagramJob(capture));
   const triggerResearch =
@@ -115,6 +121,28 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
   for (const entry of pending) {
     result.attempted += 1;
     const attempts = (entry.attempts ?? 0) + 1;
+
+    // 직접 입력(텍스트): 열 게시물이 없다. 주제·소스 본문으로 바로 job을 만든다(종합 키워드 입력 툴).
+    if (entry.source === "text") {
+      try {
+        const created = await createInput(entry);
+        result.created += 1;
+        mark(entry.id, { attempts });
+        await triggerResearch(created.jobId).catch((error) => {
+          result.messages.push(
+            `⚠️ job ${created.jobId}는 만들었지만 자료조사 발화에 실패했습니다: ${error instanceof Error ? error.message : error}\n   이어서: npm run job:research -- ${created.jobId}`
+          );
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result.failed += 1;
+        const giveUp = attempts >= MAX_ATTEMPTS;
+        if (giveUp) result.givenUp += 1;
+        mark(entry.id, giveUp ? { status: "skipped", attempts, lastError: message } : { attempts, lastError: message });
+        result.messages.push(`⚠️ 직접 입력 "${(entry.userTopic ?? "").slice(0, 40)}"\n   ${giveUp ? "포기" : `${attempts}/${MAX_ATTEMPTS}회 실패`}: ${message}`);
+      }
+      continue;
+    }
 
     // 사용자가 주제를 답해 준 항목은 다시 열지 않는다.
     let capture: InstagramCaptureResult | null = null;
