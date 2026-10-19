@@ -15,6 +15,8 @@ import { splitInstagramUrlAndCaption } from "../../notifications/InstagramCaptur
 import type { InstagramInboxRow } from "../../services/supabase/repositories/instagramInboxRepository.js";
 import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
 import { classifyUrl, directInputAck, extractFirstUrl, interpretDirectInput, UNSUPPORTED_URL_REPLY } from "./directInput.js";
+import { encodeLinkSource, linkSourceAck, resolveLinkSource } from "./linkInput.js";
+import type { ExtractResult } from "../input-extract/extractLinkSource.js";
 import { ackMessage, encodeTrackPick, isBareTrackWord, isInstagramTrack, splitTrackWord, TRACK_LABEL } from "./instagramTrack.js";
 import type { InstagramTrack } from "./instagramTrack.js";
 
@@ -72,6 +74,11 @@ export type InstagramWebhookDeps = {
   insertInbox: (row: InstagramInboxRow) => Promise<unknown>;
   sendMessage: (chatId: string, text: string, replyMarkup?: TelegramReplyMarkup) => Promise<unknown>;
   editReplyMarkup: (chatId: string, messageId: number, replyMarkup: TelegramReplyMarkup) => Promise<unknown>;
+  /**
+   * 블로그·뉴스·유튜브 링크를 소스 본문으로 읽는다(B부, 비치명 - 예외를 던지지 않는다). 없으면 그 링크들은 "지원 예정" 안내로 간다.
+   * `hint`는 링크와 함께 보낸 말(트랙 단어를 뗀 것).
+   */
+  extractLink?: (url: string, hint: string) => Promise<ExtractResult>;
   now?: () => Date;
 };
 
@@ -80,7 +87,8 @@ export type InstagramWebhookOutcome =
   | { handled: "track_pick"; queueId: string; track: InstagramTrack }
   | { handled: "reply"; replyToMessageId: number | null }
   | { handled: "input"; queueId: string; kind: "topic" | "source" }
-  | { handled: "ignored"; reason: "wrong_chat" | "empty" | "not_relevant" | "bad_callback" | "unsupported_url" };
+  | { handled: "source"; queueId: string; track: InstagramTrack | null }
+  | { handled: "ignored"; reason: "wrong_chat" | "empty" | "not_relevant" | "bad_callback" | "unsupported_url" | "extract_failed" };
 
 export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps: InstagramWebhookDeps): Promise<InstagramWebhookOutcome> {
   const now = deps.now ?? (() => new Date());
@@ -126,8 +134,31 @@ export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps
   const firstUrl = extractFirstUrl(text);
   const urlKind = firstUrl ? classifyUrl(firstUrl) : null;
   if (firstUrl && urlKind === "other") {
-    await deps.sendMessage(chatId, UNSUPPORTED_URL_REPLY).catch(() => {});
-    return { handled: "ignored", reason: "unsupported_url" };
+    if (!deps.extractLink) {
+      await deps.sendMessage(chatId, UNSUPPORTED_URL_REPLY).catch(() => {});
+      return { handled: "ignored", reason: "unsupported_url" };
+    }
+    // 링크 자동 추출(B부): 읽는 데 실패해도 job을 막지 않고 "본문을 붙여넣어 달라"고 답한다.
+    const resolved = await resolveLinkSource(firstUrl, text.replace(firstUrl, "").trim(), deps.extractLink);
+    if (!resolved.ok) {
+      await deps.sendMessage(chatId, resolved.reply).catch(() => {});
+      return { handled: "ignored", reason: "extract_failed" };
+    }
+    const { payload } = resolved;
+    await deps.insertInbox({
+      id: rowId,
+      kind: "source",
+      instagramUrl: payload.url,
+      rawCaption: encodeLinkSource(payload),
+      telegramChatId: chatId,
+      telegramMessageId: message.message_id,
+      replyToMessageId: null,
+      replyText: null,
+      receivedAt: now().toISOString(),
+    });
+    if (payload.track) await deps.sendMessage(chatId, `${linkSourceAck(payload).split(" — ")[0]} → ${TRACK_LABEL[payload.track]} 트랙.`).catch(() => {});
+    else await deps.sendMessage(chatId, linkSourceAck(payload), trackButtons(rowId)).catch(() => {});
+    return { handled: "source", queueId: rowId, track: payload.track ?? null };
   }
 
   const parsed = urlKind === "threads" ? { url: firstUrl!, caption: text.replace(firstUrl!, "").trim() } : splitInstagramUrlAndCaption(text);

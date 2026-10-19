@@ -9,6 +9,8 @@
 
 import { listAwaitingTopic, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { ackMessage, isBareTrackWord, splitTrackWord } from "../workflows/instagram-capture/instagramTrack.js";
+import { linkSourceAck, queueFieldsForLinkSource, resolveLinkSource } from "../workflows/instagram-capture/linkInput.js";
+import type { ExtractResult } from "../workflows/input-extract/extractLinkSource.js";
 import {
   classifyUrl,
   directInputAck,
@@ -69,6 +71,11 @@ export type InstagramCaptureBotOptions = {
     replyToMessageId: number | null;
     text: string;
   }) => Promise<void>;
+  /**
+   * 블로그·뉴스·유튜브 링크를 소스 본문으로 읽는다(B부, 비치명). 없으면 그 링크들은 "지원 예정" 안내만 보낸다.
+   * 폴링 모드(IG_INBOX_MODE=false)에서만 쓰인다 - 기본 경로는 웹훅 핸들러의 같은 이름 의존이다.
+   */
+  extractLink?: (url: string, hint: string) => Promise<ExtractResult>;
   /** 주제를 기다리는 항목들. 답장을 어디에 붙일지 고를 때 쓴다. */
   listAwaitingTopic?: () => import("../workflows/instagram-capture/types.js").InstagramQueueEntry[];
   /** 답으로 받은 주제를 항목에 붙이고 다시 대기로 돌린다. */
@@ -91,6 +98,7 @@ export class InstagramCaptureBot {
   private readonly getStoredOffset: () => Promise<number | null>;
   private readonly advanceStoredOffset: (updateId: number) => Promise<unknown>;
   private readonly enqueue: NonNullable<InstagramCaptureBotOptions["enqueue"]>;
+  private readonly extractLink: InstagramCaptureBotOptions["extractLink"];
   private readonly onUnmatchedReply: InstagramCaptureBotOptions["onUnmatchedReply"];
   private readonly listAwaitingTopic: NonNullable<InstagramCaptureBotOptions["listAwaitingTopic"]>;
   private readonly applyTopic: NonNullable<InstagramCaptureBotOptions["applyTopic"]>;
@@ -125,6 +133,7 @@ export class InstagramCaptureBot {
         return TelegramOffsetRepository.setLastUpdateId(updateId, "instagram-capture-bot");
       });
     this.onUnmatchedReply = options.onUnmatchedReply;
+    this.extractLink = options.extractLink;
     this.enqueue =
       options.enqueue ??
       (async (entry) => {
@@ -247,8 +256,29 @@ export class InstagramCaptureBot {
           // 알림 실패는 큐 적재를 막지 않는다.
         });
       } else if (urlKind === "other") {
-        await this.sendMessage(chatId, UNSUPPORTED_URL_REPLY).catch(() => {});
-        ignored += 1;
+        const resolved = this.extractLink ? await resolveLinkSource(firstUrl!, text.replace(firstUrl!, "").trim(), this.extractLink) : null;
+        if (resolved?.ok) {
+          const fields = queueFieldsForLinkSource(resolved.payload);
+          const askedMessageId =
+            fields.status === "needs_topic"
+              ? await this.sendMessage(chatId, `📌 이 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요.\n\n${resolved.payload.url}`).catch(() => null)
+              : null;
+          await this.enqueue({
+            id: `tg-${update.update_id}`,
+            instagramUrl: "",
+            rawCaption: "",
+            telegramChatId: chatId,
+            telegramMessageId: message.message_id,
+            receivedAt: new Date().toISOString(),
+            ...fields,
+            ...(askedMessageId ? { askedMessageId } : {}),
+          });
+          enqueued += 1;
+          await this.sendMessage(chatId, linkSourceAck(resolved.payload)).catch(() => {});
+        } else {
+          await this.sendMessage(chatId, resolved ? resolved.reply : UNSUPPORTED_URL_REPLY).catch(() => {});
+          ignored += 1;
+        }
       } else if (text.trim() && this.matchAwaitingEntry(message.reply_to_message?.message_id)) {
         // URL이 없는 메시지는 원래 버린다. 단, 주제를 물어본 항목이 있으면 그 답으로 본다.
         const target = this.matchAwaitingEntry(message.reply_to_message?.message_id);

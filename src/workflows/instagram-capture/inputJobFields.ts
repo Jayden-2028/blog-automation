@@ -24,6 +24,7 @@ export function inputJobFields(entry: InstagramQueueEntry): InputJobFields {
       source: "keyword_input",
       inputTopic: topic,
       ...(entry.sourceText ? { sourceText: capUtf8(entry.sourceText, SOURCE_TEXT_MAX_BYTES) } : {}),
+      ...(entry.sourceUrl ? { sourceUrl: entry.sourceUrl } : {}),
       ...jobMetadataForTrack(entry.track),
     },
   };

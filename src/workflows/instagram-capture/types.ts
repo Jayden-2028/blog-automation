@@ -38,6 +38,8 @@ export type InstagramQueueEntry = {
   source?: InputSource;
   /** 긴 글(카페글 등)을 그대로 보관한 소스 본문. job.metadata.sourceText로 옮겨져 조사의 1차 근거가 된다. */
   sourceText?: string;
+  /** 소스 본문을 읽어 온 원본 링크(블로그·뉴스·유튜브, B부). job.metadata.sourceUrl로 옮겨져 조사 프롬프트 라벨에 쓰인다. */
+  sourceUrl?: string;
   /** 맥 폴러가 "어느 트랙?"을 다시 물은 메시지 id. 답장을 어느 링크에 붙일지 짚는다(askedMessageId와 같은 구실). */
   askedTrackMessageId?: number;
   /** done/skipped로 바뀐 뒤 생성된 article_jobs.id. */

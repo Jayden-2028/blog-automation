@@ -14,6 +14,7 @@ import { listUnclaimed, markClaimed } from "../services/supabase/repositories/in
 import { appendQueueEntry, applyTrackPick, listAwaitingTopic, listAwaitingTrack, markEntry } from "../workflows/instagram-capture/instagramQueue.js";
 import { parseTrackPick, resolveTrackReply, splitTrackWord, trackQuestion } from "../workflows/instagram-capture/instagramTrack.js";
 import { queueFieldsForDirectInput, sourceOfUrl } from "../workflows/instagram-capture/directInput.js";
+import { decodeLinkSource, queueFieldsForLinkSource } from "../workflows/instagram-capture/linkInput.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 import { captureReadiness, processPendingCaptures } from "../workflows/instagram-capture/processPendingCaptures.js";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
@@ -104,6 +105,31 @@ async function main(): Promise<void> {
             row.telegramChatId,
             "📌 붙여넣은 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요."
           );
+          if (askedMessageId) markEntry(row.id, { askedMessageId });
+        }
+        links += 1;
+        continue;
+      }
+      if (row.kind === "source") {
+        // 링크 자동 추출 결과(B부): 클라우드가 이미 읽어 왔다. 제목이나 메모로 주제가 정해지면 트랙만 기다리고, 못 정하면 주제부터 묻는다.
+        const payload = decodeLinkSource(row.rawCaption);
+        if (!payload) {
+          console.warn(`⚠️ [ig-capture-poll] ${row.id}: 링크 추출 수신함 행을 해석하지 못해 건너뜁니다.`);
+          continue;
+        }
+        const fields = queueFieldsForLinkSource(payload);
+        await appendQueueEntry({
+          id: row.id,
+          instagramUrl: "",
+          rawCaption: "",
+          telegramChatId: row.telegramChatId,
+          telegramMessageId: row.telegramMessageId,
+          receivedAt: row.receivedAt,
+          attempts: 0,
+          ...fields,
+        });
+        if (fields.status === "needs_topic") {
+          const askedMessageId = await bot.ask(row.telegramChatId, `📌 이 글의 주제를 한 줄로 알려주세요. 이 메시지에 답장해 주세요.\n\n${payload.url}`);
           if (askedMessageId) markEntry(row.id, { askedMessageId });
         }
         links += 1;

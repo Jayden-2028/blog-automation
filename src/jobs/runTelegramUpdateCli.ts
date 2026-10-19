@@ -23,6 +23,8 @@ import { TelegramBot } from "../notifications/TelegramBot.js";
 import type { TelegramUpdate } from "../notifications/TelegramBot.js";
 import { DEFAULT_TRACK, parseTrack } from "../notifications/telegramTracks.js";
 import { handleInstagramUpdate } from "../workflows/instagram-capture/instagramWebhookHandler.js";
+import { createExtractDeps } from "../workflows/input-extract/createExtractDeps.js";
+import { extractLinkSource } from "../workflows/input-extract/extractLinkSource.js";
 import { insertInboxEntry } from "../services/supabase/repositories/instagramInboxRepository.js";
 import { TelegramNotifier } from "../notifications/TelegramNotifier.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
@@ -62,6 +64,8 @@ async function main(): Promise<void> {
     const outcome = await handleInstagramUpdate(update as Parameters<typeof handleInstagramUpdate>[0], {
       allowedChatId: process.env.INSTAGRAM_BOT_CHAT_ID || null,
       insertInbox: (row) => insertInboxEntry(row),
+      // 블로그·뉴스·유튜브 링크는 클라우드(여기)에서 읽는다. YOUTUBE_API_KEY·NAVER 키가 없으면 해당 경로만 붙여넣기 안내로 떨어진다.
+      extractLink: (url, hint) => extractLinkSource(url, hint, createExtractDeps()),
       sendMessage: (chatId, text, replyMarkup) =>
         new TelegramNotifier({ botToken, chatId }).sendMessages([{ text, replyMarkup }]),
       editReplyMarkup: (chatId, messageId, replyMarkup) =>
