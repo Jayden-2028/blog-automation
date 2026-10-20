@@ -1,0 +1,66 @@
+# Google Cloud 청구액을 BigQuery 결제 내보내기에서 읽어 api_usage에 넣는다(2026-10-15).
+#
+# 기본은 미리보기다(analytics-ga4와 같은 방식) - 실제 적재는 apply 입력을 true로 둘 때만 한다.
+# 처음에는 수동 실행(workflow_dispatch)으로 자격증명·테이블·스키마가 맞는지 확인하고,
+# 확인된 뒤에 아래 schedule 주석을 풀어 매일 돌린다.
+#
+# 필요한 시크릿 3종: GCP_SA_KEY(BigQuery 읽기 전용 서비스 계정 JSON 전체),
+# GCP_BILLING_PROJECT(프로젝트 ID), GCP_BILLING_DATASET(결제 내보내기 데이터셋 이름).
+# 테이블 이름은 넣지 않아도 된다 - 데이터셋에서 gcp_billing_export_v1_… 을 직접 찾는다.
+
+name: gcp-billing-sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe=연결·테이블만 확인 / preview=금액까지 조회(쓰기 없음) / apply=적재"
+        required: false
+        default: "probe"
+        type: choice
+        options: [probe, preview, apply]
+      days:
+        description: "오늘 기준 며칠치를 다시 읽을지(구글이 며칠 뒤 금액을 정정한다)"
+        required: false
+        default: "5"
+        type: string
+
+  # 확인이 끝나면 주석을 푼다. 09:40 KST = 00:40 UTC - 원고 파이프라인과 겹치지 않는 시각.
+  # schedule:
+  #   - cron: "40 0 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gcp-billing-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run billing:gcp
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_BILLING_PROJECT: ${{ secrets.GCP_BILLING_PROJECT }}
+          GCP_BILLING_DATASET: ${{ secrets.GCP_BILLING_DATASET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          MODE="${{ inputs.mode || 'probe' }}"
+          DAYS="${{ inputs.days || '5' }}"
+          if [ "$MODE" = "probe" ]; then
+            npm run billing:gcp -- --probe --days="$DAYS"
+          elif [ "$MODE" = "apply" ]; then
+            npm run billing:gcp -- --apply --days="$DAYS"
+          else
+            npm run billing:gcp -- --days="$DAYS"
+          fi
