@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "probe=연결·테이블만 확인 / preview=금액까지 조회(쓰기 없음) / apply=적재"
+        description: "probe·preview=조회만(쓰기 없음, 동작 동일) / apply=적재"
         required: false
         default: "probe"
         type: choice

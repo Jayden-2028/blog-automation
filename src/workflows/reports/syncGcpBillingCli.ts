@@ -118,7 +118,8 @@ async function main(): Promise<void> {
 
   const rows = toRows(result.data);
   const total = rows.reduce((sum, r) => sum + r.netCost, 0);
-  console.log(`최근 ${days}일: ${rows.length}행, 순비용 합계 ${usd(total)}`);
+  const currencies = Array.from(new Set(rows.map((r) => r.currency)));
+  console.log(`최근 ${days}일: ${rows.length}행, 순비용 합계 ${usd(total)} [통화 ${currencies.join(", ") || "USD"}]`);
   for (const r of rows.slice(0, 20)) {
     console.log(`  ${r.usageDate}  ${usd(r.netCost)}  ${r.service} / ${r.sku}`);
   }
@@ -135,6 +136,14 @@ async function main(): Promise<void> {
   if (rows.length === 0) {
     console.log("적재할 행이 없습니다.");
     return;
+  }
+
+  // api_usage.cost_usd는 이름 그대로 USD 칸이다. 청구 통화가 USD가 아니면(한국 계정은 KRW인 경우가
+  // 있다) 숫자를 그대로 넣는 순간 대시보드가 원화를 달러로 읽어 1,000배 넘게 부풀린다. 막는다.
+  const nonUsd = currencies.filter((c) => c !== "USD");
+  if (nonUsd.length > 0) {
+    console.error(`청구 통화가 ${nonUsd.join(", ")}입니다. cost_usd 칸에 그대로 넣으면 금액이 왜곡되므로 적재를 멈춥니다. 환산 규칙을 정한 뒤 다시 실행하세요.`);
+    process.exit(1);
   }
 
   // 같은 창을 지우고 다시 넣는다(파일 상단 주석 참고). 범위를 벗어난 행은 건드리지 않는다.
