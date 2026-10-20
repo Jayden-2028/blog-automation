@@ -87,11 +87,18 @@ assert.equal(trackFromWord("테크"), "tech");
 assert.equal(trackFromWord("일상생활"), null);
 assert.deepEqual(parseTrackPick("track:tg-1:tech"), { queueId: "tg-1", track: "tech" });
 assert.equal(parseTrackPick("track:tg-1:nope"), null);
-console.log("✅ 트랙 단어 답장 4종");
+// 인물 트랙(2026-10-19 추가)
+assert.equal(trackFromWord("인물"), "person");
+assert.equal(trackFromWord("인물백과"), "person");
+assert.equal(trackFromWord("인물사진"), null, "합성어는 트랙 단어가 아니다");
+assert.deepEqual(parseTrackPick("track:tg-1:person"), { queueId: "tg-1", track: "person" });
+console.log("✅ 트랙 단어 답장 5종");
 
 // ---- 5) track -> category -> metadata ----
 assert.equal(categoryForTrack("living"), "living");
 assert.equal(categoryForTrack("tech"), "tech");
+assert.equal(categoryForTrack("person"), "person", "인물 트랙 -> category=person(소스팩 폴러·person 리서처가 이 값으로 잡는다)");
+assert.deepEqual(jobMetadataForTrack("person"), {}, "인물은 metadata.track 없음(엔터 봇·뷰어 - 핫스타 선례)");
 assert.equal(categoryForTrack("social"), null);
 assert.deepEqual(jobMetadataForTrack("living"), { track: "living" });
 assert.deepEqual(jobMetadataForTrack("tech"), { track: "tech" });
@@ -204,7 +211,7 @@ const msg = (id: number, text: string, extra: object = {}) => ({ update_id: id, 
   const ack = h.sent.at(-1)!;
   assert.ok(ack.text.includes('접수: 주제 "민찌는 무슨 고기일까?"') && ack.text.includes("엔터/사회/일상/테크"));
   const buttons = (ack.markup?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
-  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:social", "igtrack:tg-5:living", "igtrack:tg-5:tech"], "4트랙 버튼");
+  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:social", "igtrack:tg-5:living", "igtrack:tg-5:tech", "igtrack:tg-5:person"], "5트랙 버튼");
 
   const longOut = await handleInstagramUpdate(msg(6, longBody), h.deps);
   assert.deepEqual(longOut, { handled: "input", queueId: "tg-6", kind: "source" });

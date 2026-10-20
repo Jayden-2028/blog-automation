@@ -48,6 +48,7 @@ export function trackButtons(queueId: string): TelegramReplyMarkup {
         { text: TRACK_LABEL.living, callback_data: buildTrackCallbackData(queueId, "living") },
         { text: TRACK_LABEL.tech, callback_data: buildTrackCallbackData(queueId, "tech") },
       ],
+      [{ text: TRACK_LABEL.person, callback_data: buildTrackCallbackData(queueId, "person") }],
     ],
   };
 }

@@ -301,6 +301,8 @@ function buildPersonResearchPrompt(input: BuildResearchPromptInput, baselineLine
     "",
     ...formatPersonAutocomplete(input.personAutocomplete ?? null),
     ...formatPersonSourcePack(input.personSourcePack ?? null),
+    // 종합 키워드 입력 툴(2026-10-19): 인물 트랙으로 링크·긴 글을 보낸 경우의 소스 본문. §1 사실 우선순위 밖 1차 근거.
+    ...buildUserSourceTextSection(input.userSourceText, input.userSourceUrl),
     "파이프라인 오버라이드(person-researcher.md와 충돌하면 이 지시가 우선):",
     `- 출력 파일은 person-researcher.md §6의 이름 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못 채운 빈칸을",

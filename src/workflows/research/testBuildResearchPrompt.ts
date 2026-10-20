@@ -71,6 +71,17 @@ function main(): void {
   assert(!person.includes("- prompts/research/researcher.md"), "person은 researcher.md를 읽히면 안 된다");
   assert(!person.includes("celebrity") && !person.includes("§4-1"), "person은 브리프 프로파일 오버라이드를 싣지 않는다");
   assert(person.includes("/repo/research/진선규.md") && person.includes("신작 공개 이후 연기 재조명"), "person: 출력 경로와 background 주입");
+  // 종합 키워드 입력 툴(2026-10-19): 인물 트랙으로 보낸 링크·긴 글의 소스 본문도 person 프롬프트에 실린다.
+  const personWithSource = buildResearchPrompt({
+    job: { keyword: "진선규", headline: null, category: "person" },
+    baselineSources: [],
+    outputPath: "/repo/research/진선규.md",
+    today: "2026-10-19",
+    userSourceText: "배우 진선규가 ...(블로그 발췌)",
+    userSourceUrl: "https://m.blog.naver.com/x/1",
+  });
+  assert(personWithSource.includes("사용자 제공 소스 텍스트") && personWithSource.includes("블로그 발췌"), "person: userSourceText 주입");
+  assert(!person.includes("사용자 제공 소스 텍스트"), "person: 소스 없으면 절 생략");
   assert(!buildResearchPrompt({ job: { keyword: "x", headline: null, category: "entertainment" }, baselineSources: [], outputPath: "/r/x.md", today: "2026-10-13" }).includes("person-researcher"), "다른 카테고리는 person 규격을 싣지 않는다");
   console.log("✅ person 분기 - person-researcher.md만, 브리프 오버라이드 없음");
 
