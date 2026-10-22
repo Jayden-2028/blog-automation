@@ -52,7 +52,7 @@ function buildSql(projectId: string, dataset: string, table: string, days: numbe
     `from ${fq}`,
     `where date(usage_start_time, 'Asia/Seoul') >= date_sub(current_date('Asia/Seoul'), interval ${days} day)`,
     "group by 1, 2, 3, 4",
-    "having abs(sum(cost)) > 0 or abs(sum(ifnull((select sum(c.amount) from unnest(credits) c), 0))) > 0",
+    "having abs(gross_cost) > 0 or abs(credits) > 0",
     "order by 1 desc, 5 desc",
   ].join("\n");
 }
