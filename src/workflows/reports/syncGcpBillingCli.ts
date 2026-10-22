@@ -57,6 +57,22 @@ function buildSql(projectId: string, dataset: string, table: string, days: numbe
   ].join("\n");
 }
 
+/**
+ * probe 전용 진단. 본 조회가 "0행"을 돌려줄 때 원인이 둘로 갈리는데(테이블이 비었거나,
+ * 행은 있지만 전부 무료 등급이라 청구액이 0이거나) 날짜·비용 필터를 모두 뺀 이 조회로 가른다.
+ */
+function buildProbeSql(projectId: string, dataset: string, table: string): string {
+  const fq = `\`${projectId}.${dataset}.${table}\``;
+  return [
+    "select",
+    "  count(*) as total_rows,",
+    "  format_date('%Y-%m-%d', min(date(usage_start_time, 'Asia/Seoul'))) as first_day,",
+    "  format_date('%Y-%m-%d', max(date(usage_start_time, 'Asia/Seoul'))) as last_day,",
+    "  sum(cost) as all_gross_cost",
+    `from ${fq}`,
+  ].join("\n");
+}
+
 function toRows(raw: Array<Record<string, string | null>>): BillingRow[] {
   return raw.map((r) => {
     const grossCost = Number(r.gross_cost ?? 0);
@@ -126,6 +142,24 @@ async function main(): Promise<void> {
   if (rows.length > 20) console.log(`  … 외 ${rows.length - 20}행`);
 
   if (probe) {
+    const diag = await client.query(projectId, buildProbeSql(projectId, dataset, table));
+    if (!diag.ok) {
+      console.error(`[${diag.stage}] ${diag.error}`);
+      process.exit(1);
+    }
+    const d = diag.data[0] ?? {};
+    const totalRows = Number(d.total_rows ?? 0);
+    const allCost = Number(d.all_gross_cost ?? 0);
+    console.log(
+      `테이블 전체: ${totalRows}행, 사용일 ${d.first_day ?? "-"} ~ ${d.last_day ?? "-"}, 총 청구액 ${usd(Number.isFinite(allCost) ? allCost : 0)}`
+    );
+    if (totalRows === 0) {
+      console.log("→ 테이블이 비어 있습니다. 내보내기를 켠 직후라면 구글이 채울 때까지 하루 정도 더 걸립니다.");
+    } else if (!Number.isFinite(allCost) || allCost === 0) {
+      console.log("→ 행은 있는데 청구액이 전부 0입니다(무료 등급 범위). 유료 사용이 생기는 날부터 잡힙니다.");
+    } else {
+      console.log("→ 청구액이 있는 테이블입니다. 최근 창에 0행이면 그 기간에만 지출이 없었던 것입니다.");
+    }
     console.log("probe 모드 - DB에 아무것도 쓰지 않았습니다.");
     return;
   }
