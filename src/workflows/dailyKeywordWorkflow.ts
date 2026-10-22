@@ -893,9 +893,20 @@ export async function runDailyKeywordWorkflow(
                   0
                 ),
                 groups: result.queryPool.foldedGroups,
+                // 어순 변형 접힘(2026-10-21 추가 필드). 위 세 필드 모양은 그대로 둔다 -
+                // 10/25까지 기존 모양으로 관측 중인 데이터다.
+                wordOrderGroupCount: result.queryPool.foldedGroups.filter(
+                  (group) => group.kind === "wordOrder"
+                ).length,
+                wordOrderDroppedCount: result.queryPool.foldedGroups
+                  .filter((group) => group.kind === "wordOrder")
+                  .reduce((sum, group) => sum + group.dropped.length, 0),
               },
             }
           : {}),
+        // 수집 입구 날짜 컷(2026-10-21). 컷이 켜져 있으면 0건이어도 남긴다 - 상한이 몇 일로
+        // 돌았는지가 기록돼야 "안 걸러졌다"와 "컷이 꺼져 있었다"를 구분할 수 있다.
+        ...(collected.ageCut.maxAgeDays > 0 ? { candidateAgeCut: collected.ageCut } : {}),
         ...options.metadata,
       },
       candidatesCount: collected.candidates.length,

@@ -231,6 +231,15 @@ export const QUERY_POOL_VARIANT_FOLD_ENV = "QUERY_POOL_VARIANT_FOLD";
 /** 한 변형 그룹에서 pool에 남길 대표 수. */
 export const QUERY_POOL_VARIANT_KEEP = 2;
 
+/**
+ * 어순 변형만 다른 그룹(토큰 집합이 완전히 같음)에서 남길 대표 수. 2026-10-21 추가.
+ *
+ * 왜 1인가: run 182에서 시드 "이재 샘킴 결혼"과 "샘킴 이재 결혼"이 각각 살아 같은 주제가 [2]+[4]
+ * 두 칸을 먹었다. 첫 토큰이 달라 기존 판정(첫 토큰 동일 + 부분집합)에 걸리지 않았다. 토큰이 같으면
+ * **검색 결과도 사실상 같으므로** 2개를 남길 이유가 없다.
+ */
+export const QUERY_POOL_WORD_ORDER_KEEP = 1;
+
 // pipelineGate.ts와 같은 해석 규칙이다: 미설정·빈 값은 켜짐(워크플로가 `vars.X`를 빈 값으로
 // 넘기는 경우를 기본값으로 흘리기 위함), 끄는 값만 명시적으로 나열한다.
 const FOLD_OFF_VALUES = new Set(["false", "0", "off", "no"]);
@@ -249,6 +258,12 @@ export type QueryPoolFoldGroup = {
   kept: string[];
   /** pool에서 뺀 변형 키워드. */
   dropped: string[];
+  /**
+   * 그룹 종류(2026-10-21 추가 필드. 기존 base·kept·dropped 모양은 그대로다).
+   *   "subset"    — 첫 토큰 동일 + 토큰 부분집합. 대표 2개를 남긴다.
+   *   "wordOrder" — 토큰 집합이 완전히 같고 순서만 다름. 대표 1개만 남긴다.
+   */
+  kind: "subset" | "wordOrder";
 };
 
 type FoldableEntry = {
@@ -263,9 +278,29 @@ function tokenizeKeyword(keyword: string): string[] {
 }
 
 /**
+ * 토큰 집합이 완전히 같은가(순서만 다름). "이재 샘킴 결혼" ↔ "샘킴 이재 결혼".
+ * 중복 토큰은 집합으로 보므로 무시한다 - 검색어에서 같은 낱말을 두 번 쓰는 경우는 사실상 없다.
+ */
+function isWordOrderVariant(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+
+  const setA = new Set(a);
+  const setB = new Set(b);
+  if (setA.size !== setB.size) return false;
+  for (const token of setA) {
+    if (!setB.has(token)) return false;
+  }
+  return true;
+}
+
+/**
  * 같은 주제의 검색어 변형인가. 보수적으로 두 조건을 동시에 요구한다.
  *   ① 첫 토큰이 같다(CA 검색어는 프로그램·인물명이 맨 앞에 오는 형태가 대부분이다).
  *   ② 짧은 쪽의 토큰 집합이 긴 쪽의 부분집합이다.
+ *
+ * 어순 변형(토큰 집합이 같고 순서만 다름)은 이 판정이 아니라 **앞 단계**(foldWordOrderVariants)가
+ * 먼저 1개로 줄인다 - 여기서 함께 묶으면 "어순 쌍 + 부분집합 변형"이 한 그룹이 되어 KEEP=2에
+ * 어순 쌍 둘이 그대로 남을 수 있다(실측 반례: 이재 샘킴 결혼 / 샘킴 이재 결혼 / 이재 샘킴 결혼 축하).
  *
  * "나솔사계 현커" vs "나솔사계 라방"은 이 판정으로는 직접 묶이지 않는다 - 둘 다 base "나솔사계"와
  * 묶여 **전이적으로만** 한 그룹이 된다. base가 pool에 없으면 형제 변형끼리는 **안 묶인다**.
@@ -313,7 +348,61 @@ function compareForRank(a: FoldableEntry, b: FoldableEntry): number {
 }
 
 /**
- * 같은 주제의 검색어 변형을 대표 QUERY_POOL_VARIANT_KEEP개로 접는다.
+ * 1단계 — 어순 변형 묶기(2026-10-21). 토큰 집합이 같은 것들을 **대표 1개**로 줄인다.
+ * 대표는 CA rank 상위(compareForBase는 토큰 수가 같으면 rank로 떨어진다).
+ *
+ * 부분집합 접기보다 **먼저** 도는 이유: 나중에 돌리면 어순 쌍이 부분집합 그룹에 섞여 들어가
+ * KEEP=2 자리를 어순 쌍 둘이 차지할 수 있다(이재 샘킴 결혼 / 샘킴 이재 결혼 / 이재 샘킴 결혼 축하).
+ */
+function foldWordOrderVariants(
+  foldable: readonly FoldableEntry[]
+): { survivors: FoldableEntry[]; droppedIndexes: Set<number>; groups: QueryPoolFoldGroup[] } {
+  const buckets = new Map<string, FoldableEntry[]>();
+  for (const item of foldable) {
+    const key = [...new Set(item.tokens)].sort().join("\u0000");
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(item);
+    else buckets.set(key, [item]);
+  }
+
+  const droppedIndexes = new Set<number>();
+  const groups: QueryPoolFoldGroup[] = [];
+  const survivors: FoldableEntry[] = [];
+
+  for (const bucket of buckets.values()) {
+    if (bucket.length <= QUERY_POOL_WORD_ORDER_KEEP) {
+      survivors.push(...bucket);
+      continue;
+    }
+
+    const ordered = [...bucket].sort(compareForBase);
+    const kept = ordered.slice(0, QUERY_POOL_WORD_ORDER_KEEP);
+    const dropped = ordered.slice(QUERY_POOL_WORD_ORDER_KEEP);
+
+    survivors.push(...kept);
+    for (const item of dropped) droppedIndexes.add(item.index);
+
+    const group: QueryPoolFoldGroup = {
+      base: kept[0].entry.keyword,
+      kept: kept.map((item) => item.entry.keyword),
+      dropped: dropped.map((item) => item.entry.keyword),
+      kind: "wordOrder",
+    };
+    groups.push(group);
+
+    console.log(
+      `ℹ️ [buildDailyQueryPool] 어순 변형 접기: ${group.base} (${bucket.length}→${group.kept.length}) — ` +
+        `대표 [${group.kept.join(", ")}], 접힘 [${group.dropped.join(", ")}]`
+    );
+  }
+
+  // 원래 순서를 유지한다(entries 필터링은 index로 하지만, 이후 단계의 쌍 비교 순서도 결정적이어야 한다).
+  survivors.sort((a, b) => a.index - b.index);
+  return { survivors, droppedIndexes, groups };
+}
+
+/**
+ * 2단계 — 같은 주제의 검색어 변형을 대표 QUERY_POOL_VARIANT_KEEP개로 접는다.
  *
  * 접기 대상은 **동적 entry(origin=creator_advisor|trend)만**이다. seed와 merged(seed 키워드에
  * 동적 신호가 흡수된 것)는 사람이 큐레이션한 상시 검색어라 접지 않고, 그룹 anchor로도 쓰지 않는다 -
@@ -328,13 +417,17 @@ function foldVariantQueries(
 ): { entries: QueryPoolEntry[]; foldedGroups: QueryPoolFoldGroup[] } {
   if (!options.enabled) return { entries, foldedGroups: [] };
 
-  const foldable: FoldableEntry[] = [];
+  const allFoldable: FoldableEntry[] = [];
   entries.forEach((entry, index) => {
     if (!isTrendOrigin(entry.origin)) return;
     const tokens = tokenizeKeyword(entry.keyword);
     if (tokens.length === 0) return;
-    foldable.push({ entry, index, tokens });
+    allFoldable.push({ entry, index, tokens });
   });
+
+  // 1단계: 어순 변형을 먼저 1개로 줄인다. 그 결과만 2단계(부분집합)로 넘긴다.
+  const wordOrder = foldWordOrderVariants(allFoldable);
+  const foldable = wordOrder.survivors;
 
   // union-find. 쌍 판정이 전이성을 보장하지 않으므로(현커-라방은 base를 거쳐야 한다) 묶기는
   // 집합 연산으로 한다. 동적 entry는 하루 최대 수십 건이라 O(n^2) 쌍 비교로 충분하다.
@@ -367,8 +460,8 @@ function foldVariantQueries(
     else buckets.set(root, [i]);
   }
 
-  const droppedIndexes = new Set<number>();
-  const foldedGroups: QueryPoolFoldGroup[] = [];
+  const droppedIndexes = new Set<number>(wordOrder.droppedIndexes);
+  const foldedGroups: QueryPoolFoldGroup[] = [...wordOrder.groups];
 
   for (const bucket of buckets.values()) {
     if (bucket.length <= QUERY_POOL_VARIANT_KEEP) continue;
@@ -385,6 +478,7 @@ function foldVariantQueries(
       base: foldable[base].entry.keyword,
       kept: keptIndexes.map((item) => foldable[item].entry.keyword),
       dropped: droppedList.map((item) => foldable[item].entry.keyword),
+      kind: "subset",
     };
     foldedGroups.push(group);
 

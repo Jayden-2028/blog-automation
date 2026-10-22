@@ -157,6 +157,8 @@
     "test:notify-revised-article": "tsx src/workflows/writing/testNotifyRevisedArticleReady.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
     "test:keyword-exclusion": "tsx src/config/testKeywordExclusionRules.ts",
+    "test:candidate-age-cut": "tsx src/workflows/keyword-discovery/testCandidateAgeCut.ts",
+    "test:cluster-attribution": "tsx src/workflows/keyword-ranking/testClusterAttribution.ts",
     "test:ent-trend-gate": "tsx src/workflows/keyword-discovery/testEntertainmentTrendGate.ts",
     "test:competition-score": "tsx src/workflows/keyword-ranking/testCompetitionScore.ts",
     "seeds:apply-purity": "tsx scripts/applySeedQueryRefresh.ts",

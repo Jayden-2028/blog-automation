@@ -437,6 +437,126 @@ async function testVariantFoldSwitchOff(): Promise<void> {
   console.log("✅ QUERY_POOL_VARIANT_FOLD=false -> 무변경(롤백 경로)");
 }
 
+// ---------- 어순 변형 묶기 (KEYWORD-HEADLINE-FRESHNESS-2026-10.md ③) ----------
+//
+// run 182 실측: 시드 "이재 샘킴 결혼"과 "샘킴 이재 결혼"이 각각 살아 같은 주제가 Top 10에서
+// [2]+[4] 두 칸을 먹었다. 첫 토큰이 달라 기존 판정(첫 토큰 동일 + 부분집합)에 안 걸렸다.
+async function testWordOrderVariantKeepsOne(): Promise<void> {
+  const trends = [
+    makeTrend({
+      id: "wo-1",
+      keyword: "이재 샘킴 결혼",
+      keyword_normalized: "이재 샘킴 결혼",
+      topic: "연예인",
+      topic_normalized: "entertainment",
+      trend_date: "2026-10-21",
+      rank: 4,
+      candidate_score: 28,
+    }),
+    makeTrend({
+      id: "wo-2",
+      keyword: "샘킴 이재 결혼",
+      keyword_normalized: "샘킴 이재 결혼",
+      topic: "방송",
+      topic_normalized: "entertainment",
+      trend_date: "2026-10-21",
+      rank: 2,
+      candidate_score: 31,
+    }),
+  ];
+
+  const result = await buildDailyQueryPool({
+    enabledSources: ["creator_advisor"],
+    creatorAdvisorEnabled: true,
+    includeSeedQueries: false,
+    loadActiveSeeds: async () => [],
+    loadLatestCreatorAdvisorCandidates: async () => ({ trendDate: "2026-10-21", candidates: trends }),
+  });
+
+  assert(result.foldedGroups.length === 1, `어순 그룹 1개여야 합니다 (실제: ${result.foldedGroups.length})`);
+  const [group] = result.foldedGroups;
+  assert(group.kind === "wordOrder", `kind는 wordOrder여야 합니다 (실제: ${group.kind})`);
+  assert(
+    group.kept.length === 1 && group.kept[0] === "샘킴 이재 결혼",
+    `대표는 rank 상위 1개(샘킴 이재 결혼, rank2)여야 합니다 (실제: ${group.kept.join(", ")})`
+  );
+  assert(
+    group.dropped.length === 1 && group.dropped[0] === "이재 샘킴 결혼",
+    `접힘은 "이재 샘킴 결혼" 1건이어야 합니다 (실제: ${group.dropped.join(", ")})`
+  );
+  assert(result.entries.length === 1, `pool은 1건이어야 합니다 (실제: ${result.entries.length})`);
+
+  console.log("✅ 어순 변형: 2건 -> 대표 1건(KEEP=1)");
+}
+
+async function testWordOrderDoesNotFoldDifferentTokenSets(): Promise<void> {
+  // 토큰 집합이 다르면(한쪽에 낱말이 더 있음) 어순 케이스가 아니다. 첫 토큰도 다르니 안 묶인다.
+  const trends = [
+    makeTrend({ id: "wo-3", keyword: "이재 샘킴 결혼", keyword_normalized: "이재 샘킴 결혼", topic: "연예인", rank: 4, candidate_score: 28 }),
+    makeTrend({ id: "wo-4", keyword: "샘킴 이재 결혼 축하", keyword_normalized: "샘킴 이재 결혼 축하", topic: "방송", rank: 2, candidate_score: 31 }),
+  ];
+
+  const result = await buildDailyQueryPool({
+    enabledSources: ["creator_advisor"],
+    creatorAdvisorEnabled: true,
+    includeSeedQueries: false,
+    loadActiveSeeds: async () => [],
+    loadLatestCreatorAdvisorCandidates: async () => ({ trendDate: "2026-10-21", candidates: trends }),
+  });
+
+  assert(result.foldedGroups.length === 0, "토큰 집합이 다르면 접히지 않아야 합니다");
+  assert(result.entries.length === 2, `2건 모두 남아야 합니다 (실제: ${result.entries.length})`);
+  console.log("✅ 토큰이 하나라도 다르면 어순 케이스가 아니다(안 묶임)");
+}
+
+async function testWordOrderFoldRunsBeforeSubsetFold(): Promise<void> {
+  // 어순 쌍 + 더 긴 변형이 섞인 경우. 어순 접기가 **먼저** 돌아야 한다 - 나중에 돌면
+  // 셋이 한 부분집합 그룹이 되어 KEEP=2 자리를 어순 쌍 둘이 차지한다(실측 반례).
+  const trends = [
+    makeTrend({ id: "mx-1", keyword: "이재 샘킴 결혼", keyword_normalized: "이재 샘킴 결혼", topic: "연예인", rank: 4, candidate_score: 28 }),
+    makeTrend({ id: "mx-2", keyword: "샘킴 이재 결혼", keyword_normalized: "샘킴 이재 결혼", topic: "방송", rank: 2, candidate_score: 31 }),
+    makeTrend({ id: "mx-3", keyword: "이재 샘킴 결혼 축하", keyword_normalized: "이재 샘킴 결혼 축하", topic: "드라마", rank: 9, candidate_score: 20 }),
+  ];
+
+  const result = await buildDailyQueryPool({
+    enabledSources: ["creator_advisor"],
+    creatorAdvisorEnabled: true,
+    includeSeedQueries: false,
+    loadActiveSeeds: async () => [],
+    loadLatestCreatorAdvisorCandidates: async () => ({ trendDate: "2026-10-21", candidates: trends }),
+  });
+
+  const keywords = result.entries.map((entry) => entry.keyword);
+  assert(result.foldedGroups.length === 1, `그룹 1개여야 합니다 (실제: ${result.foldedGroups.length})`);
+  assert(
+    result.foldedGroups[0].kind === "wordOrder",
+    `어순 그룹으로 먼저 접혀야 합니다 (실제: ${result.foldedGroups[0].kind})`
+  );
+  assert(
+    !keywords.includes("이재 샘킴 결혼"),
+    `어순 쌍 중 rank 하위는 빠져야 합니다 (실제 pool: ${keywords.join(", ")})`
+  );
+  assert(
+    keywords.includes("샘킴 이재 결혼") && keywords.includes("이재 샘킴 결혼 축하"),
+    `어순 대표와 토큰이 다른 변형은 남아야 합니다 (실제 pool: ${keywords.join(", ")})`
+  );
+  assert(keywords.length === 2, `pool은 2건이어야 합니다 (실제: ${keywords.length})`);
+  console.log("✅ 어순 접기가 부분집합 접기보다 먼저 돈다(어순 쌍이 KEEP=2 자리를 먹지 않음)");
+}
+
+async function testSubsetFoldStillTaggedSubset(): Promise<void> {
+  // 10/17 케이스 회귀: 기존 fold 결과가 그대로이고 kind가 subset으로 붙는다.
+  const result = await buildVariantPool();
+  assert(result.foldedGroups.length === 1, "기존 fold 그룹 수 불변");
+  assert(result.foldedGroups[0].kind === "subset", "기존 케이스는 subset이어야 합니다");
+  assert(
+    result.foldedGroups[0].kept.join(" / ") === "나솔사계 / 나솔사계 현커",
+    `기존 대표 선정 불변이어야 합니다 (실제: ${result.foldedGroups[0].kept.join(" / ")})`
+  );
+  assert(result.entries.length === 3, `기존 결과(3건) 불변 (실제: ${result.entries.length})`);
+  console.log("✅ 10/17 부분집합 fold 회귀 없음 + kind=subset 태깅");
+}
+
 async function main(): Promise<void> {
   console.log("▶ Daily Query Pool merge/fallback 테스트 시작");
   await testSeedAndCreatorAdvisorMerge();
@@ -449,6 +569,10 @@ async function main(): Promise<void> {
   await testVariantFoldSkipsSeedAndMergedEntries();
   await testVariantFoldDoesNotMixDifferentSubjects();
   await testVariantFoldSwitchOff();
+  await testWordOrderVariantKeepsOne();
+  await testWordOrderDoesNotFoldDifferentTokenSets();
+  await testWordOrderFoldRunsBeforeSubsetFold();
+  await testSubsetFoldStillTaggedSubset();
   console.log("\n✅ Daily Query Pool 테스트 완료");
 }
 
