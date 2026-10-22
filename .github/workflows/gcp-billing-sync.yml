@@ -25,9 +25,10 @@ on:
         default: "5"
         type: string
 
-  # 확인이 끝나면 주석을 푼다. 09:40 KST = 00:40 UTC - 원고 파이프라인과 겹치지 않는 시각.
-  # schedule:
-  #   - cron: "40 0 * * *"
+  # 09:40 KST = 00:40 UTC. 원고 파이프라인과 겹치지 않는 시각으로 잡았다(2026-10-22 확인 후 켬).
+  # 예약 실행에는 inputs가 없으므로 아래 run 단계에서 mode가 apply로 떨어진다.
+  schedule:
+    - cron: "40 0 * * *"
 
 permissions:
   contents: read
@@ -55,7 +56,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          MODE="${{ inputs.mode || 'probe' }}"
+          # 수동 실행은 고른 값을, 예약 실행은(inputs가 비어 있다) apply를 쓴다.
+          MODE="${{ inputs.mode || 'apply' }}"
           DAYS="${{ inputs.days || '5' }}"
           if [ "$MODE" = "probe" ]; then
             npm run billing:gcp -- --probe --days="$DAYS"
