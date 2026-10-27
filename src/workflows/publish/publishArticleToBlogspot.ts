@@ -54,6 +54,9 @@ import type {
 } from "../../services/publish/blogger/BloggerClient.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 import { applyTkmStructure, pickTkmRelated } from "./tkmPostStructure.js";
+import { BingWebmasterClient, resolveBingSiteUrl } from "../../services/bing/BingWebmasterClient.js";
+import type { BingSubmitResult } from "../../services/bing/BingWebmasterClient.js";
+import { TKM_ALL_GUIDES_PATH } from "./tkmPostStructure.js";
 import { bloggerTkmSiteDeps, finalizeTkmPost, loadTkmSiteContext } from "./tkmSite.js";
 import type { TkmSiteDeps } from "./tkmSite.js";
 
@@ -127,6 +130,20 @@ export type PublishArticleToBlogspotOptions = {
    * false면 건너뛴다(소제목 h2는 그대로 적용). 기본은 이 블로그의 BloggerClient.
    */
   tkmSite?: TkmSiteDeps | false;
+  /**
+   * 사용설명서 글이 공개 발행되면 그 글 URL과 All Guides URL을 Bing URL Submission API로 제출한다(2026-10-27).
+   * 테스트 주입 지점. false면 건너뛴다. 기본은 BingWebmasterClient(키는 BING_WEBMASTER_API_KEY, 없으면 조용히 비활성).
+   * 실패해도 발행 결과는 그대로 success다(결과는 job.metadata.bingSubmit에만 남는다).
+   */
+  bing?: { submitUrls: (siteUrl: string, urls: string[]) => Promise<BingSubmitResult> } | false;
+};
+
+export type BingSubmitRecord = {
+  at: string;
+  urls: string[];
+  ok: boolean;
+  error?: string;
+  skipped?: string;
 };
 
 /** 어느 블로그·라벨로 올릴지. 사용설명서 트랙은 K-Scene blogId와 영문 라벨, 그 밖은 기존(BLOGGER_BLOG_ID·한글 라벨). */
@@ -297,14 +314,39 @@ export async function publishArticleToBlogspot(
     const related = pickTkmRelated({ ...self, labels: label ? [label] : [] }, site.posts, site.allGuidesUrl);
     return applyTkmStructure(html, { related, jsonLd: null }).html;
   };
-  const finalizeTkm = async (input: { postId: string; url: string; title: string; published: string; html: string }): Promise<void> => {
-    if (!tkmSite || !input.postId || !input.url) return;
+  const finalizeTkm = async (input: { postId: string; url: string; title: string; published: string; html: string }): Promise<string | null> => {
+    if (!tkmSite || !input.postId || !input.url) return null;
     const result = await finalizeTkmPost(
       tkmSite,
       { ...input, labels: label ? [label] : [], searchDescription: englishSearchDescription },
       input.html
     );
     for (const warning of result.warnings) console.warn(`⚠️ [tkm] ${warning}`);
+    return result.allGuidesUrl;
+  };
+
+  // 사용설명서 글이 새로 공개되면 [글 URL, All Guides URL]을 한 번에 Bing에 제출하고 결과를 job.metadata.bingSubmit에 남긴다.
+  // 어떤 실패도 던지지 않는다 - 글은 이미 공개됐다.
+  const submitToBing = async (postUrl: string, allGuidesUrl: string | null): Promise<void> => {
+    if (target.track !== "kscene" || options.bing === false || !postUrl) return;
+    try {
+      const siteUrl = resolveBingSiteUrl(postUrl);
+      if (!siteUrl) return;
+      const hubUrl = allGuidesUrl ?? `${siteUrl.replace(/\/$/, "")}${TKM_ALL_GUIDES_PATH}`;
+      const urls = [postUrl, hubUrl];
+      const result = await (options.bing ?? new BingWebmasterClient()).submitUrls(siteUrl, urls);
+      const record: BingSubmitRecord = { at: new Date().toISOString(), urls, ok: "ok" in result && result.ok };
+      if ("error" in result) record.error = result.error;
+      if ("skipped" in result) record.skipped = result.skipped;
+      if (record.error) console.warn(`⚠️ [bing] URL 제출 실패(발행은 성공): ${record.error}`);
+      else if (!record.skipped) console.log(`🔎 [bing] URL ${urls.length}개 제출`);
+      const saveJobMetadata = options.saveJobMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
+      await saveJobMetadata(jobId, { bingSubmit: record }).catch((error) =>
+        console.warn(`⚠️ [bing] 제출 기록 실패: ${error instanceof Error ? error.message : String(error)}`)
+      );
+    } catch (error) {
+      console.warn(`⚠️ [bing] 제출 처리 오류(발행은 성공): ${error instanceof Error ? error.message : String(error)}`);
+    }
   };
 
   // 최종 원고 = 작성 단계 원고(2026-09-30 배리에이션 폐지). 과거 배리에이션이 더 새것이면 그것.
@@ -349,7 +391,8 @@ export async function publishArticleToBlogspot(
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
         }
         await markPublished({ publicationId: done.id, url: promoted.url, articleId: finalArticle.id });
-        await finalizeTkm({ postId, url: promoted.url, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
+        const promotedHub = await finalizeTkm({ postId, url: promoted.url, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
+        await submitToBing(promoted.url, promotedHub);
         return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, alreadyDone: false };
       }
 
@@ -423,7 +466,8 @@ export async function publishArticleToBlogspot(
   // 공개 발행이면 배리에이션 원고 상태도 published로 올린다(기준 원고와 별개). draft면 pending 유지.
   if (!inserted.isDraft) {
     await updateArticleStatus(finalArticle.id, "published").catch(() => {});
-    await finalizeTkm({ postId: inserted.postId, url: inserted.url, title: postTitle, published: new Date().toISOString(), html: contentHtml });
+    const insertedHub = await finalizeTkm({ postId: inserted.postId, url: inserted.url, title: postTitle, published: new Date().toISOString(), html: contentHtml });
+    await submitToBing(inserted.url, insertedHub);
   }
 
   return {

@@ -114,6 +114,9 @@ jobs:
           BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          # 사용설명서 글 공개 시 Bing URL 제출(2026-10-27). 시크릿이 없으면 빈 값이라 기능이 조용히 꺼진다. 사이트 주소는 BING_SITE_URL(선택).
+          BING_WEBMASTER_API_KEY: ${{ secrets.BING_WEBMASTER_API_KEY }}
+          BING_SITE_URL: ${{ vars.BING_SITE_URL }}
           BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
           # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.

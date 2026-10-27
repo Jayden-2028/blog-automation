@@ -53,6 +53,8 @@ const baseDeps = {
   savePublication: async (i: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) =>
     ({ id: 99, article_id: i.articleId, platform: "blogspot", status: i.status, published_url: i.publishedUrl, published_at: null, created_at: "x" }) as PublicationRow,
   countToday: async () => 0,
+  // 실제 Bing 호출 방지(.env에 키가 있어도 테스트는 네트워크를 타지 않는다). 전용 케이스에서만 스텁을 넣는다.
+  bing: false as const,
   insertPost: async () => ({ ok: true as const, postId: "p1", url: "https://b.example.com/p1.html", isDraft: true }),
 };
 
@@ -388,6 +390,51 @@ async function main(): Promise<void> {
     assert(pagesStore.length === 1 && tkmInserted.includes(`${site}/p/all-guides.html`), "페이지는 하나만 유지(멱등), 새 글엔 처음부터 허브 링크");
     assert(postPatches.length === 1 && postPatches[0].includes("application/ld+json") && (postPatches[0].match(/tkm-related/g) ?? []).length === 1, "발행 뒤 patch는 JSON-LD를 붙이는 한 번, Related 블록은 하나");
     console.log("✅ kscene 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성, JSON-LD");
+
+    // ---- Bing URL 제출(2026-10-27): [글 URL, All Guides URL] 한 번, 실패해도 발행은 success, 결과는 job.metadata.bingSubmit ----
+    const bingRun = async (
+      submitUrls: (siteUrl: string, urls: string[]) => Promise<import("../../services/bing/BingWebmasterClient.js").BingSubmitResult>,
+      overrides: Record<string, unknown> = {}
+    ) => {
+      const calls: { siteUrl: string; urls: string[] }[] = [];
+      const saved: Record<string, unknown>[] = [];
+      const result = await publishArticleToBlogspot("job-1", {
+        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+        loadJob: async () => ksceneJob(),
+        loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
+        insertPost: async () => ({ ok: true as const, postId: "p11", url: `${site}/2026/10/bing.html`, isDraft: false }),
+        rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
+        saveJobMetadata: async (_id, patch) => { saved.push(patch); },
+        bing: { submitUrls: async (siteUrl, urls) => { calls.push({ siteUrl, urls }); return submitUrls(siteUrl, urls); } },
+        ...overrides,
+      });
+      return { result, calls, saved, record: saved.find((patch) => "bingSubmit" in patch)?.bingSubmit as Record<string, unknown> | undefined };
+    };
+
+    const bingOk = await bingRun(async () => ({ ok: true, submitted: 2 }));
+    assert(bingOk.result.ok === true, "Bing 성공 케이스 발행 성공");
+    assert(bingOk.calls.length === 1 && bingOk.calls[0].siteUrl === `${site}/` && bingOk.calls[0].urls.join() === `${site}/2026/10/bing.html,${site}/p/all-guides.html`, `한 번의 배치로 [글, All Guides] 제출 (${JSON.stringify(bingOk.calls)})`);
+    assert(bingOk.record?.ok === true && Array.isArray(bingOk.record.urls) && typeof bingOk.record.at === "string", `bingSubmit 기록 (${JSON.stringify(bingOk.record)})`);
+
+    const bingFail = await bingRun(async () => ({ ok: false, error: "HTTP 400: Quota exceeded", status: 400 }));
+    assert(bingFail.result.ok === true && bingFail.calls.length === 1, "Bing 제출이 호출되고 실패해도 발행 결과는 success");
+    assert(bingFail.record?.ok === false && String(bingFail.record.error).includes("Quota exceeded"), "실패는 bingSubmit.error에 남는다");
+
+    const bingThrows = await bingRun(async () => { throw new Error("예상 밖 예외"); });
+    assert(bingThrows.result.ok === true, "제출이 예외를 던져도 발행은 success");
+
+    const bingSkipped = await bingRun(async () => ({ skipped: "no-key" as const }));
+    assert(bingSkipped.result.ok === true && bingSkipped.record?.skipped === "no-key" && bingSkipped.record.ok === false && !("error" in bingSkipped.record), "키 없음 -> skipped 기록, 오류 아님");
+
+    const bingMetaFails = await bingRun(async () => ({ ok: true, submitted: 2 }), { saveJobMetadata: async () => { throw new Error("db down"); } });
+    assert(bingMetaFails.result.ok === true, "메타 기록 실패도 발행은 success");
+
+    const bingDraft = await bingRun(async () => ({ ok: true, submitted: 2 }), { asDraft: true, insertPost: async () => ({ ok: true as const, postId: "p12", url: `${site}/draft`, isDraft: true }) });
+    assert(bingDraft.calls.length === 0, "초안은 제출하지 않는다");
+
+    const bingOtherTrack = await bingRun(async () => ({ ok: true, submitted: 2 }), { loadJob: async () => job(), ksceneBlogId: undefined });
+    assert(bingOtherTrack.calls.length === 0, "kscene이 아닌 트랙은 제출하지 않는다");
+    console.log("✅ Bing 제출 - 글+All Guides 1배치, 실패·예외·키 없음에도 발행 success, 초안·다른 트랙은 제외");
   }
 
   console.log("\n✅ 전체 테스트 통과");

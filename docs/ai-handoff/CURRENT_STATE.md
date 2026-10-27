@@ -2,6 +2,24 @@
 
 기준일: 2026-10-27 (Asia/Seoul)
 
+## 2026-10-27 — The Korea Manual 색인 대응 C: Bing URL 자동 제출 (브랜치 `feat/tkm-bing-submit`)
+
+**상태: 코드 main 병합·push 완료. GitHub 시크릿 등록 전까지 자동 제출은 꺼져 있다(조용히 건너뜀).**
+
+- **동작**: kscene 글이 **공개 발행**되면(신규 공개·초안→공개 전환. 기존 글 본문 갱신·초안은 제외) `finalizeTkmPost`(All Guides 재생성) 뒤에
+  `[글 URL, All Guides URL]`를 **한 번의 SubmitUrlBatch**로 Bing에 제출한다(`publishArticleToBlogspot.ts`의 `submitToBing`).
+  결과는 `job.metadata.bingSubmit = {at, urls, ok, error?, skipped?}`(기존 `saveJobMetadata` 경로). 어떤 실패·예외도 발행을 바꾸지 않는다.
+- **클라이언트**: `src/services/bing/BingWebmasterClient.ts` - `submitUrls(siteUrl, urls)` / `getQuota(siteUrl)`, fetch 주입, 던지지 않고 결과 객체.
+  키(`BING_WEBMASTER_API_KEY`)가 없으면 `{skipped:"no-key"}` + 로그 한 줄. siteUrl은 `BING_SITE_URL`이 있으면 그것, 없으면 글 URL의 origin
+  (커스텀 도메인 전환 시 글 URL이 바뀌므로 코드 수정 불필요, Bing 쪽에 새 사이트 등록만 필요). All Guides URL은 `finalizeTkmPost`가 찾은 주소, 못 찾으면 siteUrl+`/p/all-guides.html`.
+- **CLI**: `npm run bing:submit -- --quota` / `--urls a,b` / `--job-id <id>`(그 job의 공개 글+허브 재제출, `bingSubmit` 기록). `--site=`로 siteUrl 지정.
+- **워크플로**: `telegram-update.yml`·`job-publish-prepare.yml` env에 `BING_WEBMASTER_API_KEY`(secret)·`BING_SITE_URL`(vars, 선택) 추가.
+- **할당량(실측 10-27)**: 일 60 / 월 460(사이트 단위). 글 1편 발행 = 2건 소모.
+- **테스트**: `npm run test:bing`(클라이언트), `test:publish-blogspot`(Bing 호출·실패에도 success·초안/타 트랙 제외). 기존 케이스는 `bing:false`로 네트워크 차단.
+- **실동작 확인**: `--quota` 응답 DailyQuota 60/MonthlyQuota 460, All Guides URL 1건 제출 ok(수동 제출분과 중복, 무해). 새 글 발행 없음.
+- **사용자가 할 일**: GitHub 시크릿 `BING_WEBMASTER_API_KEY` 등록(값은 prod/.env). 커스텀 도메인 전환 시 Bing에 새 사이트 등록 + repo variable `BING_SITE_URL` 설정.
+- **알려둔 한계**: Blogger posts.update(본문 갱신)는 재제출하지 않는다 - 필요하면 `--urls`로 수동. 다른 트랙(티스토리·네이버)은 대상 아님.
+
 ## 2026-10-27 — The Korea Manual 색인 대응 B: 사이트 내부 구조 보강 (브랜치 `feat/tkm-index-structure`)
 
 **상태: 코드 main 병합·push 완료, 기존 38편 일괄 갱신 완료(실패 0).** 테마·UI 항목은 `docs/ai-handoff/TKM_THEME_PATCH_2026-10.md`(팀장이 Blogger UI에서).

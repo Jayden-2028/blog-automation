@@ -136,6 +136,8 @@
     "debug:approved-jobs": "tsx src/workflows/publish/debug/showApprovedJobs.ts",
     "debug:live-blogspot": "tsx src/workflows/publish/debug/liveBlogspotTest.ts",
     "blogspot:schedule": "tsx src/workflows/publish/scheduleBlogspotPostCli.ts",
+    "bing:submit": "tsx src/services/bing/bingSubmitCli.ts",
+    "test:bing": "tsx src/services/bing/testBingWebmasterClient.ts",
     "tkm:structure": "tsx src/workflows/publish/tkmStructureBackfillCli.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
