@@ -147,6 +147,8 @@
     "test:bing": "tsx src/services/bing/testBingWebmasterClient.ts",
     "tkm:structure": "tsx src/workflows/publish/tkmStructureBackfillCli.ts",
     "tkm:rebrand": "tsx src/workflows/publish/tkmRebrandCli.ts",
+    "tkm:cutover-urls": "tsx src/workflows/publish/tkmCutoverUrlsCli.ts",
+    "test:tkm-cutover": "tsx src/workflows/publish/testTkmCutover.ts",
     "test:notify-publish": "tsx src/services/publish/testNotifyPublishReady.ts",
     "test:notify-article": "tsx src/workflows/writing/testNotifyArticleReady.ts",
     "test:notify-write-failed": "tsx src/workflows/writing/testNotifyWriteFailed.ts",

@@ -1,4 +1,5 @@
 # Korea Plain 기존 글 구조 보강(소제목 h2·Related 블록·All Guides 허브·JSON-LD) - 수동 실행 전용(2026-10-27).
+# rewrite_host(2026-10-28): 맞춤 도메인 전환 - 본문·고정 페이지의 옛 blogspot 주소를 www.koreaplain.com으로.
 # 기본은 dry-run(아무것도 쓰지 않음). 결과 표는 실행 요약(Summary)에 남는다. 상세: src/workflows/publish/tkmStructureBackfillCli.ts
 name: tkm-structure-backfill
 
@@ -21,6 +22,10 @@ on:
         description: "All Guides 페이지 재생성(apply일 때만 씀)"
         type: boolean
         default: true
+      rewrite_host:
+        description: "본문·고정 페이지의 옛 blogspot 주소를 공개 주소(www.koreaplain.com)로 교체(기존 JSON-LD 유지)"
+        type: boolean
+        default: false
 
 concurrency:
   group: tkm-structure-backfill
@@ -50,10 +55,13 @@ jobs:
           INPUT_ONLY: ${{ inputs.only }}
           INPUT_JSONLD: ${{ inputs.jsonld }}
           INPUT_PAGE: ${{ inputs.page }}
+          INPUT_REWRITE_HOST: ${{ inputs.rewrite_host }}
+          KSCENE_PUBLIC_ORIGIN: ${{ vars.KSCENE_PUBLIC_ORIGIN }}
         run: |
           args=()
           [ "$INPUT_APPLY" = "true" ] && args+=(--apply)
           [ -n "$INPUT_ONLY" ] && args+=("--only=$INPUT_ONLY")
           [ "$INPUT_JSONLD" = "true" ] && args+=(--jsonld)
           [ "$INPUT_PAGE" = "true" ] || args+=(--no-page)
+          [ "$INPUT_REWRITE_HOST" = "true" ] && args+=(--rewrite-host)
           npm run tkm:structure -- "${args[@]}"

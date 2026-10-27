@@ -7,6 +7,8 @@
 //   GET  {BASE}/GetUrlSubmissionQuota?siteUrl=&apikey=  -> {d:{DailyQuota, MonthlyQuota}}
 // siteUrl은 Bing Webmaster에 등록된 사이트와 같아야 한다(끝 슬래시 포함 형태로 보낸다).
 
+import { normalizeTkmUrl } from "../../config/publishTargets.js";
+
 const BING_API_BASE = "https://ssl.bing.com/webmaster/api.svc/json";
 const REQUEST_TIMEOUT_MS = 15_000;
 
@@ -41,11 +43,12 @@ export function normalizeSiteUrl(value: string): string {
 }
 
 /**
- * 제출에 쓸 siteUrl. BING_SITE_URL이 있으면 그것을 우선하고(커스텀 도메인 전환 대비), 없으면 글 URL의 origin.
+ * 제출에 쓸 siteUrl. BING_SITE_URL이 있으면 그것을 우선하고, 없으면 글 URL의 origin.
+ * TKM 글이면 옛 blogspot 주소가 와도 공개 주소(KSCENE_PUBLIC_ORIGIN, 2026-10-28 www.koreaplain.com)의 origin이 된다.
  * 둘 다 없으면 null.
  */
 export function resolveBingSiteUrl(sampleUrl: string | null | undefined, env: string | undefined = process.env.BING_SITE_URL): string | null {
-  for (const candidate of [env?.trim(), sampleUrl]) {
+  for (const candidate of [env?.trim(), sampleUrl ? normalizeTkmUrl(sampleUrl) : sampleUrl]) {
     if (!candidate) continue;
     try {
       return normalizeSiteUrl(candidate);

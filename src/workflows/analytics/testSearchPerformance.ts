@@ -5,7 +5,7 @@ import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyInd
 import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
 import type { PerfRow } from "./weeklyReport.js";
 import { mapGa4Rows } from "../../services/ga4/Ga4Client.js";
-import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
+import { belongsToSite, resolveSiteUrls, siteLabel, withTkmAliases } from "./siteUrls.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -194,6 +194,45 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(attached[0].jobId === "job-b", "TKM 글은 자기 job에 붙는다");
   assert(attached[1].jobId === null, "매칭표에 없는 티스토리 글은 null로 비켜 간다");
   console.log("✅ 다중 속성 - 목록 해석·단일 폴백·소속 판정·타 채널 job 매칭 무해");
+}
+
+// --- 8b. Korea Plain 맞춤 도메인 전환(2026-10-28) - 새 속성 소속·두 호스트 job 매칭·주간 리포트 이어 붙이기 ----------
+{
+  const OLD = "https://thekoreamanual.blogspot.com";
+  const NEW = "https://www.koreaplain.com";
+  assert(belongsToSite(`${NEW}/2026/10/a.html`, "sc-domain:koreaplain.com"), "도메인 속성은 www 글을 포함");
+  assert(belongsToSite("https://koreaplain.com/", "sc-domain:koreaplain.com"), "도메인 속성은 apex도 포함");
+  assert(belongsToSite(`${NEW}/2026/10/a.html`, `${NEW}/`), "URL 접두어 속성");
+  assert(!belongsToSite(`${OLD}/2026/10/a.html`, "sc-domain:koreaplain.com") && !belongsToSite(`${OLD}/2026/10/a.html`, `${NEW}/`), "옛 blogspot 주소는 새 속성 밖");
+  assert(siteLabel("sc-domain:koreaplain.com") === "koreaplain.com" && siteLabel(`${NEW}/`) === "www.koreaplain.com", "표시 이름");
+
+  // publications가 옛 주소로 남아 있어도(전환 전) 새 주소 행이 같은 job에 붙고, 새 주소로 바뀐 뒤에도 옛 행이 붙는다.
+  const rows = aggregateRows([
+    { date: "2026-10-20", pageUrl: `${OLD}/2026/10/a.html`, query: "q", clicks: 1, impressions: 3, ctr: 0.3, position: 4 },
+    { date: "2026-10-30", pageUrl: `${NEW}/2026/10/a.html`, query: "q", clicks: 2, impressions: 5, ctr: 0.4, position: 3 },
+    { date: "2026-10-30", pageUrl: "https://wooahpapa.tistory.com/12", query: "q", clicks: 0, impressions: 1, ctr: 0, position: 9 },
+  ]);
+  for (const stored of [`${OLD}/2026/10/a.html`, `${NEW}/2026/10/a.html`]) {
+    const attached = attachJobIds(rows, withTkmAliases(new Map([[stored, "job-a"], ["https://wooahpapa.tistory.com/12", "job-t"]])));
+    assert(attached[0].jobId === "job-a" && attached[1].jobId === "job-a", `두 호스트 모두 같은 job (${stored})`);
+    assert(attached[2].jobId === "job-t", "티스토리 매칭 그대로");
+  }
+  const aliased = withTkmAliases(new Map([[`${NEW}/x.html`, "j1"], [`${OLD}/x.html`, "j2"]]));
+  assert(aliased.get(`${OLD}/x.html`) === "j2" && aliased.get(`${NEW}/x.html`) === "j1", "이미 있는 키는 덮어쓰지 않는다");
+
+  // 주간 리포트: 도메인 속성 이름(koreaplain.com)에 www 행과 전환 전 blogspot 행이 함께 모인다.
+  const perf = (date: string, url: string, clicks: number) => ({ date, page_url: url, query: "q", clicks, impressions: clicks * 10, position: 5 });
+  const weeks = buildWeeklyReport(
+    [perf("2026-10-27", `${OLD}/a.html`, 1), perf("2026-10-30", `${NEW}/a.html`, 2), perf("2026-10-30", "https://wooahpapa.tistory.com/1", 3), perf("2026-10-30", "https://other.example/1", 9)],
+    "2026-11-01",
+    ["koreaplain.com", "wooahpapa.tistory.com"]
+  );
+  const kp = weeks.find((week) => week.site === "koreaplain.com")!;
+  assert(kp.current.clicks === 3, `새 속성에 옛·새 행 합산 (${kp.current.clicks})`);
+  assert(weeks.find((week) => week.site === "wooahpapa.tistory.com")!.current.clicks === 3 && weeks.length === 2, "다른 속성 분리·목록 밖 제외");
+  const transitional = buildWeeklyReport([perf("2026-10-27", `${OLD}/a.html`, 1)], "2026-11-01", ["thekoreamanual.blogspot.com"]);
+  assert(transitional[0].current.clicks === 1, "변수 바꾸기 전(blogspot 속성)에는 옛 행이 그 속성에 그대로");
+  console.log("✅ 맞춤 도메인 - 새 속성 소속·두 호스트 job 매칭·주간 리포트 연속");
 }
 
 // --- 9. 주간 리포트 - 추이·축적 중 분기·경보·속성 분리 ----------------------------------------

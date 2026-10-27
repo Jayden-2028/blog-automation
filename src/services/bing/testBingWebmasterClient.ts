@@ -57,6 +57,8 @@ async function main(): Promise<void> {
   assert(resolveBingSiteUrl("https://a.blogspot.com/2026/10/x.html", undefined) === "https://a.blogspot.com/", "글 URL origin");
   assert(resolveBingSiteUrl("https://a.blogspot.com/x.html", "https://custom.example.com") === "https://custom.example.com/", "BING_SITE_URL 우선");
   assert(resolveBingSiteUrl("https://a.blogspot.com/x.html", "not a url") === "https://a.blogspot.com/", "잘못된 env는 무시");
+  assert(resolveBingSiteUrl("https://thekoreamanual.blogspot.com/2026/10/x.html", undefined) === "https://www.koreaplain.com/", "TKM 옛 주소는 공개 주소로(2026-10-28)");
+  assert(resolveBingSiteUrl("http://www.koreaplain.com/2026/10/x.html", undefined) === "https://www.koreaplain.com/", "http 새 주소도 https 사이트로");
   assert(resolveBingSiteUrl(null, undefined) === null, "후보 없음 -> null");
   console.log("✅ siteUrl 해석");
 

@@ -71,13 +71,87 @@ export const BLOGGER_CONFIG: BloggerConfig = {
 };
 
 /**
- * 사용설명서 트랙(Korea Plain)의 Blogger blogId(개편3, 2026-10-05 확정: thekoreamanual.blogspot.com).
+ * 사용설명서 트랙(Korea Plain)의 Blogger blogId(개편3, 2026-10-05 확정. 2026-10-28 맞춤 도메인 www.koreaplain.com 연결 -
+ * 구 주소 thekoreamanual.blogspot.com은 Blogger가 301로 넘긴다).
  * whynowissue와 **같은 구글 계정**이라 OAuth refresh token(BLOGGER_REFRESH_TOKEN)은 그대로 쓰고 blogId만 다르다.
  *
  * ⚠️ 이 값이 비어 있으면 사용설명서 글은 **발행하지 않는다**(BLOGGER_BLOG_ID로 폴백하지 않는다) - 폴백하면 영어 글이
  * whynowissue(한국어 블로그)에 올라간다. publishArticleToBlogspot.ts가 이 경우 `disabled`로 돌려준다.
  */
 export const KSCENE_BLOGGER_BLOG_ID: string | undefined = process.env.KSCENE_BLOGGER_BLOG_ID?.trim() || undefined;
+
+/**
+ * 사용설명서 트랙(Korea Plain)의 공개 주소(origin, 끝 슬래시 없음). 2026-10-28 맞춤 도메인 전환.
+ * 코드가 이 블로그의 호스트를 가정하는 자리(Related·All Guides 링크, JSON-LD, Bing siteUrl, 분석 매칭, 발행 기록 URL)는
+ * 전부 이 값과 normalizeTkmUrl을 거친다. `KSCENE_PUBLIC_ORIGIN`으로 덮어쓸 수 있다(되돌릴 때는 blogspot 주소를 넣는다).
+ */
+export const KSCENE_PUBLIC_ORIGIN: string = parseOrigin(process.env.KSCENE_PUBLIC_ORIGIN) ?? "https://www.koreaplain.com";
+
+/**
+ * 같은 블로그를 가리키는 옛 호스트. 구 주소는 301 소스로 영구 보존하므로 들어오는 URL에 계속 나타난다
+ * (Blogger API 응답·옛 발행 기록·옛 GSC 행·이미 넣은 본문 링크).
+ */
+export const KSCENE_LEGACY_HOSTS: readonly string[] = ["thekoreamanual.blogspot.com"];
+
+function parseOrigin(value: string | undefined): string | null {
+  if (!value?.trim()) return null;
+  try {
+    return new URL(value.trim()).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** 이 블로그의 호스트인가: 옛 blogspot, 공개 호스트, 공개 호스트의 apex(www 없는 형태). */
+function isTkmHost(host: string, origin: string): boolean {
+  const publicHost = new URL(origin).host.toLowerCase();
+  const apex = publicHost.replace(/^www\./, "");
+  const lower = host.toLowerCase();
+  return KSCENE_LEGACY_HOSTS.includes(lower) || lower === publicHost || lower === apex;
+}
+
+/**
+ * TKM 주소를 공개 주소로 바꾼다 - 스킴·호스트만 바꾸고 경로·쿼리·해시는 그대로. 다른 블로그 주소나 URL이 아닌 값은 그대로 돌려준다.
+ * `http://www.koreaplain.com/...`(Blogger API가 맞춤 도메인 글을 http로 돌려줄 수 있다)도 https로 맞춘다.
+ */
+export function normalizeTkmUrl(url: string, origin: string = KSCENE_PUBLIC_ORIGIN): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return url;
+  }
+  if (!/^https?:$/.test(parsed.protocol) || !isTkmHost(parsed.host, origin)) return url;
+  return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+/** 같은 글의 다른 호스트 표기들(공개 주소 + 옛 blogspot 주소). TKM 주소가 아니면 [url]. 분석 매칭용. */
+export function tkmUrlAliases(url: string, origin: string = KSCENE_PUBLIC_ORIGIN): string[] {
+  if (!isTkmUrl(url, origin)) return [url];
+  const normalized = normalizeTkmUrl(url, origin);
+  const path = normalized.slice(origin.length);
+  return [...new Set([url, normalized, ...KSCENE_LEGACY_HOSTS.map((host) => `https://${host}${path}`)])];
+}
+
+export function isTkmUrl(url: string, origin: string = KSCENE_PUBLIC_ORIGIN): boolean {
+  try {
+    return isTkmHost(new URL(url).host, origin);
+  } catch {
+    return false;
+  }
+}
+
+/** 본문 HTML·텍스트 안의 옛 blogspot **절대 URL**(`https://`, `http://`, `//`)을 공개 주소로. 스킴 없는 호스트 언급은 건드리지 않는다. */
+export function rewriteTkmLegacyUrls(text: string, origin: string = KSCENE_PUBLIC_ORIGIN): { text: string; count: number } {
+  let count = 0;
+  const hosts = KSCENE_LEGACY_HOSTS.map((host) => host.replace(/\./g, "\\.")).join("|");
+  const re = new RegExp(String.raw`(?:https?:)?//(?:${hosts})(?![\w.-])`, "gi");
+  const next = text.replace(re, () => {
+    count += 1;
+    return origin;
+  });
+  return { text: next, count };
+}
 
 /**
  * 내부 category -> Blogspot 라벨 (SPRINT_5_DESIGN.md §9-2).

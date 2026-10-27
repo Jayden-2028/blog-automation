@@ -3,11 +3,13 @@
 //   npm run bing:submit -- --quota                      # 잔여 할당량(일/월)
 //   npm run bing:submit -- --urls <url>,<url>           # 지정한 URL 제출
 //   npm run bing:submit -- --job-id <id>                # 그 job의 공개 글 URL + All Guides 제출(결과를 job.metadata.bingSubmit에 기록)
-//   옵션: --site=<siteUrl>  (기본: BING_SITE_URL, 없으면 첫 URL의 origin)
+//   옵션: --site=<siteUrl>  (기본: BING_SITE_URL, 없으면 첫 URL의 origin, URL도 없으면 KSCENE_PUBLIC_ORIGIN)
+// TKM 주소는 옛 blogspot 표기로 줘도 공개 주소(www.koreaplain.com)로 바꿔 제출한다(normalizeTkmUrl).
 //
 // 키는 BING_WEBMASTER_API_KEY(.env). 없으면 아무것도 보내지 않고 안내만 출력한다. 키 값은 출력하지 않는다.
 
 import "dotenv/config";
+import { KSCENE_PUBLIC_ORIGIN, normalizeTkmUrl } from "../../config/publishTargets.js";
 import { TKM_ALL_GUIDES_PATH } from "../../workflows/publish/tkmPostStructure.js";
 import { BingWebmasterClient, resolveBingSiteUrl } from "./BingWebmasterClient.js";
 
@@ -28,18 +30,19 @@ async function urlsOfJob(jobId: string): Promise<string[]> {
   const publications = await listPublicationsByArticleIds(articles.map((article) => article.id));
   const published = publications.find((pub) => pub.status === "published" && pub.published_url);
   if (!published?.published_url) throw new Error(`공개 발행된 글이 없습니다: ${jobId}`);
-  const siteUrl = resolveBingSiteUrl(published.published_url);
-  return [published.published_url, `${siteUrl?.replace(/\/$/, "")}${TKM_ALL_GUIDES_PATH}`];
+  const postUrl = normalizeTkmUrl(published.published_url);
+  const siteUrl = resolveBingSiteUrl(postUrl);
+  return [postUrl, `${siteUrl?.replace(/\/$/, "")}${TKM_ALL_GUIDES_PATH}`];
 }
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const client = new BingWebmasterClient();
   const jobId = option(argv, "job-id");
-  let urls = (option(argv, "urls") ?? "").split(",").map((url) => url.trim()).filter(Boolean);
+  let urls = (option(argv, "urls") ?? "").split(",").map((url) => normalizeTkmUrl(url.trim())).filter(Boolean);
   if (jobId) urls = await urlsOfJob(jobId);
 
-  const siteUrl = resolveBingSiteUrl(urls[0], option(argv, "site") ?? process.env.BING_SITE_URL);
+  const siteUrl = resolveBingSiteUrl(urls[0] ?? KSCENE_PUBLIC_ORIGIN, option(argv, "site") ?? process.env.BING_SITE_URL);
   if (!siteUrl) {
     console.error("siteUrl을 알 수 없습니다. --urls/--job-id를 주거나 --site= 또는 BING_SITE_URL을 설정하세요.");
     process.exit(1);

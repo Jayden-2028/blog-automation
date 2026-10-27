@@ -4,6 +4,7 @@
 // **정상 운영**이라 (date, page_url, query) unique 위에서 갱신한다.
 
 import { supabase } from "../client.js";
+import { withTkmAliases } from "../../../workflows/analytics/siteUrls.js";
 
 export type SearchPerformanceInsert = {
   date: string;
@@ -36,6 +37,7 @@ export async function upsertSearchPerformance(rows: SearchPerformanceInsert[]): 
  * 발행된 글 주소 → job_id. 성과 행을 우리 원고에 붙이는 데 쓴다.
  *
  * publications는 article_id만 갖고 있어 articles를 한 번 거쳐야 job_id가 나온다.
+ * Korea Plain 글은 blogspot·www.koreaplain.com 두 호스트를 모두 같은 job으로 매핑한다(withTkmAliases).
  */
 export async function loadPublishedUrlToJobId(): Promise<Map<string, string>> {
   const { data, error } = await supabase
@@ -49,7 +51,7 @@ export async function loadPublishedUrlToJobId(): Promise<Map<string, string>> {
     const jobId = row.articles?.job_id;
     if (row.published_url && jobId) map.set(row.published_url, jobId);
   }
-  return map;
+  return withTkmAliases(map);
 }
 
 /** 기간(포함)의 성과 행을 읽는다. Supabase 1회 응답 상한(1000행)을 넘으므로 나눠 읽는다. */

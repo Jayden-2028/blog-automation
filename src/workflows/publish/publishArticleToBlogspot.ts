@@ -23,7 +23,7 @@
 
 import { KSCENE_DEFAULT_LABEL, KSCENE_LABEL_BY_SEED } from "../../config/ksceneSeeds.js";
 import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
-import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KSCENE_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
+import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KSCENE_BLOGGER_BLOG_ID, normalizeTkmUrl } from "../../config/publishTargets.js";
 import { trackOfJob } from "../../notifications/telegramTracks.js";
 import { defaultRehostDeps, rehostImagesToPages } from "../../services/images/rehostImagesToPages.js";
 import type { RehostResult } from "../../services/images/rehostImagesToPages.js";
@@ -390,19 +390,21 @@ export async function publishArticleToBlogspot(
         if (!promoted.ok) {
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
         }
-        await markPublished({ publicationId: done.id, url: promoted.url, articleId: finalArticle.id });
-        const promotedHub = await finalizeTkm({ postId, url: promoted.url, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
-        await submitToBing(promoted.url, promotedHub);
-        return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, alreadyDone: false };
+        const promotedUrl = normalizeTkmUrl(promoted.url);
+        await markPublished({ publicationId: done.id, url: promotedUrl, articleId: finalArticle.id });
+        const promotedHub = await finalizeTkm({ postId, url: promotedUrl, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
+        await submitToBing(promotedUrl, promotedHub);
+        return { ok: true, publicationId: done.id, url: promotedUrl, isDraft: false, alreadyDone: false };
       }
 
-      // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다.
-      await markPublished({ publicationId: done.id, url: done.published_url ?? "", articleId: finalArticle.id });
-      await finalizeTkm({ postId, url: done.published_url ?? "", title: refreshTitle, published: done.created_at, html: refreshHtml });
+      // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다(옛 blogspot 기록이면 공개 주소로 맞춰 남긴다).
+      const knownPublicUrl = normalizeTkmUrl(done.published_url ?? "");
+      await markPublished({ publicationId: done.id, url: knownPublicUrl, articleId: finalArticle.id });
+      await finalizeTkm({ postId, url: knownPublicUrl, title: refreshTitle, published: done.created_at, html: refreshHtml });
       return {
         ok: true,
         publicationId: done.id,
-        url: done.published_url ?? "",
+        url: knownPublicUrl,
         isDraft: false,
         alreadyDone: false,
         updatedExisting: true,
@@ -412,7 +414,7 @@ export async function publishArticleToBlogspot(
     return {
       ok: true,
       publicationId: done.id,
-      url: done.published_url ?? "",
+      url: normalizeTkmUrl(done.published_url ?? ""),
       isDraft: done.status === "pending",
       alreadyDone: true,
     };
@@ -458,22 +460,25 @@ export async function publishArticleToBlogspot(
     return { ok: false, reason: "blogger_failed", detail: `[${inserted.stage}] ${inserted.error}`, stage: inserted.stage };
   }
 
+  // 맞춤 도메인 전환(2026-10-28) 뒤에도 API가 옛 blogspot 주소나 http 주소를 돌려줄 수 있다 - 기록·알림·뷰어에는 공개 주소를 쓴다.
+  // 초안 편집 URL(blogger.com)은 TKM 호스트가 아니라 그대로 남는다.
+  const insertedUrl = normalizeTkmUrl(inserted.url);
   const publication = await savePublication({
     articleId: finalArticle.id,
     status: inserted.isDraft ? "pending" : "published",
-    publishedUrl: inserted.url,
+    publishedUrl: insertedUrl,
   });
   // 공개 발행이면 배리에이션 원고 상태도 published로 올린다(기준 원고와 별개). draft면 pending 유지.
   if (!inserted.isDraft) {
     await updateArticleStatus(finalArticle.id, "published").catch(() => {});
-    const insertedHub = await finalizeTkm({ postId: inserted.postId, url: inserted.url, title: postTitle, published: new Date().toISOString(), html: contentHtml });
-    await submitToBing(inserted.url, insertedHub);
+    const insertedHub = await finalizeTkm({ postId: inserted.postId, url: insertedUrl, title: postTitle, published: new Date().toISOString(), html: contentHtml });
+    await submitToBing(insertedUrl, insertedHub);
   }
 
   return {
     ok: true,
     publicationId: publication.id,
-    url: inserted.url,
+    url: insertedUrl,
     isDraft: inserted.isDraft,
     alreadyDone: false,
   };

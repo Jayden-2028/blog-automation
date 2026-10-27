@@ -17,6 +17,10 @@
 //
 // 블록은 `class="tkm-related"` div와 `class="tkm-jsonld"` script로 감싸 **다시 돌려도 갈아 끼운다**(멱등).
 // 도메인은 하드코딩하지 않는다 - 링크 주소는 Blogger가 돌려준 글 URL에서, 사이트 루트는 그 origin에서 얻는다.
+// 단 호스트는 normalizeTkmUrl로 공개 주소(KSCENE_PUBLIC_ORIGIN, 2026-10-28 www.koreaplain.com)에 맞춘다 - 맞춤 도메인 전환 뒤에도
+// API·발행 기록에 옛 blogspot 주소가 섞여 들어온다. 경로는 그대로다.
+
+import { normalizeTkmUrl } from "../../config/publishTargets.js";
 
 /**
  * 본문 안 BlogPosting JSON-LD를 넣을지. 2026-10-27 실험: posts.patch로 넣은 `<script type="application/ld+json">`을
@@ -57,10 +61,10 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** 비교용 주소: 쿼리·해시·m=1 차이를 무시한다. */
+/** 비교용 주소: 쿼리·해시·m=1 차이와 호스트 표기(blogspot/맞춤 도메인) 차이를 무시한다. */
 export function normalizePostUrl(url: string): string {
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(normalizeTkmUrl(url));
     return `${parsed.host}${parsed.pathname}`.toLowerCase();
   } catch {
     return url.trim().toLowerCase();
@@ -69,7 +73,7 @@ export function normalizePostUrl(url: string): string {
 
 export function siteOrigin(url: string): string | null {
   try {
-    return new URL(url).origin;
+    return new URL(normalizeTkmUrl(url)).origin;
   } catch {
     return null;
   }
@@ -133,8 +137,12 @@ export function pickTkmRelated(
     if (post !== previousPost && !similar.includes(post)) similar.push(post);
   }
 
-  const toLink = (post: TkmPost): TkmLink => ({ url: post.url, title: post.title });
-  return { similar: similar.map(toLink), previous: previousPost ? toLink(previousPost) : null, allGuidesUrl };
+  const toLink = (post: TkmPost): TkmLink => ({ url: normalizeTkmUrl(post.url), title: post.title });
+  return {
+    similar: similar.map(toLink),
+    previous: previousPost ? toLink(previousPost) : null,
+    allGuidesUrl: allGuidesUrl ? normalizeTkmUrl(allGuidesUrl) : null,
+  };
 }
 
 /**
@@ -193,7 +201,8 @@ export function jsonLdForScript(data: unknown): string {
 
 /** BlogPosting JSON-LD `<script>`. `<`를 이스케이프해 본문 HTML 안에서 script가 일찍 닫히지 않게 한다. */
 export function buildJsonLdHtml(input: TkmJsonLdInput): string {
-  const { author, publisher } = tkmJsonLdBrand(siteOrigin(input.url));
+  const url = normalizeTkmUrl(input.url);
+  const { author, publisher } = tkmJsonLdBrand(siteOrigin(url));
   const data = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -204,8 +213,8 @@ export function buildJsonLdHtml(input: TkmJsonLdInput): string {
     author,
     publisher,
     ...(input.imageUrl ? { image: [input.imageUrl] } : {}),
-    mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
-    url: input.url,
+    mainEntityOfPage: { "@type": "WebPage", "@id": url },
+    url,
   };
   return `<script type="application/ld+json" class="${JSONLD_CLASS}">${jsonLdForScript(data)}</script>`;
 }
@@ -334,7 +343,7 @@ export function buildAllGuidesHtml(posts: readonly TkmPost[], fallbackLabel = "M
       .sort((a, b) => b.published.localeCompare(a.published))
       .map((post) => {
         const date = formatDate(post.published);
-        return `<li><a href="${escapeHtml(post.url)}">${escapeHtml(post.title)}</a>${date ? ` <span style="color:#666">(${date})</span>` : ""}</li>`;
+        return `<li><a href="${escapeHtml(normalizeTkmUrl(post.url))}">${escapeHtml(post.title)}</a>${date ? ` <span style="color:#666">(${date})</span>` : ""}</li>`;
       })
       .join("");
     return `<h2 style="${HEADING_STYLE}">${escapeHtml(label)}</h2>\n<ul style="${BODY_STYLE}">${items}</ul>`;

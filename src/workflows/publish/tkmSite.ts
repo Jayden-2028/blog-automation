@@ -4,6 +4,7 @@
 // All Guides 페이지는 **발행할 때마다 다시 만든다**(pages.patch, 멱등). 정적 목록으로 두면 다음 글부터 다시 고아가 된다.
 // 페이지 ID는 저장하지 않는다 - 매번 pages.list에서 경로(/p/all-guides.html)로 찾는다. 없으면 새로 만든다.
 
+import { normalizeTkmUrl } from "../../config/publishTargets.js";
 import type { BloggerClient, BloggerListedPage } from "../../services/publish/blogger/BloggerClient.js";
 import {
   TKM_ALL_GUIDES_PATH,
@@ -13,6 +14,7 @@ import {
   buildAllGuidesHtml,
   describePost,
   firstImageUrl,
+  normalizePostUrl,
   pickTkmRelated,
   siteOrigin,
 } from "./tkmPostStructure.js";
@@ -64,22 +66,23 @@ export async function syncAllGuidesPage(
   if (options.dryRun) {
     const origin = posts.map((post) => siteOrigin(post.url)).find(Boolean) ?? null;
     return existing
-      ? { url: existing.url, action: "would-update" }
+      ? { url: normalizeTkmUrl(existing.url), action: "would-update" }
       : { url: origin ? `${origin}${TKM_ALL_GUIDES_PATH}` : null, action: "would-create" };
   }
   if (existing) {
     await deps.patchPage(existing.id, TKM_ALL_GUIDES_TITLE, html);
-    return { url: existing.url, action: "updated" };
+    return { url: normalizeTkmUrl(existing.url), action: "updated" };
   }
   const created = await deps.insertPage(TKM_ALL_GUIDES_TITLE, html);
-  return { url: created.url || null, action: "created" };
+  return { url: created.url ? normalizeTkmUrl(created.url) : null, action: "created" };
 }
 
 /** 발행 직전 본문에 넣을 사이트 정보(글 목록 + 허브 주소). 실패하면 null - 발행을 막지 않는다. */
 export async function loadTkmSiteContext(deps: TkmSiteDeps): Promise<{ posts: TkmPost[]; allGuidesUrl: string | null } | null> {
   try {
     const [posts, pages] = await Promise.all([deps.listPosts(), deps.listPages()]);
-    return { posts, allGuidesUrl: findAllGuidesPage(pages)?.url ?? null };
+    const hub = findAllGuidesPage(pages)?.url;
+    return { posts, allGuidesUrl: hub ? normalizeTkmUrl(hub) : null };
   } catch (error) {
     console.warn(`⚠️ [tkm] 글 목록을 읽지 못했습니다(구조 보강 없이 발행): ${error instanceof Error ? error.message : String(error)}`);
     return null;
@@ -116,7 +119,7 @@ export async function finalizeTkmPost(
   }
   // 방금 공개한 글이 목록에 아직 없을 수 있다(API 반영 지연) - 직접 넣는다.
   const self: TkmPost = { url: post.url, title: post.title, labels: post.labels, published: post.published };
-  if (!posts.some((candidate) => candidate.url === post.url)) posts = [self, ...posts];
+  if (!posts.some((candidate) => normalizePostUrl(candidate.url) === normalizePostUrl(post.url))) posts = [self, ...posts];
 
   let allGuidesUrl: string | null = null;
   try {

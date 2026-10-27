@@ -5,6 +5,8 @@
 //
 // 데이터가 14일(날짜 수) 미만인 속성은 "축적 중"으로만 표기한다 - 빈약한 데이터로 추이를 말하지 않는다.
 
+import { normalizeTkmUrl } from "../../config/publishTargets.js";
+
 export type PerfRow = {
   date: string;
   page_url: string;
@@ -42,6 +44,19 @@ export function siteOf(pageUrl: string): string {
   } catch {
     return "(알 수 없음)";
   }
+}
+
+/**
+ * 행이 속한 속성 이름. 호스트가 같거나 도메인 속성(`sc-domain:koreaplain.com` → 이름 `koreaplain.com`)의 하위 호스트면 속한다.
+ * 그대로 맞는 속성이 없으면 TKM 옛 blogspot 주소를 공개 주소로 바꿔 다시 본다 - 맞춤 도메인 전환(2026-10-28) 전 행이 새 속성의
+ * 주간 비교에 이어진다. 끝내 없으면 null(목록 밖 호스트).
+ */
+function matchSite(pageUrl: string, sites: string[]): string | null {
+  for (const host of [siteOf(pageUrl), siteOf(normalizeTkmUrl(pageUrl))]) {
+    const found = sites.find((s) => host === s || host.endsWith(`.${s}`));
+    if (found) return found;
+  }
+  return null;
 }
 
 function addDays(date: string, delta: number): string {
@@ -94,8 +109,8 @@ export function buildWeeklyReport(rows: PerfRow[], endDate: string, sites: strin
   const bySite = new Map<string, PerfRow[]>();
   for (const s of sites) bySite.set(s, []);
   for (const r of rows) {
-    const s = siteOf(r.page_url);
-    if (sites.length > 0 && !bySite.has(s)) continue;
+    const s = sites.length > 0 ? matchSite(r.page_url, sites) : siteOf(r.page_url);
+    if (s === null) continue;
     bySite.set(s, [...(bySite.get(s) ?? []), r]);
   }
 
