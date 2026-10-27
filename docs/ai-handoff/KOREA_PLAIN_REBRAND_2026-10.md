@@ -62,7 +62,18 @@ curl -s https://thekoreamanual.blogspot.com/ | grep -o "<title>[^<]*</title>\|na
 
 ### 실행 결과
 
-(실행 후 단계별로 기록)
+2026-10-28 실행(전부 `tkm-rebrand.yml`, main):
+
+| 단계 | run | 결과 |
+|---|---|---|
+| dry-run(all) | 40553605912 | 46건(글 40·페이지 6) 중 바꿀 것 44, 변경 없음 2(Contact·Editorial Policy), 본문 치환 7, JSON-LD 40블록, 제목 1, 검증 실패 0 |
+| apply limit 1(posts) | 40553698435 | how-to-get-tax-refund-on-electronics-in ok. **공개 페이지에서 publisher.description의 "—"가 `&#8212;`로 나옴** - Blogger가 script 안 비ASCII를 엔티티로 바꾼다 |
+| 수정 eb64c9a | - | `jsonLdForScript`: JSON-LD 비ASCII를 `\uXXXX`로. 이름이 새 것이어도 날것 비ASCII 블록은 다시 쓴다 |
+| apply only=그 글 | 40553964937 | ok. 공개 페이지 curl: author·publisher = Korea Plain, slogan·description 정상, 엔티티 0, JSON-LD 밖 본문 바이트 동일 |
+| apply all(limit 100) | 40554096532 | **적용 43건(글 39 + All Guides·Privacy·Disclaimer·About), 실패 0**, 변경 없음 3(1편 기적용·Contact·Editorial) |
+
+공개 페이지 재확인(46개 curl): JSON-LD 40/40 새 이름·slogan, 엔티티 0(기존 글에 있던 `&#8211;`·`&#8361;` 8곳도 이번 재작성으로 해소),
+스크립트 밖 옛 이름 0(About의 "formerly" 제외). About 제목 "About Korea Plain"·첫머리 태그라인 확인, All Guides "Every guide on Korea Plain".
 
 ## 4. 도메인 전환 때 할 일 — 이번에 건드리지 않음
 

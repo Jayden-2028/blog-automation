@@ -4,7 +4,7 @@
 
 ## 2026-10-28 — 사용설명서 블로그 리브랜딩: The Korea Manual → **Korea Plain** (브랜치 `feat/korea-plain-rebrand`)
 
-**상태: 코드 main 병합. 기존 글·페이지 치환은 `tkm-rebrand.yml`(수동 dispatch)로 실행. 블로그 제목·설명·검색 설명은 팀장 Blogger UI 작업
+**상태: 코드 main 병합. 기존 글 40편·페이지 4개 치환 완료(`tkm-rebrand.yml` run 40554096532, 실패 0 - 공개 페이지 curl 확인). 블로그 제목·설명·검색 설명은 팀장 Blogger UI 작업
 (`KOREA_PLAIN_REBRAND_2026-10.md` §1 표). 주소(thekoreamanual.blogspot.com)·슬러그·환경변수명은 그대로 - 도메인(koreaplain.com) 전환 때 별도.**
 
 - 이유: thekoreamanual.com이 같은 이름·같은 주제의 제3자 사이트. 이름 **Korea Plain**, 태그라인 **"Korea, in plain English"**, 설명
@@ -12,6 +12,7 @@
 - 새 발행: JSON-LD author·publisher = Korea Plain(publisher에 slogan·description), All Guides 문구, 텔레그램 안내·뷰어 제목, 번역 프롬프트 매체명(태그라인 포함).
 - 기존 글·페이지: `npm run tkm:rebrand`(dry-run 기본, `--apply --limit=N`, `--target=all|posts|pages`) - 글은 JSON-LD 이름만, 페이지는 본문 이름 + About 제목
   "About Korea Plain"·태그라인·"(formerly The Korea Manual)". 변환 전후가 이름 치환뿐인지 문자 단위로 검증(`checkNameOnlyChange`). `BloggerClient.listPages({ fetchBodies })`·`getPage` 추가.
+- JSON-LD는 이제 비ASCII를 `\uXXXX`로 쓴다(`jsonLdForScript`) - Blogger가 script 안 "—"·"–"·"₩"를 `&#8212;` 같은 엔티티로 바꿔 구조화 데이터에 그대로 남던 문제(리브랜딩 1편 적용 때 발견, 기존 8곳도 함께 해소).
 - 식별자는 그대로: `TKM_*`, `tkm*.ts`, `tkm-*` 클래스, `KSCENE_*`, 트랙 키 `kscene`, `@KoreanManualBot`, 이미지 호스트 `korea-manual-images-2026.pages.dev`.
 - 테스트: `test:tkm-rebrand`(신규) + tkm-structure·publish-blogspot·publish-blocks·translation·kscene-approval·kscene-topics·manuscript-track-pages·related-posts·search-performance, `npm run build`.
 
