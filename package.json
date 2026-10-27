@@ -104,6 +104,8 @@
     "tistory:fix-links": "tsx src/workflows/publish/tistoryFixLinksCli.ts",
     "test:tistory-edit": "tsx src/services/publish/tistory/testTistoryPostEdit.ts",
     "test:tistory-fix-links": "tsx src/workflows/publish/testTistoryDeadLinks.ts",
+    "tistory:backfill-links": "tsx src/workflows/publish/tistoryBackfillLinksCli.ts",
+    "test:tistory-backfill-links": "tsx src/workflows/publish/testTistoryRelatedBackfill.ts",
     "test:tistory-image": "tsx src/services/publish/tistory/testTistoryImageFormat.ts",
     "test:tistory-queue": "tsx src/workflows/publish/testTistoryPublishQueue.ts",
     "test:publish-tistory-job": "tsx src/workflows/publish/testPublishJobToTistory.ts",

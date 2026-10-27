@@ -2,6 +2,24 @@
 
 기준일: 2026-10-28 (Asia/Seoul)
 
+## 2026-10-28 — 티스토리 기존 글 내부 링크 소급 백필 CLI (브랜치 `feat/tistory-backfill-links`)
+
+**상태: 코드 main 병합. 실행(`--apply`)은 팀장이 맥미니에서. 이 세션은 dry-run만 돌렸다(DB 읽기 + 공개 페이지 GET).**
+
+- `npm run tistory:backfill-links`: 기존 티스토리 발행 글에 "함께 보면 좋은 글" 블록(같은 블로그 글 최대 3개)을 `editPost`의 **블록 추가**로
+  넣는다. 기본 dry-run, `--apply [--limit N]`, `--only <article_id>`. 규칙·절차는 `TISTORY_AUTO_PUBLISH_DESIGN.md` §8 "소급 백필".
+- 코드: `workflows/publish/tistoryBackfillLinksCli.ts`, 순수 함수 `workflows/publish/tistoryRelatedBackfill.ts`. 추출·확장:
+  `appendRelatedPosts.ts`에 `pickRelatedPostsForHosts`·`relatedBlockMarkdown`(신규 발행 경로도 이것으로 블록을 만든다),
+  `listPublishedPosts(limit, { platform })`, `tistoryPostEdit.ts`에 `EditPlan.insertBlock`·`checkInsertInvariants`,
+  `TistoryPublisher.editPost`에 블록 추가 분기(`INSERT_BLOCK_JS`, setContent 없음) + 결과 `insertedHrefs`.
+- **dry-run(2026-10-28)**: 101편 - 대상 100 / 이미 블록 있음 1(article 455, 글 17) / 후보 없음 0. 자리 예측: 참고 자료 앞 99, 본문 끝 1.
+  관련 글 수: 3개 33편, 2개 18편, **1개 50편**(점수 미달 → 가장 가까운 1개 규칙이라 주제가 먼 링크가 섞인다 - 선정 규칙은 신규 발행과 같다).
+  글 17의 기존 블록은 **폐쇄된 whynowissue.blogspot.com 링크 1개**다(건너뜀 대상 - 따로 처리할지 결정 필요).
+- 테스트: `test:tistory-backfill-links`(선정·마크업·자리·멱등·불변 검증·공개 페이지 확인). 기존 티스토리 테스트 8종 + `test:related-posts` +
+  `test:prepare-manuscripts` + `npm run build` 통과.
+- **미확인 가정**: editPost 실측 전(수정 화면 주소·셀렉터·버튼 문구·"이어서 작성" 팝업) + 블록 추가 고유 가정 - 수정 화면 에디터의
+  `body.children`이 공개 페이지 본문 블록과 같은 구조, 직접 DOM에 넣은 노드가 `getContent`에 그대로 직렬화됨. `--limit 1`로 먼저 확인.
+
 ## 2026-10-28 — 티스토리 발행본에 같은 블로그 내부 링크 유지 (브랜치 `feat/tistory-same-blog-links`)
 
 **상태: main 병합. 맥미니 폴러가 이 코드를 쓰므로 `git pull --ff-only` 필요(폴러 재시작은 팀장 판단 - 폴러는 건드리지 않았다).**
@@ -10,7 +28,7 @@
 - 후(사용자 결정 2026-10-28): `filterRelatedPostsByHost(body, allowedHosts)`가 블록 안 `- [제목](url)` 중 **호스트가 허용 목록에 없는 것만** 지운다(정확 일치, `www.` 무시 - 접두·접미 위장 호스트는 통과 못 함). 남는 게 0개면 제목 줄까지 블록째 제거. 멱등. 허용 호스트는 `tistoryOwnHosts()` = `<tistoryBlogName()>.tistory.com`(`TISTORY_BLOG_URL`에서 파생, 하드코딩 없음).
 - 네이버 경로(`removeRelatedPosts`, `publishJobToNaver`)와 `manualPasteView`는 그대로다. HTML 변환(`renderPublishBlocks`)은 이미 `- [제목](url)` 목록을 `<ul><li><a href>`로 렌더해 수정 없음(제목은 `<p><strong>`).
 - 테스트: `test:related-posts`(호스트 필터 3케이스), `test:publish-tistory-job`(같은 블로그 `<a href>` 유지 + blogspot 제거 + 전부 외부면 블록 제거).
-- **범위 밖**: 이미 발행된 티스토리 글 소급(editPost로 블록 추가)은 별도 결정이다.
+- **범위 밖**: 이미 발행된 티스토리 글 소급(editPost로 블록 추가)은 별도 결정이다. → 같은 날 결정·구현(`tistory:backfill-links`, 위 절).
 
 ## 2026-10-28 — 티스토리 발행 후 수정(editPost) + 404 내부 링크 치환 CLI (브랜치 `feat/tistory-edit-post`)
 

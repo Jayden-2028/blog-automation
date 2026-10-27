@@ -112,7 +112,10 @@
 **할 수 있는 것**: 본문 `a`의 href를 계획한 자리만 바꿔 다시 저장. 공개 범위·슬러그·제목·태그·카테고리는 그대로 둔다
 (공개 범위는 발행 레이어에서 현재 값을 읽어 로그로만 남기고 클릭하지 않는다).
 
-**할 수 없는 것(일부러 막음)**: 본문 통째 교체(`setContent`), 텍스트·이미지 수정, 링크 추가·삭제, 제목·슬러그·공개 범위 변경.
+**할 수 있는 것(2026-10-28 추가)**: 최상위 블록 **추가**(`EditPlan.insertBlock`) - 기존 노드는 건드리지 않고 새 블록만 넣는다.
+첫 용도는 "함께 보면 좋은 글" 소급 백필(아래 "소급 백필"). href 변경과 한 번에 같이 쓰지 않는다.
+
+**할 수 없는 것(일부러 막음)**: 본문 통째 교체(`setContent`), 기존 텍스트·이미지 수정, 기존 링크 삭제, 제목·슬러그·공개 범위 변경.
 그런 수정이 필요하면 이 기능을 넓히지 말고 따로 설계한다.
 
 **흐름**: ① 공개 페이지(로그인 컨텍스트 GET)에서 글 ID - `data-entry-id` → `"entryId":N` → `/<N>` 링크(최다·단독 1등일 때만)
@@ -142,4 +145,35 @@
 4. DB 본문은 따로: `npm run tistory:fix-links -- --db --dry-run` → `--db`
 
 2026-10-28 dry-run 기준 티스토리 글에는 옛 링크가 0개라(당시까지 “함께 보면 좋은 글” 블록은 티스토리 발행 때 통째로 빠졌다. 같은 날 이후 발행분부터는 같은 블로그 링크가 남는다) 1~3은 할 일이 없고 4만 남았다.
+
+### 소급 백필 - 기존 글에 "함께 보면 좋은 글" 블록 추가 (2026-10-28)
+
+2026-10-28부터 신규 티스토리 글에는 같은 블로그 내부 링크 블록이 남지만(`filterRelatedPostsByHost`), 그 전 발행분 101편에는 내부 링크가
+0개였다. 사용자 결정(2026-10-28)으로 editPost의 블록 추가로 소급한다. CLI `npm run tistory:backfill-links`
+(`workflows/publish/tistoryBackfillLinksCli.ts`), 순수 함수 `workflows/publish/tistoryRelatedBackfill.ts`, 테스트 `npm run test:tistory-backfill-links`.
+
+- **대상·선정**: `publications`(platform=tistory, status=published) 전부. 관련 글은 `pickRelatedPostsForHosts`(= 같은 블로그
+  `<blogName>.tistory.com` 후보로 먼저 거른 뒤 `pickRelatedPosts`) - 최대 3개, 자기 자신은 job·주소로 제외, 점수 미달이면 가장 가까운 1개
+  (신규 발행 경로와 같은 규칙). 후보는 `listPublishedPosts(1000, { platform: "tistory" })`. 후보가 없으면 `skip: no-candidates`.
+- **마크업**: 마크다운 블록(`relatedBlockMarkdown`)을 티스토리 변환기에 넣어 만든다 - 신규 발행본과 같은
+  `<p style="font-size:19px"><strong>함께 보면 좋은 글</strong></p><ul style="font-size:15px"><li><a href … target="_blank" rel="noopener">제목</a></li>…</ul>`.
+  블록 간격 빈 단락(`<p>&nbsp;</p>`)은 앞에 넣을 때 블록 뒤, 끝에 붙일 때 블록 앞. (티스토리는 저장할 때 `strong`→`b`, `data-ke-*` 속성을 붙인다.
+  신규 발행본도 같다.)
+- **자리**: 본문 최상위 블록 중 굵은 글씨 "참고 자료" 단락 앞 → 해시태그 단락(`#… #…`) 앞 → 본문 끝. Node가 자리(블록 순번)를 정하고,
+  브라우저는 블록 수·그 자리 블록 텍스트가 계획과 같을 때만 `ed.dom.create`로 만든 노드를 `insertBefore`/`ed.dom.add`로 넣는다.
+- **멱등**: 공개 페이지 본문 영역(`.contents_style`) 또는 에디터 본문에 제목 "함께 보면 좋은 글" 단락이 이미 있으면 `skip: already-has-block`.
+- **불변 검증**(`checkInsertInvariants`): 넣은 노드 **밖** 텍스트 길이·해시 동일, 넣은 블록 텍스트 = 계획, `img` 수 동일,
+  `a` 수·직렬화 본문 링크 수 = 기존 + 넣은 수, 기존 href는 순서·값 그대로이고 넣은 링크는 한 덩어리, 직렬화 본문에 새 주소 전부.
+  하나라도 어긋나면 발행하지 않는다. 저장 뒤 공개 페이지 본문 영역에서 제목·링크를 다시 확인한다(스킨의 관련 글 위젯과 섞이지 않게).
+- **기록**: 저장된 글은 `article_jobs.metadata.tistoryRelatedBackfill = { at, postId, verified, links: [{title, url}] }`.
+- **멈춤**: 로그인 풀림(deferred)·저장 확인 실패(publish 단계)·저장 뒤 공개 페이지 확인 실패는 즉시, 그 밖의 실패(발행 안 함)는 연속 3번.
+  글 사이 3~5초.
+
+**실행 절차(맥미니, 팀장)** - 티스토리 폴러가 발행 중이 아닐 때(같은 프로필).
+1. `npm run tistory:backfill-links` (dry-run - 글별 관련 글·삽입 위치 표 + 집계. 네트워크는 공개 페이지 GET만. 특정 글은 `--only <article_id>`)
+2. `npm run tistory:backfill-links -- --apply --limit 1` → 결과 표 확인
+3. 그 글의 공개 페이지를 눈으로 확인(블록 위치·링크·이미지·공개 범위 그대로인지)
+4. `npm run tistory:backfill-links -- --apply` (이미 넣은 글은 `skip: already-has-block`으로 건너뛴다 - 중간에 멈춰도 다시 돌리면 된다)
+
+실패 스냅샷: `.local/dom-snapshots/tistory/failures/<시각>_edit-<단계>.html|png`(맥미니 저장소 폴더 기준).
 

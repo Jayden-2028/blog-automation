@@ -42,19 +42,23 @@ import {
 
 import {
   checkEditInvariants,
+  checkInsertInvariants,
   extractPageTitle,
   extractTistoryPostId,
   snapshotFromRaw,
   tistoryEditUrl,
+  type BlockInsertion,
   type EditPlan,
+  type EditorBlock,
   type EditorSnapshot,
   type HrefChange,
   type RawEditorState,
+  type RawInsertState,
   type TistoryPostIdSource,
 } from "./tistoryPostEdit.js";
 
 export type { TistoryUrlSource } from "./tistoryPublishedUrl.js";
-export type { EditPlan, HrefChange } from "./tistoryPostEdit.js";
+export type { BlockInsertion, EditPlan, EditorBlock, HrefChange } from "./tistoryPostEdit.js";
 
 export type TistoryPublishStage =
   | "login"
@@ -105,6 +109,8 @@ export type TistoryEditContext = {
   postId: number;
   /** 에디터 본문 `a`의 href(순서 = ed.dom.select("a") 순번). */
   hrefs: string[];
+  /** 에디터 본문 최상위 블록(순서 = body.children). 블록 추가 자리 판정용. */
+  blocks: EditorBlock[];
   /** 수정 전 공개 글 페이지 HTML. */
   publicHtml: string;
   /** `<blog>.tistory.com` - 상대 경로 href 비교용. */
@@ -125,6 +131,8 @@ export type TistoryEditResult =
       ok: true;
       postId: number;
       changedHrefs: HrefChange[];
+      /** 블록 추가 계획으로 넣은 링크 주소(없으면 빈 배열). */
+      insertedHrefs: string[];
       /** 바꿀 게 없어 발행 단계를 건너뛰었다(멱등 재실행). */
       noChange: boolean;
       verified: boolean;
@@ -222,6 +230,65 @@ const EDIT_STATE_JS = `(() => {
     images: body.querySelectorAll("img").length,
     hrefs: ed.dom.select("a").map((a) => ed.dom.getAttrib(a, "href") || ""),
     content: ed.getContent() || "",
+    blocks: Array.from(body.children).map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      text: (el.textContent || "").trim(),
+      bold: Array.from(el.querySelectorAll("strong, b")).map((b) => (b.textContent || "").trim()),
+    })),
+  };
+})()`;
+
+/**
+ * 최상위 블록을 **추가**한다(2026-10-28 소급 백필). setContent 없이 ed.dom.create로 만든 노드를 기준 블록 앞(insertBefore)이나
+ * 본문 끝(ed.dom.add)에 넣는다. 넣기 전 블록 수·기준 블록 텍스트가 계획과 같은지 보고, 다르면 아무것도 넣지 않는다.
+ * 넣은 노드는 window.__tistoryInsertedNodes에 남겨 INSERT_STATE_JS가 그 밖의 텍스트만 따로 읽게 한다.
+ */
+const INSERT_BLOCK_JS = (insertion: BlockInsertion): string => `(() => {
+  const ed = window.tinymce && window.tinymce.get("${SELECTORS.editorInstanceId}");
+  if (!ed) return "no-editor";
+  const ins = ${JSON.stringify({ html: insertion.html, beforeIndex: insertion.beforeIndex, guardText: insertion.guardText, blockCount: insertion.blockCount })};
+  const body = ed.getBody();
+  const blocks = Array.from(body.children);
+  if (blocks.length !== ins.blockCount) return "block-count " + blocks.length + "!=" + ins.blockCount;
+  let ref = null;
+  if (ins.beforeIndex !== null) {
+    ref = blocks[ins.beforeIndex];
+    if (!ref) return "missing #" + ins.beforeIndex;
+    if ((ref.textContent || "").trim() !== ins.guardText) return "mismatch #" + ins.beforeIndex;
+  }
+  const holder = ed.dom.create("div", {}, ins.html);
+  const nodes = Array.from(holder.childNodes).filter((n) => n.nodeType === 1);
+  if (nodes.length === 0) return "empty-block";
+  for (const node of nodes) {
+    if (ref) ref.parentNode.insertBefore(node, ref);
+    else ed.dom.add(body, node);
+  }
+  window.__tistoryInsertedNodes = nodes;
+  if (ed.undoManager && ed.undoManager.add) ed.undoManager.add();
+  if (ed.setDirty) ed.setDirty(true);
+  if (ed.fire) { ed.fire("change"); ed.fire("input"); }
+  return "ok";
+})()`;
+
+/** 블록 추가 뒤 상태 - EDIT_STATE_JS에 더해 넣은 노드 밖의 텍스트(textOutside)와 넣은 노드의 텍스트·href. 읽기만 한다. */
+const INSERT_STATE_JS = `(() => {
+  const ed = window.tinymce && window.tinymce.get("${SELECTORS.editorInstanceId}");
+  if (!ed || !ed.initialized || !ed.getBody()) return null;
+  const body = ed.getBody();
+  const nodes = window.__tistoryInsertedNodes || [];
+  const walker = body.ownerDocument.createTreeWalker(body, 4);
+  let textOutside = "";
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    if (!nodes.some((n) => n.contains(t))) textOutside += t.nodeValue || "";
+  }
+  return {
+    text: body.textContent || "",
+    images: body.querySelectorAll("img").length,
+    hrefs: ed.dom.select("a").map((a) => ed.dom.getAttrib(a, "href") || ""),
+    content: ed.getContent() || "",
+    textOutside,
+    insertedText: nodes.map((n) => n.textContent || "").join(""),
+    insertedHrefs: nodes.flatMap((n) => Array.from(n.querySelectorAll("a")).map((a) => ed.dom.getAttrib(a, "href") || "")),
   };
 })()`;
 
@@ -432,7 +499,7 @@ export class TistoryPublisher {
   /**
    * 이미 발행된 글의 본문을 **속성 단위로만** 고쳐 다시 저장한다(2026-10-28, 설계서 "발행 후 수정").
    * 흐름: 공개 페이지에서 글 ID → 수정 화면(/manage/newpost/<ID>?type=post) → 에디터 상태 스냅샷 → mutate(Node)로 바꿀 자리 결정
-   * → 그 `a`의 href만 setAttrib → 불변 검증 → 발행 레이어(공개 범위·슬러그·제목·태그·카테고리는 건드리지 않음) → 화면 이탈 확인
+   * → 그 `a`의 href만 setAttrib(또는 최상위 블록 추가 - 소급 백필) → 불변 검증 → 발행 레이어(공개 범위·슬러그·제목·태그·카테고리는 건드리지 않음) → 화면 이탈 확인
    * → 공개 페이지 재확인(verify). 실측 전 가정(수정 화면 주소·버튼 문구·셀렉터)은 실패 메시지에 셀렉터를 적고 스냅샷을 남긴다.
    */
   async editPost(input: TistoryEditInput): Promise<TistoryEditResult> {
@@ -499,7 +566,7 @@ export class TistoryPublisher {
       // 3) 바꿀 자리 결정(Node).
       let plan: EditPlan;
       try {
-        plan = input.mutate({ postId, hrefs: before.hrefs, publicHtml, host });
+        plan = input.mutate({ postId, hrefs: before.hrefs, blocks: raw0.blocks ?? [], publicHtml, host });
       } catch (error) {
         return { ok: false, stage: "plan", postId, error: this.errorMessage(error) };
       }
@@ -507,26 +574,52 @@ export class TistoryPublisher {
         await this.saveFailureSnapshot(page, "edit-plan");
         return { ok: false, stage: "plan", postId, error: plan.abort };
       }
-      if (plan.hrefChanges.length === 0) {
+      if (plan.insertBlock && plan.hrefChanges.length > 0) {
+        return { ok: false, stage: "plan", postId, error: "href 변경과 블록 추가는 한 번에 같이 하지 않습니다." };
+      }
+      if (plan.hrefChanges.length === 0 && !plan.insertBlock) {
         const check = input.verify?.(publicHtml);
-        return { ok: true, postId, changedHrefs: [], noChange: true, verified: check?.ok ?? false, verifyDetail: check?.detail, warnings };
+        return { ok: true, postId, changedHrefs: [], insertedHrefs: [], noChange: true, verified: check?.ok ?? false, verifyDetail: check?.detail, warnings };
       }
 
-      // 4) 속성만 바꾸고 불변 검증.
-      const applied = (await page.evaluate(APPLY_HREF_CHANGES_JS(plan.hrefChanges)).catch((error: unknown) => `error:${this.errorMessage(error)}`)) as string;
-      if (applied !== "ok") {
-        await this.saveFailureSnapshot(page, "edit-mutate");
-        return { ok: false, stage: "mutate", postId, error: `href 변경 실패(${applied}) - ed.dom.select("a")` };
-      }
-      const raw1 = (await page.evaluate(EDIT_STATE_JS).catch(() => null)) as RawEditorState | null;
-      if (!raw1) {
-        await this.saveFailureSnapshot(page, "edit-invariant");
-        return { ok: false, stage: "invariant", postId, error: "변경 후 에디터 상태를 읽지 못했습니다." };
-      }
-      const invariant = checkEditInvariants(before, snapshotFromRaw(raw1), plan.hrefChanges, host);
-      if (!invariant.ok) {
-        await this.saveFailureSnapshot(page, "edit-invariant");
-        return { ok: false, stage: "invariant", postId, error: `불변 검증 실패 - 발행하지 않았습니다: ${invariant.reasons.join("; ")}` };
+      // 4) 속성만 바꾸거나(href) 블록만 추가하고 불변 검증.
+      let changedHrefs: HrefChange[] = [];
+      let insertedHrefs: string[] = [];
+      if (plan.insertBlock) {
+        const insertion = plan.insertBlock;
+        const inserted = (await page.evaluate(INSERT_BLOCK_JS(insertion)).catch((error: unknown) => `error:${this.errorMessage(error)}`)) as string;
+        if (inserted !== "ok") {
+          await this.saveFailureSnapshot(page, "edit-mutate");
+          return { ok: false, stage: "mutate", postId, error: `블록 추가 실패(${inserted}) - body.children[${insertion.beforeIndex ?? "끝"}]` };
+        }
+        const raw1 = (await page.evaluate(INSERT_STATE_JS).catch(() => null)) as RawInsertState | null;
+        if (!raw1) {
+          await this.saveFailureSnapshot(page, "edit-invariant");
+          return { ok: false, stage: "invariant", postId, error: "변경 후 에디터 상태를 읽지 못했습니다." };
+        }
+        const invariant = checkInsertInvariants(before, raw1, insertion, host);
+        if (!invariant.ok) {
+          await this.saveFailureSnapshot(page, "edit-invariant");
+          return { ok: false, stage: "invariant", postId, error: `불변 검증 실패 - 발행하지 않았습니다: ${invariant.reasons.join("; ")}` };
+        }
+        insertedHrefs = raw1.insertedHrefs;
+      } else {
+        const applied = (await page.evaluate(APPLY_HREF_CHANGES_JS(plan.hrefChanges)).catch((error: unknown) => `error:${this.errorMessage(error)}`)) as string;
+        if (applied !== "ok") {
+          await this.saveFailureSnapshot(page, "edit-mutate");
+          return { ok: false, stage: "mutate", postId, error: `href 변경 실패(${applied}) - ed.dom.select("a")` };
+        }
+        const raw1 = (await page.evaluate(EDIT_STATE_JS).catch(() => null)) as RawEditorState | null;
+        if (!raw1) {
+          await this.saveFailureSnapshot(page, "edit-invariant");
+          return { ok: false, stage: "invariant", postId, error: "변경 후 에디터 상태를 읽지 못했습니다." };
+        }
+        const invariant = checkEditInvariants(before, snapshotFromRaw(raw1), plan.hrefChanges, host);
+        if (!invariant.ok) {
+          await this.saveFailureSnapshot(page, "edit-invariant");
+          return { ok: false, stage: "invariant", postId, error: `불변 검증 실패 - 발행하지 않았습니다: ${invariant.reasons.join("; ")}` };
+        }
+        changedHrefs = invariant.changed;
       }
 
       // 5) 발행 레이어 - 공개 범위는 현재 값을 읽기만 한다(클릭하지 않는다).
@@ -592,7 +685,7 @@ export class TistoryPublisher {
           }
         }
       }
-      return { ok: true, postId, changedHrefs: invariant.changed, noChange: false, verified, verifyDetail, visibility, buttonText, warnings };
+      return { ok: true, postId, changedHrefs, insertedHrefs, noChange: false, verified, verifyDetail, visibility, buttonText, warnings };
     } finally {
       await context.close().catch(() => {});
     }

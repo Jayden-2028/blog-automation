@@ -57,6 +57,20 @@ export function pickRelatedPosts(
 }
 
 /**
+ * 허용 호스트(같은 블로그)의 발행글만 후보로 두고 pickRelatedPosts로 고른다(2026-10-28, 티스토리 소급 백필).
+ * 신규 발행 경로는 전체 후보에서 고른 뒤 발행 단계에서 호스트로 거르지만(filterRelatedPostsByHost), 소급 백필은
+ * 같은 블로그 글만 넣으므로 **먼저 거르고** 고른다 - 그래야 최대 3개가 다른 블로그 글에 밀려 비지 않는다.
+ */
+export function pickRelatedPostsForHosts(
+  input: { jobId: string; keyword: string; category: string | null },
+  candidates: readonly PublishedPost[],
+  allowedHosts: readonly string[],
+  limit = MAX_LINKS
+): RelatedLink[] {
+  return pickRelatedPosts(input, candidates.filter((post) => isAllowedHost(post.url, allowedHosts)), limit);
+}
+
+/**
  * 이미 붙어 있는 "함께 보면 좋은 글" 블록을 통째로 들어낸다. 멱등 처리용이고, 네이버 발행에서도
  * 쓴다(2026-10-04) - 링크가 전부 Blogspot 주소라 네이버에서는 바깥 링크이고, 같은 글의 다른 채널
  * 사본으로 이어져 유사문서 판정 위험만 키운다. `참고 자료`를 빼는 2026-09-22 결정과 같은 취지다.
@@ -75,6 +89,12 @@ function normalizeHost(value: string): string | null {
   }
 }
 
+/** 주소의 호스트가 허용 목록과 정확히 같은가(`www.` 접두는 무시). */
+function isAllowedHost(url: string, allowedHosts: readonly string[]): boolean {
+  const host = normalizeHost(url);
+  return host !== null && allowedHosts.some((allowed) => normalizeHost(allowed) === host);
+}
+
 const RELATED_LINK_LINE = /^\s*[-*]\s+\[[^\]]*\]\(([^\s()]+(?:\([^\s()]*\))*[^\s()]*)\)\s*$/;
 
 /**
@@ -86,7 +106,6 @@ const RELATED_LINK_LINE = /^\s*[-*]\s+\[[^\]]*\]\(([^\s()]+(?:\([^\s()]*\))*[^\s
 export function filterRelatedPostsByHost(body: string, allowedHosts: readonly string[]): string {
   const start = body.indexOf(RELATED_HEADING);
   if (start < 0) return body;
-  const allowed = new Set(allowedHosts.map(normalizeHost).filter((host): host is string => host !== null));
 
   const afterHeading = start + RELATED_HEADING.length;
   const rest = body.slice(afterHeading);
@@ -98,8 +117,7 @@ export function filterRelatedPostsByHost(body: string, allowedHosts: readonly st
     if (line.trim() === "") return false;
     const match = line.match(RELATED_LINK_LINE);
     if (!match) return false; // 링크로 읽히지 않는 줄은 어디로 가는지 알 수 없다 - 뺀다
-    const host = normalizeHost(match[1]);
-    return host !== null && allowed.has(host);
+    return isAllowedHost(match[1], allowedHosts);
   });
 
   if (kept.length === 0) return stripExisting(body);
@@ -117,6 +135,11 @@ function stripExisting(body: string): string {
   return (body.slice(0, start) + after).replace(/\n{3,}/g, "\n\n");
 }
 
+/** "함께 보면 좋은 글" 블록 마크다운(제목 줄 + 링크 목록). 소급 백필도 이것을 티스토리 변환기에 넣어 같은 마크업을 만든다. */
+export function relatedBlockMarkdown(related: readonly RelatedLink[]): string {
+  return [RELATED_HEADING, ...related.map((link) => `- [${link.title}](${link.url})`)].join("\n");
+}
+
 /**
  * 본문에 내부 링크 블록을 끼워 넣는다. 자리는 `**참고 자료**`(바깥 출처) **앞**이다 -
  * 우리 글 링크가 남의 출처 뒤로 밀리면 독자가 못 본다.
@@ -127,10 +150,7 @@ export function appendRelatedPosts(body: string, related: readonly RelatedLink[]
   const cleaned = stripExisting(body);
   if (related.length === 0) return cleaned;
 
-  const block = [
-    RELATED_HEADING,
-    ...related.map((link) => `- [${link.title}](${link.url})`),
-  ].join("\n");
+  const block = relatedBlockMarkdown(related);
 
   const referenceIndex = cleaned.indexOf("**참고 자료**");
   if (referenceIndex >= 0) {

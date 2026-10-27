@@ -126,14 +126,15 @@ export type PublishedPost = {
  * writer는 다른 글의 주소를 알 방법이 없어 구조적으로 링크를 쓸 수 없었다. 그래서 여기서 실제
  * 발행 기록을 읽어 넘겨준다(LLM이 지어낸 주소가 섞이지 않는다).
  */
-export async function listPublishedPosts(limit = 200): Promise<PublishedPost[]> {
-  const { data: publications, error: publicationError } = await supabase
+export async function listPublishedPosts(limit = 200, options: { platform?: string } = {}): Promise<PublishedPost[]> {
+  let query = supabase
     .from("publications")
     .select("article_id,published_url,created_at")
     .eq("status", "published")
-    .not("published_url", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .not("published_url", "is", null);
+  // 채널 한정(2026-10-28, 티스토리 소급 백필) - 같은 job이 여러 채널에 올라가도 그 채널 주소를 후보로 쓴다.
+  if (options.platform) query = query.eq("platform", options.platform);
+  const { data: publications, error: publicationError } = await query.order("created_at", { ascending: false }).limit(limit);
   if (publicationError) throw publicationError;
   if (!publications || publications.length === 0) return [];
 
