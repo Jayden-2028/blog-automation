@@ -53,6 +53,9 @@ import type {
   BloggerUpdateResult,
 } from "../../services/publish/blogger/BloggerClient.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
+import { applyTkmStructure, pickTkmRelated } from "./tkmPostStructure.js";
+import { bloggerTkmSiteDeps, finalizeTkmPost, loadTkmSiteContext } from "./tkmSite.js";
+import type { TkmSiteDeps } from "./tkmSite.js";
 
 export const BLOGSPOT_PLATFORM = "blogspot";
 
@@ -119,6 +122,11 @@ export type PublishArticleToBlogspotOptions = {
   rehostImages?: (input: { jobId: string; images: ManuscriptImage[] }) => Promise<RehostResult>;
   /** 테스트 주입: job.metadata 병합(복사 결과 기록). 기본은 ArticleJobRepository.mergeMetadata. */
   saveJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * 사용설명서 사이트 구조 보강(2026-10-27, tkmPostStructure.ts): Related 블록·All Guides 재생성·JSON-LD에 쓰는 Blogger 호출.
+   * false면 건너뛴다(소제목 h2는 그대로 적용). 기본은 이 블로그의 BloggerClient.
+   */
+  tkmSite?: TkmSiteDeps | false;
 };
 
 /** 어느 블로그·라벨로 올릴지. 사용설명서 트랙은 K-Scene blogId와 영문 라벨, 그 밖은 기존(BLOGGER_BLOG_ID·한글 라벨). */
@@ -210,6 +218,9 @@ export async function publishArticleToBlogspot(
   }
 
   const label = target.label;
+  // JSON-LD description용 영어 검색 설명(번역 산출물, channelMeta.blogspot). draftMeta는 한글이라 쓰지 않는다.
+  const englishSearchDescription =
+    ((job.metadata?.channelMeta as ChannelMetaMap | undefined)?.[BLOGSPOT_PLATFORM]?.searchDescription as string | null | undefined) ?? null;
 
   // 사용설명서: 발행 이미지를 공개 Pages로 복사하고 본문 URL을 치환한다(개편3 §4.3-4). 실패·미설정이면 Supabase URL 그대로
   // 발행한다(발행을 막지 않는다). 원본 URL -> Pages URL 대응을 job.metadata.rehostedBySource에 남겨 재발행·이미지 수정 때
@@ -270,7 +281,30 @@ export async function publishArticleToBlogspot(
   const buildContentHtml = async (article: ArticleRow, draft: boolean): Promise<string> => {
     const confirmedImages = await resolveImages();
     const bodyWithImages = substituteConfirmedImages(splitTrailingHashtags(article.content ?? "").body, confirmedImages);
-    return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages));
+    return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages), {
+      semanticHeadings: target.track === "kscene",
+    });
+  };
+
+  // 사용설명서: 본문에 Related 블록을 넣고(발행 전), 공개 뒤에는 All Guides 재생성 + 본문 마무리(finalizeTkmPost)를 한다.
+  // 초안에는 넣지 않는다 - 초안은 공개 주소가 없고 버튼 경로는 공개 발행이다.
+  const tkmSite: TkmSiteDeps | null =
+    target.track !== "kscene" || options.tkmSite === false ? null : options.tkmSite ?? bloggerTkmSiteDeps(client());
+  const withTkmRelated = async (html: string, self: { url: string | null; title: string; published: string | null }): Promise<string> => {
+    if (!tkmSite) return html;
+    const site = await loadTkmSiteContext(tkmSite);
+    if (!site) return html;
+    const related = pickTkmRelated({ ...self, labels: label ? [label] : [] }, site.posts, site.allGuidesUrl);
+    return applyTkmStructure(html, { related, jsonLd: null }).html;
+  };
+  const finalizeTkm = async (input: { postId: string; url: string; title: string; published: string; html: string }): Promise<void> => {
+    if (!tkmSite || !input.postId || !input.url) return;
+    const result = await finalizeTkmPost(
+      tkmSite,
+      { ...input, labels: label ? [label] : [], searchDescription: englishSearchDescription },
+      input.html
+    );
+    for (const warning of result.warnings) console.warn(`⚠️ [tkm] ${warning}`);
   };
 
   // 최종 원고 = 작성 단계 원고(2026-09-30 배리에이션 폐지). 과거 배리에이션이 더 새것이면 그것.
@@ -293,9 +327,16 @@ export async function publishArticleToBlogspot(
     const shouldRefresh = Boolean(postId) && (done.status === "published" || (wantsPublic && done.status === "pending"));
 
     if (postId && shouldRefresh) {
+      const refreshTitle = finalArticle.title ?? job.keyword;
+      const knownUrl = done.status === "published" ? done.published_url : null;
+      const refreshHtml = await withTkmRelated(await buildContentHtml(finalArticle, false), {
+        url: knownUrl,
+        title: refreshTitle,
+        published: knownUrl ? done.created_at : null,
+      });
       const refreshed = await updatePost(postId, {
-        title: finalArticle.title ?? job.keyword,
-        contentHtml: await buildContentHtml(finalArticle, false),
+        title: refreshTitle,
+        contentHtml: refreshHtml,
         labels: label ? [label] : undefined,
       });
       if (!refreshed.ok) {
@@ -308,11 +349,13 @@ export async function publishArticleToBlogspot(
           return { ok: false, reason: "blogger_failed", detail: `[${promoted.stage}] ${promoted.error}`, stage: promoted.stage };
         }
         await markPublished({ publicationId: done.id, url: promoted.url, articleId: finalArticle.id });
+        await finalizeTkm({ postId, url: promoted.url, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
         return { ok: true, publicationId: done.id, url: promoted.url, isDraft: false, alreadyDone: false };
       }
 
       // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다.
       await markPublished({ publicationId: done.id, url: done.published_url ?? "", articleId: finalArticle.id });
+      await finalizeTkm({ postId, url: done.published_url ?? "", title: refreshTitle, published: done.created_at, html: refreshHtml });
       return {
         ok: true,
         publicationId: done.id,
@@ -355,10 +398,12 @@ export async function publishArticleToBlogspot(
     null;
 
   const isDraft = options.asDraft ?? BLOGGER_CONFIG.publishAsDraft;
-  const contentHtml = await buildContentHtml(finalArticle, isDraft);
+  const postTitle = finalArticle.title ?? job.keyword;
+  const baseHtml = await buildContentHtml(finalArticle, isDraft);
+  const contentHtml = isDraft ? baseHtml : await withTkmRelated(baseHtml, { url: null, title: postTitle, published: null });
 
   const inserted = await insertPost({
-    title: finalArticle.title ?? job.keyword,
+    title: postTitle,
     contentHtml,
     labels: label ? [label] : undefined,
     searchDescription,
@@ -378,6 +423,7 @@ export async function publishArticleToBlogspot(
   // 공개 발행이면 배리에이션 원고 상태도 published로 올린다(기준 원고와 별개). draft면 pending 유지.
   if (!inserted.isDraft) {
     await updateArticleStatus(finalArticle.id, "published").catch(() => {});
+    await finalizeTkm({ postId: inserted.postId, url: inserted.url, title: postTitle, published: new Date().toISOString(), html: contentHtml });
   }
 
   return {

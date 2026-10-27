@@ -274,7 +274,7 @@ async function main(): Promise<void> {
     const rehostCalls: number[] = [];
     const run = (metadata: Record<string, unknown>, rehost: NonNullable<Parameters<typeof publishArticleToBlogspot>[1]>["rehostImages"]) =>
       publishArticleToBlogspot("job-1", {
-        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false,
+        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: false,
         loadJob: async () => ksceneJob({ images: imgs, ...metadata }),
         loadArticles: async () => enArticles,
         insertPost: async (input) => { inserted = input; return { ok: true as const, postId: "p", url: "https://thekoreamanual.blogspot.com/p.html", isDraft: false }; },
@@ -333,6 +333,59 @@ async function main(): Promise<void> {
     });
     assert(touched === 0, "엔터·사회 job은 Supabase URL 그대로(복사 없음)");
     console.log("✅ 다른 트랙은 이미지 복사를 타지 않는다");
+
+    // ---- 사용설명서 사이트 구조 보강(2026-10-27): h2·Related(이전 글+All Guides)·All Guides 재생성 ----
+    const site = "https://tkm.example.com";
+    const existing = [
+      { url: `${site}/2026/10/korean-dining-etiquette.html`, title: "Korean Dining Etiquette: 3 Key Rules", labels: ["Culture & Etiquette"], published: "2026-10-11T10:00:00+09:00" },
+      { url: `${site}/2026/10/how-to-order-korean-bbq.html`, title: "How to Order Korean BBQ at a Restaurant", labels: ["Food & Dining"], published: "2026-10-25T10:00:00+09:00" },
+      { url: `${site}/2026/10/korea-taxi-app.html`, title: "What Taxi App Does Korea Use?", labels: ["Travel & Transit"], published: "2026-10-26T10:00:00+09:00" },
+      { url: `${site}/2026/10/soju.html`, title: "How to Drink Soju in Korea", labels: ["Food & Dining"], published: "2026-10-16T10:00:00+09:00" },
+    ];
+    const pagesStore: { id: string; url: string; title: string; status: string; html?: string }[] = [];
+    const postPatches: string[] = [];
+    const fakeSite = {
+      listPosts: async () => existing,
+      listPages: async () => pagesStore.map(({ html: _html, ...page }) => page),
+      insertPage: async (title: string, html: string) => {
+        const page = { id: "pg1", url: `${site}/p/all-guides.html`, title, status: "LIVE", html };
+        pagesStore.push(page);
+        return page;
+      },
+      patchPage: async (_id: string, _title: string, html: string) => { pagesStore[0].html = html; },
+      patchPostContent: async (_postId: string, html: string) => { postPatches.push(html); },
+    };
+    let tkmInserted = "";
+    const tkmBody = "Intro paragraph about Korean BBQ.\n\n**How to Order**\nPoint at the menu.\n\n**References**\n- [Visit Korea](https://english.visitkorea.or.kr)";
+    const tkmRun = await publishArticleToBlogspot("job-1", {
+      ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+      loadJob: async () => ksceneJob({ channelMeta: { blogspot: { searchDescription: "How to order Korean BBQ.", slug: null, tags: [] } } }),
+      loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
+      insertPost: async (input) => { tkmInserted = input.contentHtml; return { ok: true as const, postId: "p9", url: `${site}/2026/10/korean-bbq-etiquette.html`, isDraft: false }; },
+      rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
+      saveJobMetadata: async () => {},
+    });
+    assert(tkmRun.ok === true, `kscene 구조 보강 발행 성공 (${JSON.stringify(tkmRun)})`);
+    assert((tkmInserted.match(/<h2\b/g) ?? []).length >= 3 && !tkmInserted.includes("<strong>How to Order</strong>"), `소제목이 h2로 나간다 (${tkmInserted})`);
+    assert(tkmInserted.indexOf("tkm-related") > 0 && tkmInserted.indexOf("tkm-related") < tkmInserted.indexOf(">References<"), "Related 블록은 References 앞");
+    assert(tkmInserted.includes(`Previous guide: <a href="${site}/2026/10/korea-taxi-app.html">`), "이전 글 = 지금 가장 최신 글(체인)");
+    assert(tkmInserted.includes(`href="${site}/2026/10/how-to-order-korean-bbq.html"`), "제목·라벨이 가까운 글이 Related에");
+    assert(!/tkm-related[\s\S]*rel="/.test(tkmInserted.split("References")[0]), "내부 링크에는 rel 속성을 붙이지 않는다");
+    assert(pagesStore.length === 1 && pagesStore[0].html?.includes(`${site}/2026/10/korean-bbq-etiquette.html`), "All Guides 페이지를 만들고 방금 글을 포함한다");
+    assert(postPatches.length === 1 && postPatches[0].includes(`href="${site}/p/all-guides.html"`), "페이지 주소가 생기면 본문에 All Guides 링크를 채워 patch");
+    // 두 번째 발행: 페이지가 이미 있으니 insert 없이 patch, 본문에 처음부터 All Guides 링크
+    postPatches.length = 0;
+    await publishArticleToBlogspot("job-1", {
+      ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+      loadJob: async () => ksceneJob(),
+      loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
+      insertPost: async (input) => { tkmInserted = input.contentHtml; return { ok: true as const, postId: "p10", url: `${site}/2026/10/next.html`, isDraft: false }; },
+      rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
+      saveJobMetadata: async () => {},
+    });
+    assert(pagesStore.length === 1 && tkmInserted.includes(`${site}/p/all-guides.html`), "페이지는 하나만 유지(멱등), 새 글엔 처음부터 허브 링크");
+    assert(postPatches.length === 0, "JSON-LD가 꺼져 있고 링크가 그대로면 발행 뒤 patch가 없다");
+    console.log("✅ kscene 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성");
   }
 
   console.log("\n✅ 전체 테스트 통과");

@@ -55,6 +55,21 @@ export type BloggerPublishResult =
   | { ok: true; postId: string; url: string; status: string; publishedAt: string; scheduled: boolean }
   | { ok: false; stage: BloggerPublishStage; error: string };
 
+/** posts.list / pages.list 한 항목에서 쓰는 필드만(The Korea Manual 구조 보강, 2026-10-27). */
+export type BloggerListedPost = {
+  id: string;
+  url: string;
+  title: string;
+  labels: string[];
+  published: string;
+  updated: string;
+  /** fetchBodies=true로 읽었을 때만 있다. */
+  content?: string;
+  authorName?: string;
+};
+
+export type BloggerListedPage = { id: string; url: string; title: string; status: string };
+
 export type BloggerClientOptions = {
   clientId?: string;
   clientSecret?: string;
@@ -262,5 +277,117 @@ export class BloggerClient {
       publishedAt: json.published ?? "",
       scheduled: Boolean(publishDate),
     };
+  }
+
+  // ---- The Korea Manual 구조 보강(2026-10-27): 글·페이지 목록과 본문만 바꾸는 patch ----
+
+  /** 토큰을 붙여 API를 부른다. 실패는 메시지 문자열로 돌려준다(호출부가 단계 이름을 붙인다). */
+  private async authed(
+    method: "GET" | "POST" | "PATCH",
+    path: string,
+    query: Record<string, string> = {},
+    body?: unknown
+  ): Promise<{ ok: true; json: Record<string, unknown> } | { ok: false; error: string }> {
+    const configError = this.missingConfig();
+    if (configError) return { ok: false, error: configError };
+    const token = await this.getAccessToken();
+    if (!token.ok) return { ok: false, error: token.error };
+
+    const url = new URL(`${API_BASE}/blogs/${this.blogId}${path}`);
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    const res = await this.fetchImpl(url.toString(), {
+      method,
+      headers: {
+        Authorization: `Bearer ${token.token}`,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown> & { error?: { message?: string } };
+    if (!res.ok) return { ok: false, error: `${method} ${path} 실패 (${res.status}): ${json.error?.message ?? ""}`.trim() };
+    return { ok: true, json };
+  }
+
+  /** 공개(live) 글 전부(posts.list, 페이지네이션 포함). 본문이 필요할 때만 fetchBodies. */
+  async listLivePosts(options: { fetchBodies?: boolean } = {}): Promise<{ ok: true; posts: BloggerListedPost[] } | { ok: false; error: string }> {
+    const posts: BloggerListedPost[] = [];
+    let pageToken = "";
+    do {
+      const query: Record<string, string> = {
+        status: "live",
+        maxResults: "50",
+        fetchBodies: String(Boolean(options.fetchBodies)),
+        fetchImages: "false",
+      };
+      if (pageToken) query.pageToken = pageToken;
+      const res = await this.authed("GET", "/posts", query);
+      if (!res.ok) return res;
+      const items = (res.json.items ?? []) as Array<Record<string, unknown>>;
+      for (const item of items) {
+        posts.push({
+          id: String(item.id ?? ""),
+          url: String(item.url ?? ""),
+          title: String(item.title ?? ""),
+          labels: Array.isArray(item.labels) ? item.labels.map(String) : [],
+          published: String(item.published ?? ""),
+          updated: String(item.updated ?? ""),
+          ...(typeof item.content === "string" ? { content: item.content } : {}),
+          ...(typeof (item.author as { displayName?: unknown } | undefined)?.displayName === "string"
+            ? { authorName: (item.author as { displayName: string }).displayName }
+            : {}),
+        });
+      }
+      pageToken = typeof res.json.nextPageToken === "string" ? res.json.nextPageToken : "";
+    } while (pageToken);
+    return { ok: true, posts };
+  }
+
+  /** 글 하나(본문 포함). 갱신 뒤 저장된 본문을 다시 읽어 확인하는 데 쓴다. */
+  async getPostContent(postId: string): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
+    const res = await this.authed("GET", `/posts/${postId}`, { fetchBody: "true", fetchImages: "false" });
+    if (!res.ok) return res;
+    return { ok: true, content: String(res.json.content ?? "") };
+  }
+
+  /**
+   * **본문만** 바꾼다(posts.patch). 제목·라벨·발행일·검색 설명은 보내지 않아 그대로 남는다 - updatePost는 제목과
+   * 라벨을 같이 보내므로 일괄 갱신에는 이쪽을 쓴다. publish=false라 공개 상태도 바뀌지 않는다.
+   */
+  async patchPostContent(postId: string, contentHtml: string): Promise<BloggerUpdateResult> {
+    const res = await this.authed("PATCH", `/posts/${postId}`, { publish: "false", fetchImages: "false" }, { content: contentHtml });
+    if (!res.ok) return { ok: false, stage: "update", error: res.error };
+    return { ok: true, postId: String(res.json.id ?? postId) };
+  }
+
+  /** 고정 페이지 목록(live + draft). */
+  async listPages(): Promise<{ ok: true; pages: BloggerListedPage[] } | { ok: false; error: string }> {
+    const res = await this.authed("GET", "/pages", { status: "live", fetchBodies: "false" });
+    if (!res.ok) return res;
+    const items = (res.json.items ?? []) as Array<Record<string, unknown>>;
+    return {
+      ok: true,
+      pages: items.map((item) => ({
+        id: String(item.id ?? ""),
+        url: String(item.url ?? ""),
+        title: String(item.title ?? ""),
+        status: String(item.status ?? ""),
+      })),
+    };
+  }
+
+  /** 고정 페이지를 새로 공개한다(pages.insert). URL은 Blogger가 제목에서 만든다("All Guides" -> /p/all-guides.html). */
+  async insertPage(title: string, contentHtml: string): Promise<{ ok: true; page: BloggerListedPage } | { ok: false; error: string }> {
+    const res = await this.authed("POST", "/pages/", { isDraft: "false" }, { kind: "blogger#page", title, content: contentHtml });
+    if (!res.ok) return res;
+    return {
+      ok: true,
+      page: { id: String(res.json.id ?? ""), url: String(res.json.url ?? ""), title, status: String(res.json.status ?? "") },
+    };
+  }
+
+  /** 고정 페이지 제목·본문을 덮어쓴다(pages.patch). */
+  async patchPage(pageId: string, title: string, contentHtml: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const res = await this.authed("PATCH", `/pages/${pageId}`, {}, { title, content: contentHtml });
+    return res.ok ? { ok: true } : res;
   }
 }

@@ -1,0 +1,59 @@
+# The Korea Manual 기존 글 구조 보강(소제목 h2·Related 블록·All Guides 허브·JSON-LD) - 수동 실행 전용(2026-10-27).
+# 기본은 dry-run(아무것도 쓰지 않음). 결과 표는 실행 요약(Summary)에 남는다. 상세: src/workflows/publish/tkmStructureBackfillCli.ts
+name: tkm-structure-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "실제 적용(체크 안 하면 dry-run)"
+        type: boolean
+        default: false
+      only:
+        description: "한 편만(postId 또는 URL 일부). 비우면 전 글"
+        type: string
+        default: ""
+      jsonld:
+        description: "본문 BlogPosting JSON-LD 포함"
+        type: boolean
+        default: false
+      page:
+        description: "All Guides 페이지 재생성(apply일 때만 씀)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: tkm-structure-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run tkm:structure
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          KSCENE_BLOGGER_BLOG_ID: ${{ secrets.KSCENE_BLOGGER_BLOG_ID || vars.KSCENE_BLOGGER_BLOG_ID }}
+          INPUT_APPLY: ${{ inputs.apply }}
+          INPUT_ONLY: ${{ inputs.only }}
+          INPUT_JSONLD: ${{ inputs.jsonld }}
+          INPUT_PAGE: ${{ inputs.page }}
+        run: |
+          args=()
+          [ "$INPUT_APPLY" = "true" ] && args+=(--apply)
+          [ -n "$INPUT_ONLY" ] && args+=("--only=$INPUT_ONLY")
+          [ "$INPUT_JSONLD" = "true" ] && args+=(--jsonld)
+          [ "$INPUT_PAGE" = "true" ] || args+=(--no-page)
+          npm run tkm:structure -- "${args[@]}"

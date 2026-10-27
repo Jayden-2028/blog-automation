@@ -30,7 +30,13 @@ const BLOGSPOT_OPTIONS: PublishRenderOptions = {
   linkTarget: true,
 };
 
-/** 원고 본문(마크다운 부분집합)을 Blogspot 발행용 HTML로 변환한다. */
-export function convertArticleToHtml(markdown: string): string {
-  return renderPublishBlocks(markdown, BLOGSPOT_OPTIONS);
+/**
+ * 원고 본문(마크다운 부분집합)을 Blogspot 발행용 HTML로 변환한다.
+ *
+ * `semanticHeadings`면 소제목을 `<h2>`로 낸다(사용설명서 트랙, 2026-10-27). 번역 프롬프트는 소제목을
+ * `**굵은 줄**`로 유지하게 두고 여기서 바꾼다 - 번역 계약 검증(마커·링크·한글 잔존)과 영어본 diff가
+ * 마크다운 기준이라 그쪽을 건드리지 않는 편이 안전하다.
+ */
+export function convertArticleToHtml(markdown: string, options: { semanticHeadings?: boolean } = {}): string {
+  return renderPublishBlocks(markdown, options.semanticHeadings ? { ...BLOGSPOT_OPTIONS, headingTag: "h2" } : BLOGSPOT_OPTIONS);
 }
