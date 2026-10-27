@@ -373,6 +373,8 @@ async function main(): Promise<void> {
     assert(!/tkm-related[\s\S]*rel="/.test(tkmInserted.split("References")[0]), "내부 링크에는 rel 속성을 붙이지 않는다");
     assert(pagesStore.length === 1 && pagesStore[0].html?.includes(`${site}/2026/10/korean-bbq-etiquette.html`), "All Guides 페이지를 만들고 방금 글을 포함한다");
     assert(postPatches.length === 1 && postPatches[0].includes(`href="${site}/p/all-guides.html"`), "페이지 주소가 생기면 본문에 All Guides 링크를 채워 patch");
+    const ld = JSON.parse(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/.exec(postPatches[0])![1]);
+    assert(ld["@type"] === "BlogPosting" && ld.mainEntityOfPage["@id"] === `${site}/2026/10/korean-bbq-etiquette.html` && ld.description === "How to order Korean BBQ.", "공개 뒤 patch에 JSON-LD(공개 URL·영어 검색 설명)");
     // 두 번째 발행: 페이지가 이미 있으니 insert 없이 patch, 본문에 처음부터 All Guides 링크
     postPatches.length = 0;
     await publishArticleToBlogspot("job-1", {
@@ -384,8 +386,8 @@ async function main(): Promise<void> {
       saveJobMetadata: async () => {},
     });
     assert(pagesStore.length === 1 && tkmInserted.includes(`${site}/p/all-guides.html`), "페이지는 하나만 유지(멱등), 새 글엔 처음부터 허브 링크");
-    assert(postPatches.length === 0, "JSON-LD가 꺼져 있고 링크가 그대로면 발행 뒤 patch가 없다");
-    console.log("✅ kscene 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성");
+    assert(postPatches.length === 1 && postPatches[0].includes("application/ld+json") && (postPatches[0].match(/tkm-related/g) ?? []).length === 1, "발행 뒤 patch는 JSON-LD를 붙이는 한 번, Related 블록은 하나");
+    console.log("✅ kscene 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성, JSON-LD");
   }
 
   console.log("\n✅ 전체 테스트 통과");

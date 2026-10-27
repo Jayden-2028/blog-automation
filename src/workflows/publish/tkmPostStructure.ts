@@ -10,15 +10,18 @@
 //
 // 그래서 글마다 세 가지를 넣는다. 전부 결정론적이다(LLM이 주소를 지어내지 않는다 - 목록은 Blogger API에서 읽는다).
 //  1) 소제목 `<h2>`  2) "Related Guides" 블록 - 비슷한 글 3개 + **바로 이전 글**(체인) + **All Guides 페이지**(허브)
-//  3) BlogPosting JSON-LD(본문 안 `<script>`, Blogger가 보존하는지는 실험으로 확인한다 - TKM_JSONLD_IN_BODY)
+//  3) BlogPosting JSON-LD(본문 안 `<script>`, Blogger가 보존함을 2026-10-27 실험으로 확인 - TKM_JSONLD_IN_BODY)
 // 체인: 글 N은 글 N-1을 가리키고 최신 글은 홈에 있으니 모든 글이 홈에서 이어진다. 허브: All Guides 한 페이지가
 // 전 글을 링크해 어느 글이든 2클릭이다. 둘 중 하나가 깨져도 다른 길이 남는다.
 //
 // 블록은 `class="tkm-related"` div와 `class="tkm-jsonld"` script로 감싸 **다시 돌려도 갈아 끼운다**(멱등).
 // 도메인은 하드코딩하지 않는다 - 링크 주소는 Blogger가 돌려준 글 URL에서, 사이트 루트는 그 origin에서 얻는다.
 
-/** 본문 안 BlogPosting JSON-LD를 넣을지. 2026-10-27 글 1편 실험 결과로 정한다(TKM_THEME_PATCH_2026-10.md). */
-export const TKM_JSONLD_IN_BODY = false;
+/**
+ * 본문 안 BlogPosting JSON-LD를 넣을지. 2026-10-27 실험: posts.patch로 넣은 `<script type="application/ld+json">`을
+ * Blogger가 저장·공개 페이지 양쪽에서 그대로 보존했다(1편 확인 후 38편 적용, 38/38 보존). 테마 수정 없이 본문으로 간다.
+ */
+export const TKM_JSONLD_IN_BODY = true;
 
 /** 허브 페이지 제목. Blogger는 페이지 URL을 제목에서 만든다 -> /p/all-guides.html. */
 export const TKM_ALL_GUIDES_TITLE = "All Guides";

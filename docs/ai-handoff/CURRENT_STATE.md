@@ -1,6 +1,31 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-16 (Asia/Seoul)
+기준일: 2026-10-27 (Asia/Seoul)
+
+## 2026-10-27 — The Korea Manual 색인 대응 B: 사이트 내부 구조 보강 (브랜치 `feat/tkm-index-structure`)
+
+**상태: 코드 main 병합·push 완료, 기존 38편 일괄 갱신 완료(실패 0).** 테마·UI 항목은 `docs/ai-handoff/TKM_THEME_PATCH_2026-10.md`(팀장이 Blogger UI에서).
+
+- **진단(팀장, 같은 날)**: 38편 색인 0, 전부 "발견됨 - 색인 안 됨". 기술 결함이 아니라 크롤 경로 부족. 이번 실측 추가:
+  본문 TKM 내부 링크 0(영어본은 `prepareManuscript`의 배리에이션 재사용 경로라 `appendRelatedPosts`를 안 탄다),
+  robots.txt `Disallow: /search`(Blogger 기본)라 홈 "Older posts"·라벨·아카이브 다음 페이지가 크롤 불가 - 홈·월 아카이브는
+  최신 12~14편까지만 링크한다. h2 0개(소제목이 `<p><strong>`), 글 페이지 `<meta name=description>` 없음, JSON-LD 0.
+- **신규 kscene 발행(자동, `publishArticleToBlogspot.ts` → `tkmPostStructure.ts`·`tkmSite.ts`)**:
+  ① 소제목 `<h2>` - 번역 프롬프트는 그대로 두고 변환기 옵션(`convertArticleToHtml(.., {semanticHeadings})`, kscene만)으로 바꿨다
+  (번역 계약 검증·영어본 diff가 마크다운 기준이라). ② "Related Guides" 블록 - 비슷한 글 3(제목 토큰+라벨) + **이전 글**(체인) +
+  **All Guides**(허브), References 앞, `div.tkm-related`로 멱등. ③ 공개 직후 **All Guides 페이지 재생성**(`/p/all-guides.html`,
+  pages.patch, 없으면 생성 - 페이지 ID는 저장하지 않고 경로로 찾는다, 새 .env 키 없음) + BlogPosting JSON-LD를 넣어 본문 patch.
+  전부 실패해도 발행은 성공으로 끝난다(경고 로그만). 글 목록은 DB가 아니라 Blogger posts.list에서 읽는다(도메인 하드코딩 없음).
+- **JSON-LD 실험**: 본문 `<script type="application/ld+json">`을 Blogger가 **보존**한다(1편 후 38편, 38/38). `TKM_JSONLD_IN_BODY=true`.
+- **기존 38편**: `tkm-structure-backfill.yml`(수동, 기본 dry-run) → `npm run tkm:structure`. 본문만 patch(제목·라벨·발행일 불변),
+  글마다 변환 전후 읽히는 글자 동일 검증(불일치 0), `job.metadata.tkmStructure`에 기록(38건). 결과: h2 0 → 6~10,
+  내부 링크 4~5(합계 189), JSON-LD 38. run: dry-run 40451002529 → 1편 40451071832 → 전체 40451145172.
+- **로컬 자격 증명 주의**: 맥 `.env`의 `BLOGGER_CLIENT_ID`가 Google에서 "OAuth client not found"로 거부된다(GitHub secret은 정상).
+  팀장이 처리 항목으로 접수. 그 전까지 Blogger 쓰기는 GitHub Actions로만 한다.
+- **남은 일(팀장, UI)**: 홈 상단 링크 목록에 All Guides 추가(가장 중요 - 홈→허브→전 글 2클릭), 글별 검색 설명 38편 붙여넣기,
+  (선택) 글 제목 h1. 라벨 페이지 개방은 보류.
+- **배포**: 운영은 GitHub Actions 경로라 main push로 반영됐다. 맥미니 pull 필요 여부는 팀장이 판단한다.
+
 
 ## 2026-10-16 — 엔터 키워드 순도 2차 + 선점 기준 재정비 (브랜치 `feat/ent-keyword-purity`, 워크트리 `keyword-refresh/`)
 
