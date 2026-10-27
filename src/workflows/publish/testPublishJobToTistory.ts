@@ -39,7 +39,7 @@ function article(over: Partial<ArticleRow> = {}): ArticleRow {
   return { id: 1, job_id: "job-1", title: "블로그 제목", content: BODY, status: "approved", ai_model: "claude", platform: null, created_at: "x", updated_at: "x", ...over } as ArticleRow;
 }
 
-const okPublish = async (): Promise<TistoryPublishResult> => ({ ok: true, url: "https://wooahpapa.tistory.com/entry/t", warnings: [] });
+const okPublish = async (): Promise<TistoryPublishResult> => ({ ok: true, url: "https://wooahpapa.tistory.com/entry/t", urlSource: "rss", warnings: [] });
 const baseDeps = {
   enabled: true,
   loadJob: async () => job(),
@@ -58,6 +58,7 @@ async function main(): Promise<void> {
     let seen: { input: TistoryPublishInput; visibility: string } | null = null;
     const out = await publishJobToTistory("job-1", { ...baseDeps, publish: async (input, visibility) => { seen = { input, visibility }; return okPublish(); } });
     assert(out.ok && !out.alreadyDone, `발행 성공 (${JSON.stringify(out)})`);
+    assert(out.ok && out.urlSource === "rss", `주소 확정 단계(urlSource)를 그대로 넘긴다 (${JSON.stringify(out)})`);
     assert(seen!.visibility === "private", "기본은 비공개");
     const input = seen!.input;
     assert(input.title === "블로그 제목", "제목");

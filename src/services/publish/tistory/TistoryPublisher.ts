@@ -30,6 +30,17 @@ import { chromium, type BrowserContext, type Frame, type Page } from "playwright
 import { TISTORY_CONFIG, tistoryBlogName } from "../../../config/publishTargets.js";
 import { ANY_IMAGE_MARKER } from "../naverImageMarkers.js";
 import { restoreSessionCookies, saveSessionCookies } from "./tistorySessionCookies.js";
+import {
+  extractCanonicalUrl,
+  isTistoryPostUrl,
+  normalizeTitle,
+  resolveUrlFromRss,
+  resolveUrlFromSearch,
+  resolveUrlFromSlug,
+  type TistoryUrlSource,
+} from "./tistoryPublishedUrl.js";
+
+export type { TistoryUrlSource } from "./tistoryPublishedUrl.js";
 
 export type TistoryPublishStage =
   | "login"
@@ -58,7 +69,8 @@ export type TistoryPublishInput = {
 };
 
 export type TistoryPublishResult =
-  | { ok: true; url: string; warnings: string[] }
+  /** urlSource: 주소를 어느 단계에서 확정했나(tistoryPublishedUrl.ts). slug-unverified면 404일 수 있다. */
+  | { ok: true; url: string; urlSource: TistoryUrlSource; warnings: string[] }
   | { ok: false; stage: TistoryPublishStage; error: string };
 
 export type TistoryLoginCheckResult = { loggedIn: true } | { loggedIn: false; reason: string };
@@ -85,6 +97,7 @@ const FILE_CHOOSER_TIMEOUT_MS = 10_000;
 const IMAGE_UPLOAD_WAIT_MS = 40_000;
 const UPLOAD_SETTLE_MS = 1_200;
 const PUBLISH_WAIT_MS = 30_000;
+const MANAGE_LIST_WAIT_MS = 10_000;
 const FAILURE_SNAPSHOT_DIR = ".local/dom-snapshots/tistory/failures";
 
 export function isTistoryLoginUrl(url: string): boolean {
@@ -305,19 +318,9 @@ export class TistoryPublisher {
         return { ok: false, stage: "publish", error: `발행 확인 신호(글쓰기 화면 이탈)를 ${PUBLISH_WAIT_MS / 1000}초 내 감지하지 못했습니다: ${this.errorMessage(error).split("\n")[0]}` };
       }
 
-      // 발행 레이어에서 읽은 슬러그는 티스토리가 발행 시 다듬어(쉼표 제거 등) 실제 주소와 달라질 수 있다
-      // (2026-10-07 실측: 알림 주소가 404). 공개 글은 RSS에서 제목으로 실제 주소를 찾는다. 비공개는 RSS에 없다.
-      const slugUrl = slug
-        ? `https://${this.blogName}.tistory.com/entry/${encodeURI(slug)}`
-        : `https://${this.blogName}.tistory.com/manage/posts/`;
-      let url = slugUrl;
-      if (visibility === "public") {
-        const fromRss = await this.resolveUrlFromRss(input.title).catch(() => null);
-        if (fromRss) url = fromRss;
-        else warnings.push("RSS에서 발행 글을 찾지 못해 추정 주소를 돌려줍니다(다듬어진 슬러그면 404일 수 있습니다).");
-      }
-      if (!slug && url === slugUrl) warnings.push("발행 URL 슬러그를 읽지 못해 관리 화면 주소를 돌려줍니다.");
-      return { ok: true, url, warnings };
+      const resolved = await this.resolvePublishedUrl(page, { title: input.title, slug, visibility });
+      if (resolved.warning) warnings.push(resolved.warning);
+      return { ok: true, url: resolved.url, urlSource: resolved.urlSource, warnings };
     } finally {
       await context.close().catch(() => {});
     }
@@ -555,21 +558,123 @@ export class TistoryPublisher {
     return converted;
   }
 
-  /** 발행 직후 RSS에서 같은 제목의 글을 찾아 실제 주소를 돌려준다. 반영이 늦을 수 있어 짧게 재시도한다. */
-  private async resolveUrlFromRss(title: string): Promise<string | null> {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const res = await fetch(`https://${this.blogName}.tistory.com/rss`);
-        if (res.ok) {
-          const link = matchRssLink(await res.text(), title);
-          if (link) return link;
-        }
-      } catch {
-        // 네트워크 실패는 재시도로
-      }
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+  /**
+   * 발행 직후 실제 글 주소를 정한다(2026-10-27 재설계 - 슬러그를 그대로 쓰던 시절 18%가 404였다).
+   * 순서: ① 발행 후 머문 페이지가 글 주소면 그것 ② 관리 목록에서 같은 제목 글의 공개 링크 ③ RSS(공개만, 최대 60초)
+   * ④ 블로그 검색(공개만) ⑤ 슬러그를 티스토리 규칙대로 다듬어 HEAD 200 확인. 비공개 글은 RSS·검색에 없어 ①②⑤만 본다.
+   * 실발행 테스트를 할 수 없는 단계(①②)는 실패해도 다음 단계로 넘어가고, 어느 단계에서 정했는지 로그와 urlSource로 남긴다.
+   */
+  private async resolvePublishedUrl(
+    page: Page,
+    input: { title: string; slug: string; visibility: TistoryVisibility }
+  ): Promise<{ url: string; urlSource: TistoryUrlSource; warning?: string }> {
+    const log = (source: TistoryUrlSource, url: string) => console.log(`[tistory] 발행 주소 확정(${source}): ${url}`);
+    const headStatus = async (url: string): Promise<number> => {
+      // 브라우저 컨텍스트로 확인한다 - 로그인된 주인이라 비공개 글도 200이 나온다.
+      const res = await page.context().request.head(url, { timeout: 10_000 }).catch(() => null);
+      return res ? res.status() : 0;
+    };
+
+    // ① 발행 후 페이지
+    const afterUrl = page.url();
+    console.log(`[tistory] 발행 후 페이지: ${afterUrl}`);
+    if (isTistoryPostUrl(afterUrl, this.blogName)) {
+      const url = await this.preferEntryUrl(page, afterUrl.replace(/[?#].*$/, ""));
+      log("page-url", url);
+      return { url, urlSource: "page-url" };
     }
+
+    // ② 관리 목록
+    const fromManage = await this.findInManageList(page, input.title).catch((error: unknown) => {
+      console.warn(`[tistory] 관리 목록에서 주소 찾기 실패: ${this.errorMessage(error).split("\n")[0]}`);
+      return null;
+    });
+    if (fromManage) {
+      const url = await this.preferEntryUrl(page, fromManage);
+      log("manage-list", url);
+      return { url, urlSource: "manage-list" };
+    }
+
+    // ③ RSS ④ 검색 - 공개 글만
+    if (input.visibility === "public") {
+      const fromRss = await resolveUrlFromRss(this.blogName, input.title).catch(() => null);
+      if (fromRss) {
+        log("rss", fromRss);
+        return { url: fromRss, urlSource: "rss" };
+      }
+      const fromSearch = await resolveUrlFromSearch(this.blogName, input.title).catch(() => null);
+      if (fromSearch) {
+        log("search", fromSearch);
+        return { url: fromSearch, urlSource: "search" };
+      }
+    }
+
+    // ⑤ 슬러그 추정 + HEAD 확인. 슬러그를 못 읽었으면 제목으로 만든다(티스토리 기본 슬러그가 제목에서 나온다).
+    const candidates = [...new Set([input.slug, input.title].filter(Boolean))];
+    let firstGuess: string | null = null;
+    for (const candidate of candidates) {
+      const guess = await resolveUrlFromSlug(this.blogName, candidate, headStatus);
+      if (!guess) continue;
+      firstGuess ??= guess.url;
+      if (guess.verified) {
+        log("slug-verified", guess.url);
+        return { url: guess.url, urlSource: "slug-verified" };
+      }
+    }
+    const url = firstGuess ?? `https://${this.blogName}.tistory.com/manage/posts/`;
+    log("slug-unverified", url);
+    return {
+      url,
+      urlSource: "slug-unverified",
+      warning: firstGuess
+        ? "발행 주소를 확정하지 못했습니다(추정 주소, 검증 실패)."
+        : "발행 주소를 확정하지 못했습니다(슬러그를 읽지 못해 관리 화면 주소를 돌려줍니다).",
+    };
+  }
+
+  /**
+   * 관리 목록(/manage/posts/)에서 제목이 같은 글의 공개 링크. 실측 DOM이 없어(로그인 필요) 셀렉터에 기대지 않고,
+   * 공개 글 주소로 가는 링크마다 위로 올라가며 "그 글 하나만 품은 행"의 글자에 제목이 있는지 본다.
+   */
+  private async findInManageList(page: Page, title: string): Promise<string | null> {
+    const manageUrl = `https://${this.blogName}.tistory.com/manage/posts/`;
+    if (!page.url().startsWith(manageUrl)) {
+      await page.goto(manageUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    }
+    const want = normalizeTitle(title);
+    if (!want) return null;
+    const js = `(() => {
+      const norm = (v) => String(v).replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, "");
+      const want = ${JSON.stringify(want)};
+      const re = /^https?:\/\/${this.blogName}\.tistory\.com\/(entry\/[^/?#]+|\d+)\/?$/;
+      const anchors = Array.from(document.querySelectorAll("a[href]")).filter((a) => re.test(a.href));
+      for (const a of anchors) {
+        let el = a;
+        for (let depth = 0; depth < 8 && el; depth += 1, el = el.parentElement) {
+          const hrefs = new Set(Array.from(el.querySelectorAll("a[href]")).map((x) => x.href).filter((h) => re.test(h)));
+          if (hrefs.size > 1) break;
+          if (norm(el.innerText || "").includes(want)) return a.href;
+        }
+      }
+      return null;
+    })()`;
+    const deadline = Date.now() + MANAGE_LIST_WAIT_MS;
+    while (Date.now() < deadline) {
+      const found = (await page.evaluate(js).catch(() => null)) as string | null;
+      if (found) return found;
+      await page.waitForTimeout(1_000);
+    }
+    console.warn(`[tistory] 관리 목록에서 같은 제목 글을 찾지 못했습니다(${MANAGE_LIST_WAIT_MS / 1000}초).`);
     return null;
+  }
+
+  /** `/<숫자>` 주소면 글 페이지의 canonical에서 `/entry/` 주소를 읽어 바꾼다(분석·내부 링크가 같은 주소를 쓰게). 실패하면 그대로. */
+  private async preferEntryUrl(page: Page, url: string): Promise<string> {
+    if (url.includes("/entry/")) return url;
+    const res = await page.context().request.get(url, { timeout: 10_000 }).catch(() => null);
+    if (!res || !res.ok()) return url;
+    const canonical = extractCanonicalUrl(await res.text().catch(() => ""));
+    return canonical && isTistoryPostUrl(canonical, this.blogName) ? canonical : url;
   }
 
   private async saveFailureSnapshot(page: Page, label: string): Promise<void> {
@@ -584,33 +689,8 @@ export class TistoryPublisher {
   }
 }
 
-// ---------- RSS 제목 매칭(순수 함수, 테스트: testTistoryPublishedUrl.ts) ----------
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, "$1")
-    .replace(/&middot;/g, "\u00b7")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)));
-}
-
-/** 비교용 정규화 - RSS가 특수문자를 엔티티로 바꾸므로 한글·영숫자만 남긴다(캡션 검증과 같은 이유). */
-function normalizeTitle(text: string): string {
-  return decodeEntities(text).replace(/[^0-9A-Za-z\uAC00-\uD7A3]/g, "");
-}
-
-/** RSS XML에서 제목이 같은 item의 link. 같은 제목이 여럿이면 최신(첫 번째) 것. */
-export function matchRssLink(rssXml: string, title: string): string | null {
-  const want = normalizeTitle(title);
-  if (!want) return null;
-  for (const match of rssXml.matchAll(/<item>.*?<title>(.*?)<\/title>.*?<link>(.*?)<\/link>/gs)) {
-    if (normalizeTitle(match[1]) === want) return decodeEntities(match[2]).trim();
-  }
-  return null;
-}
+// RSS 제목 매칭·슬러그 다듬기는 교정 CLI와 공유하는 모듈로 옮겼다(2026-10-27) - 기존 import가 깨지지 않게 다시 내보낸다.
+export { matchRssLink, sanitizeTistorySlug } from "./tistoryPublishedUrl.js";
 
 // 형식 판별은 수집·업로드와 공유하는 모듈로 옮겼다(2026-10-08) - 기존 import가 깨지지 않게 다시 내보낸다.
 export { sniffImageFormat } from "../../images/sniffImageFormat.js";

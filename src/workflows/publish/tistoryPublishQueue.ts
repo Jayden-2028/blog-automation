@@ -39,6 +39,10 @@ export type TistoryPublishRequest = {
   notifiedAt?: string;
   finishedAt?: string;
   url?: string;
+  /** 발행 주소를 어느 단계에서 확정했나(2026-10-27). slug-unverified면 404일 수 있다. */
+  urlSource?: string;
+  /** 교정 CLI(tistory:url-audit --apply)가 url을 고친 시각. */
+  urlCorrectedAt?: string;
   error?: string;
 };
 
@@ -57,6 +61,8 @@ export function readTistoryRequest(job: Pick<ArticleJobRow, "metadata">): Tistor
     lastCheckedAt: value.lastCheckedAt,
     finishedAt: value.finishedAt,
     url: value.url,
+    urlSource: value.urlSource,
+    urlCorrectedAt: value.urlCorrectedAt,
     error: value.error,
   };
 }
@@ -114,7 +120,7 @@ export async function requestTistoryPublish(
 /** 처리 결과를 적는다(맥미니 폴러 쪽에서 호출). */
 export async function finishTistoryPublish(
   jobId: string,
-  outcome: { ok: true; url: string } | { ok: false; error: string } | { ok: "unrecorded"; url: string; error: string },
+  outcome: { ok: true; url: string; urlSource?: string } | { ok: false; error: string } | { ok: "unrecorded"; url: string; error: string },
   options: TistoryQueueOptions = {}
 ): Promise<void> {
   const mergeMetadata = options.mergeMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
@@ -122,7 +128,7 @@ export async function finishTistoryPublish(
   const finishedAt = now().toISOString();
   const request: TistoryPublishRequest =
     outcome.ok === true
-      ? { status: "done", requestedAt: "", finishedAt, url: outcome.url }
+      ? { status: "done", requestedAt: "", finishedAt, url: outcome.url, ...(outcome.urlSource ? { urlSource: outcome.urlSource } : {}) }
       : outcome.ok === "unrecorded"
         ? { status: "published_unrecorded", requestedAt: "", finishedAt, url: outcome.url, error: outcome.error }
         : { status: "failed", requestedAt: "", finishedAt, error: outcome.error };

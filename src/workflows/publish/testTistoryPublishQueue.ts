@@ -92,11 +92,12 @@ async function main(): Promise<void> {
   {
     const patches: Record<string, unknown>[] = [];
     const mergeMetadata = async (_id: string, patch: Record<string, unknown>) => { patches.push(patch); return null; };
-    await finishTistoryPublish("f", { ok: true, url: "https://wooahpapa.tistory.com/entry/x" }, { mergeMetadata, now: () => T0 });
+    await finishTistoryPublish("f", { ok: true, url: "https://wooahpapa.tistory.com/entry/x", urlSource: "search" }, { mergeMetadata, now: () => T0 });
     await finishTistoryPublish("g", { ok: false, error: "boom" }, { mergeMetadata, now: () => T0 });
-    const ok = patches[0][TISTORY_REQUEST_KEY] as { status: string; url?: string };
+    const ok = patches[0][TISTORY_REQUEST_KEY] as { status: string; url?: string; urlSource?: string };
     const ng = patches[1][TISTORY_REQUEST_KEY] as { status: string; error?: string };
     assert(ok.status === "done" && ok.url?.includes("/entry/x") && ng.status === "failed" && ng.error === "boom", "done/failed 기록");
+    assert(ok.urlSource === "search", `주소 확정 단계(urlSource)도 기록 (${ok.urlSource})`);
     console.log("✅ 결과 기록");
   }
 

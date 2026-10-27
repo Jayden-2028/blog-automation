@@ -2,6 +2,31 @@
 
 기준일: 2026-10-27 (Asia/Seoul)
 
+## 2026-10-27 — 티스토리 발행 주소 404: 확정 로직 재설계 + 교정 CLI (브랜치 `fix/tistory-published-url`)
+
+**상태: 코드 main 병합. 교정 18건은 `--apply` 사용자 승인 대기, 본문 404 링크 14편은 범위 밖(제안만).**
+
+- **증상**: 티스토리 발행 기록 101건 중 **18건(18%)의 저장 주소가 404**. 이 주소가 내부 링크로 다른 글 본문에 들어가
+  옛 주소를 품은 글이 **21편(그중 발행된 글 14편)**이고, GSC URL↔job 매칭에서도 빠졌다.
+- **원인 2가지**: ① 발행 레이어 `input#urlPublish` 슬러그를 그대로 `/entry/<slug>`로 썼는데, 티스토리는 발행 시 슬러그에서
+  `, ? ! ' %`를 지운다(`2,000명`→`2000명`, `30%`→`30`. `·`·한자는 유지). ② 공개 글은 RSS 제목으로 실제 주소를 찾았는데,
+  RSS가 `·`을 `&amp;middot;`로 **이중 이스케이프**하고 `decodeEntities()`가 `&middot;`를 `&amp;`보다 먼저 풀어 `·`이 든 제목은
+  늘 실패했다. RSS 재시도도 3회×3초뿐이었다.
+- **새 확정 순서**(`TistoryPublisher.resolvePublishedUrl`, 공용 모듈 `services/publish/tistory/tistoryPublishedUrl.ts`):
+  ① 발행 후 페이지 URL이 글 주소(`/entry/…`·`/<숫자>`, 숫자는 canonical로 `/entry/` 변환) ② 관리 목록(`/manage/posts/`)에서 같은 제목 행의
+  공개 링크 ③ RSS(`&amp;` 먼저 풀기, 백오프 2·4·8·16·30초) ④ 블로그 검색 `/search/<앞 4단어>` ⑤ `sanitizeTistorySlug()` 추정 +
+  HEAD 200(브라우저 컨텍스트라 비공개도 확인). 비공개는 ①②⑤만. 결과에 `urlSource`(`page-url|manage-list|rss|search|slug-verified|slug-unverified`)가
+  붙어 `job.metadata.tistoryPublish.urlSource`에 남는다. 실패 경고는 "발행 주소를 확정하지 못했습니다(추정 주소, 검증 실패)".
+  **①②는 실발행 테스트를 못 했다**(로그인 프로필이 맥미니에만 있음) - 실패해도 다음 단계로 넘어가며 `[tistory] 발행 후 페이지:`·
+  `발행 주소 확정(<source>)` 로그를 남긴다. 다음 실발행 때 폴러 로그로 어느 단계에서 정해졌는지 확인할 것.
+- **교정 CLI** `npm run tistory:url-audit`(dry-run 기본): 전 행 HEAD → 404 행을 RSS·검색·슬러그 검증으로 교정 주소 산출(행당 0.3초).
+  2026-10-27 dry-run: **18/18 확보**(rss 5·search 11·slug-verified 2), 팀장 실측(`prod/logs/tistory-url-audit.json`)과 전부 일치.
+  `--apply`는 `publications.published_url` + `metadata.tistoryPublish.url`/`urlCorrectedAt`을 고친다 - **사용자 승인 전 실행 금지**.
+  `--rewrite-bodies`는 설계 메모(치환 대상 목록만 출력).
+- **남은 일(승인 필요)**: ① `--apply` 실행(되돌리기: 옛 주소가 dry-run 표에 남아 있다) ② 본문 404 링크 치환 - DB `articles.content`는
+  같은 CLI에 치환을 붙이면 되지만, 이미 발행된 14편은 **티스토리·네이버 실제 글 본문 수정**이 필요하다(폴러 경로에 "본문만 수정" 기능이
+  없어 수동 또는 신규 기능). 픽스처: `services/publish/tistory/fixtures/tistoryUrlAudit-2026-10-27.json`(저장 주소→실제 주소 18쌍).
+
 ## 2026-10-27 — The Korea Manual 색인 대응 C: Bing URL 자동 제출 (브랜치 `feat/tkm-bing-submit`)
 
 **상태: 코드 main 병합·push 완료. GitHub 시크릿 등록 전까지 자동 제출은 꺼져 있다(조용히 건너뜀).**

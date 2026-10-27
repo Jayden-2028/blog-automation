@@ -167,7 +167,7 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
     }
 
     if (result.ok) {
-      await deps.finish(job.id, { ok: true, url: result.url });
+      await deps.finish(job.id, { ok: true, url: result.url, ...(result.urlSource ? { urlSource: result.urlSource } : {}) });
       console.log(`   ✅ ${job.keyword} -> ${result.url}`);
       const warnings = result.warnings ?? [];
       if (warnings.length > 0) console.warn(`   ⚠️ ${warnings.join(" / ")}`);

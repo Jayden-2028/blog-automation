@@ -22,6 +22,7 @@ import type {
   TistoryPublishImageInput,
   TistoryPublishInput,
   TistoryPublishResult,
+  TistoryUrlSource,
   TistoryVisibility,
 } from "../../services/publish/tistory/TistoryPublisher.js";
 import { TISTORY_CONFIG } from "../../config/publishTargets.js";
@@ -38,7 +39,8 @@ export const TISTORY_PLATFORM = "tistory";
 const IN_PROGRESS_OR_DONE: readonly PublicationRow["status"][] = ["pending", "publishing", "published"];
 
 export type PublishJobToTistoryResult =
-  | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[] }
+  /** urlSource: 이번에 발행한 경우 주소를 어느 단계에서 확정했나(TistoryPublisher.resolvePublishedUrl). */
+  | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[]; urlSource?: TistoryUrlSource }
   /** 로그인이 풀렸다 - 실패가 아니라 **대기**다. 폴러가 deferred로 기록하고 재로그인 후 다시 시도한다. */
   | { ok: false; reason: "login_required"; detail: string }
   /** 티스토리에는 올라갔는데 publications 기록이 실패했다. 다시 올리면 중복 발행이므로 재시도 큐로 되돌리지 않는다. */
@@ -140,5 +142,5 @@ export async function publishJobToTistory(
       detail: `티스토리 발행은 성공했지만 기록에 실패했습니다: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
-  return { ok: true, publicationId: publication.id, url: result.url, alreadyDone: false, warnings: result.warnings };
+  return { ok: true, publicationId: publication.id, url: result.url, alreadyDone: false, warnings: result.warnings, urlSource: result.urlSource };
 }
