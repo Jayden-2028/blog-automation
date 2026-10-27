@@ -40,6 +40,7 @@ const postHtml = [
   assert(data.publisher.slogan === TKM_BRAND_TAGLINE && data.publisher.description === TKM_BRAND_DESCRIPTION, "발행자에 태그라인·설명");
   assert(data.author.slogan === undefined, "저자에는 태그라인을 중복하지 않는다");
   assert(!html.includes("Korea Manual"), "새 JSON-LD에 옛 이름 없음");
+  assert(/^[\x00-\x7e]*$/.test(html) && html.includes("\\u2014"), "JSON-LD는 ASCII만(—는 \\u2014) - Blogger 엔티티 변환 방지");
   assert(buildAllGuidesHtml([{ url: `${site}/a.html`, title: "A", labels: ["X"], published: "2026-10-01" }]).includes("Every guide on Korea Plain,"), "All Guides 문구 새 이름");
 }
 
@@ -51,6 +52,10 @@ const postHtml = [
   assert(result.html.includes("p/about-korea-manual.html") && result.html.includes("korea-manual-images-2026.pages.dev"), "주소·이미지 호스트는 그대로");
   assert(result.html.includes(`"dateModified":"2026-10-27T11:08:57.017Z"`), "dateModified 그대로");
   assert(!result.html.includes("The Korea Manual"), "글: 옛 이름 0");
+  const withDash = rebrandTkmHtml({ path: "/x", title: "x", html: oldJsonLd.replace("Tap in, ring", "Tap in – ring ₩1,500") });
+  const rawDash = result.html.replace("\\u2014", "\u2014");
+  assert(rebrandTkmHtml({ path: "/x", title: "x", html: rawDash }).html === result.html, "이름이 새 것이어도 날것 비ASCII는 다시 이스케이프");
+  assert(withDash.check.ok && withDash.html.includes("Tap in \\u2013 ring \\u20a91,500"), "기존 칸의 비ASCII도 이스케이프(값은 같아 검증 통과)");
   const again = rebrandTkmHtml({ path: "/2026/10/bus.html", title: "How to Ride a Seoul Bus", html: result.html });
   assert(!again.changed, "글: 다시 돌리면 변경 없음(멱등)");
 }

@@ -12,7 +12,7 @@
 // (3) About 페이지만: 제목 "About Korea Plain", 맨 위 태그라인 한 줄, 첫 문장에 "(formerly The Korea Manual)".
 // 변환 뒤 checkNameOnlyChange가 "옛 이름 -> 새 이름 + 허용한 삽입" 말고 다른 차이가 없음을 확인한다. 다시 돌려도 결과가 같다(멱등).
 
-import { TKM_BRAND_NAME, TKM_BRAND_TAGLINE, TKM_FORMER_BRAND_NAME, tkmJsonLdBrand } from "./tkmPostStructure.js";
+import { TKM_BRAND_NAME, TKM_BRAND_TAGLINE, TKM_FORMER_BRAND_NAME, jsonLdForScript, tkmJsonLdBrand } from "./tkmPostStructure.js";
 
 /** About 페이지 경로. 슬러그는 링크가 깨지지 않게 그대로 둔다(제목만 바뀐다). */
 export const TKM_ABOUT_PATH = "/p/about-korea-manual.html";
@@ -61,7 +61,7 @@ function originOf(url: unknown): string | null {
 
 /**
  * tkm-jsonld 블록의 author·publisher를 새 브랜드로 갈아 끼운다. 나머지 칸·순서는 그대로 두고 buildJsonLdHtml과 같은 방식
- * (`<` 이스케이프)으로 다시 쓴다. 이미 새 브랜드면 그 블록은 원문 그대로 둔다. 파싱이 안 되는 블록은 건드리지 않고 센다.
+ * (`jsonLdForScript` - `<`·비ASCII 이스케이프)으로 다시 쓴다. 값은 그대로라 검증(파싱 후 비교)을 통과한다. 이미 새 브랜드면 그 블록은 원문 그대로 둔다. 파싱이 안 되는 블록은 건드리지 않고 센다.
  */
 export function rebrandJsonLd(html: string): { html: string; changed: number; unparsable: number } {
   let changed = 0;
@@ -73,10 +73,12 @@ export function rebrandJsonLd(html: string): { html: string; changed: number; un
       return whole;
     }
     const { author, publisher } = tkmJsonLdBrand(originOf(data.url));
-    if (JSON.stringify(data.author) === JSON.stringify(author) && JSON.stringify(data.publisher) === JSON.stringify(publisher)) return whole;
+    const sameBrand = JSON.stringify(data.author) === JSON.stringify(author) && JSON.stringify(data.publisher) === JSON.stringify(publisher);
+    // 이름이 이미 새 것이어도 비ASCII가 날것으로 남아 있으면 다시 쓴다(Blogger 엔티티 변환 방지 - jsonLdForScript).
+    if (sameBrand && /^[\x00-\x7e]*$/.test(raw)) return whole;
     changed += 1;
     const updated = { ...data, author, publisher };
-    return `${open}${JSON.stringify(updated).replace(/</g, "\\u003c")}${close}`;
+    return `${open}${jsonLdForScript(updated)}${close}`;
   });
   return { html: next, changed, unparsable };
 }

@@ -180,6 +180,17 @@ export function tkmJsonLdBrand(origin: string | null): { author: Record<string, 
   };
 }
 
+/**
+ * script 안에 넣을 JSON. `<`는 script가 일찍 닫히지 않게, **ASCII 밖 글자는 전부 `\uXXXX`로** 쓴다 - Blogger가 본문을 내보낼 때
+ * script 안의 비ASCII도 `&#8212;` 같은 엔티티로 바꾸는데, script 안 엔티티는 해석되지 않아 구조화 데이터에 그대로 남는다
+ * (2026-10-28 실측: "—"가 공개 페이지에서 "&#8212;", 기존 글의 "–"·"₩"도 같은 증상). JSON 이스케이프는 파서가 원래 글자로 읽는다.
+ */
+export function jsonLdForScript(data: unknown): string {
+  return JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/[\u007f-\uffff]/g, (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 /** BlogPosting JSON-LD `<script>`. `<`를 이스케이프해 본문 HTML 안에서 script가 일찍 닫히지 않게 한다. */
 export function buildJsonLdHtml(input: TkmJsonLdInput): string {
   const { author, publisher } = tkmJsonLdBrand(siteOrigin(input.url));
@@ -196,8 +207,7 @@ export function buildJsonLdHtml(input: TkmJsonLdInput): string {
     mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
     url: input.url,
   };
-  const json = JSON.stringify(data).replace(/</g, "\\u003c");
-  return `<script type="application/ld+json" class="${JSONLD_CLASS}">${json}</script>`;
+  return `<script type="application/ld+json" class="${JSONLD_CLASS}">${jsonLdForScript(data)}</script>`;
 }
 
 // 뒤 줄바꿈까지 먹는 쪽을 먼저 시도한다(References 앞에 끼운 경우). 글 끝에 붙인 경우는 앞 줄바꿈을 먹는다.
