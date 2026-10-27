@@ -2,6 +2,31 @@
 
 기준일: 2026-10-28 (Asia/Seoul)
 
+## 2026-10-28 — Korea Plain 맞춤 도메인 전환 준비: thekoreamanual.blogspot.com → **www.koreaplain.com** (브랜치 `feat/koreaplain-cutover`)
+
+**상태: 코드 main 병합(d5cde52). DB 치환·GitHub 변수·Blogger 본문 갱신은 아직 안 함 - 팀장이 HTTPS 인증서 발급 확인 후 아래 순서로 실행.**
+구 blogspot 주소는 Blogger 301 소스로 영구 보존한다(삭제·역치환 없음).
+
+- **한 곳 설정**: `src/config/publishTargets.ts`의 `KSCENE_PUBLIC_ORIGIN`(기본 `https://www.koreaplain.com`, env로 덮어쓰기 - 되돌릴 때 blogspot 주소),
+  `normalizeTkmUrl`(옛 blogspot·http·apex → 공개 주소, 경로 보존, 타 블로그는 그대로), `tkmUrlAliases`(분석 매칭), `rewriteTkmLegacyUrls`(본문 절대 URL만,
+  스킴 없는 언급·`1.bp.blogspot.com` 이미지는 그대로).
+- **쓰는 자리**: Related 블록·All Guides 허브·JSON-LD(`tkmPostStructure.ts`·`tkmSite.ts`), 발행 기록·텔레그램/뷰어로 가는 발행 URL(`publishArticleToBlogspot.ts` -
+  API가 옛 주소·http를 돌려줘도 정규화), Bing siteUrl(`resolveBingSiteUrl`, `BING_SITE_URL` 미설정 시 공개 주소), `bing:submit`.
+- **분석**: `loadPublishedUrlToJobId`가 두 호스트를 같은 job으로(`withTkmAliases`) - 구 속성 행(10/7~10/28)은 `search_performance_daily`에 그대로 두고 매칭만 이어진다.
+  `belongsToSite`는 `sc-domain:koreaplain.com`(www·apex 포함)·`https://www.koreaplain.com/` 둘 다 처리(테스트 추가). 주간 리포트는 도메인 속성 이름(`koreaplain.com`)에
+  www 행과 전환 전 blogspot 행을 함께 모은다(변수 바꾸기 전엔 blogspot 속성에 그대로).
+- **DB 치환 CLI** `npm run tkm:cutover-urls`(기본 dry-run / `--apply` / `--verify`): (a) `publications.published_url` 40행, (b) `article_jobs.metadata` 40 job·42 문자열
+  (`tkmStructure.allGuidesUrl` 38, `bingSubmit.urls[]` 4 - metadata 전체를 훑어 경로로 보고), (c) `articles.content` 3건(각 1개). `--apply`는 읽은 값 그대로일 때만 바꾼다.
+  `--verify` 10/28 03:2x 기준 42개 전부 https TLS 실패 / http 301 → https(인증서 발급 전).
+- **구조 백필 `--rewrite-host`**(`tkm-structure-backfill.yml` 입력 `rewrite_host`): 본문 옛 절대 URL 교체 + 기존 JSON-LD는 `--jsonld` 없이도 새 주소로 재생성(없이 돌리면 걷히던 문제 회피) +
+  고정 페이지 옛 주소 교체. dry-run run 40559255124: 40편 변경, 주소 교체 359, 글자 불일치 0, 남은 옛 주소 0, All Guides `https://www.koreaplain.com/p/all-guides.html`,
+  고정 페이지 Privacy Policy 1개. Blogger API는 이미 www.koreaplain.com 주소를 돌려준다.
+- 번역 프롬프트(`kscene-ko-en.md`)·kscene 문체 매체 주소 교체. 테스트: `test:tkm-cutover` 신설, `test:search-performance`·`test:bing` 보강.
+- **팀장 실행 순서**(승인 후): ① GSC 새 속성 추가·서비스 계정 권한(UI) → ② `gh variable set GSC_SITE_URLS --body "sc-domain:koreaplain.com,https://wooahpapa.tistory.com/"`
+  → ③ `npm run tkm:cutover-urls -- --apply`(prod) → ④ `gh workflow run tkm-structure-backfill.yml --ref main -f apply=true -f rewrite_host=true` → ⑤ Bing에 `https://www.koreaplain.com/` 추가(UI)
+  → ⑥ `npm run bing:submit -- --site=https://www.koreaplain.com/ --urls <40편+허브>`. ③④는 HTTPS 발급 확인 뒤(`tkm:cutover-urls -- --verify` 전부 ✅).
+- **주의**: main 배포 시점부터 새 TKM 발행은 https://www.koreaplain.com 링크를 쓴다 - 인증서 발급 전 발행은 피한다. Bing 새 사이트 등록 전 자동 제출은 실패로 기록만 된다(발행은 성공).
+
 ## 2026-10-28 — 사용설명서 블로그 리브랜딩: The Korea Manual → **Korea Plain** (브랜치 `feat/korea-plain-rebrand`)
 
 **상태: 코드 main 병합. 기존 글 40편·페이지 4개 치환 완료(`tkm-rebrand.yml` run 40554096532, 실패 0 - 공개 페이지 curl 확인). 블로그 제목·설명·검색 설명은 팀장 Blogger UI 작업
