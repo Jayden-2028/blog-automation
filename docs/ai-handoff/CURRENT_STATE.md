@@ -4,7 +4,11 @@
 
 ## 2026-10-28 — Korea Plain 맞춤 도메인 전환 준비: thekoreamanual.blogspot.com → **www.koreaplain.com** (브랜치 `feat/koreaplain-cutover`)
 
-**상태: 코드 main 병합(d5cde52). DB 치환·GitHub 변수·Blogger 본문 갱신은 아직 안 함 - 팀장이 HTTPS 인증서 발급 확인 후 아래 순서로 실행.**
+**상태: 전환 완료(2026-10-28 03:40 KST). HTTPS 03:26 발급 → ① GSC `sc-domain:koreaplain.com` 자동 확인·서비스 계정 추가·sitemap.xml(40)·sitemap-pages.xml 제출
+② `GSC_SITE_URLS=sc-domain:koreaplain.com,https://wooahpapa.tistory.com/` ③ `tkm:cutover-urls --apply` publications 40·article_jobs 40·articles 3, 실패 0, blogspot 잔여 0
+④ 구조 백필 run 40560547138 성공(40편, 불일치 0, All Guides 갱신) ⑤ Bing: GSC 가져오기로 `https://koreaplain.com/` 인증(수동 추가한 www도 API 승인됨)
+⑥ `bing:submit` 42건(글 40+All Guides+홈) ok, 잔여 58/100. GA4 스트림 16061490614 URL www.koreaplain.com·이름 Korea Plain Web(측정 ID 불변).
+공개 검증: blogspot·apex → www 301, canonical 새 주소, 본문 koreaplain 링크만, GA 태그 노출. 남은 일: GSC 새 속성 색인 요청(옛 15건은 옛 속성), 11/3 주간 점검 비교.**
 구 blogspot 주소는 Blogger 301 소스로 영구 보존한다(삭제·역치환 없음).
 
 - **한 곳 설정**: `src/config/publishTargets.ts`의 `KSCENE_PUBLIC_ORIGIN`(기본 `https://www.koreaplain.com`, env로 덮어쓰기 - 되돌릴 때 blogspot 주소),
@@ -22,7 +26,7 @@
   고정 페이지 옛 주소 교체. dry-run run 40559255124: 40편 변경, 주소 교체 359, 글자 불일치 0, 남은 옛 주소 0, All Guides `https://www.koreaplain.com/p/all-guides.html`,
   고정 페이지 Privacy Policy 1개. Blogger API는 이미 www.koreaplain.com 주소를 돌려준다.
 - 번역 프롬프트(`kscene-ko-en.md`)·kscene 문체 매체 주소 교체. 테스트: `test:tkm-cutover` 신설, `test:search-performance`·`test:bing` 보강.
-- **팀장 실행 순서**(승인 후): ① GSC 새 속성 추가·서비스 계정 권한(UI) → ② `gh variable set GSC_SITE_URLS --body "sc-domain:koreaplain.com,https://wooahpapa.tistory.com/"`
+- **팀장 실행 순서**(10/28 전부 실행 완료, 위 상태 참조): ① GSC 새 속성 추가·서비스 계정 권한(UI) → ② `gh variable set GSC_SITE_URLS --body "sc-domain:koreaplain.com,https://wooahpapa.tistory.com/"`
   → ③ `npm run tkm:cutover-urls -- --apply`(prod) → ④ `gh workflow run tkm-structure-backfill.yml --ref main -f apply=true -f rewrite_host=true` → ⑤ Bing에 `https://www.koreaplain.com/` 추가(UI)
   → ⑥ `npm run bing:submit -- --site=https://www.koreaplain.com/ --urls <40편+허브>`. ③④는 HTTPS 발급 확인 뒤(`tkm:cutover-urls -- --verify` 전부 ✅).
 - **주의**: main 배포 시점부터 새 TKM 발행은 https://www.koreaplain.com 링크를 쓴다 - 인증서 발급 전 발행은 피한다. Bing 새 사이트 등록 전 자동 제출은 실패로 기록만 된다(발행은 성공).
