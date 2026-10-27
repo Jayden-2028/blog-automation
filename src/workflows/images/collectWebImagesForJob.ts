@@ -71,7 +71,7 @@ export type CollectWebImagesForJobInput = {
    */
   directUrls?: Record<string, string>;
   /**
-   * 캡션·alt 언어(2026-10-07). 사용설명서 영어본(The Korea Manual)은 "en" - 수집 에이전트의 alt와
+   * 캡션·alt 언어(2026-10-07). 사용설명서 영어본(Korea Plain)은 "en" - 수집 에이전트의 alt와
    * 검증자가 다시 쓰는 캡션이 발행본에 그대로 나간다. 기본(미지정)은 한국어.
    */
   captionLanguage?: "ko" | "en";

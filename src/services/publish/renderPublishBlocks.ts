@@ -29,7 +29,7 @@ export type PublishRenderOptions = {
   /** 링크에 target/rel을 붙일지(Blogspot만). */
   linkTarget: boolean;
   /**
-   * 소제목을 실제 `<h2>`로 낼지(2026-10-27, The Korea Manual 색인 보강). 생략하면 `<p><strong>`(기존 관례).
+   * 소제목을 실제 `<h2>`로 낼지(2026-10-27, Korea Plain 색인 보강). 생략하면 `<p><strong>`(기존 관례).
    * 네이버·티스토리·뷰어 복사는 계속 생략한다 - 붙여넣기 대상 테마에 흔들리지 않게 하려던 원래 이유가 그쪽엔 그대로다.
    */
   headingTag?: "h2";

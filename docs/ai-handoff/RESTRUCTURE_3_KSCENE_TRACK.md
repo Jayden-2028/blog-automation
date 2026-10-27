@@ -1,4 +1,6 @@
-# 개편3 — 사용설명서 트랙 (The Korea Manual)
+# 개편3 — 사용설명서 트랙 (Korea Plain, 구 The Korea Manual)
+
+> 현재 이름: **Korea Plain**(태그라인 "Korea, in plain English", 2026-10-28 리브랜딩 - `KOREA_PLAIN_REBRAND_2026-10.md`). 아래 본문의 "The Korea Manual"은 작성 당시 이름이다. 주소(thekoreamanual.blogspot.com)는 도메인 전환 때 바뀐다.
 
 기준 문서: `RESTRUCTURE-PLAN-2026-10.md` §4.2~4.3 (저장소 밖 `/Users/wooahpapa/blog-automation/`). 구현일 2026-10-06, 브랜치 `feat/restructure-3-kscene-track`.
 트랙 레이어(봇 분기·웹훅·`job.metadata.track`)는 개편2 것을 그대로 쓴다 - `docs/ai-handoff/RESTRUCTURE_2_SOCIAL_TRACK.md`.

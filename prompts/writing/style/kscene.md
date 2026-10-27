@@ -1,6 +1,6 @@
 # 문체 참고 — 사용설명서(kscene) 카테고리
 
-> 대한민국 사용 설명서 트랙(The Korea Manual, 개편3 §4.3)의 **구조·제목·독자 가정 전용** 규격이다.
+> 대한민국 사용 설명서 트랙(Korea Plain, 개편3 §4.3)의 **구조·제목·독자 가정 전용** 규격이다.
 > 사실·인용·금지 표현은 `core-rules.md`가 우선한다. 어투·어미는 `style/voice.md`를 따르되, **아래 "화자" 절이
 > 인칭·개인 경험 규칙을 덮어쓴다**(이 카테고리는 개인 블로거 톤이 아니다).
 > `category`가 `kscene`일 때 `trend.md` 대신 이 파일을 쓴다(`specFiles.ts` pickStyleFile).

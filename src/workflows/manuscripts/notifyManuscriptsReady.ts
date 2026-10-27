@@ -152,7 +152,7 @@ function buildSocialReadyMessage(
 
 /**
  * 사용설명서 트랙(개편3): **영어본**이 최종 원고다(한글 승인 -> 영어본 생성 -> 영어본 재승인을 거쳤다). 🔵 Blogger 발행 버튼만 붙는다 -
- * The Korea Manual(K-Scene blogId)로 **공개 발행**되고, 그 순간 발행 이미지가 공개 이미지 서버(Pages)로 옮겨진다.
+ * Korea Plain(K-Scene blogId)로 **공개 발행**되고, 그 순간 발행 이미지가 공개 이미지 서버(Pages)로 옮겨진다.
  */
 function buildKsceneReadyMessage(
   result: JobManuscriptsResult,
@@ -172,7 +172,7 @@ function buildKsceneReadyMessage(
     `<b>${escapeTelegramHtml(outcome.topic.manuscript.title || job.keyword)}</b>`,
     detail,
     "",
-    "🔵 Blogger 발행을 누르면 The Korea Manual에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.",
+    "🔵 Blogger 발행을 누르면 Korea Plain에 공개 발행됩니다. 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.",
   ];
   // 영어본 단독 재승인이 없어졌으니(자동 승인) 검수 요약·수정/반려 안내를 이 알림에서 보여 준다.
   const notes = buildAutoApprovedNotes(job);

@@ -1,4 +1,4 @@
-# The Korea Manual 기존 글 구조 보강(소제목 h2·Related 블록·All Guides 허브·JSON-LD) - 수동 실행 전용(2026-10-27).
+# Korea Plain 기존 글 구조 보강(소제목 h2·Related 블록·All Guides 허브·JSON-LD) - 수동 실행 전용(2026-10-27).
 # 기본은 dry-run(아무것도 쓰지 않음). 결과 표는 실행 요약(Summary)에 남는다. 상세: src/workflows/publish/tkmStructureBackfillCli.ts
 name: tkm-structure-backfill
 

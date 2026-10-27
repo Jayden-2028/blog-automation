@@ -71,7 +71,7 @@ export const BLOGGER_CONFIG: BloggerConfig = {
 };
 
 /**
- * 사용설명서 트랙(The Korea Manual)의 Blogger blogId(개편3, 2026-10-05 확정: thekoreamanual.blogspot.com).
+ * 사용설명서 트랙(Korea Plain)의 Blogger blogId(개편3, 2026-10-05 확정: thekoreamanual.blogspot.com).
  * whynowissue와 **같은 구글 계정**이라 OAuth refresh token(BLOGGER_REFRESH_TOKEN)은 그대로 쓰고 blogId만 다르다.
  *
  * ⚠️ 이 값이 비어 있으면 사용설명서 글은 **발행하지 않는다**(BLOGGER_BLOG_ID로 폴백하지 않는다) - 폴백하면 영어 글이

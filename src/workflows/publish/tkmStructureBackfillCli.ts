@@ -1,4 +1,4 @@
-// The Korea Manual 기존 글 일괄 구조 보강(2026-10-27). 기본은 dry-run - 아무것도 쓰지 않고 글마다 바뀔 내용을 출력한다.
+// Korea Plain 기존 글 일괄 구조 보강(2026-10-27). 기본은 dry-run - 아무것도 쓰지 않고 글마다 바뀔 내용을 출력한다.
 //
 //   npm run tkm:structure                               # dry-run(전 글)
 //   npm run tkm:structure -- --apply --only=<postId>    # 한 편만 실제 적용(+ All Guides 페이지 재생성)

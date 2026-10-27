@@ -1,0 +1,58 @@
+# Korea Plain 리브랜딩(구 The Korea Manual, 2026-10-28) - 기존 글 본문 JSON-LD·고정 페이지의 옛 이름 치환. 수동 실행 전용.
+# 기본은 dry-run(아무것도 쓰지 않음). 결과 표는 실행 요약(Summary)에 남는다. 상세: src/workflows/publish/tkmRebrandCli.ts
+# 순서: dry-run -> apply + limit 1 -> 공개 페이지 확인 -> apply(limit 비움).
+name: tkm-rebrand
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "실제 적용(체크 안 하면 dry-run)"
+        type: boolean
+        default: false
+      limit:
+        description: "적용할 최대 건수(바꿀 게 있는 것만 셈). 비우면 전부"
+        type: string
+        default: "1"
+      target:
+        description: "대상"
+        type: choice
+        options: [all, posts, pages]
+        default: all
+      only:
+        description: "한 건만(postId·pageId 또는 URL 일부). 비우면 전부"
+        type: string
+        default: ""
+
+concurrency:
+  group: tkm-rebrand
+  cancel-in-progress: false
+
+jobs:
+  rebrand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run tkm:rebrand
+        env:
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          KSCENE_BLOGGER_BLOG_ID: ${{ secrets.KSCENE_BLOGGER_BLOG_ID || vars.KSCENE_BLOGGER_BLOG_ID }}
+          INPUT_APPLY: ${{ inputs.apply }}
+          INPUT_LIMIT: ${{ inputs.limit }}
+          INPUT_TARGET: ${{ inputs.target }}
+          INPUT_ONLY: ${{ inputs.only }}
+        run: |
+          args=("--target=$INPUT_TARGET")
+          [ "$INPUT_APPLY" = "true" ] && args+=(--apply)
+          [ -n "$INPUT_LIMIT" ] && args+=("--limit=$INPUT_LIMIT")
+          [ -n "$INPUT_ONLY" ] && args+=("--only=$INPUT_ONLY")
+          npm run tkm:rebrand -- "${args[@]}"

@@ -1,4 +1,4 @@
-// The Korea Manual 사이트 단위 작업(2026-10-27): 글 목록 읽기, All Guides 허브 페이지 재생성, 발행 직후 본문 마무리.
+// Korea Plain 사이트 단위 작업(2026-10-27): 글 목록 읽기, All Guides 허브 페이지 재생성, 발행 직후 본문 마무리.
 // 순수 변환은 tkmPostStructure.ts에 있고, 여기는 Blogger API를 부르는 쪽이다(테스트는 TkmSiteDeps를 주입한다).
 //
 // All Guides 페이지는 **발행할 때마다 다시 만든다**(pages.patch, 멱등). 정적 목록으로 두면 다음 글부터 다시 고아가 된다.

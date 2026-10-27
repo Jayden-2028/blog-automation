@@ -1,4 +1,4 @@
-// 사용설명서 트랙(The Korea Manual) 주제 제안 - 매일 KST 21:00(Worker cron UTC 12시), **사용설명서 봇(@KoreanManualBot)**으로 발송.
+// 사용설명서 트랙(Korea Plain) 주제 제안 - 매일 KST 21:00(Worker cron UTC 12시), **사용설명서 봇(@KoreanManualBot)**으로 발송.
 //
 // 개편3 §4.2: 시의성 소스가 아니라 영문 검색 수요(자동완성)에서 에버그린 주제 5~10건을 뽑아 Go/Pass로 제안한다.
 // Go 이후(research -> write)는 기존 파이프라인 그대로이고, 한글 원고 승인 뒤 영어 번역·재승인·Blogger 발행이 이어진다

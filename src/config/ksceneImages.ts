@@ -1,4 +1,4 @@
-// 사용설명서(The Korea Manual) 발행 이미지 호스팅 설정(개편3 §4.3-4, 2026-10-06 사용자 확정).
+// 사용설명서(Korea Plain) 발행 이미지 호스팅 설정(개편3 §4.3-4, 2026-10-06 사용자 확정).
 //
 // Blogger API에는 이미지 업로드가 없어 Blogspot 글은 지금까지 Supabase Storage URL을 핫링크했다(영구 보관을 강제하고
 // egress를 쓴다). 사용설명서 트랙은 발행 시점에 이미지를 **전용 공개 Cloudflare Pages 프로젝트**로 복사하고 본문 URL을 치환한다.

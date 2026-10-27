@@ -44,7 +44,7 @@ const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: str
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
-    title: "사용설명서 원고 뷰어", heading: "The Korea Manual", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
+    title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
     pen: "#E8590C", penSoft: "#FDF0E6",
   },
 };

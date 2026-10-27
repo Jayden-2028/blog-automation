@@ -1,4 +1,6 @@
-# The Korea Manual 테마·UI 패치 (2026-10-27)
+# Korea Plain(구 The Korea Manual) 테마·UI 패치 (2026-10-27)
+
+> 현재 이름: **Korea Plain**(2026-10-28 리브랜딩, `KOREA_PLAIN_REBRAND_2026-10.md`). 아래 본문은 작성 당시 기록이다.
 
 작성: TKM 구조 보강 세션(B). 적용: 팀장이 Blogger UI에서. **이 문서의 항목은 코드로 할 수 없는 것만** 모았다 -
 Blogger API v3에는 테마 편집·레이아웃 위젯·글별 검색 설명 필드가 없다.

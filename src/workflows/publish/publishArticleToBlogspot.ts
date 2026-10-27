@@ -225,7 +225,7 @@ export async function publishArticleToBlogspot(
   target = resolveBloggerTarget(job, "ksceneBlogId" in options ? options.ksceneBlogId : KSCENE_BLOGGER_BLOG_ID);
   if (target.track === "kscene" && !target.blogId) {
     // BLOGGER_BLOG_ID로 폴백하지 않는다 - 영어 글이 whynowissue(한국어 블로그)에 올라간다.
-    return { ok: false, reason: "disabled", detail: "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 The Korea Manual 블로그 ID가 있어야 발행합니다" };
+    return { ok: false, reason: "disabled", detail: "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 Korea Plain 블로그 ID가 있어야 발행합니다" };
   }
 
   const articles = await loadArticles(jobId);

@@ -1,4 +1,5 @@
-// The Korea Manual(사용설명서 트랙, Blogger) 글의 내부 구조 보강(2026-10-27).
+// Korea Plain(사용설명서 트랙, Blogger) 글의 내부 구조 보강(2026-10-27).
+// TKM = Korea Plain(구 The Korea Manual, 2026-10-28 리브랜딩). 식별자·파일명·환경변수의 TKM/kscene은 운영 영향 때문에 그대로 둔다.
 //
 // 왜 필요한가: 개설 20일·38편인데 구글 색인 0건. robots·noindex·canonical·사이트맵은 정상이고, URL 검사는 전부
 // "발견됨 - 현재 색인 생성되지 않음"이었다. 실측해 보니 크롤러가 홈에서 글로 흘러갈 길이 거의 없었다.
@@ -27,7 +28,16 @@ export const TKM_JSONLD_IN_BODY = true;
 export const TKM_ALL_GUIDES_TITLE = "All Guides";
 export const TKM_ALL_GUIDES_PATH = "/p/all-guides.html";
 /** 저자·발행자 이름(JSON-LD). 블로그 이름과 같다. */
-export const TKM_BRAND_NAME = "The Korea Manual";
+export const TKM_BRAND_NAME = "Korea Plain";
+/**
+ * 태그라인. "plain"이 "평원·단순한"으로 읽히지 않게 이름 옆에 늘 붙인다 - 블로그 제목 옆(테마, UI 작업)·About·메타 설명·
+ * JSON-LD(publisher.slogan)에 노출한다.
+ */
+export const TKM_BRAND_TAGLINE = "Korea, in plain English";
+/** 블로그 설명·메타 설명·JSON-LD publisher.description. */
+export const TKM_BRAND_DESCRIPTION = "Practical step-by-step guides to Korean transport, apps, errands, and customs — in plain English.";
+/** 2026-10-28까지의 이름. 같은 이름의 제3자 사이트(thekoreamanual.com)와 충돌해 바꿨다. 기존 글·페이지 치환에만 쓴다. */
+export const TKM_FORMER_BRAND_NAME = "The Korea Manual";
 
 const RELATED_CLASS = "tkm-related";
 const JSONLD_CLASS = "tkm-jsonld";
@@ -161,10 +171,18 @@ export type TkmJsonLdInput = {
   imageUrl: string | null;
 };
 
+/** JSON-LD 저자·발행자. 발행자에만 태그라인(slogan)과 설명을 싣는다 - 저자까지 실으면 글마다 같은 문장이 두 번 들어간다. */
+export function tkmJsonLdBrand(origin: string | null): { author: Record<string, string>; publisher: Record<string, string> } {
+  const url: Record<string, string> = origin ? { url: `${origin}/` } : {};
+  return {
+    author: { "@type": "Organization", name: TKM_BRAND_NAME, ...url },
+    publisher: { "@type": "Organization", name: TKM_BRAND_NAME, slogan: TKM_BRAND_TAGLINE, description: TKM_BRAND_DESCRIPTION, ...url },
+  };
+}
+
 /** BlogPosting JSON-LD `<script>`. `<`를 이스케이프해 본문 HTML 안에서 script가 일찍 닫히지 않게 한다. */
 export function buildJsonLdHtml(input: TkmJsonLdInput): string {
-  const origin = siteOrigin(input.url);
-  const brand = { "@type": "Organization", name: TKM_BRAND_NAME, ...(origin ? { url: `${origin}/` } : {}) };
+  const { author, publisher } = tkmJsonLdBrand(siteOrigin(input.url));
   const data = {
     "@context": "https://schema.org",
     "@type": "BlogPosting",
@@ -172,8 +190,8 @@ export function buildJsonLdHtml(input: TkmJsonLdInput): string {
     description: input.description,
     datePublished: input.datePublished,
     dateModified: input.dateModified,
-    author: brand,
-    publisher: brand,
+    author,
+    publisher,
     ...(input.imageUrl ? { image: [input.imageUrl] } : {}),
     mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
     url: input.url,

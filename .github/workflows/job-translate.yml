@@ -1,4 +1,4 @@
-# 사용설명서 트랙(The Korea Manual) 한→영 번역 단계(개편3 §4.3-2). 한글 원고가 승인(✅)되면 TelegramBot이 이 워크플로를
+# 사용설명서 트랙(Korea Plain) 한→영 번역 단계(개편3 §4.3-2). 한글 원고가 승인(✅)되면 TelegramBot이 이 워크플로를
 # workflow_dispatch로 발화하고(runTelegramUpdateCli.ts triggerTranslation), 영어본 재승인에서 "수정 필요" 답장이 오면
 # 같은 워크플로를 feedback과 함께 다시 띄운다.
 #

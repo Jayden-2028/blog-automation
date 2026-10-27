@@ -55,7 +55,7 @@ export type BloggerPublishResult =
   | { ok: true; postId: string; url: string; status: string; publishedAt: string; scheduled: boolean }
   | { ok: false; stage: BloggerPublishStage; error: string };
 
-/** posts.list / pages.list 한 항목에서 쓰는 필드만(The Korea Manual 구조 보강, 2026-10-27). */
+/** posts.list / pages.list 한 항목에서 쓰는 필드만(Korea Plain 구조 보강, 2026-10-27). */
 export type BloggerListedPost = {
   id: string;
   url: string;
@@ -68,7 +68,7 @@ export type BloggerListedPost = {
   authorName?: string;
 };
 
-export type BloggerListedPage = { id: string; url: string; title: string; status: string };
+export type BloggerListedPage = { id: string; url: string; title: string; status: string; /** fetchBodies=true로 읽었을 때만 있다. */ content?: string };
 
 export type BloggerClientOptions = {
   clientId?: string;
@@ -279,7 +279,7 @@ export class BloggerClient {
     };
   }
 
-  // ---- The Korea Manual 구조 보강(2026-10-27): 글·페이지 목록과 본문만 바꾸는 patch ----
+  // ---- Korea Plain 구조 보강(2026-10-27): 글·페이지 목록과 본문만 바꾸는 patch ----
 
   /** 토큰을 붙여 API를 부른다. 실패는 메시지 문자열로 돌려준다(호출부가 단계 이름을 붙인다). */
   private async authed(
@@ -359,9 +359,9 @@ export class BloggerClient {
     return { ok: true, postId: String(res.json.id ?? postId) };
   }
 
-  /** 고정 페이지 목록(live + draft). */
-  async listPages(): Promise<{ ok: true; pages: BloggerListedPage[] } | { ok: false; error: string }> {
-    const res = await this.authed("GET", "/pages", { status: "live", fetchBodies: "false" });
+  /** 고정 페이지 목록(공개된 것). 본문이 필요할 때만 fetchBodies(Korea Plain 리브랜딩, 2026-10-28). */
+  async listPages(options: { fetchBodies?: boolean } = {}): Promise<{ ok: true; pages: BloggerListedPage[] } | { ok: false; error: string }> {
+    const res = await this.authed("GET", "/pages", { status: "live", fetchBodies: String(Boolean(options.fetchBodies)) });
     if (!res.ok) return res;
     const items = (res.json.items ?? []) as Array<Record<string, unknown>>;
     return {
@@ -371,8 +371,16 @@ export class BloggerClient {
         url: String(item.url ?? ""),
         title: String(item.title ?? ""),
         status: String(item.status ?? ""),
+        ...(typeof item.content === "string" ? { content: item.content } : {}),
       })),
     };
+  }
+
+  /** 고정 페이지 하나(제목·본문). 갱신 뒤 저장된 값을 다시 읽어 확인하는 데 쓴다. */
+  async getPage(pageId: string): Promise<{ ok: true; title: string; content: string } | { ok: false; error: string }> {
+    const res = await this.authed("GET", `/pages/${pageId}`);
+    if (!res.ok) return res;
+    return { ok: true, title: String(res.json.title ?? ""), content: String(res.json.content ?? "") };
   }
 
   /** 고정 페이지를 새로 공개한다(pages.insert). URL은 Blogger가 제목에서 만든다("All Guides" -> /p/all-guides.html). */
