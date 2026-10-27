@@ -3,7 +3,7 @@
 //
 //   npm run tistory:url-audit                      # dry-run(기본): 전 행 HEAD 검사 -> 404 행의 교정 주소·근거 표 + 옛 주소를 본문에 품은 글 목록
 //   npm run tistory:url-audit -- --apply           # publications.published_url + job.metadata.tistoryPublish.url 교정(+ urlCorrectedAt)
-//   npm run tistory:url-audit -- --rewrite-bodies  # (미구현 - 설계 메모) 본문 치환 대상 목록만 출력한다
+//   npm run tistory:url-audit -- --rewrite-bodies  # 본문 치환 대상 목록만 출력한다(치환은 npm run tistory:fix-links)
 //
 // --apply는 원격 DB update다 - 사용자 승인 뒤에만 실행한다. 교정 주소를 찾지 못한(또는 검증 못 한) 행은 건드리지 않는다.
 // 네트워크 호출(HEAD·검색·RSS)은 읽기 전용이고 행당 0.3초 간격을 둔다.
@@ -22,6 +22,7 @@ import {
 } from "../../services/publish/tistory/tistoryPublishedUrl.js";
 import { TISTORY_PLATFORM } from "./publishJobToTistory.js";
 import { TISTORY_REQUEST_KEY } from "./tistoryPublishQueue.js";
+import { findBodyHits } from "./tistoryDeadLinkHits.js";
 
 const GAP_MS = 300;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,7 +40,6 @@ type AuditRow = {
   note?: string;
 };
 
-type BodyHit = { articleId: number; jobId: string | null; title: string; deadUrlIds: number[]; jobPublished: boolean };
 
 function short(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -52,11 +52,6 @@ function decoded(url: string | null): string {
   } catch {
     return url;
   }
-}
-
-/** LIKE 패턴 이스케이프(퍼센트 인코딩 주소에 %가 가득하다). */
-function likeEscape(text: string): string {
-  return text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
 async function loadRows(): Promise<Omit<AuditRow, "httpStatus" | "fixUrl" | "fixSource">[]> {
@@ -80,40 +75,6 @@ async function loadRows(): Promise<Omit<AuditRow, "httpStatus" | "fixUrl" | "fix
       status: pub.status,
       currentUrl: pub.published_url as string,
     }));
-}
-
-/** 옛 주소를 본문에 품은 글(내부 링크). 인코딩된 주소와 풀린 주소 둘 다 찾는다. */
-async function findBodyHits(dead: AuditRow[]): Promise<BodyHit[]> {
-  const hits = new Map<number, BodyHit>();
-  for (const row of dead) {
-    const slug = slugFromEntryUrl(row.currentUrl);
-    const needles = [...new Set([row.currentUrl.replace(/^https?:\/\//, ""), slug ? `/entry/${slug}` : ""].filter(Boolean))];
-    for (const needle of needles) {
-      const { data, error } = await supabase.from("articles").select("id, job_id, title").ilike("content", `%${likeEscape(needle)}%`);
-      if (error) throw error;
-      for (const article of data ?? []) {
-        const hit = hits.get(article.id) ?? { articleId: article.id, jobId: article.job_id, title: article.title ?? "", deadUrlIds: [], jobPublished: false };
-        if (!hit.deadUrlIds.includes(row.id)) hit.deadUrlIds.push(row.id);
-        hits.set(article.id, hit);
-      }
-    }
-  }
-  // 그 글이 실제로 (어느 채널이든) 발행됐나 - job 단위로 본다(수정 반영으로 article row가 여럿일 수 있다).
-  const jobIds = [...new Set([...hits.values()].map((hit) => hit.jobId).filter((id): id is string => Boolean(id)))];
-  if (jobIds.length > 0) {
-    const { data: jobArticles, error } = await supabase.from("articles").select("id, job_id").in("job_id", jobIds);
-    if (error) throw error;
-    const { data: pubs, error: pubError } = await supabase
-      .from("publications")
-      .select("article_id, status")
-      .in("article_id", (jobArticles ?? []).map((article) => article.id))
-      .eq("status", "published");
-    if (pubError) throw pubError;
-    const publishedArticles = new Set((pubs ?? []).map((pub) => pub.article_id));
-    const publishedJobs = new Set((jobArticles ?? []).filter((article) => publishedArticles.has(article.id)).map((article) => article.job_id));
-    for (const hit of hits.values()) hit.jobPublished = hit.jobId ? publishedJobs.has(hit.jobId) : false;
-  }
-  return [...hits.values()].sort((a, b) => b.articleId - a.articleId);
 }
 
 async function applyFix(row: AuditRow, correctedAt: string): Promise<void> {
@@ -192,8 +153,8 @@ async function main(): Promise<void> {
 
   if (rewriteBodies) {
     console.log(
-      "\n⚠️ --rewrite-bodies는 설계 메모 단계라 실행하지 않습니다 - 위 목록이 치환 대상입니다." +
-        "\n   articles.content 치환과 티스토리 실제 글 본문 수정은 별도 승인 범위입니다(CURRENT_STATE.md '티스토리 발행 주소 404' 절)."
+      "\n⚠️ --rewrite-bodies는 목록만 출력합니다 - 위 목록이 치환 대상입니다." +
+        "\n   articles.content 치환과 티스토리 실제 글 본문 수정은 npm run tistory:fix-links(dry-run 기본, 맥미니에서 실행)."
     );
   }
 

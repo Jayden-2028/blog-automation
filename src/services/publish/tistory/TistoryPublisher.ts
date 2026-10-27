@@ -40,7 +40,21 @@ import {
   type TistoryUrlSource,
 } from "./tistoryPublishedUrl.js";
 
+import {
+  checkEditInvariants,
+  extractPageTitle,
+  extractTistoryPostId,
+  snapshotFromRaw,
+  tistoryEditUrl,
+  type EditPlan,
+  type EditorSnapshot,
+  type HrefChange,
+  type RawEditorState,
+  type TistoryPostIdSource,
+} from "./tistoryPostEdit.js";
+
 export type { TistoryUrlSource } from "./tistoryPublishedUrl.js";
+export type { EditPlan, HrefChange } from "./tistoryPostEdit.js";
 
 export type TistoryPublishStage =
   | "login"
@@ -75,6 +89,54 @@ export type TistoryPublishResult =
 
 export type TistoryLoginCheckResult = { loggedIn: true } | { loggedIn: false; reason: string };
 
+export type TistoryEditStage =
+  | "public-page"
+  | "post-id"
+  | "login"
+  | "navigate"
+  | "editor-init"
+  | "plan"
+  | "mutate"
+  | "invariant"
+  | "publish-layer"
+  | "publish";
+
+export type TistoryEditContext = {
+  postId: number;
+  /** 에디터 본문 `a`의 href(순서 = ed.dom.select("a") 순번). */
+  hrefs: string[];
+  /** 수정 전 공개 글 페이지 HTML. */
+  publicHtml: string;
+  /** `<blog>.tistory.com` - 상대 경로 href 비교용. */
+  host: string;
+};
+
+export type TistoryEditInput = {
+  /** 공개 글 주소(`/entry/…` 또는 `/<숫자>`). */
+  postUrl: string;
+  /** 바꿀 자리를 정한다. 브라우저 밖(Node)에서 돈다 - 결과는 속성 변경 목록뿐이다. */
+  mutate: (ctx: TistoryEditContext) => EditPlan;
+  /** 발행 뒤 다시 받은 공개 페이지가 기대대로인지. 없으면 verified=false로 둔다. */
+  verify?: (publicHtml: string) => { ok: boolean; detail: string };
+};
+
+export type TistoryEditResult =
+  | {
+      ok: true;
+      postId: number;
+      changedHrefs: HrefChange[];
+      /** 바꿀 게 없어 발행 단계를 건너뛰었다(멱등 재실행). */
+      noChange: boolean;
+      verified: boolean;
+      verifyDetail?: string;
+      /** 발행 레이어에서 읽은 공개 범위 라디오 id(그대로 유지했다)와 버튼 문구. */
+      visibility?: string;
+      buttonText?: string;
+      warnings: string[];
+    }
+  /** stage "login"은 실패가 아니라 대기(deferred) - 재로그인 뒤 다시 돌린다. */
+  | { ok: false; stage: TistoryEditStage; error: string; postId?: number };
+
 const SELECTORS = {
   title: "#post-title-inp",
   editorInstanceId: "editor-tistory",
@@ -87,6 +149,7 @@ const SELECTORS = {
   publishLayer: ".editor_layer",
   visibilityPublic: "#open20",
   visibilityPrivate: "#open0",
+  visibilityRadios: "input[name=basicSet]",
   urlSlug: "#urlPublish",
   publishButton: "#publish-btn",
 } as const;
@@ -99,6 +162,8 @@ const UPLOAD_SETTLE_MS = 1_200;
 const PUBLISH_WAIT_MS = 30_000;
 const MANAGE_LIST_WAIT_MS = 10_000;
 const FAILURE_SNAPSHOT_DIR = ".local/dom-snapshots/tistory/failures";
+const EDIT_BODY_SETTLE_MS = 8_000;
+const EDIT_VERIFY_DELAYS_MS = [2_000, 4_000, 8_000] as const;
 
 export function isTistoryLoginUrl(url: string): boolean {
   return (
@@ -145,6 +210,44 @@ const FOCUS_END_JS = `(() => {
   ed.selection.collapse(false);
   ed.focus();
   return true;
+})()`;
+
+/** 수정 화면 본문 상태(불변 검증용) - 텍스트·이미지 수·`a` href 목록·직렬화 본문. 읽기만 한다. */
+const EDIT_STATE_JS = `(() => {
+  const ed = window.tinymce && window.tinymce.get("${SELECTORS.editorInstanceId}");
+  if (!ed || !ed.initialized || !ed.getBody()) return null;
+  const body = ed.getBody();
+  return {
+    text: body.textContent || "",
+    images: body.querySelectorAll("img").length,
+    hrefs: ed.dom.select("a").map((a) => ed.dom.getAttrib(a, "href") || ""),
+    content: ed.getContent() || "",
+  };
+})()`;
+
+/**
+ * 계획한 `a`의 href만 바꾼다. 자리마다 지금 값이 계획의 from과 같은지 먼저 확인하고, 하나라도 다르면 아무것도 바꾸지 않는다.
+ * TinyMCE는 저장 때 data-mce-href를 우선하므로 그 속성이 있으면 같이 맞춘다.
+ */
+const APPLY_HREF_CHANGES_JS = (changes: readonly HrefChange[]): string => `(() => {
+  const ed = window.tinymce && window.tinymce.get("${SELECTORS.editorInstanceId}");
+  if (!ed) return "no-editor";
+  const changes = ${JSON.stringify(changes)};
+  const anchors = ed.dom.select("a");
+  for (const c of changes) {
+    const a = anchors[c.index];
+    if (!a) return "missing #" + c.index;
+    if ((ed.dom.getAttrib(a, "href") || "") !== c.from) return "mismatch #" + c.index;
+  }
+  for (const c of changes) {
+    const a = anchors[c.index];
+    ed.dom.setAttrib(a, "href", c.to);
+    if (a.hasAttribute("data-mce-href")) a.setAttribute("data-mce-href", c.to);
+  }
+  if (ed.undoManager && ed.undoManager.add) ed.undoManager.add();
+  if (ed.setDirty) ed.setDirty(true);
+  if (ed.fire) { ed.fire("change"); ed.fire("input"); }
+  return "ok";
 })()`;
 
 /** 남은 표식 문단(업로드 실패 자리)을 지운다. 지운 표식 목록을 돌려준다. */
@@ -326,7 +429,198 @@ export class TistoryPublisher {
     }
   }
 
+  /**
+   * 이미 발행된 글의 본문을 **속성 단위로만** 고쳐 다시 저장한다(2026-10-28, 설계서 "발행 후 수정").
+   * 흐름: 공개 페이지에서 글 ID → 수정 화면(/manage/newpost/<ID>?type=post) → 에디터 상태 스냅샷 → mutate(Node)로 바꿀 자리 결정
+   * → 그 `a`의 href만 setAttrib → 불변 검증 → 발행 레이어(공개 범위·슬러그·제목·태그·카테고리는 건드리지 않음) → 화면 이탈 확인
+   * → 공개 페이지 재확인(verify). 실측 전 가정(수정 화면 주소·버튼 문구·셀렉터)은 실패 메시지에 셀렉터를 적고 스냅샷을 남긴다.
+   */
+  async editPost(input: TistoryEditInput): Promise<TistoryEditResult> {
+    const warnings: string[] = [];
+    const host = `${this.blogName}.tistory.com`;
+    const context = await this.launch();
+    let publishClicked = false;
+    try {
+      // 1) 공개 페이지 → 글 ID. 로그인 컨텍스트로 받아 비공개 글도 읽는다.
+      const publicHtml = await this.fetchPage(context, input.postUrl);
+      if (publicHtml === null) return { ok: false, stage: "public-page", error: `글 페이지를 받지 못했습니다(${input.postUrl})` };
+      const idInfo: { id: number; source: TistoryPostIdSource } | null = extractTistoryPostId(publicHtml);
+      if (!idInfo) {
+        return { ok: false, stage: "post-id", error: `글 ID를 찾지 못했습니다(data-entry-id / "entryId":N / "/<N>" 링크 모두 실패): ${input.postUrl}` };
+      }
+      const postId = idInfo.id;
+      console.log(`[tistory-edit] 글 ID ${postId}(${idInfo.source}) <- ${input.postUrl}`);
+
+      // 2) 수정 화면. 발행 버튼을 누르기 전 confirm(임시저장 복원 등)은 거절, 누른 뒤의 확인은 수락한다 - 둘 다 로그로 남긴다.
+      const page = await context.newPage();
+      page.on("dialog", (dialog) => {
+        console.log(`[tistory-edit] 대화상자(${dialog.type()}) "${dialog.message()}" -> ${publishClicked ? "수락" : "거절"}`);
+        void (publishClicked ? dialog.accept() : dialog.dismiss()).catch(() => {});
+      });
+      const editUrl = tistoryEditUrl(this.blogName, postId);
+      try {
+        await page.goto(editUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      } catch (error) {
+        return { ok: false, stage: "navigate", postId, error: `수정 화면(${editUrl}) 열기 실패: ${this.errorMessage(error).split("\n")[0]}` };
+      }
+      await page.waitForTimeout(1500);
+      if (isTistoryLoginUrl(page.url())) {
+        return { ok: false, stage: "login", postId, error: "티스토리(카카오) 로그인이 풀렸습니다. 맥미니에서 npm run setup:tistory 로 다시 로그인하세요." };
+      }
+      if (!page.url().includes(`/manage/newpost/${postId}`)) {
+        await this.saveFailureSnapshot(page, "edit-navigate");
+        return { ok: false, stage: "navigate", postId, error: `수정 화면 주소가 아닙니다(기대 ${editUrl}, 실제 ${page.url()})` };
+      }
+      await this.refreshSavedCookies(context);
+      await this.dismissRestorePopup(page);
+
+      const editorReady = await this.waitForEditor(page);
+      if (!editorReady.ok) {
+        await this.saveFailureSnapshot(page, "edit-editor-init");
+        return { ok: false, stage: "editor-init", postId, error: editorReady.error };
+      }
+      const raw0 = await this.waitForEditBody(page);
+      if (!raw0) {
+        await this.saveFailureSnapshot(page, "edit-editor-init");
+        return { ok: false, stage: "editor-init", postId, error: `에디터 본문이 ${EDIT_BODY_SETTLE_MS / 1000}초 내 채워지지 않았습니다(tinymce.get("${SELECTORS.editorInstanceId}").getBody())` };
+      }
+
+      // 맞는 글을 열었나 - 에디터 제목과 공개 페이지 제목 대조.
+      const editorTitle = normalizeTitle(await page.inputValue(SELECTORS.title).catch(() => ""));
+      const pageTitle = normalizeTitle(extractPageTitle(publicHtml) ?? "");
+      if (!editorTitle) {
+        warnings.push(`수정 화면 제목을 읽지 못했습니다(${SELECTORS.title}) - 글 대조를 건너뜁니다.`);
+      } else if (pageTitle && !editorTitle.includes(pageTitle) && !pageTitle.includes(editorTitle)) {
+        await this.saveFailureSnapshot(page, "edit-editor-init");
+        return { ok: false, stage: "editor-init", postId, error: `수정 화면 제목이 공개 글 제목과 다릅니다(다른 글이 열렸을 수 있음)` };
+      }
+      const before: EditorSnapshot = snapshotFromRaw(raw0);
+
+      // 3) 바꿀 자리 결정(Node).
+      let plan: EditPlan;
+      try {
+        plan = input.mutate({ postId, hrefs: before.hrefs, publicHtml, host });
+      } catch (error) {
+        return { ok: false, stage: "plan", postId, error: this.errorMessage(error) };
+      }
+      if (plan.abort) {
+        await this.saveFailureSnapshot(page, "edit-plan");
+        return { ok: false, stage: "plan", postId, error: plan.abort };
+      }
+      if (plan.hrefChanges.length === 0) {
+        const check = input.verify?.(publicHtml);
+        return { ok: true, postId, changedHrefs: [], noChange: true, verified: check?.ok ?? false, verifyDetail: check?.detail, warnings };
+      }
+
+      // 4) 속성만 바꾸고 불변 검증.
+      const applied = (await page.evaluate(APPLY_HREF_CHANGES_JS(plan.hrefChanges)).catch((error: unknown) => `error:${this.errorMessage(error)}`)) as string;
+      if (applied !== "ok") {
+        await this.saveFailureSnapshot(page, "edit-mutate");
+        return { ok: false, stage: "mutate", postId, error: `href 변경 실패(${applied}) - ed.dom.select("a")` };
+      }
+      const raw1 = (await page.evaluate(EDIT_STATE_JS).catch(() => null)) as RawEditorState | null;
+      if (!raw1) {
+        await this.saveFailureSnapshot(page, "edit-invariant");
+        return { ok: false, stage: "invariant", postId, error: "변경 후 에디터 상태를 읽지 못했습니다." };
+      }
+      const invariant = checkEditInvariants(before, snapshotFromRaw(raw1), plan.hrefChanges, host);
+      if (!invariant.ok) {
+        await this.saveFailureSnapshot(page, "edit-invariant");
+        return { ok: false, stage: "invariant", postId, error: `불변 검증 실패 - 발행하지 않았습니다: ${invariant.reasons.join("; ")}` };
+      }
+
+      // 5) 발행 레이어 - 공개 범위는 현재 값을 읽기만 한다(클릭하지 않는다).
+      let visibility = "";
+      let buttonText = "";
+      try {
+        await page.click(SELECTORS.publishLayerButton, { timeout: CLICK_TIMEOUT_MS });
+        await page.waitForSelector(SELECTORS.publishLayer, { state: "visible", timeout: CLICK_TIMEOUT_MS });
+        const checked = (await page.evaluate(
+          `(() => { const r = document.querySelector(${JSON.stringify(`${SELECTORS.visibilityRadios}:checked`)}); return r ? (r.id || r.value || "checked") : null; })()`
+        )) as string | null;
+        if (!checked) {
+          await this.saveFailureSnapshot(page, "edit-publish-layer");
+          return { ok: false, stage: "publish-layer", postId, error: `공개 범위 현재 값을 읽지 못했습니다(${SELECTORS.visibilityRadios}:checked) - 바꾸지 않고 중단합니다.` };
+        }
+        visibility = checked;
+        const slug = (await page.inputValue(SELECTORS.urlSlug).catch(() => "")).trim();
+        buttonText = ((await page.textContent(SELECTORS.publishButton).catch(() => "")) ?? "").trim();
+        console.log(`[tistory-edit] 공개 범위 유지 #${visibility}, 슬러그 "${slug}", 버튼 "${buttonText}"`);
+        if (!/수정|발행|저장/.test(buttonText)) warnings.push(`발행 버튼 문구가 예상(수정/발행/공개 발행)과 다릅니다("${buttonText}").`);
+      } catch (error) {
+        await this.saveFailureSnapshot(page, "edit-publish-layer");
+        return {
+          ok: false,
+          stage: "publish-layer",
+          postId,
+          error: `발행 레이어 실패(${SELECTORS.publishLayerButton} -> ${SELECTORS.publishLayer}): ${this.errorMessage(error).split("\n")[0]}`,
+        };
+      }
+
+      // 6) 저장 - 글쓰기 화면 이탈을 성공 신호로 본다(publish와 같다).
+      try {
+        publishClicked = true;
+        const left = page.waitForURL((url) => !url.toString().includes("/manage/newpost"), { timeout: PUBLISH_WAIT_MS });
+        await page.click(SELECTORS.publishButton, { timeout: CLICK_TIMEOUT_MS });
+        await left;
+      } catch (error) {
+        await this.saveFailureSnapshot(page, "edit-publish");
+        return {
+          ok: false,
+          stage: "publish",
+          postId,
+          error: `저장 확인 신호(글쓰기 화면 이탈)를 ${PUBLISH_WAIT_MS / 1000}초 내 감지하지 못했습니다(${SELECTORS.publishButton}): ${this.errorMessage(error).split("\n")[0]}`,
+        };
+      }
+
+      // 7) 공개 페이지 재확인(반영이 늦을 수 있어 몇 번 다시 받는다).
+      let verified = false;
+      let verifyDetail: string | undefined;
+      if (input.verify) {
+        for (const delay of EDIT_VERIFY_DELAYS_MS) {
+          await page.waitForTimeout(delay);
+          const html = await this.fetchPage(context, input.postUrl);
+          if (html === null) {
+            verifyDetail = "글 페이지를 다시 받지 못했습니다";
+            continue;
+          }
+          const check = input.verify(html);
+          verifyDetail = check.detail;
+          if (check.ok) {
+            verified = true;
+            break;
+          }
+        }
+      }
+      return { ok: true, postId, changedHrefs: invariant.changed, noChange: false, verified, verifyDetail, visibility, buttonText, warnings };
+    } finally {
+      await context.close().catch(() => {});
+    }
+  }
+
   // ---------- 단계별 도우미 ----------
+
+  /** 로그인 컨텍스트로 페이지 HTML을 받는다. 실패하면 null. */
+  private async fetchPage(context: BrowserContext, url: string): Promise<string | null> {
+    const res = await context.request.get(url, { timeout: 15_000 }).catch(() => null);
+    if (!res || !res.ok()) return null;
+    return res.text().catch(() => null);
+  }
+
+  /** 에디터 본문이 서버 글로 채워질 때까지(텍스트 길이가 두 번 연속 같을 때까지) 기다린다. */
+  private async waitForEditBody(page: Page): Promise<RawEditorState | null> {
+    const deadline = Date.now() + EDIT_BODY_SETTLE_MS;
+    let previous = -1;
+    while (Date.now() < deadline) {
+      const state = (await page.evaluate(EDIT_STATE_JS).catch(() => null)) as RawEditorState | null;
+      if (state && state.text.trim().length > 0) {
+        if (state.text.length === previous) return state;
+        previous = state.text.length;
+      }
+      await page.waitForTimeout(700);
+    }
+    return null;
+  }
 
   private async dismissRestorePopup(page: Page): Promise<void> {
     // "작성 중이던 글이 있습니다. 이어서 작성할까요?" 류의 레이어. 새 글로 시작한다.

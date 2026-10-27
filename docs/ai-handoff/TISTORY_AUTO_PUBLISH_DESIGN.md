@@ -103,3 +103,43 @@
 5. **첫 발행은 비공개**: 서식·이미지·카테고리를 눈으로 확인한 뒤 `public`으로 바꾼다. 비공개 글을 공개로 바꾸는 건 사람이 티스토리에서 한다(초안을 다시 여는 자동화는 네이버 때 팝업 문제로 포기한 전례).
 6. **알림 채널**: 발행 결과·로그인 알림은 사회 봇(`notifierForJob`)으로 간다. 네이버 폴러는 메인봇을 쓰는데 이건 다른 세션 소유라 손대지 않는다.
 7. **큐 적체**: 로그인이 며칠 풀린 채 요청이 쌓이면 재로그인 직후 한꺼번에 올라간다. 폴러는 1회 2건 상한이라 2분 간격으로 순차 발행되지만, 묵은 글이 뒤늦게 공개되는 게 싫으면 "N일 지난 deferred는 사람이 다시 눌러야 함"을 둔다(기본 3일 제안).
+
+## 8. 발행 후 수정(editPost) (2026-10-28)
+
+이미 발행된 글의 본문을 **속성 단위로만** 고치는 재사용 기능. 첫 용도는 2026-10-27 404 내부 링크 치환(`npm run tistory:fix-links`).
+코드: `TistoryPublisher.editPost()`, 순수 함수 `services/publish/tistory/tistoryPostEdit.ts`(테스트 `npm run test:tistory-edit`).
+
+**할 수 있는 것**: 본문 `a`의 href를 계획한 자리만 바꿔 다시 저장. 공개 범위·슬러그·제목·태그·카테고리는 그대로 둔다
+(공개 범위는 발행 레이어에서 현재 값을 읽어 로그로만 남기고 클릭하지 않는다).
+
+**할 수 없는 것(일부러 막음)**: 본문 통째 교체(`setContent`), 텍스트·이미지 수정, 링크 추가·삭제, 제목·슬러그·공개 범위 변경.
+그런 수정이 필요하면 이 기능을 넓히지 말고 따로 설계한다.
+
+**흐름**: ① 공개 페이지(로그인 컨텍스트 GET)에서 글 ID - `data-entry-id` → `"entryId":N` → `/<N>` 링크(최다·단독 1등일 때만)
+② `/manage/newpost/<ID>?type=post` 열기 - 로그인 화면이면 `stage: "login"`(대기), 주소가 다르면 중단, "이어서 작성" 팝업은
+`dismissRestorePopup` ③ TinyMCE `initialized` + 본문 길이 안정 대기, 에디터 제목 ↔ 공개 페이지 og:title 대조(다르면 중단)
+④ `mutate(ctx)`(Node)가 `ed.dom.select("a")` 순번 기준 `{index, from, to}` 목록을 돌려준다 - 공개 페이지엔 옛 링크가 있는데 에디터에서
+못 찾으면 `abort` ⑤ 브라우저는 각 자리의 현재 값이 `from`과 같은지 확인한 뒤 `ed.dom.setAttrib(a, "href", to)`(+`data-mce-href`)
+⑥ 불변 검증 ⑦ 발행 레이어 → 버튼 문구 로그 → 클릭 → `/manage/newpost` 이탈을 성공 신호로 ⑧ 공개 페이지를 2·4·8초 뒤 다시 받아 `verify`.
+버튼 클릭 전 대화상자는 거절, 클릭 뒤는 수락(둘 다 로그).
+
+**불변 검증 규칙**(`checkEditInvariants`, 하나라도 어긋나면 발행하지 않고 스냅샷 저장):
+- 본문 텍스트 길이·해시(sha256 앞 16자) 동일, `img` 수 동일, `a` 수 동일, 직렬화 본문(`getContent`)의 링크 수 동일
+- 계획한 자리는 계획한 값으로 바뀌었고(인코딩 변형은 같은 주소로 본다 - `hrefKey`), 계획 밖 href는 한 글자도 안 바뀜
+- 직렬화 본문에 옛 주소 0개·새 주소 존재(저장되는 건 DOM이 아니라 직렬화 결과다)
+- 계획 0건이면 발행하지 않는다(그 경우 결과는 `noChange: true`로 브라우저 저장 없이 끝난다)
+
+**실패 스냅샷**: `.local/dom-snapshots/tistory/failures/<시각>_edit-<단계>.html|png`. 각 실패 메시지에 기다린 셀렉터를 적는다
+(`#publish-layer-btn`, `.editor_layer`, `input[name=basicSet]:checked`, `#publish-btn`, `tinymce.get("editor-tistory")`).
+
+**실측 전 가정(미확인)**: 수정 화면 주소 `/manage/newpost/<ID>?type=post`, 수정 화면도 발행 화면과 같은 셀렉터, 발행 버튼 문구
+("수정"/"발행"/"공개 발행" 중 무엇인지 로그로 확인), 수정 저장 뒤 글쓰기 화면을 벗어남, 수정 화면에서 "이어서 작성" 팝업 동작.
+
+**실행 절차(맥미니, 팀장)**: 폴러와 같은 프로필을 쓰므로 티스토리 폴러가 발행 중이 아닐 때.
+1. `npm run tistory:fix-links` (dry-run - 대상·글 ID·공개 페이지 옛 링크 수 확인. 필요하면 `--scan-all`)
+2. `npm run tistory:fix-links -- --apply --limit 1` → 결과 표·공개 글을 눈으로 확인
+3. `npm run tistory:fix-links -- --apply` (첫 실패에서 멈춘다. 이미 고친 글은 "변경 없음"으로 건너뛴다)
+4. DB 본문은 따로: `npm run tistory:fix-links -- --db --dry-run` → `--db`
+
+2026-10-28 dry-run 기준 티스토리 글에는 옛 링크가 0개라(“함께 보면 좋은 글” 블록은 티스토리 발행 때 빠진다) 1~3은 할 일이 없고 4만 남았다.
+

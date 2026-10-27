@@ -1,6 +1,29 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-27 (Asia/Seoul)
+기준일: 2026-10-28 (Asia/Seoul)
+
+## 2026-10-28 — 티스토리 발행 후 수정(editPost) + 404 내부 링크 치환 CLI (브랜치 `feat/tistory-edit-post`)
+
+**상태: 코드 main 병합. 실행(`--db`·`--apply`)은 팀장이 맥미니에서. 이 세션은 dry-run만 돌렸다.**
+
+- **dry-run 결론(2026-10-28)**: **티스토리 실제 글 본문에는 옛 404 링크가 0개**다. 발행된 14편 + 나머지 87편, 티스토리 발행 글
+  101편 전부(HTTP 200)의 공개 페이지를 훑었다(`--scan-all`). 티스토리 발행은 `removeRelatedPosts()`로 "함께 보면 좋은 글" 블록을
+  빼고 올리는데(`publishJobToTistory.ts`), 옛 주소는 **그 블록에만** 있었다. 그래서 고칠 곳은 **DB `articles.content` 21편(링크 22개,
+  693만 2개)**뿐이고 티스토리 글 수정(`--apply`)은 지금 할 일이 없다(돌려도 14편 전부 "변경 없음(건너뜀)", 브라우저도 안 띄운다).
+  10-27 절의 "발행된 14편은 티스토리 실제 글 본문 수정 필요"는 이 실측으로 정정한다(14편 = DB 본문 기준 "발행된 job"이었다).
+- **재사용 기본기** `TistoryPublisher.editPost({ postUrl, mutate, verify })` + 순수 함수 `services/publish/tistory/tistoryPostEdit.ts`:
+  공개 페이지에서 글 ID(`data-entry-id` → `"entryId":N` → `/<N>` 링크) → `/manage/newpost/<ID>?type=post` → 에디터 스냅샷 →
+  mutate(Node)가 바꿀 `a` 자리 결정 → 그 href만 `ed.dom.setAttrib` → **불변 검증**(텍스트 길이·해시, img 수, a 수, 계획한 href만,
+  직렬화 본문에 옛 주소 0·새 주소 있음) → 발행 레이어(공개 범위는 **읽기만**, 슬러그·제목·태그·카테고리 안 건드림) → 화면 이탈 →
+  공개 페이지 재확인. 설계·규칙은 `TISTORY_AUTO_PUBLISH_DESIGN.md` §8.
+- **CLI** `npm run tistory:fix-links`: 기본 dry-run(티스토리 표 + DB 표), `--scan-all`(전체 공개 페이지), `--apply [--limit N]`
+  (티스토리 글 수정 + `article_jobs.metadata.tistoryLinkFix={at,postId,verified,changed}`), `--db [--dry-run]`(`articles.content` 치환).
+  멱등. `findBodyHits`는 `tistoryUrlAuditCli`에서 `workflows/publish/tistoryDeadLinkHits.ts`로 옮겨 같이 쓴다.
+- **테스트**: `test:tistory-edit`(글 ID 3형태·href 인코딩 변형·불변 검증), `test:tistory-fix-links`(픽스처 18쌍으로 21편·22링크 치환·멱등·
+  특수문자 `'`·`?`·`%`). 기존 티스토리 테스트 6종 + `npm run build` 통과.
+- **남은 일**: ① 팀장 `npm run tistory:fix-links -- --db --dry-run` → `--db`(원격 DB update, 21편) ② 뷰어 manifest·`manuscripts/*.md`
+  사본은 이 CLI가 안 고친다(다음 원고 준비·뷰어 저장 때 DB에서 다시 만들어진다). ③ `editPost`는 **실측 미검증**(수정 화면 주소·
+  "이어서 작성" 팝업·발행 버튼 문구·셀렉터) - 실제로 고칠 글이 생기면 `--limit 1`로 먼저 확인.
 
 ## 2026-10-27 — 티스토리 발행 주소 404: 확정 로직 재설계 + 교정 CLI (브랜치 `fix/tistory-published-url`)
 
