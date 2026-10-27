@@ -6,7 +6,8 @@
 //
 // 사회 트랙 전용 가공:
 //   - `참고 자료` 링크아웃은 **남긴다**(티스토리는 바깥 링크가 문제 없다. 네이버만 뺀다).
-//   - Blogspot 내부 링크 "함께 보면 좋은 글"은 **뺀다**(다른 블로그로 가는 링크).
+//   - 내부 링크 "함께 보면 좋은 글"은 **같은 티스토리 블로그 글로 가는 것만 남긴다**(2026-10-28 사용자 결정).
+//     blogspot·naver 등 다른 블로그 주소는 계속 뺀다(유사문서·다른 블로그 유출 방지). 남는 것이 없으면 블록째 뺀다.
 //   - 이미지는 Blogspot·네이버와 **같은 것**(job.metadata.images)을 쓰고, 본문에는 표식만 두고 발행기가 업로드한다.
 //   - 본문 맨 아래 **해시태그 줄은 뺀다**(2026-10-06 사용자 결정, 엔터·네이버는 유지). 태그는 그 줄에서 뽑아 태그 입력으로만 넣는다.
 
@@ -25,12 +26,12 @@ import type {
   TistoryUrlSource,
   TistoryVisibility,
 } from "../../services/publish/tistory/TistoryPublisher.js";
-import { TISTORY_CONFIG } from "../../config/publishTargets.js";
+import { TISTORY_CONFIG, tistoryBlogName } from "../../config/publishTargets.js";
 import { tistoryCategoryName } from "../../config/tistoryCategoryMapping.js";
 import { manuscriptBodyWithoutImages, substituteConfirmedImages } from "../manuscripts/parseManuscriptBlocks.js";
 import { readJobManuscriptImages } from "../manuscripts/manuscriptManifest.js";
 import { pickFinalArticle } from "../manuscripts/pickFinalArticle.js";
-import { removeRelatedPosts } from "../manuscripts/appendRelatedPosts.js";
+import { filterRelatedPostsByHost } from "../manuscripts/appendRelatedPosts.js";
 import { splitTrailingHashtags } from "../manuscripts/articleContentParts.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
 
@@ -66,6 +67,12 @@ export function tistoryTagsFor(job: ArticleJobRow, content: string): string[] {
     : [];
   const tags = fromMeta.length > 0 ? fromMeta : splitTrailingHashtags(content).tags;
   return [...new Set(tags)].slice(0, 10);
+}
+
+/** 발행 대상 블로그의 호스트(설정에서 파생). 내부 링크는 이 호스트로 가는 것만 남긴다. 블로그 이름을 못 읽으면 빈 목록 = 전부 뺀다. */
+export function tistoryOwnHosts(): string[] {
+  const name = tistoryBlogName();
+  return name ? [`${name}.tistory.com`] : [];
 }
 
 export async function publishJobToTistory(
@@ -109,7 +116,7 @@ export async function publishJobToTistory(
   const content = article.content ?? "";
   // 태그는 해시태그 줄을 떼기 **전** 본문에서 뽑는다(아래 tags) - 본문에서는 그 줄을 지운다.
   const bodyWithoutHashtags = splitTrailingHashtags(content).body;
-  const bodyWithImages = substituteConfirmedImages(removeRelatedPosts(bodyWithoutHashtags), confirmedImages);
+  const bodyWithImages = substituteConfirmedImages(filterRelatedPostsByHost(bodyWithoutHashtags, tistoryOwnHosts()), confirmedImages);
   const { html: bodyHtml, images } = convertArticleToTistoryHtml(manuscriptBodyWithoutImages(bodyWithImages));
   const imageInputs: TistoryPublishImageInput[] = images.map((image) => ({ url: image.url, alt: image.alt, marker: image.marker }));
 

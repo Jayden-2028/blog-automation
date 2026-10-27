@@ -2,7 +2,7 @@
 //
 // 지켜야 할 것: ① 자기 자신을 링크하지 않는다 ② 같은 자리에 두 번 쌓이지 않는다(멱등)
 // ③ 우리 글 링크가 바깥 출처(참고 자료) 뒤로 밀리지 않는다 ④ 링크가 지어내진 것이 아니다.
-import { appendRelatedPosts, pickRelatedPosts, RELATED_HEADING } from "./appendRelatedPosts.js";
+import { appendRelatedPosts, filterRelatedPostsByHost, pickRelatedPosts, RELATED_HEADING } from "./appendRelatedPosts.js";
 import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -99,6 +99,43 @@ const BODY = [
 {
   assert(appendRelatedPosts(BODY, []) === BODY, "링크가 없으면 원본 그대로여야 한다");
   console.log("✅ 링크가 없으면 본문 무변경");
+}
+
+// --- 8. 호스트 필터: 허용 호스트 링크만 남긴다 -------------------------------------------------
+{
+  const HOSTS = ["wooahpapa.tistory.com"];
+  const mixed = [
+    "본문입니다.",
+    "",
+    RELATED_HEADING,
+    "- [같은 블로그](https://wooahpapa.tistory.com/entry/a)",
+    "- [www 접두](https://www.wooahpapa.tistory.com/entry/b)",
+    "- [블로그스팟](https://thekoreamanual.blogspot.com/2026/10/x.html)",
+    "- [비슷한 호스트](https://evil-wooahpapa.tistory.com/entry/c)",
+    "- [접미 위장](https://wooahpapa.tistory.com.evil.com/entry/d)",
+    "",
+    "**참고 자료**",
+    "- [기사](https://news.example.com/1)",
+  ].join("\n");
+  const out = filterRelatedPostsByHost(mixed, HOSTS);
+  assert(out.includes("entry/a") && out.includes("entry/b"), "같은 호스트(www 포함)는 남아야 한다");
+  assert(!out.includes("blogspot") && !out.includes("evil"), `다른 호스트는 빠져야 한다 (${out})`);
+  assert(out.includes("news.example.com") && out.includes("**참고 자료**"), "블록 밖 참고 자료는 건드리지 않는다");
+  assert(filterRelatedPostsByHost(out, HOSTS) === out, "멱등이어야 한다");
+  console.log("✅ 호스트 필터: 같은 호스트만 남김 + 멱등");
+
+  const foreignOnly = mixed.replace(/- \[(같은 블로그|www 접두)\].*\n/g, "");
+  const gone = filterRelatedPostsByHost(foreignOnly, HOSTS);
+  assert(!gone.includes(RELATED_HEADING) && !gone.includes("blogspot"), `전부 다른 호스트면 블록 통째 제거 (${gone})`);
+  assert(gone.includes("본문입니다.\n\n**참고 자료**"), `블록이 빠진 자리가 매끈해야 한다 (${JSON.stringify(gone)})`);
+  assert(filterRelatedPostsByHost(foreignOnly, []) === gone, "허용 목록이 비면 전부 뺀다");
+  console.log("✅ 호스트 필터: 남는 링크 0개면 블록 제거");
+
+  const plain = "블록 없는 본문입니다.\n\n#태그";
+  assert(filterRelatedPostsByHost(plain, HOSTS) === plain, "블록이 없으면 무변경");
+  const tailBlock = `끝 문단.\n\n${RELATED_HEADING}\n- [글](https://wooahpapa.tistory.com/entry/z)\n`;
+  assert(filterRelatedPostsByHost(tailBlock, HOSTS) === tailBlock, "끝에 있는 블록도 같은 호스트면 무변경");
+  console.log("✅ 호스트 필터: 블록 없음·이미 필터됨은 무변경");
 }
 
 console.log("\n🎉 내부 링크 삽입 테스트 통과");

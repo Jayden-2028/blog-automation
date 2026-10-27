@@ -44,7 +44,7 @@
 ```
 
 - 큐·중복 방지·결과 기록은 `naverPublishQueue.ts`·`publishJobToNaver.ts`와 같은 모양(jsonb 키 `tistoryPublish`, `publications` 테이블에 `platform="tistory"`). **migration 없음.**
-- 발행 원고는 네이버와 같이 `pickFinalArticle` → `articles.content`를 읽는다. 사회 트랙 전용 가공: `참고 자료` 링크아웃은 **유지**(티스토리는 바깥 링크 OK), 블로그스팟 내부 링크 "함께 보면 좋은 글"은 **제거**(다른 블로그로 가는 링크).
+- 발행 원고는 네이버와 같이 `pickFinalArticle` → `articles.content`를 읽는다. 사회 트랙 전용 가공: `참고 자료` 링크아웃은 **유지**(티스토리는 바깥 링크 OK), "함께 보면 좋은 글"은 **같은 블로그(`<blogName>.tistory.com`) 링크만 유지하고 다른 호스트(blogspot·naver 등)는 제거**(2026-10-28 변경. 전에는 블록 통째 제거 - 당시 링크가 전부 Blogspot 주소였다). 남는 링크가 0개면 제목까지 블록째 뺀다. `filterRelatedPostsByHost`(`appendRelatedPosts.ts`), 허용 호스트는 `TISTORY_BLOG_URL`에서 파생.
 - 공개 범위: 기본 **비공개**, `TISTORY_PUBLISH_VISIBILITY=public`으로 공개(네이버와 같은 첫 운영 원칙). 카테고리는 `config/tistoryCategoryMapping.ts`(job.category → 티스토리 카테고리 id).
 
 ## 2. 뷰어에서 고친 내용으로 발행되게
@@ -141,5 +141,5 @@
 3. `npm run tistory:fix-links -- --apply` (첫 실패에서 멈춘다. 이미 고친 글은 "변경 없음"으로 건너뛴다)
 4. DB 본문은 따로: `npm run tistory:fix-links -- --db --dry-run` → `--db`
 
-2026-10-28 dry-run 기준 티스토리 글에는 옛 링크가 0개라(“함께 보면 좋은 글” 블록은 티스토리 발행 때 빠진다) 1~3은 할 일이 없고 4만 남았다.
+2026-10-28 dry-run 기준 티스토리 글에는 옛 링크가 0개라(당시까지 “함께 보면 좋은 글” 블록은 티스토리 발행 때 통째로 빠졌다. 같은 날 이후 발행분부터는 같은 블로그 링크가 남는다) 1~3은 할 일이 없고 4만 남았다.
 

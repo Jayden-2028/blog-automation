@@ -65,6 +65,48 @@ export function removeRelatedPosts(body: string): string {
   return stripExisting(body);
 }
 
+/** 주소의 호스트를 소문자·`www.` 제거로 정규화한다. 주소가 아니면 null. */
+function normalizeHost(value: string): string | null {
+  try {
+    const host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`).hostname.toLowerCase();
+    return host.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+const RELATED_LINK_LINE = /^\s*[-*]\s+\[[^\]]*\]\(([^\s()]+(?:\([^\s()]*\))*[^\s()]*)\)\s*$/;
+
+/**
+ * "함께 보면 좋은 글" 블록에서 **허용 호스트가 아닌 링크만** 지운다(2026-10-28, 티스토리 발행용).
+ * 호스트는 정확 일치(`www.` 접두는 무시)다 - `evil-wooahpapa.tistory.com`이나 `wooahpapa.tistory.com.evil.com`은 통과하지 못한다.
+ * 남는 링크가 하나도 없으면 제목 줄까지 블록을 통째로 지운다. 멱등이고, 블록이 없으면 본문을 그대로 돌려준다.
+ * 네이버는 계속 `removeRelatedPosts`(통째 제거)를 쓴다.
+ */
+export function filterRelatedPostsByHost(body: string, allowedHosts: readonly string[]): string {
+  const start = body.indexOf(RELATED_HEADING);
+  if (start < 0) return body;
+  const allowed = new Set(allowedHosts.map(normalizeHost).filter((host): host is string => host !== null));
+
+  const afterHeading = start + RELATED_HEADING.length;
+  const rest = body.slice(afterHeading);
+  const end = rest.indexOf("\n\n");
+  const blockBody = end < 0 ? rest : rest.slice(0, end);
+  const tail = end < 0 ? "" : rest.slice(end);
+
+  const kept = blockBody.split("\n").filter((line) => {
+    if (line.trim() === "") return false;
+    const match = line.match(RELATED_LINK_LINE);
+    if (!match) return false; // 링크로 읽히지 않는 줄은 어디로 가는지 알 수 없다 - 뺀다
+    const host = normalizeHost(match[1]);
+    return host !== null && allowed.has(host);
+  });
+
+  if (kept.length === 0) return stripExisting(body);
+  const trailingNewlines = blockBody.match(/\n*$/)?.[0] ?? "";
+  return `${body.slice(0, afterHeading)}\n${kept.join("\n")}${trailingNewlines}${tail}`;
+}
+
 function stripExisting(body: string): string {
   const start = body.indexOf(RELATED_HEADING);
   if (start < 0) return body;

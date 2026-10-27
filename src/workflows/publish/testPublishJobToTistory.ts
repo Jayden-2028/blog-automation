@@ -1,7 +1,7 @@
 // publishJobToTistory 테스트. 브라우저·DB를 전부 주입해 오케스트레이션만 본다.
 //
 // 지켜야 할 것: ① 기본이 비공개 ② 같은 job을 두 번 올리지 않는다 ③ 이미지는 표식으로 바뀌어 업로드 목록으로 간다
-// ④ 참고 자료는 남고 Blogspot 내부 링크는 빠진다 ⑤ 로그인 풀림은 failed 기록 없이 login_required ⑥ 실패는 기록한다
+// ④ 참고 자료는 남고, 함께 보면 좋은 글은 같은 티스토리 블로그 링크만 남고 Blogspot 링크는 빠진다 ⑤ 로그인 풀림은 failed 기록 없이 login_required ⑥ 실패는 기록한다
 // ⑦ TISTORY_ENABLED가 꺼져 있으면 아무것도 안 한다.
 import { publishJobToTistory, tistoryTagsFor } from "./publishJobToTistory.js";
 import type { ArticleJobRow, ArticleRow, PublicationRow } from "../../types/database.js";
@@ -23,6 +23,7 @@ const BODY = [
   "- [기사](https://news.example.com/1)",
   "",
   "**함께 보면 좋은 글**",
+  "- [티스토리 글](https://wooahpapa.tistory.com/entry/same-blog)",
   "- [옛 글](https://whynowissue.blogspot.com/old)",
   "",
   "#사회 #이슈",
@@ -65,12 +66,29 @@ async function main(): Promise<void> {
     assert(input.images.length === 1 && input.images[0].url === IMG && input.images[0].marker === "⟦IMG-1⟧", `이미지는 표식+URL (${JSON.stringify(input.images)})`);
     assert(input.bodyHtml.includes("⟦IMG-1⟧") && !input.bodyHtml.includes("<img"), "본문에는 표식만, <img> 없음");
     assert(input.bodyHtml.includes("참고 자료") && input.bodyHtml.includes("news.example.com"), "참고 자료는 남긴다");
-    assert(!input.bodyHtml.includes("함께 보면 좋은 글") && !input.bodyHtml.includes("blogspot"), "Blogspot 내부 링크는 뺀다");
+    assert(input.bodyHtml.includes("함께 보면 좋은 글"), "같은 블로그 링크가 남으면 블록 제목도 남는다");
+    assert(input.bodyHtml.includes('<a href="https://wooahpapa.tistory.com/entry/same-blog"'), `같은 티스토리 링크는 <a href>로 남는다 (${input.bodyHtml})`);
+    assert(input.bodyHtml.includes("<li>") && input.bodyHtml.includes("<ul"), "목록(<ul><li>)으로 렌더");
+    assert(!input.bodyHtml.includes("blogspot") && !input.bodyHtml.includes("옛 글"), "Blogspot 링크는 뺀다");
     assert(input.bodyHtml.includes("<strong>"), "굵게는 strong");
     assert(JSON.stringify(input.tags) === JSON.stringify(["사회", "이슈"]), `태그는 본문 끝 해시태그 (${JSON.stringify(input.tags)})`);
     assert(!input.bodyHtml.includes("#사회") && !input.bodyHtml.includes("#이슈"), "본문에는 해시태그 줄이 없어야 한다(2026-10-06)");
     assert(input.categoryName === "일상 생활 정보", `living -> 일상 생활 정보 (${input.categoryName})`);
     console.log("✅ 기본 비공개 + 표식 이미지 + 참고자료 유지/내부링크 제거 + 태그·카테고리");
+  }
+
+  // 1-b) 다른 호스트 링크뿐이면 블록 제목까지 통째로 빠진다
+  {
+    let html = "";
+    const onlyForeign = BODY.replace("- [티스토리 글](https://wooahpapa.tistory.com/entry/same-blog)\n", "");
+    await publishJobToTistory("job-1", {
+      ...baseDeps,
+      loadArticles: async () => [article({ content: onlyForeign })],
+      publish: async (input) => { html = input.bodyHtml; return okPublish(); },
+    });
+    assert(!html.includes("함께 보면 좋은 글") && !html.includes("blogspot"), `전부 다른 호스트면 블록 제거 (${html})`);
+    assert(html.includes("참고 자료"), "참고 자료는 그대로");
+    console.log("✅ 같은 티스토리 링크만 남기고, 없으면 블록째 제거");
   }
 
   // 2) frontmatter 태그가 있으면 우선

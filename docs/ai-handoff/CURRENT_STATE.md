@@ -2,6 +2,16 @@
 
 기준일: 2026-10-28 (Asia/Seoul)
 
+## 2026-10-28 — 티스토리 발행본에 같은 블로그 내부 링크 유지 (브랜치 `feat/tistory-same-blog-links`)
+
+**상태: main 병합. 맥미니 폴러가 이 코드를 쓰므로 `git pull --ff-only` 필요(폴러 재시작은 팀장 판단 - 폴러는 건드리지 않았다).**
+
+- 전: 티스토리 발행은 `removeRelatedPosts`로 "함께 보면 좋은 글" 블록을 통째로 뺐다(2026-10-04, 링크가 전부 Blogspot 주소였던 때의 결정). 발행된 티스토리 글 101편에 내부 링크 0개.
+- 후(사용자 결정 2026-10-28): `filterRelatedPostsByHost(body, allowedHosts)`가 블록 안 `- [제목](url)` 중 **호스트가 허용 목록에 없는 것만** 지운다(정확 일치, `www.` 무시 - 접두·접미 위장 호스트는 통과 못 함). 남는 게 0개면 제목 줄까지 블록째 제거. 멱등. 허용 호스트는 `tistoryOwnHosts()` = `<tistoryBlogName()>.tistory.com`(`TISTORY_BLOG_URL`에서 파생, 하드코딩 없음).
+- 네이버 경로(`removeRelatedPosts`, `publishJobToNaver`)와 `manualPasteView`는 그대로다. HTML 변환(`renderPublishBlocks`)은 이미 `- [제목](url)` 목록을 `<ul><li><a href>`로 렌더해 수정 없음(제목은 `<p><strong>`).
+- 테스트: `test:related-posts`(호스트 필터 3케이스), `test:publish-tistory-job`(같은 블로그 `<a href>` 유지 + blogspot 제거 + 전부 외부면 블록 제거).
+- **범위 밖**: 이미 발행된 티스토리 글 소급(editPost로 블록 추가)은 별도 결정이다.
+
 ## 2026-10-28 — 티스토리 발행 후 수정(editPost) + 404 내부 링크 치환 CLI (브랜치 `feat/tistory-edit-post`)
 
 **상태: 코드 main 병합. 실행(`--db`·`--apply`)은 팀장이 맥미니에서. 이 세션은 dry-run만 돌렸다.**
