@@ -22,6 +22,7 @@ import {
   buildRedditNewUrl,
   buildRedditSearchUrl,
   fetchRedditTitles,
+  redditCredentialsFromEnv,
 } from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import { saveRankingHistory } from "../keyword-ranking/saveRankingHistory.js";
 import { sendKeywordNotification } from "../keyword-notification/sendKeywordNotification.js";
@@ -243,7 +244,7 @@ export async function runKsceneTopicCollection(
     );
     reddit = collected.summary;
     redditTitles = collected.titles;
-    log(`ℹ️ 레딧 보조 관찰: ${reddit.status} · 요청 ${reddit.requests}회 · 제목 ${reddit.titleCount}건`);
+    log(`ℹ️ 레딧 보조 관찰(${redditCredentialsFromEnv() ? "oauth" : "public"}): ${reddit.status} · 요청 ${reddit.requests}회 · 제목 ${reddit.titleCount}건`);
   }
 
   // 4) 후보 -> 중복 제거 -> 선정

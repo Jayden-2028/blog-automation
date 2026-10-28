@@ -8,6 +8,9 @@ import {
   buildRedditNewUrl,
   buildRedditSearchUrl,
   parseRedditListing,
+  buildTokenRequest,
+  redditCredentialsFromEnv,
+  toOauthUrl,
 } from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import {
   attachRedditSupport,
@@ -159,6 +162,15 @@ async function main(): Promise<void> {
   const rankedReddit = toRankedKeywords([{ ...supported, score: scoreTopic(supported) }]);
   assert(rankedReddit[0].sources.includes("reddit") && rankedReddit[0].reason.includes("레딧 질문 2건"), "출처·사유에 레딧 표시");
   console.log("  ✅ 레딧 교차 신호(URL·UA·파싱·포함률 매칭·+10 가산·후보 미생성·출처 표시)");
+
+  // OAuth(app-only) 경로(2026-10-28 저녁): 자격증명이 둘 다 있을 때만 켜지고, URL은 호스트만 바뀐다.
+  assert(redditCredentialsFromEnv({}) === null && redditCredentialsFromEnv({ REDDIT_CLIENT_ID: "id" }) === null, "자격증명이 하나라도 없으면 공개 경로");
+  assert(JSON.stringify(redditCredentialsFromEnv({ REDDIT_CLIENT_ID: " id ", REDDIT_CLIENT_SECRET: "sec" })) === '{"clientId":"id","clientSecret":"sec"}', "자격증명 trim");
+  assert(toOauthUrl(buildRedditNewUrl(KSCENE_SUBREDDITS)).startsWith("https://oauth.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "OAuth 호스트로 교체");
+  assert(toOauthUrl("https://example.com/x") === "https://example.com/x", "레딧 밖 주소는 그대로");
+  const tokenReq = buildTokenRequest({ clientId: "id", clientSecret: "sec" });
+  assert(tokenReq.headers.Authorization === `Basic ${Buffer.from("id:sec").toString("base64")}` && tokenReq.body === "grant_type=client_credentials" && tokenReq.headers["User-Agent"].startsWith("blog-automation-kscene/"), "토큰 요청 모양");
+  console.log("  ✅ 레딧 OAuth 경로(자격증명 판정·호스트 교체·토큰 요청)");
 
   // 시드 선정: 개수·라벨 혼합·날짜로 회전
   const day0 = pickSeedsForDay(KSCENE_SEEDS, 0, 20);
