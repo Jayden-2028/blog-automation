@@ -4,7 +4,7 @@
 // 수요와 맞지 않는다. 대신 **같은 저장·알림 경로**를 쓴다: discovery_runs/keyword_rankings에 저장하고
 // sendKeywordNotification으로 사용설명서 봇에 Go/Pass를 보내면, Go 이후(research -> write)는 기존 그대로 간다.
 //
-// 비치명적 단계: 시드 하나의 자동완성 실패, 구글 트렌드(US) 실패는 건너뛰고 계속한다. 후보가 0이면 알림 없이
+// 비치명적 단계: 시드 하나의 자동완성 실패, 구글 트렌드(US) 실패, 레딧 실패·차단은 건너뛰고 계속한다. 후보가 0이면 알림 없이
 // 실패로 끝낸다(watchdog이 전날분 run을 확인하므로 조용히 completed로 남기지 않는다).
 
 import {
@@ -16,11 +16,20 @@ import {
 } from "../../config/ksceneSeeds.js";
 import { fetchAutocompleteSuggestions } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
+import {
+  KSCENE_SUBREDDITS,
+  RedditBlockedError,
+  buildRedditNewUrl,
+  buildRedditSearchUrl,
+  fetchRedditTitles,
+} from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import { saveRankingHistory } from "../keyword-ranking/saveRankingHistory.js";
 import { sendKeywordNotification } from "../keyword-notification/sendKeywordNotification.js";
 import {
+  attachRedditSupport,
   autocompleteQueriesForSeed,
   buildCandidates,
+  normalizeTopic,
   pickSeedsForDay,
   selectTopics,
   toRankedKeywords,
@@ -45,6 +54,12 @@ export type RunKsceneTopicCollectionOptions = {
   dryRun?: boolean;
   /** 자동완성 조회. 테스트 주입. */
   fetchSuggestions?: (query: string) => Promise<string[]>;
+  /** 레딧 보조 관찰을 돌릴지. 생략하면 KSCENE_TOPIC_CONFIG.redditEnabled(KSCENE_REDDIT_ENABLED, 기본 꺼짐). */
+  redditEnabled?: boolean;
+  /** 레딧 URL 하나의 제목 목록. 테스트 주입. 403·429는 RedditBlockedError로 던진다. */
+  fetchRedditTitles?: (url: string) => Promise<string[]>;
+  /** 레딧 요청 사이 대기(ms). 생략하면 KSCENE_TOPIC_CONFIG.redditDelayMs(1초 이상). */
+  redditDelayMs?: number;
   /** 구글 트렌드(US) 급상승어 조회. 테스트 주입. 실패해도 무시한다. */
   fetchTrendTerms?: () => Promise<string[]>;
   /** 이미 쓴/제안한 주제 목록. 테스트 주입. */
@@ -65,7 +80,18 @@ export type RunKsceneTopicCollectionResult = {
   topics: string[];
   failedSeeds: string[];
   trendSeeds: string[];
+  reddit: RedditCollectionSummary;
+  /** 선정된 주제 중 레딧 질문이 뒷받침한 것(주제 -> 예시 제목). 로그용. */
+  redditSupported: { topic: string; hits: number; example: string }[];
   notification?: SendKeywordNotificationResult;
+  error?: string;
+};
+
+export type RedditCollectionSummary = {
+  /** disabled = 스위치 꺼짐, ok = 1건 이상 성공, blocked = 403·429로 중단, failed = 전부 실패. */
+  status: "disabled" | "ok" | "blocked" | "failed";
+  requests: number;
+  titleCount: number;
   error?: string;
 };
 
@@ -102,6 +128,53 @@ async function defaultLoadExistingTopics(): Promise<string[]> {
     topics.push(...rankings.map((row) => row.keyword));
   }
   return topics;
+}
+
+/** 레딧 검색어: 시드에서 korea/korean/south를 뺀다(r/Living_in_Korea 질문은 "korea"를 잘 안 쓴다). */
+export function redditQueryForSeed(seed: string): string {
+  return normalizeTopic(seed)
+    .split(" ")
+    .filter((word) => !["korea", "korean", "south"].includes(word))
+    .join(" ");
+}
+
+/**
+ * 레딧 최근 질문 제목 수집(2026-10-28, C). 묶음 new.json 1회 + 시드별 search.json. 403·429면 그 자리에서 멈추고
+ * 그때까지 모은 제목만 쓴다(같은 실행에서 다시 두드리지 않는다). 그 밖의 실패는 그 요청만 건너뛴다.
+ */
+async function collectRedditTitles(
+  seedQueries: readonly string[],
+  fetchTitles: (url: string) => Promise<string[]>,
+  delayMs: number,
+  log: (line: string) => void
+): Promise<{ titles: string[]; summary: RedditCollectionSummary }> {
+  const urls = [buildRedditNewUrl(KSCENE_SUBREDDITS)];
+  for (const seed of seedQueries) {
+    const query = redditQueryForSeed(seed);
+    if (query) urls.push(buildRedditSearchUrl(KSCENE_SUBREDDITS, query));
+  }
+
+  const titles = new Set<string>();
+  let requests = 0;
+  let succeeded = 0;
+  let lastError: string | undefined;
+  for (const [index, url] of urls.entries()) {
+    if (index > 0) await sleep(delayMs);
+    requests += 1;
+    try {
+      for (const title of await fetchTitles(url)) titles.add(title);
+      succeeded += 1;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      if (error instanceof RedditBlockedError) {
+        log(`⚠️ 레딧 차단(${error.status}) - 이번 실행에서는 레딧을 건너뜀(비치명적, ${requests}번째 요청)`);
+        return { titles: [...titles], summary: { status: "blocked", requests, titleCount: titles.size, error: lastError } };
+      }
+      log(`⚠️ 레딧 요청 실패(비치명적): ${lastError}`);
+    }
+  }
+  const status = succeeded > 0 ? "ok" : "failed";
+  return { titles: [...titles], summary: { status, requests, titleCount: titles.size, ...(status === "failed" ? { error: lastError } : {}) } };
 }
 
 export async function runKsceneTopicCollection(
@@ -148,7 +221,8 @@ export async function runKsceneTopicCollection(
     for (const query of autocompleteQueriesForSeed(seed, dayIndex)) {
       try {
         const suggestions = await fetchSuggestions(query);
-        suggestions.forEach((suggestion, position) => observations.push({ suggestion, seed, position }));
+        const source = query === seed ? "autocomplete" : "autocomplete_variant";
+        suggestions.forEach((suggestion, position) => observations.push({ suggestion, seed, position, source }));
       } catch (error) {
         if (!failedSeeds.includes(seed)) failedSeeds.push(seed);
         log(`⚠️ 자동완성 실패(비치명적) "${query}": ${error instanceof Error ? error.message : String(error)}`);
@@ -157,8 +231,24 @@ export async function runKsceneTopicCollection(
     }
   }
 
-  // 3) 후보 -> 중복 제거 -> 선정
-  const candidates = buildCandidates(observations, labelBySeed);
+  // 3) (선택) 레딧 최근 질문 - 후보를 만들지 않고 자동완성 후보의 교차 신호로만 붙인다(C)
+  let reddit: RedditCollectionSummary = { status: "disabled", requests: 0, titleCount: 0 };
+  let redditTitles: string[] = [];
+  if (options.redditEnabled ?? KSCENE_TOPIC_CONFIG.redditEnabled) {
+    const collected = await collectRedditTitles(
+      seedQueries,
+      options.fetchRedditTitles ?? ((url: string) => fetchRedditTitles(url)),
+      options.redditDelayMs ?? KSCENE_TOPIC_CONFIG.redditDelayMs,
+      log
+    );
+    reddit = collected.summary;
+    redditTitles = collected.titles;
+    log(`ℹ️ 레딧 보조 관찰: ${reddit.status} · 요청 ${reddit.requests}회 · 제목 ${reddit.titleCount}건`);
+  }
+
+  // 4) 후보 -> 중복 제거 -> 선정
+  const autocompleteCandidates = buildCandidates(observations, labelBySeed);
+  const candidates = redditTitles.length > 0 ? attachRedditSupport(autocompleteCandidates, redditTitles) : autocompleteCandidates;
   let existing: string[] = [];
   try {
     existing = await loadExisting();
@@ -180,7 +270,13 @@ export async function runKsceneTopicCollection(
     topics: selected.map((item) => item.topic),
     failedSeeds,
     trendSeeds,
+    reddit,
+    redditSupported: selected
+      .filter((item) => (item.redditHits ?? 0) > 0)
+      .map((item) => ({ topic: item.topic, hits: item.redditHits ?? 0, example: item.redditExample ?? "" })),
   };
+
+  for (const item of base.redditSupported) log(`   🟠 레딧 뒷받침 ${item.hits}건: ${item.topic} ← "${item.example}"`);
 
   if (selected.length === 0) {
     return { status: "no_candidates", runId: null, ...base, error: "제안할 주제가 없습니다(자동완성 0건이거나 전부 제외·중복)" };
@@ -190,12 +286,12 @@ export async function runKsceneTopicCollection(
     return { status: "dry_run", runId: null, ...base };
   }
 
-  // 4) 저장(discovery_runs + keyword_rankings) - Go/Pass 버튼이 (run_id, rank)로 이 행을 가리킨다.
+  // 5) 저장(discovery_runs + keyword_rankings) - Go/Pass 버튼이 (run_id, rank)로 이 행을 가리킨다.
   const saved = await save({
     startedAt: now,
     seedQueries,
     source: "google_autocomplete",
-    metadata: { kind: KSCENE_JOB_KIND, track: "kscene" },
+    metadata: { kind: KSCENE_JOB_KIND, track: "kscene", reddit },
     candidatesCount: candidates.length,
     clustersCount: selected.length,
     errorCount: failedSeeds.length,
@@ -205,7 +301,7 @@ export async function runKsceneTopicCollection(
     return { status: "save_failed", runId: saved.runId, ...base, error: saved.error ?? "ranking 저장 실패" };
   }
 
-  // 5) 사용설명서 봇으로 알림
+  // 6) 사용설명서 봇으로 알림
   const notification = await notify({
     track: "kscene",
     runId: saved.runId,

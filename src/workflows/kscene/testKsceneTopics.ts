@@ -2,8 +2,20 @@
 import { KSCENE_LABEL_BY_SEED, KSCENE_LABELS, KSCENE_SEEDS } from "../../config/ksceneSeeds.js";
 import { buildAutocompleteUrl, parseAutocompleteResponse } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import {
+  KSCENE_SUBREDDITS,
+  REDDIT_USER_AGENT,
+  RedditBlockedError,
+  buildRedditNewUrl,
+  buildRedditSearchUrl,
+  parseRedditListing,
+} from "../../services/search/providers/reddit/fetchRedditTitles.js";
+import {
+  attachRedditSupport,
   autocompleteQueriesForSeed,
   buildCandidates,
+  hasIntentSignal,
+  isOverseasLocalTopic,
+  redditTitleSupports,
   defaultPracticalFloor,
   isDuplicateTopic,
   isExcludedTopic,
@@ -15,7 +27,7 @@ import {
   toRankedKeywords,
   topicSimilarity,
 } from "./ksceneTopics.js";
-import { dayIndexOf, runKsceneTopicCollection } from "./runKsceneTopicCollection.js";
+import { dayIndexOf, redditQueryForSeed, runKsceneTopicCollection } from "./runKsceneTopicCollection.js";
 
 function assert(c: unknown, m: string): asserts c {
   if (!c) throw new Error(`❌ ${m}`);
@@ -67,6 +79,86 @@ async function main(): Promise<void> {
     assert(!isExcludedTopic(good), `제외되면 안 됨: ${good}`);
   }
   console.log("  ✅ 제외 규칙(단어 경계 포함 - 'warm'이 'war'로 걸리지 않음)");
+
+  // ---------- A. 한국 밖 지역 노이즈(2026-10-28, run 173~209 실측) ----------
+  const overseasNoise = [
+    "korean dessert cafe fort lee", "korean karaoke fort worth", "korean bbq santa rosa", "seoul street food deventer",
+    "korean michelin star boston", "korean funeral customs in america", "korean driver s license exchange canada",
+    "korean dessert cafe vancouver",
+    // 10/28 자동완성 실측(변형 "korean breakfast g" 등)
+    "korean breakfast gainesville", "korean breakfast gold coast", "korean breakfast duluth ga", "korean language course glasgow",
+    "korea travel budget philippines", "korean michelin restaurants nyc",
+    "aiea korean culture school", "green mountain korean culture school", // 지명 없이 오는 해외 한글학교
+  ];
+  for (const noise of overseasNoise.slice(0, 8)) assert(isOverseasLocalTopic(noise), `실측 8건은 지명 규칙으로 걸린다: ${noise}`);
+  for (const noise of overseasNoise) {
+    assert(isExcludedTopic(noise), `해외 지역 노이즈는 제외: ${noise}`);
+  }
+  const domesticOrComparison = [
+    "bowing in korea vs japan angles", "jeju island trip cost", "incheon airport to seoul with luggage", "korean driver license exchange",
+    // 한국 지명·비교·국적 형용사·한국 안의 고유명사는 살린다
+    "korean breakfast gangnam", "busan travel itinerary 3 days", "hongdae myeongdong shopping guide", "korea cost of living vs canada",
+    "korea visa for american citizens", "korean chinese food jajangmyeon", "paris baguette korea menu", "london bagel museum seoul",
+    "korea mobile banking for foreigners",
+  ];
+  for (const ok of domesticOrComparison) {
+    assert(!isOverseasLocalTopic(ok) && !isExcludedTopic(ok), `한국 주제·비교는 살린다: ${ok}`);
+  }
+  // 시드 자체가 지명 규칙에 걸리면 그 시드는 헛돈다.
+  for (const seed of KSCENE_SEEDS) assert(!isOverseasLocalTopic(seed.query), `시드가 해외 지명 규칙에 걸리면 안 된다: ${seed.query}`);
+  console.log(`  ✅ 해외 지명 노이즈 제외(실측 ${overseasNoise.length}건) · 한국 지명·비교 주제 유지(${domesticOrComparison.length}건)`);
+
+  // 변형 질의 결과는 안내 의도어가 있어야 후보가 된다(목록 밖 작은 도시를 받는 2차 그물).
+  assert(!hasIntentSignal("korean breakfast tulsa") && hasIntentSignal("korean language learning guide") && hasIntentSignal("incheon airport layover what to do"), "의도어 판정");
+  const variantObs = [
+    { suggestion: "korean breakfast tulsa", seed: "korean breakfast", position: 0, source: "autocomplete_variant" as const }, // 목록 밖 도시
+    { suggestion: "korean breakfast to go", seed: "korean breakfast", position: 1, source: "autocomplete_variant" as const }, // 의도 없음
+    { suggestion: "korean breakfast foods list", seed: "korean breakfast", position: 2, source: "autocomplete_variant" as const },
+    { suggestion: "korean breakfast toast", seed: "korean breakfast", position: 3, source: "autocomplete" as const }, // 기본 질의는 그대로
+    // 10/28 dry-run 실측: 시드 낱말(culture)은 의도어로 치지 않는다
+    { suggestion: "green mountain korean culture school", seed: "korean school culture", position: 0, source: "autocomplete_variant" as const },
+  ];
+  const variantCandidates = buildCandidates(variantObs).map((c) => c.topic);
+  assert(
+    JSON.stringify(variantCandidates.sort()) === JSON.stringify(["korean breakfast foods list", "korean breakfast toast"]),
+    `변형 결과는 의도어가 있어야 한다: ${variantCandidates.join(" / ")}`
+  );
+  console.log("  ✅ 변형 질의 결과에 안내 의도어 요구(기본 질의는 그대로)");
+
+  // ---------- B. korea/korean 정규화(2026-10-28) ----------
+  const phonePair = topicSimilarity("korean phone plans for foreigners", "korea phone plans");
+  assert(phonePair >= 0.6, `korea/korean을 접으면 중복이다(전 0.40, 지금 ${phonePair.toFixed(2)})`);
+  assert(isDuplicateTopic("korean phone plans for foreigners", ["korea phone plans"], 0.6), "기발행 korea phone plans와 중복");
+  assert(topicSimilarity("south korea cost of living", "korean cost of living") === 1, "south korea = korean");
+  const tmoneyPair = topicSimilarity("t money card cost", "t money card where to buy");
+  assert(tmoneyPair < 0.6 && Math.abs(tmoneyPair - 0.5) < 1e-9, `다른 글은 임계값 0.6 아래로 남는다(${tmoneyPair})`);
+  assert(topicSimilarity("seoul subway guide", "korea subway guide") < 0.6, "seoul은 korea로 접지 않는다");
+  // 학생 보험과 일반 외국인 보험(번호 안내)은 다른 글로 둔다 - 정규화 후에도 0.43.
+  const insurancePair = topicSimilarity("korean health insurance for foreign students", "korean health insurance for foreigners number");
+  assert(insurancePair < 0.6, `foreign/foreigner는 접지 않는다(${insurancePair.toFixed(2)})`);
+  console.log(`  ✅ korea/korean 정규화(phone ${phonePair.toFixed(2)} 중복 · t money ${tmoneyPair.toFixed(2)} 비중복 · seoul 별개)`);
+
+  // ---------- C. 레딧 교차 신호(2026-10-28) ----------
+  assert(buildRedditNewUrl(KSCENE_SUBREDDITS).startsWith("https://www.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "레딧 묶음 new URL");
+  const searchUrl = buildRedditSearchUrl(KSCENE_SUBREDDITS, "phone plan");
+  assert(searchUrl.includes("/search.json?") && searchUrl.includes("q=phone+plan") && searchUrl.includes("restrict_sr=1") && searchUrl.includes("sort=new"), "레딧 검색 URL");
+  assert(!/mozilla|chrome|safari/i.test(REDDIT_USER_AGENT) && REDDIT_USER_AGENT.startsWith("blog-automation-kscene/"), "User-Agent는 위장하지 않는다");
+  assert(JSON.stringify(parseRedditListing({ data: { children: [{ data: { title: " Q about ARC " } }, { data: {} }, null] } })) === '["Q about ARC"]', "레딧 Listing 파싱");
+  assert(parseRedditListing({ nope: 1 }).length === 0 && parseRedditListing(null).length === 0, "레딧 모양이 다르면 빈 배열");
+  assert(redditQueryForSeed("korea phone plan") === "phone plan" && redditQueryForSeed("south korea") === "", "레딧 검색어는 korea를 뺀다");
+
+  assert(redditTitleSupports("korea bank account for foreigners", "Question about ARC and bank account???"), "질문 제목이 후보를 뒷받침");
+  assert(!redditTitleSupports("korea bank account for foreigners", "Best bank in Seoul?"), "한 단어 일치는 뒷받침이 아니다");
+  assert(!redditTitleSupports("korea winter guide", "Winter in Korea"), "핵심 토큰 1개짜리 후보는 뒷받침을 받지 않는다");
+  const baseCandidate = { topic: "korea bank account for foreigners", seed: "korea bank account foreigner", label: "Living in Korea" as const, hits: 1, bestPosition: 5 };
+  const [supported] = attachRedditSupport([baseCandidate], ["Question about ARC and bank account???", "Opening a bank account without ARC", "Best kimchi?"]);
+  assert(supported.redditHits === 2 && supported.redditExample === "Question about ARC and bank account???", "뒷받침 수·예시");
+  assert(scoreTopic(supported).crossSignal === 10 && scoreTopic(baseCandidate).crossSignal === 0, "레딧 2건 = 교차 신호 +10");
+  assert(scoreTopic({ ...supported, hits: 3 }).crossSignal === 15, "교차 신호 상한 15");
+  assert(attachRedditSupport([baseCandidate], ["How do I open a bank account in Korea as a foreigner"]).length === 1, "레딧은 후보를 새로 만들지 않는다");
+  const rankedReddit = toRankedKeywords([{ ...supported, score: scoreTopic(supported) }]);
+  assert(rankedReddit[0].sources.includes("reddit") && rankedReddit[0].reason.includes("레딧 질문 2건"), "출처·사유에 레딧 표시");
+  console.log("  ✅ 레딧 교차 신호(URL·UA·파싱·포함률 매칭·+10 가산·후보 미생성·출처 표시)");
 
   // 시드 선정: 개수·라벨 혼합·날짜로 회전
   const day0 = pickSeedsForDay(KSCENE_SEEDS, 0, 20);
@@ -194,6 +286,24 @@ async function main(): Promise<void> {
     save: async () => ({ runId: null, persisted: false, error: "x" }),
   });
   assert(saveFail.status === "save_failed", "저장 실패는 알림 없이 save_failed");
+  // 레딧 스위치: 꺼짐이면 호출 0회, 켜짐이면 묶음 new + 시드별 search, 403·429면 그 자리에서 멈추고 진행.
+  const redditUrls: string[] = [];
+  const redditBase = {
+    now: new Date("2026-10-07T12:00:00Z"), delayMs: 0, redditDelayMs: 0, seedsPerRun: 3, dryRun: true, log: () => {},
+    fetchTrendTerms: async () => [], loadExistingTopics: async () => [],
+    fetchSuggestions: async (q: string) => [`${q} guide for first time visitors`],
+  };
+  const redditOff = await runKsceneTopicCollection({ ...redditBase, redditEnabled: false, fetchRedditTitles: async (url) => { redditUrls.push(url); return []; } });
+  assert(redditOff.reddit.status === "disabled" && redditUrls.length === 0, "레딧 꺼짐이면 호출 없음");
+  const redditOn = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async (url) => { redditUrls.push(url); return ["Any guide for first time visitors?"]; } });
+  assert(redditOn.status === "dry_run" && redditOn.reddit.status === "ok" && redditOn.reddit.requests === redditUrls.length && redditUrls[0].includes("/new.json"), `레딧 켜짐(${redditOn.reddit.requests}회)`);
+  let blockedCalls = 0;
+  const redditBlocked = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { blockedCalls += 1; throw new RedditBlockedError(429); } });
+  assert(redditBlocked.status === "dry_run" && redditBlocked.reddit.status === "blocked" && blockedCalls === 1 && redditBlocked.topics.length > 0, "429면 레딧만 건너뛰고 제안은 나간다");
+  const redditFailed = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { throw new Error("ECONNRESET"); } });
+  assert(redditFailed.status === "dry_run" && redditFailed.reddit.status === "failed", "레딧 전부 실패도 비치명적");
+  console.log("  ✅ 레딧 스위치·차단·실패(비치명적)");
+
   assert(dayIndexOf(new Date("2026-10-07T15:00:00Z")) === dayIndexOf(new Date("2026-10-07T14:59:00Z")) + 1, "일 경계는 KST 자정(UTC 15:00)");
   console.log("  ✅ 전체 실행 계약(부분 실패 허용·저장→알림·후보0·저장실패)");
 

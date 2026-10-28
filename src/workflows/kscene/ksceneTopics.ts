@@ -7,6 +7,26 @@
 // 입국 전 문화 소개와 동등하게 우선한다.** 라벨 상한(perLabelCap)만 있으면 "쏠리지 않게" 막을 뿐이라,
 // 문화 소개 라벨이 셋(Food·Culture·K-Wave)이고 실용 라벨이 하나(Living in Korea)인 구성에서는 실용
 // 주제가 매일 0~1건으로 밀렸다. 그래서 상한과 짝이 되는 **하한**을 둔다(practicalFloor).
+//
+// 📌 보정 3건(2026-10-28, run 173~209 22일치 점검):
+//   A. **한국 밖 지역 노이즈 제외.** 자동완성의 gl=us가 사실상 무시되고(us/gb 결과 동일) 질의가 미국 IP의
+//      러너에서 나가므로, "korean dessert cafe fort lee"·"korean bbq santa rosa"·"korean funeral customs in
+//      america" 같은 교포·로컬 질의가 매일 1~2건씩 8건 안에 들어왔다. 해외 지명이 들어간 후보는 제외한다
+//      (isOverseasLocalTopic). 단 "korea vs japan"처럼 **비교 대상**으로 쓰인 국가명은 살린다. 지명은
+//      하드코딩 목록이다 - 자동완성이 전부 소문자로 와서 "고유명사형 토큰"을 모양으로 가려낼 수 없다.
+//      알파벳 변형 질의("<시드> g")는 지운다가 아니라 **결과에 안내 의도어를 요구**한다(VARIANT_INTENT_TERMS) -
+//      실측(10/28, 시드 20개)에서 변형은 "korean breakfast gainesville·gold coast·duluth ga" 같은 지명 노이즈의
+//      주공급원이었지만 "korean language learning guide"·"incheon airport layover guide"처럼 기본 질의에 없는
+//      롱테일도 냈다. 목록 밖의 작은 도시(deventer류)는 변형 쪽에서 들어오므로 의도어 요구가 2차 그물이 된다.
+//   B. **korea/korean 정규화.** topicTokens가 korea·korean·koreans·south korea를 한 토큰("korea")으로 접는다.
+//      "korean phone plans for foreigners"(제안)와 "korea phone plans"(기발행)가 0.40으로 중복을 빠져나갔다.
+//      seoul은 접지 않는다(서울 글과 전국 글은 다른 주제다). 임계값 0.6은 그대로다.
+//   C. **레딧은 교차 신호로만 쓴다.** r/koreatravel·r/Living_in_Korea·r/living_in_korea_now의 최근 질문 제목이
+//      자동완성 후보를 뒷받침하면 crossSignal에 가산한다(redditSupport). 제목을 주제로 올리지 않는다 - 제목은
+//      "Question about ARC and bank account???" 같은 질문 한 줄이라 글 제목이 안 되고, 레딧의 수요 근거는
+//      순위가 아니라 "질문이 있었다"일 뿐이라 자동완성 위치(demand)와 같은 저울에 올릴 수 없다. 후보 집합은
+//      계속 자동완성이 정하고 레딧은 그 안에서 실제로 묻는 주제를 앞으로 당기기만 한다(최대 +10점).
+//
 // 이 트랙의 선정은 LLM 프롬프트가 아니라 이 파일의 결정 규칙이 전부다 - 기준은 여기 적는다.
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
@@ -29,12 +49,18 @@ export function normalizeTopic(text: string): string {
     .trim();
 }
 
-/** 의미 있는 토큰(불용어 제거, 단순 복수형 정규화). */
+/** korea·korean(s)·south korea를 접은 토큰(2026-10-28, B). seoul 같은 지명은 접지 않는다. */
+const KOREA_TOKEN = "korea";
+const KOREA_FORMS = new Set(["korea", "korean"]);
+
+/** 의미 있는 토큰(불용어 제거, 단순 복수형 정규화, korea/korean 접기). */
 export function topicTokens(text: string): string[] {
   return normalizeTopic(text)
+    .replace(/\bsouth (?=korea)/g, "")
     .split(" ")
     .filter((token) => token.length > 1 && !STOPWORDS.has(token))
-    .map((token) => (token.length > 3 && token.endsWith("s") && !token.endsWith("ss") ? token.slice(0, -1) : token));
+    .map((token) => (token.length > 3 && token.endsWith("s") && !token.endsWith("ss") ? token.slice(0, -1) : token))
+    .map((token) => (KOREA_FORMS.has(token) ? KOREA_TOKEN : token));
 }
 
 /** 토큰 집합 자카드 유사도(0~1). */
@@ -66,6 +92,8 @@ const EXCLUDED_TERMS = [
 const LOW_VALUE_TERMS = [
   "near me", "reddit", "youtube", "tiktok", "instagram", "login", "log in", "pdf", "download", "torrent", "free online",
   "today", "tonight", "live", "news", "stock", "price chart", "meaning in english", "lyrics", "mp3", "wallpaper", "twitter",
+  // 해외 한글학교·한인 문화학교(2026-10-28, A) - "aiea korean culture school"처럼 지명 없이 학교 이름으로 온다.
+  "culture school", "heritage school", "saturday school",
 ];
 
 function containsTerm(normalized: string, term: string): boolean {
@@ -102,9 +130,70 @@ export function isPracticalTopic(topic: string, label: KsceneLabel): boolean {
   return PRACTICAL_TERMS.some((term) => containsTerm(normalized, term));
 }
 
+/**
+ * 한국 밖 지명(2026-10-28, A). 교포·로컬 질의("korean bbq santa rosa", "korean funeral customs in america")를
+ * 거른다. 22일치 실측 노이즈와 10/28 자동완성 실측에서 나온 곳 + 한인 밀집 지역 + 주요 국가·도시다.
+ *
+ * - 국가는 **명사형만** 둔다. "american"·"canadian"·"japanese" 같은 형용사는 넣지 않는다 - "korea visa for
+ *   canadian citizens"(방문자 국적)나 "korean chinese food"(짜장면)처럼 한국 안의 주제가 걸린다.
+ * - 보통 영어 단어와 겹치는 지명(mobile·reading·nice·bath·phoenix·orange)은 넣지 않는다 - "mobile banking"을
+ *   지명으로 잡는 쪽이 노이즈를 놓치는 쪽보다 손해다. 목록 밖의 작은 도시는 변형 질의 의도어 요구가 받는다.
+ * - "us"는 넣지 않는다("korea visa for us citizens"는 유효하다). "usa"·"america"는 넣는다.
+ */
+const OVERSEAS_PLACES = [
+  // 국가·지역
+  "america", "usa", "united states", "canada", "australia", "new zealand", "uk", "united kingdom", "england", "scotland",
+  "ireland", "philippines", "netherlands", "germany", "france", "italy", "spain", "india", "pakistan", "bangladesh",
+  "nepal", "sri lanka", "malaysia", "indonesia", "singapore", "thailand", "vietnam", "japan", "china", "taiwan",
+  "hong kong", "mongolia", "uzbekistan", "kazakhstan", "russia", "dubai", "uae", "saudi arabia", "nigeria", "kenya",
+  "south africa", "mexico", "brazil", "argentina", "peru", "chile", "colombia",
+  // 미국 주(일반어와 겹치는 이름 제외) + 약칭
+  "california", "texas", "new york", "new jersey", "virginia", "georgia", "illinois", "washington state", "hawaii",
+  "nevada", "florida", "massachusetts", "pennsylvania", "maryland", "michigan", "ohio", "minnesota", "colorado",
+  "arizona", "oregon", "north carolina", "tennessee", "alabama", "utah", "nyc", "nj", "socal", "bay area", "dmv",
+  // 미국 도시(한인 밀집 지역 포함)
+  "los angeles", "koreatown", "ktown", "fort lee", "palisades park", "queens", "manhattan",
+  "brooklyn", "bergen county", "flushing ny", "flushing queens", "annandale", "centreville", "fairfax", "ellicott city", "duluth", "suwanee", "atlanta",
+  "fullerton", "buena park", "garden grove", "irvine", "torrance", "cerritos", "diamond bar", "rowland heights",
+  "orange county", "san diego", "san francisco", "san jose", "oakland", "santa clara", "sacramento", "santa rosa",
+  "seattle", "federal way", "lynnwood", "tacoma", "portland", "boston", "chicago", "philadelphia", "houston", "dallas",
+  "fort worth", "carrollton", "austin", "san antonio", "denver", "phoenix az", "las vegas", "honolulu", "miami",
+  "orlando", "tampa", "charlotte", "raleigh", "nashville", "minneapolis", "detroit", "columbus ohio", "pittsburgh",
+  "baltimore", "gainesville", "anchorage", "salt lake city",
+  // 캐나다·호주·뉴질랜드·영국·유럽
+  "toronto", "vancouver", "burnaby", "coquitlam", "surrey bc", "calgary", "edmonton", "montreal", "ottawa", "winnipeg",
+  "sydney", "melbourne", "brisbane", "gold coast", "perth", "adelaide", "auckland", "wellington", "london",
+  "new malden", "manchester", "birmingham", "glasgow", "edinburgh", "leeds", "dublin", "amsterdam", "rotterdam",
+  "utrecht", "the hague", "deventer", "eindhoven", "berlin", "frankfurt", "munich", "hamburg", "paris", "madrid",
+  "barcelona",
+  // 아시아·기타
+  "manila", "makati", "cebu", "quezon city", "kuala lumpur", "jakarta", "bangkok", "hanoi", "ho chi minh",
+  "tokyo", "osaka", "fukuoka", "beijing", "shanghai", "taipei", "ulaanbaatar", "tashkent", "gujranwala", "lahore",
+  "karachi", "delhi", "mumbai", "kathmandu", "dhaka",
+] as const;
+
+/** 한국 안의 고유명사인데 해외 지명을 품은 것 - 지명 판정 전에 지운다. */
+const OVERSEAS_FALSE_FRIENDS = ["paris baguette", "paris croissant", "london bagel", "hong kong banjeom", "hong kong banjum", "phoenix park"] as const;
+
+/** 비교 대상으로 쓰인 국가명은 글 주제로 유효하다("korea vs japan", "cost of living compared to canada"). */
+const COMPARISON_TERMS = ["vs", "versus", "compared", "compare", "comparison", "difference", "differences", "than"] as const;
+
+/** 단어 경계로만 본다. containsTerm의 긴 낱말 부분 일치를 쓰면 "america"가 "american"을 잡는다. */
+function containsWord(normalized: string, term: string): boolean {
+  return ` ${normalized} `.includes(` ${term} `);
+}
+
+/** 해외 지명이 들어간 교포·로컬 질의인가(비교 대상으로 쓰인 국가명은 아니다). */
+export function isOverseasLocalTopic(topic: string): boolean {
+  let normalized = normalizeTopic(topic);
+  for (const phrase of OVERSEAS_FALSE_FRIENDS) normalized = normalized.split(phrase).join(" ");
+  if (!OVERSEAS_PLACES.some((place) => containsWord(normalized, place))) return false;
+  return !COMPARISON_TERMS.some((term) => containsWord(normalized, term));
+}
+
 export function isExcludedTopic(topic: string): boolean {
   const normalized = normalizeTopic(topic);
-  return [...EXCLUDED_TERMS, ...LOW_VALUE_TERMS].some((term) => containsTerm(normalized, term));
+  return [...EXCLUDED_TERMS, ...LOW_VALUE_TERMS].some((term) => containsTerm(normalized, term)) || isOverseasLocalTopic(normalized);
 }
 
 /** 단어 수·길이가 글 주제로 쓸 만한가(너무 짧으면 막연하고 너무 길면 질문 한 줄이다). */
@@ -140,7 +229,15 @@ export function pickSeedsForDay(seeds: readonly KsceneSeed[], dayIndex: number, 
   return picked;
 }
 
-/** 자동완성 변형 질의: 시드 그대로 + 날짜로 돌리는 알파벳 한 글자(롱테일을 다양하게). */
+/**
+ * 자동완성 변형 질의: 시드 그대로 + 날짜로 돌리는 알파벳 한 글자(롱테일을 다양하게).
+ *
+ * 변형은 남긴다(2026-10-28, A). 변형 결과는 지명 노이즈의 주공급원이지만("korean breakfast g" -> gainesville·
+ * gold coast·duluth ga) 기본 질의에 없는 안내형 롱테일도 같이 낸다. 없애면 하루 제안이 반으로 줄어 이미 68%인
+ * 중복 제외율 아래에서 후보가 마른다. 그래서 변형 결과에만 **안내 의도어를 요구**한다(hasIntentSignal) -
+ * 지명 목록에 없는 작은 도시가 붙은 질의는 의도어가 없어 여기서 걸린다. 실측 대안으로 "<시드> for foreigners"·
+ * "<시드> how" 접미 변형도 봤지만 시드 20개 중 대부분이 빈 결과였다.
+ */
 export function autocompleteQueriesForSeed(seed: string, dayIndex: number): string[] {
   const letter = String.fromCharCode("a".charCodeAt(0) + (dayIndex % 26));
   return [seed, `${seed} ${letter}`];
@@ -155,6 +252,11 @@ export type SuggestionObservation = {
   seed: string;
   /** 제안 목록에서의 위치(0이 맨 앞 = 수요가 가장 크다). */
   position: number;
+  /**
+   * 출처(2026-10-28). autocomplete = 시드 그대로의 자동완성, autocomplete_variant = 알파벳 변형 질의의 자동완성.
+   * 생략하면 autocomplete. 변형 결과에는 안내 의도어를 요구한다(autocompleteQueriesForSeed 주석).
+   */
+  source?: "autocomplete" | "autocomplete_variant";
 };
 
 export type TopicCandidate = {
@@ -165,7 +267,32 @@ export type TopicCandidate = {
   hits: number;
   /** 관찰된 가장 앞선 위치. */
   bestPosition: number;
+  /** 이 후보를 뒷받침한 레딧 질문 제목 수(2026-10-28, C). 레딧을 안 돌렸으면 생략. */
+  redditHits?: number;
+  /** 뒷받침한 레딧 제목 하나(로그·사유용). */
+  redditExample?: string;
 };
+
+/** 변형 질의 결과가 글이 될 의도를 품었는가 - 질문형·안내어·체류 실용 영역어·방문자 표현. */
+const INTENT_EXTRA_TERMS = [
+  "foreigner", "foreigners", "tourist", "tourists", "traveler", "travelers", "meaning", "list", "requirements",
+  "process", "fee", "fees", "types", "history", "culture", "customs", "ideas", "rules", "explained", "itinerary",
+] as const;
+
+/**
+ * 의도어는 **시드 밖의 낱말**에서만 센다(10/28 dry-run: 시드 "korean school culture"의 변형이 낸
+ * "green mountain korean culture school"이 시드 낱말 culture로 통과했다 - 미국 한글학교 이름이다).
+ */
+export function hasIntentSignal(topic: string, seed = ""): boolean {
+  const seedWords = new Set(normalizeTopic(seed).split(" "));
+  const normalized = normalizeTopic(topic)
+    .split(" ")
+    .filter((word) => !seedWords.has(word))
+    .join(" ");
+  const words = new Set(normalized.split(" "));
+  if (QUESTION_STARTERS.some((starter) => words.has(starter))) return true;
+  return [...GUIDE_WORDS, ...PRACTICAL_TERMS, ...INTENT_EXTRA_TERMS].some((term) => containsTerm(normalized, term));
+}
 
 /** 시드와 한 토큰도 안 겹치는 제안(자동완성이 엉뚱한 곳으로 샌 경우)은 버린다. */
 function sharesSeedToken(suggestion: string, seed: string): boolean {
@@ -179,6 +306,7 @@ export function buildCandidates(observations: readonly SuggestionObservation[], 
   for (const obs of observations) {
     const topic = normalizeTopic(obs.suggestion);
     if (!hasUsableShape(topic) || isExcludedTopic(topic) || !sharesSeedToken(topic, obs.seed)) continue;
+    if (obs.source === "autocomplete_variant" && !hasIntentSignal(topic, obs.seed)) continue;
 
     const existing = byKey.get(topic);
     if (existing) {
@@ -202,10 +330,45 @@ const GUIDE_WORDS = ["guide", "tips", "tip", "explained", "etiquette", "rules", 
 
 export type TopicScore = { total: number; demand: number; crossSignal: number; specificity: number; intent: number };
 
-/** 0~100. 수요(자동완성 위치) 40 + 반복 관찰 15 + 구체성 20 + 안내글 의도 15 + 기본 10. */
+// ---------- 레딧 교차 신호(2026-10-28, C) ----------
+
+/** 레딧 제목과 맞춰 볼 때 빼는 범용어 - 이 서브레딧의 질문은 전부 외국인이 한국에 관해 묻는 것이다. */
+const REDDIT_GENERIC_TOKENS = new Set([KOREA_TOKEN, "guide", "tip", "best", "explained", "foreigner", "first", "time"]);
+
+function redditCoreTokens(text: string): Set<string> {
+  return new Set(topicTokens(text).filter((token) => !REDDIT_GENERIC_TOKENS.has(token) && !/^\d+$/.test(token)));
+}
+
+/**
+ * 레딧 제목이 이 후보를 뒷받침하는가. 후보의 핵심 토큰(korea·범용어 제외) 중 2개 이상, 60% 이상이 제목에
+ * 있어야 한다. 제목은 길고 후보는 짧아서 자카드(topicSimilarity)로는 거의 안 걸린다 - 포함률로 본다.
+ * 핵심 토큰이 하나뿐인 후보는 뒷받침을 받지 않는다(한 단어 일치는 우연이 너무 많다).
+ */
+export function redditTitleSupports(topic: string, title: string): boolean {
+  const core = redditCoreTokens(topic);
+  if (core.size < 2) return false;
+  const titleTokens = new Set(topicTokens(title));
+  let shared = 0;
+  for (const token of core) if (titleTokens.has(token)) shared += 1;
+  return shared >= 2 && shared / core.size >= 0.6;
+}
+
+/** 후보마다 레딧 뒷받침 수를 붙인다. 레딧 제목은 후보를 만들지 않는다 - 이미 있는 후보에만 붙는다. */
+export function attachRedditSupport(candidates: readonly TopicCandidate[], titles: readonly string[]): TopicCandidate[] {
+  return candidates.map((candidate) => {
+    const supporting = titles.filter((title) => redditTitleSupports(candidate.topic, title));
+    return { ...candidate, redditHits: supporting.length, ...(supporting[0] ? { redditExample: supporting[0] } : {}) };
+  });
+}
+
+/**
+ * 0~100. 수요(자동완성 위치) 40 + 교차 신호 15 + 구체성 20 + 안내글 의도 15 + 기본 10.
+ * 교차 신호 = 자동완성 반복 관찰(0/8/15) + 레딧 질문 뒷받침(1건 5, 2건 이상 10), 합쳐 15가 상한이다(C).
+ */
 export function scoreTopic(candidate: TopicCandidate): TopicScore {
   const demand = Math.round(Math.max(0, 10 - candidate.bestPosition) / 10 * 40);
-  const crossSignal = Math.round((Math.min(candidate.hits, 3) - 1) / 2 * 15);
+  const repeat = Math.round((Math.min(candidate.hits, 3) - 1) / 2 * 15);
+  const crossSignal = Math.min(15, repeat + Math.min(candidate.redditHits ?? 0, 2) * 5);
 
   const wordCount = candidate.topic.split(" ").length;
   const specificity = wordCount >= 4 && wordCount <= 7 ? 20 : wordCount === 3 || wordCount === 8 ? 10 : 5;
@@ -316,8 +479,8 @@ export function toRankedKeywords(selected: readonly (TopicCandidate & { score: T
     },
     trendDirection: "unknown",
     relatedCount: item.hits,
-    sources: ["google_autocomplete"],
+    sources: (item.redditHits ?? 0) > 0 ? ["google_autocomplete", "reddit"] : ["google_autocomplete"],
     latestPublishedAt: null,
-    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰`,
+    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}`,
   }));
 }
