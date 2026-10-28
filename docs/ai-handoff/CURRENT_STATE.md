@@ -2,6 +2,13 @@
 
 기준일: 2026-10-28 (Asia/Seoul)
 
+## 2026-10-28 — 사용설명서 주제 수집기 보정(#20 squash `88f2a8d`, 후속 `77a9536`)
+
+- **배경**: 22일 제안(run 173~209) 점검 - gl=us 무시로 알파벳 변형 질의가 미국 교포 로컬 질의("korean dessert cafe fort lee")를 매일 1~2건 밀어 넣음, korea/korean 미정규화로 "korean phone plans for foreigners"가 기발행 "korea phone plans"(0.40)를 통과, 소스가 자동완성 하나뿐. 점검 상세는 `TKM-CUSTOM-DOMAIN-2026-10.md` §9(10/28 11:45).
+- **A** `isOverseasLocalTopic`(해외 지명 하드코딩, 비교어 vs/compared 있으면 유지), 변형 질의 결과에만 안내 의도어 요구. **B** `topicTokens`가 korea·korean·south korea를 한 토큰으로(임계 0.6 유지, phone 쌍 0.75 중복·t money 쌍 0.50 비중복). **C** `src/services/search/providers/reddit/fetchRedditTitles.ts` - 레딧 제목은 후보를 만들지 않고 crossSignal 가산(+5/+10)만. 스위치 `KSCENE_REDDIT_ENABLED`(repo variable, 기본 꺼짐) - `kscene-topic.yml`에 배선 완료, 변수는 미설정.
+- **현황**: 이 맥에서 레딧 공개 JSON은 첫 요청부터 403(네트워크 보안 차단 페이지) → 켜도 비치명적으로 건너뜀. 실신호를 받으려면 Reddit OAuth(script/app-only) 등록이 필요 - 사용자 결정 대기. 시드 소진 추세(중복 제외율 68~72%)는 다음 과제.
+- **검증**: `test:kscene-topics`·`npm run build` 팀장 재현 통과, dry-run 8건 중 해외 지명 0건. 다음 21:00 실행(run)부터 적용 - 첫 실운영 제안에서 로컬 노이즈 0건인지 확인할 것.
+
 ## 2026-10-28 — Korea Plain 맞춤 도메인 전환 준비: thekoreamanual.blogspot.com → **www.koreaplain.com** (브랜치 `feat/koreaplain-cutover`)
 
 **상태: 전환 완료(2026-10-28 03:40 KST). HTTPS 03:26 발급 → ① GSC `sc-domain:koreaplain.com` 자동 확인·서비스 계정 추가·sitemap.xml(40)·sitemap-pages.xml 제출
