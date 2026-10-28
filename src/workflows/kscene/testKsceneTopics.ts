@@ -8,6 +8,7 @@ import {
   buildRedditNewUrl,
   buildRedditSearchUrl,
   parseRedditListing,
+  parseRedditAtom,
   buildTokenRequest,
   redditCredentialsFromEnv,
   toOauthUrl,
@@ -143,6 +144,8 @@ async function main(): Promise<void> {
 
   // ---------- C. 레딧 교차 신호(2026-10-28) ----------
   assert(buildRedditNewUrl(KSCENE_SUBREDDITS).startsWith("https://www.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "레딧 묶음 new URL");
+  assert(buildRedditNewUrl(["koreatravel"], 100, "rss").startsWith("https://www.reddit.com/r/koreatravel/new.rss?limit=100"), "레딧 RSS new URL");
+  assert(JSON.stringify(parseRedditAtom('<feed><title>newest</title><entry><title>Do taxis charge for luggage?</title></entry><entry><title>Renting &amp; goshiwon &#39;tips&#39;</title></entry><entry><link/></entry></feed>')) === '["Do taxis charge for luggage?","Renting & goshiwon \'tips\'"]', "Atom 제목 파싱(피드 제목 제외·엔티티 복원)");
   const searchUrl = buildRedditSearchUrl(KSCENE_SUBREDDITS, "phone plan");
   assert(searchUrl.includes("/search.json?") && searchUrl.includes("q=phone+plan") && searchUrl.includes("restrict_sr=1") && searchUrl.includes("sort=new"), "레딧 검색 URL");
   assert(!/mozilla|chrome|safari/i.test(REDDIT_USER_AGENT) && REDDIT_USER_AGENT.startsWith("blog-automation-kscene/"), "User-Agent는 위장하지 않는다");
@@ -307,14 +310,17 @@ async function main(): Promise<void> {
   };
   const redditOff = await runKsceneTopicCollection({ ...redditBase, redditEnabled: false, fetchRedditTitles: async (url) => { redditUrls.push(url); return []; } });
   assert(redditOff.reddit.status === "disabled" && redditUrls.length === 0, "레딧 꺼짐이면 호출 없음");
-  const redditOn = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async (url) => { redditUrls.push(url); return ["Any guide for first time visitors?"]; } });
-  assert(redditOn.status === "dry_run" && redditOn.reddit.status === "ok" && redditOn.reddit.requests === redditUrls.length && redditUrls[0].includes("/new.json"), `레딧 켜짐(${redditOn.reddit.requests}회)`);
+  const redditOn = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: { clientId: "id", clientSecret: "sec" }, fetchRedditTitles: async (url) => { redditUrls.push(url); return ["Any guide for first time visitors?"]; } });
+  assert(redditOn.status === "dry_run" && redditOn.reddit.status === "ok" && redditOn.reddit.requests === redditUrls.length && redditUrls[0].includes("/new.json") && redditUrls.some((u) => u.includes("/search.json")), `레딧 OAuth 모드(${redditOn.reddit.requests}회)`);
+  const rssUrls: string[] = [];
+  const redditRss = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: null, fetchRedditTitles: async (url) => { rssUrls.push(url); return []; } });
+  assert(redditRss.reddit.requests === 3 && rssUrls.every((u) => u.includes("/new.rss?")) && rssUrls[0].includes("/r/koreatravel/"), `레딧 RSS 모드는 서브레딧별 new.rss 3회(${rssUrls.length})`);
   let blockedCalls = 0;
   const redditBlocked = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { blockedCalls += 1; throw new RedditBlockedError(429); } });
   assert(redditBlocked.status === "dry_run" && redditBlocked.reddit.status === "blocked" && blockedCalls === 1 && redditBlocked.topics.length > 0, "429면 레딧만 건너뛰고 제안은 나간다");
   const redditFailed = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { throw new Error("ECONNRESET"); } });
   assert(redditFailed.status === "dry_run" && redditFailed.reddit.status === "failed", "레딧 전부 실패도 비치명적");
-  console.log("  ✅ 레딧 스위치·차단·실패(비치명적)");
+  console.log("  ✅ 레딧 스위치·OAuth/RSS 모드·차단·실패(비치명적)");
 
   assert(dayIndexOf(new Date("2026-10-07T15:00:00Z")) === dayIndexOf(new Date("2026-10-07T14:59:00Z")) + 1, "일 경계는 KST 자정(UTC 15:00)");
   console.log("  ✅ 전체 실행 계약(부분 실패 허용·저장→알림·후보0·저장실패)");

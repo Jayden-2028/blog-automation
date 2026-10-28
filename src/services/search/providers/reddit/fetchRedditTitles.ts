@@ -4,8 +4,10 @@
 //   · **OAuth(app-only)** - `REDDIT_CLIENT_ID`·`REDDIT_CLIENT_SECRET`이 있으면 client_credentials로 토큰을 받아
 //     `oauth.reddit.com`에 요청한다(공식 API, 분당 100회). 2026-10-28 실측에서 인증 없는 공개 JSON은 가정 IP에서도
 //     첫 요청부터 403(네트워크 보안 차단 페이지)이라 실신호를 받으려면 이 경로가 필요하다.
-//   · **공개 JSON** - 자격증명이 없으면 `www.reddit.com/r/<subs>/new.json`을 그대로 친다(막히면 403으로 끝난다).
-// URL 빌더는 항상 www 주소를 만들고, 요청 직전에 OAuth 모드면 호스트만 oauth.reddit.com으로 바꾼다(경로·.json은 같다).
+//   · **공개 RSS** - 자격증명이 없으면 `www.reddit.com/r/<sub>/new.rss`(Atom)를 친다. 2026-10-28 실측: 공개 JSON은 403이지만
+//     RSS는 200이다. 단 인증 없는 요청은 **분당 1회**(x-ratelimit-remaining 0, reset 42~60s)라 요청 간격을 61초 이상 두고,
+//     요청 수도 서브레딧별 new 피드 3회로 줄인다(시드별 검색은 OAuth 모드에서만).
+// URL 빌더는 www 주소를 만들고(형식은 모드에 따라 .json/.rss), 요청 직전에 OAuth 모드면 호스트만 oauth.reddit.com으로 바꾼다.
 // User-Agent는 위장하지 않고 이 봇이 누구인지 밝힌다(스크래핑 원칙 - GoogleTrendsProvider·자동완성과 같다). 요청 간격은
 // 호출 측이 둔다. 403·429(토큰 발급 실패 포함)는 RedditBlockedError로 던진다 - 호출 측이 그 실행에서 레딧을 통째로
 // 건너뛴다(같은 IP로 더 두드리지 않는다). 그 밖의 실패는 일반 Error다(호출 측이 비치명적으로 처리한다).
@@ -13,6 +15,10 @@
 export const REDDIT_BASE_URL = "https://www.reddit.com";
 export const REDDIT_OAUTH_BASE_URL = "https://oauth.reddit.com";
 export const REDDIT_TOKEN_URL = "https://www.reddit.com/api/v1/access_token";
+/** 인증 없는 공개 피드의 최소 요청 간격(ms). 실측 분당 1회 제한에 여유를 둔 값. */
+export const REDDIT_PUBLIC_MIN_DELAY_MS = 61_000;
+
+export type RedditFeedFormat = "json" | "rss";
 
 /** 한국 체류·여행 질문이 올라오는 서브레딧(2026-10 외부 조사: 약 19만·13만·1만 명). */
 export const KSCENE_SUBREDDITS = ["koreatravel", "Living_in_Korea", "living_in_korea_now"] as const;
@@ -85,13 +91,29 @@ function subredditPath(subreddits: readonly string[]): string {
   return `/r/${subreddits.join("+")}`;
 }
 
-export function buildRedditNewUrl(subreddits: readonly string[], limit = 100): string {
-  return `${REDDIT_BASE_URL}${subredditPath(subreddits)}/new.json?${new URLSearchParams({ limit: String(limit), raw_json: "1" })}`;
+export function buildRedditNewUrl(subreddits: readonly string[], limit = 100, format: RedditFeedFormat = "json"): string {
+  return `${REDDIT_BASE_URL}${subredditPath(subreddits)}/new.${format}?${new URLSearchParams({ limit: String(limit), raw_json: "1" })}`;
 }
 
-export function buildRedditSearchUrl(subreddits: readonly string[], query: string, limit = 25): string {
+export function buildRedditSearchUrl(subreddits: readonly string[], query: string, limit = 25, format: RedditFeedFormat = "json"): string {
   const params = new URLSearchParams({ q: query, restrict_sr: "1", sort: "new", limit: String(limit), raw_json: "1" });
-  return `${REDDIT_BASE_URL}${subredditPath(subreddits)}/search.json?${params}`;
+  return `${REDDIT_BASE_URL}${subredditPath(subreddits)}/search.${format}?${params}`;
+}
+
+/** Atom 피드(`<entry><title>…</title>`)에서 제목만 뽑는다. 피드 자체 제목(`<feed><title>`)은 entry 밖이라 안 잡힌다. */
+export function parseRedditAtom(xml: string): string[] {
+  const titles: string[] = [];
+  for (const entry of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
+    const match = /<title>([\s\S]*?)<\/title>/.exec(entry[1]);
+    if (!match) continue;
+    const title = match[1]
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+      .trim();
+    if (title) titles.push(title);
+  }
+  return titles;
 }
 
 /** Listing(`{data:{children:[{data:{title}}]}}`)에서 제목만 뽑는다. 모양이 다르면 빈 배열(예외 아님). */
@@ -106,7 +128,7 @@ export function parseRedditListing(body: unknown): string[] {
 
 async function defaultFetchJson(url: string, timeoutMs: number): Promise<unknown> {
   const credentials = redditCredentialsFromEnv();
-  const headers: Record<string, string> = { Accept: "application/json", "User-Agent": REDDIT_USER_AGENT };
+  const headers: Record<string, string> = { Accept: isRssUrl(url) ? "application/atom+xml, application/rss+xml, application/xml" : "application/json", "User-Agent": REDDIT_USER_AGENT };
   let target = url;
   if (credentials) {
     headers.Authorization = `Bearer ${await getAccessToken(credentials, timeoutMs)}`;
@@ -118,14 +140,19 @@ async function defaultFetchJson(url: string, timeoutMs: number): Promise<unknown
     const response = await fetch(target, { signal: controller.signal, headers });
     if (response.status === 403 || response.status === 429) throw new RedditBlockedError(response.status);
     if (!response.ok) throw new Error(`Reddit 요청 실패: ${response.status} ${response.statusText}`);
-    return await response.json();
+    return isRssUrl(target) ? await response.text() : await response.json();
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 한 URL(new.json 또는 search.json)의 제목 목록. */
+export function isRssUrl(url: string): boolean {
+  return /\.rss(\?|$)/.test(url);
+}
+
+/** 한 URL(new/search의 .json 또는 .rss)의 제목 목록. */
 export async function fetchRedditTitles(url: string, options: FetchRedditOptions = {}): Promise<string[]> {
   const fetchJson = options.fetchJson ?? ((u: string) => defaultFetchJson(u, options.timeoutMs ?? 10_000));
-  return parseRedditListing(await fetchJson(url));
+  const body = await fetchJson(url);
+  return isRssUrl(url) && typeof body === "string" ? parseRedditAtom(body) : parseRedditListing(body);
 }

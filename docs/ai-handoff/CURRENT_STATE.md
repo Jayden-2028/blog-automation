@@ -6,7 +6,7 @@
 
 - **배경**: 22일 제안(run 173~209) 점검 - gl=us 무시로 알파벳 변형 질의가 미국 교포 로컬 질의("korean dessert cafe fort lee")를 매일 1~2건 밀어 넣음, korea/korean 미정규화로 "korean phone plans for foreigners"가 기발행 "korea phone plans"(0.40)를 통과, 소스가 자동완성 하나뿐. 점검 상세는 `TKM-CUSTOM-DOMAIN-2026-10.md` §9(10/28 11:45).
 - **A** `isOverseasLocalTopic`(해외 지명 하드코딩, 비교어 vs/compared 있으면 유지), 변형 질의 결과에만 안내 의도어 요구. **B** `topicTokens`가 korea·korean·south korea를 한 토큰으로(임계 0.6 유지, phone 쌍 0.75 중복·t money 쌍 0.50 비중복). **C** `src/services/search/providers/reddit/fetchRedditTitles.ts` - 레딧 제목은 후보를 만들지 않고 crossSignal 가산(+5/+10)만. 스위치 `KSCENE_REDDIT_ENABLED`(repo variable, 기본 꺼짐) - `kscene-topic.yml`에 배선 완료, 변수는 미설정.
-- **현황**: 이 맥에서 레딧 공개 JSON은 첫 요청부터 403(네트워크 보안 차단 페이지) → 켜도 비치명적으로 건너뜀. 실신호를 받으려면 Reddit OAuth(script/app-only) 등록이 필요 - 사용자 결정 대기. 시드 소진 추세(중복 제외율 68~72%)는 다음 과제.
+- **현황(10/28 저녁 갱신)**: 공개 JSON은 403이고, Reddit은 2026년 Responsible Builder Policy로 앱 생성(prefs/apps)을 사실상 닫았다(사용자가 create app을 눌러도 정책 링크만 뜸·비상업은 Devvit로, 상업은 서면 승인). 그래서 **공개 RSS 경로**로 바꿨다(`1a256d4` OAuth 경로 + 후속 커밋): 자격증명이 없으면 서브레딧별 `new.rss` 3회(Atom 파싱, 61초 간격 - 인증 없는 요청은 분당 1회 제한 실측), 있으면 oauth.reddit.com JSON+시드별 검색. 로컬 dry-run: rss ok · 요청 3회 · 제목 293건 · 후보 3건 뒷받침. 스위치 `KSCENE_REDDIT_ENABLED`는 아직 꺼짐(켜는 건 사용자 결정 - RSS는 피드 리더용 공개 피드이고 Data API가 아니지만 정책상 회색 지대). GitHub Actions IP에서 RSS가 열리는지는 켠 뒤 첫 실행 로그로 확인. 시드 소진 추세(중복 제외율 68~72%)는 다음 과제.
 - **검증**: `test:kscene-topics`·`npm run build` 팀장 재현 통과, dry-run 8건 중 해외 지명 0건. 다음 21:00 실행(run)부터 적용 - 첫 실운영 제안에서 로컬 노이즈 0건인지 확인할 것.
 
 ## 2026-10-28 — Korea Plain 맞춤 도메인 전환 준비: thekoreamanual.blogspot.com → **www.koreaplain.com** (브랜치 `feat/koreaplain-cutover`)

@@ -23,6 +23,8 @@ import {
   buildRedditSearchUrl,
   fetchRedditTitles,
   redditCredentialsFromEnv,
+  REDDIT_PUBLIC_MIN_DELAY_MS,
+  type RedditCredentials,
 } from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import { saveRankingHistory } from "../keyword-ranking/saveRankingHistory.js";
 import { sendKeywordNotification } from "../keyword-notification/sendKeywordNotification.js";
@@ -59,8 +61,10 @@ export type RunKsceneTopicCollectionOptions = {
   redditEnabled?: boolean;
   /** 레딧 URL 하나의 제목 목록. 테스트 주입. 403·429는 RedditBlockedError로 던진다. */
   fetchRedditTitles?: (url: string) => Promise<string[]>;
-  /** 레딧 요청 사이 대기(ms). 생략하면 KSCENE_TOPIC_CONFIG.redditDelayMs(1초 이상). */
+  /** 레딧 요청 사이 대기(ms). 생략하면 KSCENE_TOPIC_CONFIG.redditDelayMs. 공개 RSS 모드에서는 61초 하한을 강제한다. */
   redditDelayMs?: number;
+  /** 레딧 OAuth 자격증명. 생략하면 env(REDDIT_CLIENT_ID/SECRET). null이면 공개 RSS 모드. 테스트 주입. */
+  redditCredentials?: RedditCredentials | null;
   /** 구글 트렌드(US) 급상승어 조회. 테스트 주입. 실패해도 무시한다. */
   fetchTrendTerms?: () => Promise<string[]>;
   /** 이미 쓴/제안한 주제 목록. 테스트 주입. */
@@ -147,12 +151,17 @@ async function collectRedditTitles(
   seedQueries: readonly string[],
   fetchTitles: (url: string) => Promise<string[]>,
   delayMs: number,
-  log: (line: string) => void
+  log: (line: string) => void,
+  mode: "oauth" | "rss"
 ): Promise<{ titles: string[]; summary: RedditCollectionSummary }> {
-  const urls = [buildRedditNewUrl(KSCENE_SUBREDDITS)];
-  for (const seed of seedQueries) {
-    const query = redditQueryForSeed(seed);
-    if (query) urls.push(buildRedditSearchUrl(KSCENE_SUBREDDITS, query));
+  // OAuth(분당 100회): 묶음 new.json 1회 + 시드별 search.json. 공개 RSS(분당 1회): 서브레딧별 new.rss 3회만 -
+  // 시드별 검색까지 하면 한 실행이 20분을 넘는다. 최근 글 300건 제목에 후보 토큰이 있는지로 뒷받침을 센다.
+  const urls = mode === "oauth" ? [buildRedditNewUrl(KSCENE_SUBREDDITS)] : KSCENE_SUBREDDITS.map((sub) => buildRedditNewUrl([sub], 100, "rss"));
+  if (mode === "oauth") {
+    for (const seed of seedQueries) {
+      const query = redditQueryForSeed(seed);
+      if (query) urls.push(buildRedditSearchUrl(KSCENE_SUBREDDITS, query));
+    }
   }
 
   const titles = new Set<string>();
@@ -235,16 +244,22 @@ export async function runKsceneTopicCollection(
   // 3) (선택) 레딧 최근 질문 - 후보를 만들지 않고 자동완성 후보의 교차 신호로만 붙인다(C)
   let reddit: RedditCollectionSummary = { status: "disabled", requests: 0, titleCount: 0 };
   let redditTitles: string[] = [];
+  const redditCredentials = options.redditCredentials === undefined ? redditCredentialsFromEnv() : options.redditCredentials;
+  const redditMode = redditCredentials ? "oauth" : "rss";
   if (options.redditEnabled ?? KSCENE_TOPIC_CONFIG.redditEnabled) {
+    const requestedDelay = options.redditDelayMs ?? KSCENE_TOPIC_CONFIG.redditDelayMs;
+    // 테스트(0ms 주입)는 그대로, 실운영 RSS 모드는 61초 하한.
+    const redditDelay = redditMode === "rss" && options.redditDelayMs === undefined ? Math.max(requestedDelay, REDDIT_PUBLIC_MIN_DELAY_MS) : requestedDelay;
     const collected = await collectRedditTitles(
       seedQueries,
       options.fetchRedditTitles ?? ((url: string) => fetchRedditTitles(url)),
-      options.redditDelayMs ?? KSCENE_TOPIC_CONFIG.redditDelayMs,
-      log
+      redditDelay,
+      log,
+      redditMode
     );
     reddit = collected.summary;
     redditTitles = collected.titles;
-    log(`ℹ️ 레딧 보조 관찰(${redditCredentialsFromEnv() ? "oauth" : "public"}): ${reddit.status} · 요청 ${reddit.requests}회 · 제목 ${reddit.titleCount}건`);
+    log(`ℹ️ 레딧 보조 관찰(${redditMode}): ${reddit.status} · 요청 ${reddit.requests}회 · 제목 ${reddit.titleCount}건`);
   }
 
   // 4) 후보 -> 중복 제거 -> 선정
