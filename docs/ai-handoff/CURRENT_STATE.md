@@ -27,6 +27,14 @@
   `데서 나왔` 과탐이 보이면 패턴 축소. research §1 요약에 "경로·한정" 메모가 계속 들어오면 `researcher.md` 쪽도 손볼지 판단(이번
   PR은 집필 규격만).
 
+## 2026-10-29 — 주간 네이버 문체 학습 작업(style-learn)
+
+- **무엇**: 매주 월요일 네이버 발행본(`whyissuenow`, 사용자 윤문 후)과 파이프라인 원고(`articles` platform null, approved/published, `article_jobs.category` ∈ entertainment·ott·person)를 짝지어 문체 차이를 재고, 집필 규격 개정안을 **PR로 제안**한다. 규격 파일(`prompts/writing/*.md`)은 건드리지 않고 자동 병합도 없다 - 사람이 `docs/style-learning/YYYY-Www.md`의 diff 블록을 보고 반영한다. 대상 매체는 네이버뿐, 읽기 전용(RSS 1회 + 글당 1회, 요청 간 1.1초, DB 쓰기 없음).
+- **구성**: `src/jobs/styleLearnJob.ts`(`npm run job:style-learn -- [--days N] [--dry-run] [--no-pr] [--no-claude]`), `src/workflows/style-learn/*`(수집 `collect`/`naverPost`, 원고 정규화 `manuscript`, 매칭 `match`, 지표 `metrics`, 문장 diff `sentenceDiff`, 분류 `classify`(`claude -p`, `CLAUDE_MODEL`), 보고서 `report`, PR `publishReport`), 워크플로 `.github/workflows/style-learn.yml`(workflow_dispatch만, 입력 days·dry_run), 테스트 `npm run test:style-learn`(25건, 네트워크 없음).
+- **매칭**: 발행일 ±4일 창 + 점수 = 0.2 제목 Dice + 0.1 키워드 적중 + 0.35 본문 3-gram Jaccard + 0.35 본문 3-gram 포함도, 임계 **0.3**, 원고 1건은 글 1건에만(전역 탐욕 배정). 10일 실측(발행 19건): 맺어진 18건 최저 0.38, 짝 없는 글 최고 0.07, 같은 소재 다른 원고 교차 최대 0.21 -> 임계는 0.21~0.38 빈 구간 가운데다. 원고 쪽은 `[IMAGE]` 줄, 해시태그, `함께 보면 좋은 글`/`참고 자료` 꼬리를 뺀 뒤 비교한다(안 빼면 본문 겹침이 떨어진다). 발행본 쪽은 이미지 캡션·링크 카드·해시태그·`함께 보면 좋은 글` 이하를 뺀다.
+- **스케줄**: Worker `SINGLE_CRONS["0 1 * * 1"]`(월 10:00 KST)에 `analytics-index-health.yml`과 **동승**(`style-learn.yml` 추가). cron 슬롯 수·`wrangler.toml` 변경 없음. **Worker 재배포 필요**: `cd cloudflare/telegram-relay && npx wrangler deploy` 후 `npm run test:relay-schedule`(코드 쪽 확인)와 다음 월요일 10:00 KST에 Actions에 `style-learn` run이 생겼는지 확인.
+- **전제**: 저장소 설정 Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests"가 켜져 있어야 PR이 만들어진다(꺼져 있으면 보고서만 만들고 텔레그램에 실패를 알린다). 라벨은 월요일 실행이 지난주를 다루므로 "어제"가 속한 ISO 주로 붙는다.
+
 ## 2026-10-28 — 사용설명서 주제 수집기 보정(#20 squash `88f2a8d`, 후속 `77a9536`)
 
 - **배경**: 22일 제안(run 173~209) 점검 - gl=us 무시로 알파벳 변형 질의가 미국 교포 로컬 질의("korean dessert cafe fort lee")를 매일 1~2건 밀어 넣음, korea/korean 미정규화로 "korean phone plans for foreigners"가 기발행 "korea phone plans"(0.40)를 통과, 소스가 자동완성 하나뿐. 점검 상세는 `TKM-CUSTOM-DOMAIN-2026-10.md` §9(10/28 11:45).

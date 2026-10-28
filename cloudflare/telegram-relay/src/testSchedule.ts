@@ -14,7 +14,7 @@ assert(JSON.stringify(wf(KEYWORD_CRON, 11)) === '["social-issue-keyword.yml"]', 
 assert(JSON.stringify(wf(KEYWORD_CRON, 12)) === '["kscene-topic.yml","watchdog.yml"]', "12 UTC 사용설명서 수집 + watchdog 동시 발화(개편3)");
 assert(resolveScheduled(KEYWORD_CRON, at(5)) === null, "등록 안 된 시각은 null");
 assert(JSON.stringify(wf("30 0 * * *", 0)) === '["analytics-search.yml"]', "analytics-search");
-assert(JSON.stringify(wf("0 1 * * 1", 1)) === '["analytics-index-health.yml"]', "index-health");
+assert(JSON.stringify(wf("0 1 * * 1", 1)) === '["analytics-index-health.yml","style-learn.yml"]', "월요일 슬롯: index-health + style-learn 동승");
 assert(JSON.stringify(wf("0 18 * * 6", 18)) === '["storage-cleanup.yml"]', "storage-cleanup(주 1회, 개편2.5 D)");
 assert(resolveScheduled("0 9 * * *", at(9)) === null, "옛 cron 문자열은 알 수 없음");
 
@@ -25,7 +25,7 @@ assert(crons.length <= 5, `cron은 5개 이하(현재 ${crons.length})`);
 assert(crons.includes(KEYWORD_CRON), "wrangler.toml에 KEYWORD_CRON 있음");
 assert(crons.includes("0 18 * * 6"), "wrangler.toml에 storage-cleanup cron 있음");
 // 워크플로 파일이 실제로 있어야 dispatch가 404가 아니다.
-for (const file of ["storage-cleanup.yml", "kscene-topic.yml", "watchdog.yml", "entertainment-hot-star.yml"]) readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), "utf8");
+for (const file of ["storage-cleanup.yml", "kscene-topic.yml", "watchdog.yml", "entertainment-hot-star.yml", "analytics-index-health.yml", "style-learn.yml"]) readFileSync(new URL(`../../../.github/workflows/${file}`, import.meta.url), "utf8");
 for (const c of crons) assert(resolveScheduled(c, c === KEYWORD_CRON ? at(9) : c === "0 1 * * 1" ? at(1) : c === "0 18 * * 6" ? at(18) : at(0)) !== null, `toml cron이 코드에 매핑됨: ${c}`);
 
 // cron 표현식의 시각 목록과 코드의 분기 시각이 어긋나면 그 시각은 조용히 아무 일도 하지 않는다.

@@ -37,7 +37,9 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
 /** 키워드 수집 외 단독 cron. 문자열이 곧 키다. */
 const SINGLE_CRONS: Record<string, ScheduledDispatch[]> = {
   "30 0 * * *": [{ workflow: "analytics-search.yml" }], // 09:30 KST - Search Console 일일 성과
-  "0 1 * * 1": [{ workflow: "analytics-index-health.yml" }], // 월요일 10:00 KST - 색인 건강 점검
+  // 월요일 10:00 KST - 색인 건강 점검 + 네이버 문체 학습(style-learn, 2026-10-29). 새 cron 슬롯을 쓰지 않고 동승한다
+  // (wrangler.toml 변경 없음). 두 워크플로는 서로 독립이라 동시에 깨워도 된다.
+  "0 1 * * 1": [{ workflow: "analytics-index-health.yml" }, { workflow: "style-learn.yml" }],
   // 일요일 03:00 KST(토 18:00 UTC) - Storage 정리(개편2.5 D). 기본 dry-run이고 실삭제는 워크플로의 apply 게이트가 정한다.
   "0 18 * * 6": [{ workflow: "storage-cleanup.yml" }],
 };
