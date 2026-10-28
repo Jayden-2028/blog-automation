@@ -44,4 +44,6 @@ jobs:
           KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
           KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 레딧 교차 신호 스위치(#20). repo variable 미설정 = 꺼짐. 켜려면 vars.KSCENE_REDDIT_ENABLED=true.
+          KSCENE_REDDIT_ENABLED: ${{ vars.KSCENE_REDDIT_ENABLED }}
         run: npm run job:kscene-topic
