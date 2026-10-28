@@ -16,6 +16,7 @@ import {
   COVERAGE_NARRATIVE_PATTERN,
   VERIFICATION_STATUS_PATTERN,
   PARTIAL_GAP_PATTERN,
+  PROVENANCE_NARRATIVE_PATTERN,
   AS_OF_PATTERN,
   UNPUBLISHED_PATTERN,
   COMMENT_INVITE_PATTERN,
@@ -470,6 +471,15 @@ export function checkAttributionHedging(rawBody: string | null, now: Date = new 
       category: "quality",
       severity: "warning",
       message: '자료에 없는 항목의 부재 자체를 언급한 것으로 보입니다(facts-and-hedging.md §4-1 - 없으면 그 항목을 그냥 다루지 않는다)',
+    });
+  }
+
+  PROVENANCE_NARRATIVE_PATTERN.lastIndex = 0;
+  if (PROVENANCE_NARRATIVE_PATTERN.test(body)) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: '"~가 나온 곳은/~한 데서 나왔다/~한 명이고 ~는 아닙니다/~로 따지면" 같은 경위·한정·계산 서술이 있습니다(core-rules.md §1-12 - 사실을 사건 문장으로 쓰고 출처는 주어·부사구로 1회만. incident 제외)',
     });
   }
 

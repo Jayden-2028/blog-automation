@@ -242,4 +242,53 @@ const bad = "말한 것으로 보도됐습니다. 지원금은 30만 원입니�
   console.log("✅ C-11: 차정원 실측 13건 제거 / 3건 보존, 과교정 방지 19종, 멱등");
 }
 
+// 8) 경위·한정·계산 서술(2026-10-29 사용자 피드백, 정가은 원고 id 759) - 사용자가 지적한 4문장은 걸리고, 사용자가 고쳐 쓴 4문장은 통과한다.
+{
+  const RULE = "경위·한정·계산 서술";
+  const bad: Array<[string, string]> = [
+    ["소식이 나온 경로", "이야기가 나온 곳은 방송이 아니라 10월 26일 올라온 유튜브 채널 '롤코언니 가은이'의 '10년 만에 처음 알게 된 정가은 결혼반지의 비밀' 영상입니다."],
+    ["신뢰도 한정·부인", "감정한 사람은 종로 금은방 주인 한 명이고, 감정서가 있는 공인 감정 결과는 아닙니다."],
+    ["표현의 출처", "'티파니 사칭'이라는 말은 금은방 주인이 각인이 정품 티파니와 다르다며 \"티파니를 사칭한 것 같다\"고 말한 데서 나왔습니다."],
+    ["계산 과정 노출", "결혼과 이혼 연도로 따지면 2016년에 결혼해 2018년에 이혼했으니 결혼 생활은 약 2년입니다."],
+  ];
+  const good = [
+    "10월 26일 올라온 유튜브 '롤코언니 가은이'의 '10년 만에 처음 알게된 정가은의 결혼반지의 비밀' 영상에서 나왔습니다.",
+    "정가은은 종로 금은방 주인에게 감정을 받았습니다.",
+    "금은방 주인은 각인이 정품 티파니와 다르다며 \"티파니를 사칭한 것 같다\"고 말했습니다.",
+    "정가은은 2018년에 이혼했습니다.",
+  ];
+  for (const [name, sentence] of bad) {
+    const v = findRuleViolations(sentence, "entertainment");
+    assert(v.length === 1 && v[0].rule.includes(RULE), `${name}: 걸려야 한다 (${JSON.stringify(v)})`);
+    assert(findRuleViolations(sentence, "person").length === 1, `${name}: person도 걸린다`);
+    assert(findRuleViolations(sentence, "incident").length === 0, `${name}: incident는 제외(한정 서술이 무죄추정의 일부)`);
+  }
+  for (const sentence of good) {
+    assert(findRuleViolations(sentence, "entertainment").length === 0, `사용자 수정문이 걸리면 안 된다: ${sentence}`);
+  }
+  // 과탐 방지 - 평범한 사건·수치 문장은 그대로여야 한다.
+  const untouched = [
+    "출연자는 세 명이고 MC는 한 명입니다.",
+    "이 별명은 팬들이 지었습니다.",
+    "예상 매입가는 백금 기준 100만~150만 원입니다.",
+    "원화로 환산하면 3만 원 안팎입니다.",
+    "두 사람은 2016년에 결혼했습니다.",
+    "공식 포스터는 10월 20일에 공개됐습니다.",
+  ];
+  for (const sentence of untouched) {
+    assert(findRuleViolations(sentence, "entertainment").length === 0, `과탐: ${sentence}`);
+  }
+  let prompt = "";
+  await enforceWritingRules({
+    body: bad[1][1],
+    category: "entertainment",
+    runFixer: async (p: string) => {
+      prompt = p;
+      return { ok: false, error: "stub", output: "", durationMs: 1 } as never;
+    },
+  });
+  assert(prompt.includes("경위·한정·계산 서술: 그 사실을 '누가 무엇을 했다'는 사건 문장 하나로 다시 쓴다"), "교정 지시에 사건 문장으로 고치는 방법이 있다");
+  console.log("✅ 경위·한정·계산 서술: 사용자 사례 4문장 탐지 / 수정문 4문장 통과 / incident 제외 / 과탐 방지 6종");
+}
+
 console.log("\n🎉 규칙 집행 테스트 통과");
