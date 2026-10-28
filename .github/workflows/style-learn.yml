@@ -1,0 +1,66 @@
+# 주간 네이버 문체 학습(2026-10-29). 네이버 발행본(사용자 윤문 후) vs 파이프라인 원고를 짝지어 문체 차이를 재고,
+# 집필 규격 개정안을 **PR로 제안**한다(docs/style-learning/YYYY-Www.md). 규격 파일은 수정하지 않고 자동 병합도 없다 -
+# 사람이 PR을 보고 반영한다. 대상 매체는 네이버(whyissuenow)뿐이고 읽기 전용이다(RSS 1회 + 글당 1회, 요청 간 1.1초 이상).
+#
+# 트리거는 workflow_dispatch뿐이다 - Worker cron(월요일 10:00 KST, analytics-index-health와 같은 슬롯)이 깨운다.
+# 필요한 secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY(읽기만), TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID(메인봇 3줄 요약),
+# CLAUDE_CODE_OAUTH_TOKEN(문장 분류·개정안). PR 생성에는 기본 GITHUB_TOKEN을 쓰며, 저장소 설정
+# Settings > Actions > General > "Allow GitHub Actions to create and approve pull requests"가 켜져 있어야 한다.
+# 수동 실행 입력: days(기본 7), dry_run(true면 보고서를 로그에만 남기고 PR·텔레그램 없음).
+
+name: style-learn
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "최근 N일 발행분(기본 7)"
+        required: false
+        default: "7"
+      dry_run:
+        description: "true면 보고서를 로그에만(PR·텔레그램 없음)"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: style-learn
+  cancel-in-progress: false
+
+env:
+  CLAUDE_MODEL: claude-sonnet-5-5
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Claude Code CLI (문장 유형 분류·규격 개정안 생성용)
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run style-learn
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STYLE_LEARN_DAYS: ${{ inputs.days }}
+          STYLE_LEARN_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          ARGS="--days ${STYLE_LEARN_DAYS:-7}"
+          if [ "${STYLE_LEARN_DRY_RUN}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          npm run job:style-learn -- $ARGS

@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx",
     "sync:writer-style": "tsx scripts/syncWriterStyle.ts",
+    "job:style-learn": "tsx src/jobs/styleLearnJob.ts",
+    "test:style-learn": "tsx src/workflows/style-learn/testStyleLearn.ts",
     "test:supabase": "tsx src/services/supabase/testConnection.ts",
     "test:crud": "tsx src/services/supabase/testCrud.ts",
     "test:keywords": "tsx src/workflows/keyword-discovery/testKeywordDiscovery.ts",
