@@ -6,7 +6,7 @@
 // 두 단계다.
 //  1) 결정적 교정(applyDeterministicFixes): 문장을 지워도 사실이 사라지지 않는 것만 코드가 직접 지운다
 //     (댓글 유도 문장, "○월 기준" 시점 표기, 연결어미 뒤 쉼표). 판단이 필요한 것은 건드리지 않는다.
-//  2) 에이전트 교정(enforceWritingRules): 남은 위반(보도 인용·확인 여부 서술·비공개 서술·구어 어미)은
+//  2) 에이전트 교정(enforceWritingRules): 남은 위반(보도 인용·확인 여부 서술·비공개 서술·경위·한정·계산 서술·구어 어미)은
 //     문장 목록을 주고 헤드리스 에이전트에게 한 번만 고치게 한다. 고친 결과가 위반을 줄이지 못했거나
 //     이미지 마커 수가 달라지면 원본을 그대로 쓴다(fail-open + 로그).
 
@@ -24,6 +24,7 @@ import {
   COVERAGE_NARRATIVE_PATTERN,
   MEDIA_ATTRIBUTION_PATTERN,
   PARTIAL_GAP_PATTERN,
+  PROVENANCE_NARRATIVE_PATTERN,
   UNPUBLISHED_PATTERN,
   VERIFICATION_STATUS_PATTERN,
 } from "./bannedPatterns.js";
@@ -36,6 +37,7 @@ const AGENT_RULES: Array<{ rule: string; pattern: RegExp }> = [
   { rule: "확인·확정 여부 서술 금지(삭제)", pattern: VERIFICATION_STATUS_PATTERN },
   { rule: "자료에 없는 항목 언급 금지(삭제)", pattern: PARTIAL_GAP_PATTERN },
   { rule: "비공개·미정 서술 금지(삭제)", pattern: UNPUBLISHED_PATTERN },
+  { rule: "경위·한정·계산 서술 금지(사실을 사건 문장으로 고친다)", pattern: PROVENANCE_NARRATIVE_PATTERN },
   { rule: "구어 어미 금지(합니다체·해요체로 고친다)", pattern: BANNED_COLLOQUIAL_ENDINGS },
 ];
 
@@ -176,6 +178,8 @@ export function findRuleViolations(body: string, category?: string | null): Rule
       cursor = at + sentence.length;
       const maskedSentence = masked.slice(at, at + sentence.length);
       for (const { rule, pattern } of AGENT_RULES) {
+        // incident는 한정·부인 서술이 무죄추정의 일부라 경위·한정 규칙을 적용하지 않는다(core-rules §1-12).
+        if (pattern === PROVENANCE_NARRATIVE_PATTERN && category === "incident") continue;
         pattern.lastIndex = 0;
         const hit =
           pattern === BANNED_COLLOQUIAL_ENDINGS
@@ -208,6 +212,9 @@ function buildFixPrompt(body: string, violations: RuleViolation[], category: str
     "고치는 방법:",
     "- '삭제'로 표시된 규칙: 그 문장을 통째로 뺀다. 문단이 비면 문단도 뺀다. 새 문장으로 대체하지 않는다.",
     "- 보도·매체 인용: 그 사실을 단정문으로 쓰거나, 실제 인물·기관이 한 말이면 그 사람·기관을 주어로 직접 쓴다.",
+    "- 경위·한정·계산 서술: 그 사실을 '누가 무엇을 했다'는 사건 문장 하나로 다시 쓴다. 소식이 나온 경로는 주어·부사구로",
+    "  한 번만 넣고(\"~영상에서 나왔습니다\"), '~한 명이고/~는 아닙니다' 같은 한정·부인과 '~로 따지면 약 N년' 같은",
+    "  계산 과정은 뺀다. 계산으로 만든 값은 쓰지 않고 자료에 있는 값만 남긴다(facts-and-hedging.md §4-3).",
     "- 구어 어미: 정보 문장은 합니다체, 반응 문장은 해요체로 바꾼다.",
     "- 사실(수치·날짜·고유명사)은 바꾸지 않는다. 새 사실을 더하지 않는다.",
     "- `[IMAGE: ...]`/`[IMAGE PROMPT: ...]` 줄, 소제목(**...**), 해시태그, 참고 자료는 그대로 둔다.",

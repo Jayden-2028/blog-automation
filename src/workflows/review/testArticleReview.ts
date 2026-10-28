@@ -305,6 +305,18 @@ function main(): void {
   assert(partialGapSingle.some((c) => c.message.includes("부재")), "대조 접속어 없는 단독 누락 문장도 경고해야 한다");
   console.log("✅ 인용/헤지: 부분 데이터 갭(대조+단독) 탐지");
 
+  // 15-6-1) 경위·한정·계산 서술(2026-10-29) - 사용자가 지적한 문장 그대로. 고쳐 쓴 문장은 경고하지 않는다.
+  const provenance = checkAttributionHedging(
+    "이야기가 나온 곳은 방송이 아니라 10월 26일 올라온 유튜브 채널 '롤코언니 가은이'의 영상입니다. " +
+      "감정한 사람은 종로 금은방 주인 한 명이고, 감정서가 있는 공인 감정 결과는 아닙니다."
+  );
+  assert(provenance.some((c) => c.message.includes("경위·한정·계산")), "경위·한정 서술을 경고해야 한다");
+  const provenanceFixed = checkAttributionHedging(
+    "10월 26일 올라온 유튜브 '롤코언니 가은이'의 영상에서 나왔습니다. 정가은은 종로 금은방 주인에게 감정을 받았습니다."
+  );
+  assert(!provenanceFixed.some((c) => c.message.includes("경위·한정·계산")), "사건 문장으로 고친 문장은 경고하지 않는다");
+  console.log("✅ 인용/헤지: 경위·한정·계산 서술 탐지(2026-10-29)");
+
   // 15-7) 2026-09-30: 비공개·미정 서술과 기준 시점 표기는 이제 경고 대상이다.
   const unpublished = checkAttributionHedging("2026년 요금은 아직 공개되지 않았습니다.");
   assert(unpublished.some((c) => c.message.includes("비공개")), "'아직 공개되지 않았습니다'를 경고해야 한다");

@@ -106,7 +106,7 @@ episode: |                          # 선택. 실제 경험 메모(parenting)
 | §4 사실과 헤지 | `core-rules.md` §1 (요약) · `rules/facts-and-hedging.md` (상세) |
 | §6~7·9~10 출력 형식·저장·윤문 | `rules/output-format.md` |
 | §8 이미지 | `rules/images.md` |
-| §11 저장 전 체크리스트 | `core-rules.md` §6 + 아래 이미지 5항목 |
+| §11 저장 전 체크리스트 | `core-rules.md` §6(2026-10-29에 "경위·한정·계산 문장 0개"·"엔터·person 마무리가 요약이 아니다" 두 항목 추가) + 아래 이미지 5항목 |
 
 `verdict` 처리: `ok` 정상 작성 / `thin` 작성하되 하단에 `<!-- 근거 부족: 사람 검토 필요 -->` / `blocked` 작성하지 않고 사람에게 알린 뒤 종료.
 
