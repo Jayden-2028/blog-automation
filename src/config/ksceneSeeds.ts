@@ -190,4 +190,11 @@ export const KSCENE_TOPIC_CONFIG = {
   duplicateSimilarity: 0.6,
   /** 이미 제안했던 주제를 다시 제안하지 않는 기간(일). */
   proposalMemoryDays: 60,
+  /**
+   * 레딧 보조 관찰(2026-10-28, ksceneTopics.ts 상단 C). 기본 꺼짐 - `KSCENE_REDDIT_ENABLED=true`일 때만 호출한다.
+   * 레딧은 후보를 만들지 않고 자동완성 후보의 교차 신호로만 쓴다.
+   */
+  redditEnabled: process.env.KSCENE_REDDIT_ENABLED?.trim().toLowerCase() === "true",
+  /** 레딧 요청 간격(ms). 1초 아래로는 내리지 않는다(공개 엔드포인트 예의). */
+  redditDelayMs: Math.max(1000, intEnv(process.env.KSCENE_REDDIT_DELAY_MS, 1500)),
 } as const;
