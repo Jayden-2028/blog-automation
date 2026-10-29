@@ -39,15 +39,31 @@ export const TKM_BRAND_NAME = "Korea Plain";
  */
 export const TKM_BRAND_TAGLINE = "Korea, in plain English";
 /** 블로그 설명·메타 설명·JSON-LD publisher.description. */
-export const TKM_BRAND_DESCRIPTION = "Practical step-by-step guides to Korean transport, apps, errands, and customs — in plain English.";
+export const TKM_BRAND_DESCRIPTION =
+  "Step-by-step guides to Korean transport, apps, errands, and customs — written in plain English by a Korean living in Seoul.";
 /** 2026-10-28까지의 이름. 같은 이름의 제3자 사이트(thekoreamanual.com)와 충돌해 바꿨다. 기존 글·페이지 치환에만 쓴다. */
 export const TKM_FORMER_BRAND_NAME = "The Korea Manual";
 
+/**
+ * 필명(JSON-LD author). 블로그를 쓰는 사람이고 발행자(브랜드)와 구분한다 - 2026-10-30 "한국에 사는 한국인이 알려주는 한국"
+ * 정체성 개정(branding-2026-10/kp-native-identity-2026-10.md §A-5). 실명·사진·동네는 넣지 않는다.
+ */
+export const TKM_AUTHOR_NAME = "Jayden";
+/**
+ * 글마다 본문 꼬리에 들어가는 바이라인 한 줄(§A-5 꼬리안). Related Guides **앞**, 본문 마지막 문단 뒤에 놓는다 -
+ * 머리에 두면 첫 `<p>`를 읽는 describePost(검색 스니펫·JSON-LD description)와 부딪힌다.
+ */
+export const TKM_BYLINE_TEXT =
+  "Written by Jayden, a Korean living in Seoul. Prices and rules are checked against official sources; local notes describe common practice in Korea.";
+
 const RELATED_CLASS = "tkm-related";
 const JSONLD_CLASS = "tkm-jsonld";
+const BYLINE_CLASS = "tkm-byline";
 /** renderPublishBlocks.ts와 같은 값(본문 15px, 소제목 19px, 빈 문단 간격). */
 const BODY_STYLE = "font-size:15px";
 const HEADING_STYLE = "font-size:19px";
+/** 바이라인은 본문보다 한 단계 작게(테마 CSS .tkm-byline와 같은 값). */
+const BYLINE_STYLE = "font-size:14px";
 const SPACER_HTML = "<p>&nbsp;</p>";
 
 /** 비슷한 글 몇 개를 붙일지(이전 글·All Guides 링크는 별도). */
@@ -146,6 +162,19 @@ export function pickTkmRelated(
 }
 
 /**
+ * 바이라인 블록 HTML. Related와 같은 방식으로 클래스 div에 싸서 **다시 돌려도 갈아 끼운다**(멱등).
+ * 간격 문단은 div 안에 둔다 - 밖에 두면 다시 돌릴 때 걷히지 않고 쌓인다.
+ */
+export function buildBylineHtml(spacer: "before" | "none" = "none"): string {
+  return [
+    `<div class="${BYLINE_CLASS}">`,
+    ...(spacer === "before" ? [SPACER_HTML] : []),
+    `<p style="${BYLINE_STYLE}">${escapeHtml(TKM_BYLINE_TEXT)}</p>`,
+    `</div>`,
+  ].join("\n");
+}
+
+/**
  * Related 블록 HTML. 링크가 하나도 없으면 빈 문자열. 간격 문단은 **div 안에** 둔다(`spacer`) - 밖에 두면 다시 돌릴 때
  * 걷히지 않고 쌓인다. References 앞에 끼울 때는 뒤에(앞에는 이미 간격이 있다), 글 끝에 붙일 때는 앞에 둔다.
  */
@@ -179,11 +208,14 @@ export type TkmJsonLdInput = {
   imageUrl: string | null;
 };
 
-/** JSON-LD 저자·발행자. 발행자에만 태그라인(slogan)과 설명을 싣는다 - 저자까지 실으면 글마다 같은 문장이 두 번 들어간다. */
+/**
+ * JSON-LD 저자·발행자. 저자는 사람(필명 Jayden), 발행자는 브랜드(Korea Plain)다 - 2026-10-30 §A-5.
+ * 태그라인(slogan)·설명은 발행자에만 싣는다(저자까지 실으면 글마다 같은 문장이 두 번 들어간다).
+ */
 export function tkmJsonLdBrand(origin: string | null): { author: Record<string, string>; publisher: Record<string, string> } {
   const url: Record<string, string> = origin ? { url: `${origin}/` } : {};
   return {
-    author: { "@type": "Organization", name: TKM_BRAND_NAME, ...url },
+    author: { "@type": "Person", name: TKM_AUTHOR_NAME },
     publisher: { "@type": "Organization", name: TKM_BRAND_NAME, slogan: TKM_BRAND_TAGLINE, description: TKM_BRAND_DESCRIPTION, ...url },
   };
 }
@@ -222,10 +254,11 @@ export function buildJsonLdHtml(input: TkmJsonLdInput): string {
 // 뒤 줄바꿈까지 먹는 쪽을 먼저 시도한다(References 앞에 끼운 경우). 글 끝에 붙인 경우는 앞 줄바꿈을 먹는다.
 const RELATED_BLOCK_RE = new RegExp(String.raw`<div\b[^>]*\b${RELATED_CLASS}\b[^>]*>[\s\S]*?</div>\n|\n?<div\b[^>]*\b${RELATED_CLASS}\b[^>]*>[\s\S]*?</div>`, "gi");
 const JSONLD_BLOCK_RE = new RegExp(String.raw`\n?<script\b[^>]*\b${JSONLD_CLASS}\b[^>]*>[\s\S]*?</script>`, "gi");
+const BYLINE_BLOCK_RE = new RegExp(String.raw`<div\b[^>]*\b${BYLINE_CLASS}\b[^>]*>[\s\S]*?</div>\n|\n?<div\b[^>]*\b${BYLINE_CLASS}\b[^>]*>[\s\S]*?</div>`, "gi");
 
-/** 이미 넣은 Related·JSON-LD 블록을 걷어 낸다(멱등 처리와 텍스트 보존 검증용). 나머지 글자·공백은 건드리지 않는다. */
+/** 이미 넣은 바이라인·Related·JSON-LD 블록을 걷어 낸다(멱등 처리와 텍스트 보존 검증용). 나머지 글자·공백은 건드리지 않는다. */
 export function stripTkmBlocks(html: string): string {
-  return html.replace(RELATED_BLOCK_RE, "").replace(JSONLD_BLOCK_RE, "");
+  return html.replace(BYLINE_BLOCK_RE, "").replace(RELATED_BLOCK_RE, "").replace(JSONLD_BLOCK_RE, "");
 }
 
 /**
@@ -254,22 +287,34 @@ export type ApplyTkmStructureResult = {
   h2Count: number;
   relatedLinks: number;
   hasJsonLd: boolean;
+  /** 바이라인 블록을 넣었는지. */
+  hasByline: boolean;
 };
 
 /**
  * 본문 HTML에 구조 보강을 적용한다. 기존 블록은 걷고 새로 끼운다 - 몇 번을 돌려도 결과가 같다.
- * related/jsonLd가 null이면 그 블록은 넣지 않는다(기존 것도 지워진다).
+ * related/jsonLd가 null이면 그 블록은 넣지 않는다(기존 것도 지워진다). byline은 기본 true다 - false면 기존 바이라인도 걷힌다.
  */
-export function applyTkmStructure(html: string, input: { related: TkmRelated | null; jsonLd: TkmJsonLdInput | null }): ApplyTkmStructureResult {
+export function applyTkmStructure(
+  html: string,
+  input: { related: TkmRelated | null; jsonLd: TkmJsonLdInput | null; byline?: boolean }
+): ApplyTkmStructureResult {
   const { html: upgradedHtml, upgraded } = upgradeLegacyHeadings(stripTkmBlocks(html));
   let body = upgradedHtml;
 
-  const match = input.related ? REFERENCES_HEADING_RE.exec(body) : null;
-  const relatedHtml = input.related ? buildRelatedHtml(input.related, match ? "after" : "before") : "";
-  if (relatedHtml) {
+  // 꼬리 블록은 한 자리에 함께 들어간다: 바이라인 → Related. References가 있으면 그 앞, 없으면 본문 끝.
+  const withByline = input.byline !== false;
+  const match = REFERENCES_HEADING_RE.exec(body);
+  const anchored = Boolean(match) && Boolean(input.related || withByline);
+  // 간격 문단은 꼬리 묶음의 첫 블록 안에만 둔다(References 앞은 이미 간격이 있다 - 끝에 붙일 때만 앞 간격).
+  const bylineHtml = withByline ? buildBylineHtml(anchored ? "none" : "before") : "";
+  const relatedSpacer: "before" | "after" = bylineHtml || anchored ? "after" : "before";
+  const relatedHtml = input.related ? buildRelatedHtml(input.related, relatedSpacer) : "";
+  const tailHtml = [bylineHtml, relatedHtml].filter(Boolean).join("\n");
+  if (tailHtml) {
     body = match
-      ? `${body.slice(0, match.index)}${relatedHtml}\n${body.slice(match.index)}`
-      : `${body.replace(/\s+$/, "")}\n${relatedHtml}`;
+      ? `${body.slice(0, match.index)}${tailHtml}\n${body.slice(match.index)}`
+      : `${body.replace(/\s+$/, "")}\n${tailHtml}`;
   }
   const hasJsonLd = Boolean(input.jsonLd);
   if (input.jsonLd) body = `${body.replace(/\s+$/, "")}\n${buildJsonLdHtml(input.jsonLd)}`;
@@ -280,6 +325,7 @@ export function applyTkmStructure(html: string, input: { related: TkmRelated | n
     h2Count: (body.match(/<h2\b/gi) ?? []).length,
     relatedLinks: input.related && relatedHtml ? input.related.similar.length + (input.related.previous ? 1 : 0) + (input.related.allGuidesUrl ? 1 : 0) : 0,
     hasJsonLd,
+    hasByline: Boolean(bylineHtml),
   };
 }
 

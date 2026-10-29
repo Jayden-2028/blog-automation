@@ -46,7 +46,7 @@ type Row = {
 };
 
 function storedJsonLdNames(html: string): string[] {
-  return [...html.matchAll(/"(?:author|publisher)":\{"@type":"Organization","name":"([^"]*)"/g)].map((match) => match[1]);
+  return [...html.matchAll(/"(?:author|publisher)":\{"@type":"(?:Organization|Person)","name":"([^"]*)"/g)].map((match) => match[1]);
 }
 
 async function main(): Promise<void> {
