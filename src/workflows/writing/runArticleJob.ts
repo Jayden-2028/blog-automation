@@ -47,6 +47,7 @@ import { collectSourcesForJob } from "../research/collectSourcesForJob.js";
 import type { PersonAutocomplete } from "../research/collectSourcesForJob.js";
 import { enrichOfficialSources } from "../research/fetchOfficialSourceContent.js";
 import { buildResearchPrompt } from "../research/buildResearchPrompt.js";
+import { isConverterJobSource } from "../instagram-capture/instagramTrack.js";
 import type { PersonSourcePack } from "../research/personSourcePack.js";
 import { resolvePersonSourcePack, waitForPersonSourcePack } from "../research/personSourcePackWait.js";
 import { buildKeywordBrief, readJobBrief } from "../brief/buildKeywordBrief.js";
@@ -172,6 +173,8 @@ type DefaultResearcherInput = {
   userSourceText?: string | null;
   /** 그 소스 텍스트의 출처 URL(`metadata.sourceUrl`). 아니면 null. */
   userSourceUrl?: string | null;
+  /** 변환기 출처 job(`metadata.source` instagram_manual/keyword_input, 2026-10-29 🌏 국제). kscene 분기만 쓴다. */
+  converterSource?: boolean;
   /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
   retryHint?: string | null;
   /** 인물 백과(category=person): 핫스타 화제 배경(`metadata.personBackground`). 아니면 null. */
@@ -284,6 +287,7 @@ async function runDefaultResearcher(
     sourceContext: input.sourceContext,
     userSourceText: input.userSourceText,
     userSourceUrl: input.userSourceUrl,
+    converterSource: input.converterSource,
     retryHint: input.retryHint,
     personBackground: input.personBackground,
     personAutocomplete: input.personAutocomplete,
@@ -410,6 +414,8 @@ async function runResearchStageInner(
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
   const { userSourceText, userSourceUrl } = readUserSource(job.metadata as Record<string, unknown> | null);
+  // 🌏 국제(변환기 → kscene): 조사 프롬프트의 kscene 분기가 "한글 입력일 수 있다"로 바뀐다. 다른 카테고리는 무영향.
+  const converterSource = isConverterJobSource(job.metadata);
   const rawBackground = (job.metadata as Record<string, unknown> | null)?.personBackground;
   const personBackground = typeof rawBackground === "string" && rawBackground.trim() ? rawBackground.trim() : null;
 
@@ -438,10 +444,10 @@ async function runResearchStageInner(
     let ran: { ok: true } | { ok: false; error: string };
     if (options.runResearcher) {
       // 테스트 주입은 항상 Claude 규격 프롬프트를 받는다(researcher가 직접 Write하는 계약).
-      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
+      const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, converterSource, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, converterSource, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });

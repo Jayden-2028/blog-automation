@@ -159,4 +159,16 @@ try {
     if (!withBrief.includes(needle)) throw new Error(`❌ 브리프 지시가 빠졌습니다: ${needle}`);
   }
   console.log("✅ 기획 브리프 주입 - 소제목 뼈대·커버리지 frontmatter 지시");
+
+  // 사용설명서(kscene) 분기 + 🌏 국제(변환기 출처, 2026-10-29)
+  const ksceneBase = { researchFilePath: "/tmp/r.md", draftFilePath: "/tmp/d.md", isMedical: false, today: "2026-10-29" };
+  const ksceneGo = buildWritingPrompt({ ...ksceneBase, job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene", metadata: { track: "kscene" } } as never });
+  assert(ksceneGo.includes("style/kscene.md") && ksceneGo.includes("category=kscene(사용설명서)") && !ksceneGo.includes("keyword가 한글 주제다"), "kscene Go job: kscene.md + 분기, 보강 없음");
+  const ksceneConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene", metadata: { source: "keyword_input", track: "kscene" } } as never });
+  assert(ksceneConverter.includes("style/kscene.md") && ksceneConverter.includes("category=kscene(사용설명서)") && ksceneConverter.includes("keyword가 한글 주제다"), "국제(변환기) job: kscene.md + 한글 keyword 보강");
+  const igConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "남산 케이블카", headline: null, category: "kscene", metadata: { source: "instagram_manual", track: "kscene" } } as never });
+  assert(igConverter.includes("keyword가 한글 주제다"), "인스타 링크 출처도 변환기 보강");
+  const entConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "k", headline: null, category: "entertainment", metadata: { source: "keyword_input" } } as never });
+  assert(!entConverter.includes("kscene") && !entConverter.includes("keyword가 한글 주제다"), "다른 카테고리의 변환기 job은 무영향");
+  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 keyword 보강");
 }

@@ -85,5 +85,5 @@ export function queueFieldsForLinkSource(payload: LinkSourcePayload): Pick<
 export function linkSourceAck(payload: LinkSourcePayload): string {
   const chars = payload.text.replace(/\s+/g, "").length;
   const label = payload.title ? `"${payload.title.length > 60 ? `${payload.title.slice(0, 60)}…` : payload.title}"` : "(제목 없음)";
-  return `접수: ${label} — 본문 ${chars}자를 읽었습니다. 트랙을 답해주세요 (엔터/사회/일상/테크)`;
+  return `접수: ${label} — 본문 ${chars}자를 읽었습니다. 트랙을 답해주세요 (엔터/사회/일상/테크/인물/국제)`;
 }

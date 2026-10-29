@@ -26,6 +26,7 @@ import type { ArticleJobRow } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { formatSpecList, pickStyleFile, specCategoryOf, writingSpecFiles } from "./specFiles.js";
+import { isConverterJobSource } from "../instagram-capture/instagramTrack.js";
 
 export type BuildWritingPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
@@ -98,6 +99,13 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
       ? "- **이 job은 category=kscene(사용설명서)다. 한글 초고이며 승인 뒤 영어로 번역돼 해외 독자에게 나간다.**" +
         " 위 style/kscene.md의 '화자'·'한국 고유 개념'·'번역하기 쉽게 쓴다' 절은 voice.md의 1인칭·개인 경험 표현보다 우선한다" +
         "(개인 경험 지어내기 금지, 한국인 독자 전제 표현 금지)."
+      : null,
+    // 🌏 국제(변환기 → kscene, 2026-10-29): keyword가 영문 질의가 아니라 사용자가 보낸 한글 주제다. kscene.md의 "입력 keyword는
+    // 영문 질의다" 절을 그대로 적용하면 제목·질의 해석이 어긋나므로 한 줄로 바로잡는다. 사실은 여전히 자료조사 파일에서만 온다.
+    job.category === "kscene" && isConverterJobSource((job as { metadata?: unknown }).metadata)
+      ? "- **이 job은 변환기(텔레그램 입력) 출처라 keyword가 한글 주제다.** style/kscene.md '입력 keyword는 영문 질의다' 절은 keyword를" +
+        " 해외 독자의 질문으로 읽는 취지만 따른다 - 한글 keyword를 해외 방문자·거주자가 궁금해할 질문으로 풀어 제목·한 줄 답을 쓴다." +
+        " 사용자가 보낸 소재가 주제이므로 다른 주제로 바꾸지 않고, 그 소재를 1년 뒤에도 쓸 수 있는 안내로 쓴다."
       : null,
     "- 소제목은 writer.md §6 규격대로 `**소제목**` 볼드 한 줄로 쓴다(`##` 마크다운 헤더 금지 -",
     "  2026-09-06부터 이 파이프라인의 변환 단계가 `##`가 아니라 볼드를 기준으로 파싱한다).",

@@ -31,6 +31,11 @@ async function main(): Promise<void> {
   assert(called === 0 && results[0].channels[0].status === "skipped" && !results[0].markedPublished, "person은 일괄 발행에서 건너뛴다");
 
   console.log("✅ 자동 발행 제외 - 판정·티스토리 큐·일괄 발행");
+
+  // 🌏 국제(변환기 → kscene, 2026-10-29): 뷰어 복붙 전용이 아니다 - 사용설명서 트랙처럼 🔵 Blogger 발행 버튼이 붙는다.
+  assert(!isManualPublishOnly({ category: "kscene", metadata: { source: "keyword_input", track: "kscene" } }), "국제(변환기 kscene)는 발행 버튼 유지");
+  assert(!isManualPublishOnly({ category: "kscene", metadata: { track: "kscene" } }), "kscene-topic Go job도 그대로");
+  console.log("✅ kscene(국제 포함)은 자동 발행 제외 대상이 아니다");
 }
 
 main().catch((e) => { console.error(e instanceof Error ? e.message : e); process.exit(1); });

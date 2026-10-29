@@ -88,10 +88,10 @@ export function interpretDirectInput(text: string): DirectInput {
 /** 접수 확인 답장 - 해석 결과를 보여준다(A-1 §3). 트랙은 버튼 또는 단어 답장으로 받는다. */
 export function directInputAck(input: DirectInput): string {
   if (input.kind === "topic") {
-    return `접수: 주제 "${input.topic.length > 80 ? `${input.topic.slice(0, 80)}…` : input.topic}" — 트랙을 답해주세요 (엔터/사회/일상/테크)`;
+    return `접수: 주제 "${input.topic.length > 80 ? `${input.topic.slice(0, 80)}…` : input.topic}" — 트랙을 답해주세요 (엔터/사회/일상/테크/인물/국제)`;
   }
   const chars = input.sourceText.replace(/\s+/g, "").length;
-  return `접수: 긴 글(공백 제외 ${chars}자)을 소스 본문으로 저장했습니다 — 트랙을 답해주세요 (엔터/사회/일상/테크). 주제 한 줄은 따로 물어봅니다.`;
+  return `접수: 긴 글(공백 제외 ${chars}자)을 소스 본문으로 저장했습니다 — 트랙을 답해주세요 (엔터/사회/일상/테크/인물/국제). 주제 한 줄은 따로 물어봅니다.`;
 }
 
 /** 그 외 URL(블로그·뉴스·유튜브)은 B부에서 자동 추출한다. A부 시점의 안내. */
