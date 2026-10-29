@@ -2,6 +2,38 @@
 
 기준일: 2026-10-29 (Asia/Seoul)
 
+## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
+
+- **무엇**: 텔레그램 링크 변환기(종합 키워드 입력 툴)에 여섯 번째 트랙 **🌏 국제**를 추가했다(사용자 지시 "국제를 누르면 블로그스팟용
+  영문 원고"). 새 트랙·새 봇이 아니라 **사용설명서(kscene) 트랙 재사용**이다 - `instagramTrack.ts`의 내부 이름만 `global`이고 job은
+  `category="kscene"` + `metadata.track="kscene"`으로 만들어져 kscene-topic Go 버튼 job과 같은 길을 탄다.
+- **쓰는 법 3가지**(기존 5트랙과 동일): ① 링크·주제와 **같은 메시지**에 단어 - "국제 https://instagram.com/p/…", "남산 케이블카 타는 법 국제"
+  (앞·뒤 토큰만, `국제|글로벌|영문|영어|블로그스팟|blogspot|global|kscene`) ② 접수 답장의 **🌏 국제 버튼**(6개 버튼이 2행 3+3) ③ 버튼 대신
+  "국제"/"영문"이라고 **답장**(또는 단어만 전송). 접수 문구·다시 묻는 문구·직접 입력 ack에 "국제"가 들어갔다.
+- **job 모양**: `inputJobFields`/`createInstagramJob` → `category: "kscene"`, `metadata: { source: "keyword_input" | "instagram_manual",
+  track: "kscene", inputTopic/sourceText/sourceUrl 또는 instagramUrl/instagramCaption/… }`. kscene Go job과 다른 점은 `seed_query=null`
+  (Blogger 라벨은 `KSCENE_DEFAULT_LABEL`로 폴백 - `publishArticleToBlogspot.ts` `resolveBloggerTarget`)과 `metadata.kind` 없음(kind는
+  discovery_runs 전용 - kscene 흐름 코드는 `trackOfJob`·`category`만 본다, grep 확인). `selected_via="manual"`, `source_run_id`는 자리채우기.
+- **흐름(코드 근거)**: 맥 폴러 `instagramCapturePollJob.ts` → `processPendingCaptures.ts`(텍스트는 `createInputJob`, 인스타 링크는 캡처 후
+  `createInstagramJob`) → `triggerResearch.ts`(`GITHUB_TOKEN` 있으면 `pipeline_dispatch_queue`→`job-research.yml`, 없으면 맥 로컬
+  `job:research`) → `runArticleJob.ts` research(kscene 분기 + 변환기 보강) → `job-write.yml` write(`buildWritingPrompt` kscene 분기 +
+  `style/kscene.md`) → `pipelineGate.shouldSkipDraftReview=false`(kscene) → `notifyArticleReady` "✅ 한글 승인 → 영어본"(kscene 봇,
+  `trackOfJob`) → `TelegramBot` confirm → `ksceneStage=translating` → `job-translate.yml`/`runTranslateJob.ts`(trackOfJob=kscene 검사) →
+  자동 승인 → 이미지 포함 영어본 통합 알림(🔵 Blogger, `isManualPublishOnly=false`) → `publishArticleToBlogspot.ts`(`KSCENE_BLOGGER_BLOG_ID`).
+  트랙별 분기가 있는 곳(폴러·알림·게이트·문체·발행)은 전부 `metadata.track`/`category`를 보므로 변환기 출처라서 갈라지는 지점은 없다.
+- **한글 입력 처리**: kscene 조사 분기(`buildResearchPrompt.ts`)는 "keyword는 영문 검색 질의"를 가정했다. `metadata.source`가 변환기
+  (`isConverterJobSource`: instagram_manual/keyword_input)이면 `converterSource=true`로 보강 줄을 덧붙인다 - keyword·소스가 한글일 수 있으니
+  해외 독자 관점의 **영문 질의로도 바꿔** 찾고 한글·영문 자료를 둘 다 보며, **사용자가 보낸 소재가 주제**이므로 에버그린 제한으로 소재를
+  버리지 않는다(사실 확인은 규격대로). 집필 프롬프트(`buildWritingPrompt.ts`)에도 같은 조건으로 "keyword가 한글 주제다" 한 줄. 변환기 소스
+  텍스트(`sourceText`·인스타 캡션 `sourceContext`)는 카테고리와 무관하게 조사 프롬프트에 실린다(`runArticleJob.ts` 기존 경로). kscene-topic
+  Go job(변환기 아님)과 다른 5트랙의 프롬프트는 바뀌지 않는다(테스트로 고정).
+- **검증**: `test:ig-track`·`test:ig-webhook`·`test:keyword-input`·`test:research-prompt`·`test:writing-prompt`·`test:spec-files`·
+  `test:pipeline-gate`·`test:manual-publish-only`·`test:telegram-tracks`·`test:notify-article`·`test:ig-capture-queue`·
+  `test:instagram-capture-bot`·`npm run build` 통과. 실제 텔레그램 발송·DB 쓰기·발행은 하지 않았다.
+- **남은 실운영 확인**: ① 맥미니 prod pull 뒤 폴러가 새 코드로 돈다(launchd 변경 없음 - 폴러는 매 실행마다 tsx로 소스를 읽는다).
+  ② 첫 국제 job에서 kscene 봇으로 한글 초안 알림이 오는지, 한글 keyword로 조사가 영문 자료까지 찾는지, Blogger 라벨 기본값이 적절한지
+  (라벨을 고르게 하려면 별도 결정). ③ 변환기 job은 `seed_query`가 없어 `KSCENE_LABEL_BY_SEED` 라벨이 안 붙는다 - 기본 라벨로 갈지 사람이 정한다.
+
 ## 2026-10-29 — 엔터 문체 개정(경위 서술 제거·감흥 마무리) (브랜치 `style/ent-attitude-ending`, PR 대기)
 
 - **배경**: 사용자 피드백 2건(정가은 759·박정연 755·닥터X 732, 네이버 수동 윤문본과 대조). ① 출처 명시·사실 한정에 집착해 "틀린

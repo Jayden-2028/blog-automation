@@ -37,18 +37,13 @@ export function parseTrackCallbackData(data: string | undefined | null): { queue
   return { queueId: parts[1], track: parts[2] };
 }
 
+/** 트랙 버튼 6개를 2행(3+3)으로 - 2026-10-29 🌏 국제 추가(5→6개, 3행 2-2-1에서 2행으로 정리). */
 export function trackButtons(queueId: string): TelegramReplyMarkup {
+  const button = (track: InstagramTrack) => ({ text: TRACK_LABEL[track], callback_data: buildTrackCallbackData(queueId, track) });
   return {
     inline_keyboard: [
-      [
-        { text: TRACK_LABEL.entertainment, callback_data: buildTrackCallbackData(queueId, "entertainment") },
-        { text: TRACK_LABEL.social, callback_data: buildTrackCallbackData(queueId, "social") },
-      ],
-      [
-        { text: TRACK_LABEL.living, callback_data: buildTrackCallbackData(queueId, "living") },
-        { text: TRACK_LABEL.tech, callback_data: buildTrackCallbackData(queueId, "tech") },
-      ],
-      [{ text: TRACK_LABEL.person, callback_data: buildTrackCallbackData(queueId, "person") }],
+      [button("entertainment"), button("social"), button("living")],
+      [button("tech"), button("person"), button("global")],
     ],
   };
 }

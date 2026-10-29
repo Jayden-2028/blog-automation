@@ -146,4 +146,18 @@ try {
   });
   if (without.includes("원본 자료")) throw new Error("❌ 원본 자료가 없는데 블록이 붙었습니다");
   console.log("✅ 인스타 원본 자료 - 주입, 없으면 생략");
+
+  // 사용설명서(kscene) 분기 + 🌏 국제(변환기 출처, 2026-10-29) 보강
+  const ksceneBase = { job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene" }, baselineSources: [] as SourceInsert[], outputPath: "/tmp/r.md", today: "2026-10-29" };
+  const ksceneGo = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, keyword: "how to ride namsan cable car" } });
+  assert(ksceneGo.includes("category=kscene(해외 독자용 한국 사용설명서)") && ksceneGo.includes("keyword는 영문 검색 질의다"), "kscene 분기");
+  assert(!ksceneGo.includes("한글일 수 있다"), "Go 버튼 job(변환기 아님)에는 보강 줄이 없다");
+  const ksceneConverter = buildResearchPrompt({ ...ksceneBase, converterSource: true, userSourceText: "케이블카 안내문" });
+  for (const needle of ["keyword·소스 텍스트가 한글일 수 있다", "영문 질의로도 바꿔", "사용자가 보낸 소재가 곧 주제다", "에버그린 제한 때문에 소재를 버리거나", "사용자 제공 소스 텍스트", "케이블카 안내문"]) {
+    assert(ksceneConverter.includes(needle), `국제(변환기) 보강: ${needle}`);
+  }
+  assert(ksceneConverter.includes("category=kscene(해외 독자용 한국 사용설명서)"), "기존 kscene 분기는 유지된 채 보강만 덧붙는다");
+  const nonKsceneConverter = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, category: "incident" }, converterSource: true });
+  assert(!nonKsceneConverter.includes("한글일 수 있다"), "kscene이 아니면 converterSource는 무시");
+  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 입력 보강");
 }

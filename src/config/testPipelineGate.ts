@@ -26,6 +26,12 @@ assert(!shouldSkipEnglishReview(kscene, { PIPELINE_SKIP_DRAFT_REVIEW: "false" })
 assert(!shouldSkipEnglishReview(ent, {}) && !shouldSkipEnglishReview(social, {}), "엔터·사회에는 영어 단계가 없다");
 console.log("✅ shouldSkipEnglishReview - 사용설명서 전용");
 
+// 🌏 국제(변환기 → kscene, 2026-10-29): metadata.source가 변환기여도 track=kscene이면 Go 버튼 job과 같은 게이트.
+const ksceneConverter = { metadata: { source: "keyword_input", track: "kscene", sourceText: "본문" } };
+assert(!shouldSkipDraftReview(ksceneConverter, {}) && shouldSkipEnglishReview(ksceneConverter, {}), "변환기 kscene job: 한글 초안 승인 유지 + 영어본 단독 재승인 생략");
+assert(!shouldSkipEnglishReview({ metadata: { source: "keyword_input", track: "tech" } }, {}), "변환기 테크 job은 영어 단계 없음(불변)");
+console.log("✅ 변환기 출처 kscene job 게이트");
+
 assert(isAutoApproved({ metadata: { autoApprovedAt: "2026-10-08T00:00:00Z" } }), "autoApprovedAt이 있으면 자동 승인");
 assert(!isAutoApproved({ metadata: {} }) && !isAutoApproved({ metadata: { autoApprovedAt: null } }), "없거나 null이면 아님");
 assert(!isAutoApproved({ metadata: undefined as never }), "metadata가 없어도 던지지 않는다");

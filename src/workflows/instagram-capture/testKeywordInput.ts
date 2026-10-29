@@ -24,6 +24,9 @@ import { inputJobFields, SOURCE_TEXT_MAX_BYTES } from "./inputJobFields.js";
 import { handleInstagramUpdate } from "./instagramWebhookHandler.js";
 import type { InstagramWebhookDeps } from "./instagramWebhookHandler.js";
 import { categoryForTrack, jobMetadataForTrack, parseTrackPick, resolveTrackReply, trackFromWord } from "./instagramTrack.js";
+import { trackOfJob } from "../../notifications/telegramTracks.js";
+import { shouldSkipDraftReview, shouldSkipEnglishReview } from "../../config/pipelineGate.js";
+import { buildReviewDecisionButtons } from "../writing/notifyArticleReady.js";
 import { applyTrackPick, listAwaitingTrack } from "./instagramQueue.js";
 import { processPendingCaptures } from "./processPendingCaptures.js";
 import type { InstagramQueueEntry } from "./types.js";
@@ -76,7 +79,7 @@ assert.deepEqual(queueFieldsForDirectInput("테슬라 신형"), { source: "text"
 const longFields = queueFieldsForDirectInput(longBody);
 assert.equal(longFields.status, "needs_topic");
 assert.equal(longFields.sourceText, longBody.trim());
-assert.ok(directInputAck({ kind: "topic", topic: "민찌는 무슨 고기일까?" }).startsWith('접수: 주제 "민찌는 무슨 고기일까?" — 트랙을 답해주세요 (엔터/사회/일상/테크)'));
+assert.ok(directInputAck({ kind: "topic", topic: "민찌는 무슨 고기일까?" }).startsWith('접수: 주제 "민찌는 무슨 고기일까?" — 트랙을 답해주세요 (엔터/사회/일상/테크/인물/국제)'));
 console.log("✅ 짧은 글=주제 / 긴 글=소스 본문(needs_topic) / 접수 문구");
 
 // ---- 4) 트랙 단어 4종 ----
@@ -209,9 +212,10 @@ const msg = (id: number, text: string, extra: object = {}) => ({ update_id: id, 
   assert.equal(row.instagramUrl, null);
   assert.equal(row.rawCaption, "민찌는 무슨 고기일까? 원고 써줘", "원문은 그대로 수신함, 해석은 맥이 같은 규칙으로");
   const ack = h.sent.at(-1)!;
-  assert.ok(ack.text.includes('접수: 주제 "민찌는 무슨 고기일까?"') && ack.text.includes("엔터/사회/일상/테크"));
+  assert.ok(ack.text.includes('접수: 주제 "민찌는 무슨 고기일까?"') && ack.text.includes("엔터/사회/일상/테크/인물/국제"));
   const buttons = (ack.markup?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
-  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:social", "igtrack:tg-5:living", "igtrack:tg-5:tech", "igtrack:tg-5:person"], "5트랙 버튼");
+  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:social", "igtrack:tg-5:living", "igtrack:tg-5:tech", "igtrack:tg-5:person", "igtrack:tg-5:global"], "6트랙 버튼");
+  assert.equal((ack.markup?.inline_keyboard ?? []).length, 2, "2행");
 
   const longOut = await handleInstagramUpdate(msg(6, longBody), h.deps);
   assert.deepEqual(longOut, { handled: "input", queueId: "tg-6", kind: "source" });
@@ -279,5 +283,57 @@ console.log("✅ 큐: 긴 글은 주제 대기 중에도 트랙을 받는다(인
   assert.ok(marks.some(([id, p]) => id === "F" && p.status === "skipped"));
 }
 console.log("✅ 처리: 직접 입력 → createInput(캡처 없음) / 실패 시 재시도·포기");
+
+// ---- 12) 🌏 국제 트랙(2026-10-29): 변환기 job이 kscene-topic Go job과 같은 모양·같은 길 ----
+{
+  // 주제 입력 → job 모양
+  const fields = inputJobFields(baseEntry({ track: "global", userTopic: "남산 케이블카 타는 법", sourceText: "본문" }));
+  assert.equal(fields.category, "kscene", "국제 → category=kscene");
+  assert.deepEqual({ source: fields.metadata.source, track: fields.metadata.track, sourceText: fields.metadata.sourceText }, { source: "keyword_input", track: "kscene", sourceText: "본문" });
+  const job = { category: fields.category, metadata: fields.metadata };
+  // 알림 봇·뷰어·발행 채널: 사용설명서
+  assert.equal(trackOfJob(job), "kscene");
+  // 한글 초안 승인은 남고(게이트 무관) 영어본 단독 재승인만 생략 - kscene Go job과 동일
+  assert.equal(shouldSkipDraftReview(job, {}), false);
+  assert.equal(shouldSkipEnglishReview(job, {}), true);
+  assert.equal(buildReviewDecisionButtons("11111111-1111-4111-8111-111111111111", trackOfJob(job))[0].text, "✅ 한글 승인 → 영어본");
+  // 문체: kscene.md + voice.md(입력 툴 living/tech의 incident 전환과 무관)
+  assert.equal(specCategoryOf(job), "kscene");
+  assert.equal(pickStyleFile(specCategoryOf(job)), "prompts/writing/style/kscene.md");
+  assert.ok(writingSpecFiles(specCategoryOf(job)).some((f) => f.path.endsWith("style/voice.md")));
+  // 발행: Blogger 버튼이 붙는다(뷰어 복붙 전용이 아니다)
+  assert.equal(isManualPublishOnly(job), false, "국제는 🔵 Blogger 발행 버튼 유지");
+  // 집필 프롬프트: kscene 분기 + 변환기(한글 keyword) 보강 한 줄
+  const wp = buildWritingPrompt({ ...jobBase, job: { keyword: "남산 케이블카 타는 법", headline: null, ...job } as never });
+  assert.ok(wp.includes("style/kscene.md") && wp.includes("category=kscene(사용설명서)") && wp.includes("keyword가 한글 주제다"), "kscene 집필 분기 + 변환기 보강");
+  const goWp = buildWritingPrompt({ ...jobBase, job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene", metadata: { track: "kscene" } } as never });
+  assert.ok(goWp.includes("category=kscene(사용설명서)") && !goWp.includes("keyword가 한글 주제다"), "kscene-topic Go job은 보강 줄 없음(불변)");
+  // 조사 프롬프트: kscene 분기 그대로 + 변환기 출처면 한글 입력·소재 보존 보강, 소스 텍스트·원본 게시물 절도 함께 실린다
+  const rp = buildResearchPrompt({ job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene" }, baselineSources: [], outputPath: "/o.md", today: "2026-10-29", converterSource: true, userSourceText: "붙여넣은 글", sourceContext: "캡션:\n케이블카 야경" });
+  for (const needle of ["category=kscene(해외 독자용 한국 사용설명서)", "keyword·소스 텍스트가 한글일 수 있다", "영문 질의로도 바꿔", "사용자가 보낸 소재가 곧 주제다", "사용자 제공 소스 텍스트", "붙여넣은 글", "원본 자료", "케이블카 야경"]) {
+    assert.ok(rp.includes(needle), `조사 프롬프트 국제 보강: ${needle}`);
+  }
+  const goRp = buildResearchPrompt({ job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene" }, baselineSources: [], outputPath: "/o.md", today: "2026-10-29" });
+  assert.ok(goRp.includes("category=kscene(해외 독자용 한국 사용설명서)") && !goRp.includes("한글일 수 있다"), "kscene-topic Go job 조사 프롬프트 불변");
+  const techRp = buildResearchPrompt({ job: { keyword: "k", headline: null, category: "tech" }, baselineSources: [], outputPath: "/o.md", today: "2026-10-29", converterSource: true });
+  assert.ok(!techRp.includes("한글일 수 있다") && !techRp.includes("category=kscene"), "다른 트랙에는 converterSource가 영향 없다");
+  // 트랙 답장 → 큐 → createInput 경로(캡처 없음)는 다른 트랙과 같다
+  const created: InstagramQueueEntry[] = [];
+  const r = await processPendingCaptures({
+    listPending: () => [baseEntry({ id: "G", track: "global", userTopic: "남산 케이블카 타는 법" })],
+    createInput: async (e) => { created.push(e); return { jobId: "job-G" }; },
+    runSession: async () => { throw new Error("캡처하면 안 된다"); },
+    mark: () => {},
+    triggerResearch: async () => {},
+    checkLogin: async () => "logged_in" as never,
+  });
+  assert.equal(r.created, 1);
+  assert.equal(inputJobFields(created[0]).category, "kscene");
+  // 기존 5트랙의 job 모양은 그대로
+  assert.deepEqual(inputJobFields(baseEntry({ track: "tech", userTopic: "t" })).metadata.track, "tech");
+  assert.equal(inputJobFields(baseEntry({ track: "person", userTopic: "t" })).metadata.track, undefined);
+  assert.equal(inputJobFields(baseEntry({ track: "social", userTopic: "t" })).metadata.track, "social");
+}
+console.log("✅ 🌏 국제: category=kscene·track=kscene → kscene 봇·한글 승인 버튼·kscene.md·Blogger 발행·조사/집필 보강 / Go job·타 트랙 불변");
 
 console.log("\n✅ testKeywordInput(A부) 전체 통과");

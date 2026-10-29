@@ -30,9 +30,13 @@ async function main(): Promise<void> {
     const out = await handleInstagramUpdate({ update_id: 10, message: { message_id: 5, chat: { id: 99 }, text: "https://www.instagram.com/p/ABC/ 이거" } }, h.deps);
     assert(out.handled === "link" && out.queueId === "tg-10" && out.track === null, `링크 접수 (${JSON.stringify(out)})`);
     assert(h.rows[0].kind === "link" && h.rows[0].id === "tg-10" && h.rows[0].instagramUrl === "https://www.instagram.com/p/ABC/" && h.rows[0].rawCaption === "이거", "수신함 link 행");
-    const buttons = h.sent[0].markup?.inline_keyboard[0] ?? [];
-    assert(buttons.length === 2 && buttons[0].callback_data === "igtrack:tg-10:entertainment" && buttons[1].callback_data === "igtrack:tg-10:social", `트랙 버튼 (${JSON.stringify(buttons)})`);
-    console.log("✅ 링크 → 수신함 + 엔터/사회 버튼");
+    const rows = h.sent[0].markup?.inline_keyboard ?? [];
+    const buttons = rows[0] ?? [];
+    assert(buttons.length === 3 && buttons[0].callback_data === "igtrack:tg-10:entertainment" && buttons[1].callback_data === "igtrack:tg-10:social", `트랙 버튼 (${JSON.stringify(buttons)})`);
+    // 2026-10-29 🌏 국제 추가 - 6개 버튼이 2행(3+3)에 들어간다.
+    assert(rows.length === 2 && rows.flat().map((b) => b.callback_data).join(",") === ["entertainment", "social", "living", "tech", "person", "global"].map((t) => `igtrack:tg-10:${t}`).join(","), `6트랙 2행 (${JSON.stringify(rows)})`);
+    assert(rows[1][2].text === "🌏 국제", "국제 버튼 라벨");
+    console.log("✅ 링크 → 수신함 + 6트랙 버튼(2행)");
   }
 
   // 2) 링크 + "사회" → 버튼 없이 트랙 확정 답장, 캡션은 그대로(맥이 떼어 낸다)
@@ -71,6 +75,20 @@ async function main(): Promise<void> {
     const bad = await handleInstagramUpdate({ update_id: 17, callback_query: { id: "cb", data: "igtrack:nope:social", message: { message_id: 1, chat: { id: 99 } } } }, h.deps);
     assert(bad.handled === "ignored" && bad.reason === "bad_callback", "깨진 콜백은 무시");
     console.log("✅ 답장/단어/잡담/다른 chat/깨진 콜백");
+  }
+
+  // 5) 🌏 국제 - 버튼·같은 메시지 단어·답장 세 길 모두 수신함에 global로 남는다(맥 폴러가 kscene job으로 만든다).
+  {
+    const h = harness();
+    const pick = await handleInstagramUpdate({ update_id: 20, callback_query: { id: "cb", data: buildTrackCallbackData("tg-10", "global"), message: { message_id: 7, chat: { id: 99 } } } }, h.deps);
+    assert(pick.handled === "track_pick" && pick.track === "global" && parseTrackPick(h.rows[0].replyText)?.track === "global", "국제 버튼");
+    assert(h.edited[0].markup.inline_keyboard[0][0].text.includes("🌏 국제"), "✅ 국제 선택됨 표시");
+    const word = await handleInstagramUpdate({ update_id: 21, message: { message_id: 8, chat: { id: 99 }, text: "국제 https://www.instagram.com/p/GLB/" } }, h.deps);
+    assert(word.handled === "link" && word.track === "global" && !h.sent.at(-1)?.markup && h.sent.at(-1)!.text.includes("🌏 국제"), "링크 + 국제 → 바로 확정");
+    const reply = await handleInstagramUpdate({ update_id: 22, message: { message_id: 9, chat: { id: 99 }, text: "영문", reply_to_message: { message_id: 2 } } }, h.deps);
+    assert(reply.handled === "reply" && h.rows.at(-1)!.replyText === "영문", "'영문' 답장은 트랙 답으로 수신함에");
+    assert(parseTrackCallbackData("igtrack:tg-1:global")?.track === "global", "국제 콜백 파서");
+    console.log("✅ 🌏 국제 - 버튼/단어/답장");
   }
 
   assert(parseTrackCallbackData("igtrack:tg-1:entertainment")?.track === "entertainment" && parseTrackCallbackData("publish:x:y") === null, "콜백 파서");

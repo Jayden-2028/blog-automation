@@ -37,6 +37,12 @@ export type BuildResearchPromptInput = {
   /** 소스 텍스트의 출처 URL(링크 자동 추출 경로, B부). 라벨에 함께 적는다. 없으면 null. */
   userSourceUrl?: string | null;
   /**
+   * 변환기(텔레그램 링크·주제·긴 글 입력) 출처 job인가(`metadata.source`가 instagram_manual/keyword_input - instagramTrack.ts
+   * isConverterJobSource). 2026-10-29 🌏 국제 트랙: category=kscene인데 keyword·소스가 **한글**일 수 있어 kscene 분기의
+   * "keyword는 영문 질의" 가정을 풀고, 사용자가 보낸 소재를 에버그린 제한 때문에 버리지 않게 한다. kscene이 아니면 무시한다.
+   */
+  converterSource?: boolean;
+  /**
    * 재조사 안내(2026-10-02). 직전 조사가 자료 부족(verdict blocked)으로 글쓰기를 막았을 때, 사람이
    * [자료조사 다시 하기]를 눌러 다시 돌리는 경우다. 무엇이 모자랐는지 알려 줘야 같은 조사를 반복하지
    * 않는다. 없으면 일반 조사.
@@ -165,6 +171,15 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
         "정책처럼 바뀌는 값은 출처의 **기준 시점**을 반드시 적는다. 조사 파일은 기존 규격대로 **한국어**로 쓴다." +
         " 시의성 기사(최근 사건·논란)는 근거로 쓰지 않는다 - 에버그린 안내만 다룬다. 단 운영 변경" +
         " 공지(요금 인상·휴무·코스 변경·운영 중단)는 예외다(researcher.md §4-2)."
+      : null,
+    // 🌏 국제(변환기 → kscene, 2026-10-29): 사용자가 텔레그램으로 보낸 한글 주제·링크·긴 글이 keyword·소스다. 위 "영문 질의"
+    // 가정과 에버그린 제한을 그대로 두면 한글 keyword로 영문 자료를 못 찾거나 사용자가 고른 소재를 버린다.
+    job.category === "kscene" && input.converterSource
+      ? "- **이 job은 변환기(텔레그램 입력) 출처다 - keyword·소스 텍스트가 한글일 수 있다.** 위 '영문 검색 질의' 가정은 이 job에" +
+        " 맞지 않는다: keyword를 해외 독자(한국 방문자·거주자)가 알고 싶어 할 관점의 **영문 질의로도 바꿔** 검색하고(예: 한글 주제 →" +
+        " \"how to … in korea\" 꼴), 한글 1차 자료와 영문 자료를 **둘 다** 본다. **사용자가 보낸 소재가 곧 주제다** - 시의성 소재여도" +
+        " 에버그린 제한 때문에 소재를 버리거나 다른 주제로 바꾸지 않는다. 대신 그 소재를 해외 독자가 1년 뒤에도 쓸 수 있는 안내(배경·" +
+        "방법·주의점)로 풀 자료를 찾고, 사실 확인은 규격대로 한다(위 사용자 제공 소스·원본 게시물은 출처 불명 1차 근거라 공식 자료로 재확인)."
       : null,
     `- 출력 파일은 researcher.md §7의 이름 규칙·충돌 규칙을 무시하고 정확히 이 절대 경로에 Write한다: ${outputPath}`,
     "- 위 baseline 자료는 이미 확보된 것이다. 그 URL들을 다시 열어 확인하되, 조사는 baseline이 못",
