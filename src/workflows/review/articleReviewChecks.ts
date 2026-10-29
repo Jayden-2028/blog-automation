@@ -26,6 +26,7 @@ import {
   PERSON_ALLOWED_COLLOQUIAL_MAX,
   countAllowedEndings,
   findColloquialEndings,
+  findKsceneSpeakerViolations,
 } from "../writing/bannedPatterns.js";
 
 export type ReviewSeverity = "error" | "warning";
@@ -650,6 +651,18 @@ export function checkVoice(rawBody: string | null, category?: string | null): Re
       category: "quality",
       severity: "warning",
       message: `허용 구어 어미 ${allowed}곳: 원고당 상한 ${PERSON_ALLOWED_COLLOQUIAL_MAX}곳 초과 (style/voice.md §2)`,
+    });
+  }
+
+  // kscene 로컬 화자(2026-10-30): 1인칭 자체는 허용이고(관행 서술 + "저도 이렇게 합니다"),
+  // research §12로 뒷받침할 수 없는 **사적 사실**만 경고한다 - 거주지("저희 집·저희 동네")와
+  // 날짜·장소가 든 일화("지난주 강남에서 택시를 탔는데"). kscene이 아니면 검사하지 않는다.
+  const ksceneSpeaker = findKsceneSpeakerViolations(body, category);
+  if (ksceneSpeaker.length > 0) {
+    checks.push({
+      category: "quality",
+      severity: "warning",
+      message: `사용설명서 화자 규칙 위반 ${ksceneSpeaker.length}건: "${ksceneSpeaker[0].slice(0, 36)}…" (style/kscene.md 「화자」 - "저희 집/저희 동네" 같은 거주지 정보와 날짜·장소가 든 일화는 지어내기입니다. 관행은 "한국 사람들은 보통 ~합니다"로, 습관은 "저도 이렇게 합니다"로 쓰고 근거는 research §12에 있어야 합니다)`,
     });
   }
   return checks;

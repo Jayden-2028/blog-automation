@@ -30,10 +30,16 @@ If a sentence survives only because "that's what the Korean said," rewrite it.
   or split sentences to get there.
 - Use "you" for instructions ("Tap your T-money card on the reader"), not "one" or "visitors should".
 - Use American spelling and punctuation.
-- The voice is a calm, well-informed manual — never a gushing travel brochure. No hype, no exclamation
+- The voice is **a Korean local explaining Korea to a friend from abroad**: calm, specific, and well
+  informed — never a gushing travel brochure, never a government leaflet. No hype, no exclamation
   marks, no filler.
-- Never add personal anecdotes, opinions, or experiences that are not in the draft. Korea Plain has
-  no "I".
+- The writer is Korean and lives in Seoul, and every article carries the byline "Written by Jayden, a
+  Korean living in Seoul." **Preserve every sentence in the draft where the writer speaks as a local**:
+  "한국 사람들은 보통…" → "Most people in Korea…" / "Koreans usually…"; "저도 이렇게 합니다" → "I do this
+  too." Keep the first person where the draft uses it. Do not neutralize it into "visitors should" or
+  "it is common to."
+- **Do not add** anecdotes, opinions, or experiences that are not in the draft. The local voice comes
+  from the Korean writer, not from you. If the draft has no "Local note," do not invent one.
 - If the article ever names the publication, call it "Korea Plain". Never use the former name "The Korea
   Manual".
 
@@ -74,6 +80,11 @@ If a sentence survives only because "that's what the Korean said," rewrite it.
   (transit schedules often do). Weekdays in English only.
 - Do not translate the proper names of Korean-language signs, menu items, or app buttons the reader must
   recognize on screen or on site; give the Korean text in parentheses next to the English description.
+- In **"Words you will see"** and whenever the reader must match text on a sign, menu, button, or
+  receipt, give the Korean script **first and in full**, then the romanization and meaning:
+  "보행자 작동신호기 (pedestrian push-button signal)". Do not translate button labels the reader must
+  tap; show the Korean and describe where it sits on the screen. (Everywhere else in the body, the
+  existing order stays: English or romanization first, Korean in parentheses.)
 - Phone numbers: keep Korean format and add the country code on first mention where the reader might call
   from abroad ("+82-2-…" for 02 numbers), only if the draft gives the number.
 
@@ -81,13 +92,42 @@ If a sentence survives only because "that's what the Korean said," rewrite it.
 
 - No exoticism. Ban "the Land of the Morning Calm", "a country of contrasts where ancient meets modern",
   and any framing of ordinary Korean life as strange, mysterious, or quaint.
-- No generalizations about people: not "Koreans believe…", but "in Korea, it is common to…" — and only if
-  the draft says so.
+- **Practice, not psychology.** Keep the draft's statements about what people in Korea *do* ("Most
+  Koreans tap out at the back door"); never turn them into claims about what Koreans *believe, feel, or
+  are* ("Koreans are shy about…"). Keep the draft's scope words — "in Seoul", "in most apartment
+  complexes", "younger people" — exactly as strong as the source. Only if the draft says so.
 - Avoid stock AI/content-farm phrasing: "vibrant", "nestled", "bustling", "hidden gem", "delve into",
   "elevate your experience", "whether you're a seasoned traveler or a first-timer", "In conclusion",
   "It's important to note that". If a sentence could open any travel blog on the internet, cut it.
 - Practical beats poetic. "The last subway leaves around midnight" is the brand; "as the city's energy
   winds down" is not.
+
+## Local layers — fixed English headings (2026-10-30)
+
+The Korean draft may carry up to three local-practice layers. **Translate these three headings to exactly
+the English below — they are fixed strings, not a style choice.** The publishing converter matches them to
+wrap each block in its callout box (`.kp-local` / `.kp-misread` / `.kp-words`), so a paraphrase silently
+loses the box.
+
+| Korean heading in the draft | Fixed English heading |
+|---|---|
+| `**현지인은 이렇게 합니다**` | `**Local note: what Koreans actually do**` |
+| `**외국인이 자주 오해하는 점**` | `**Common misreading**` |
+| `**이 글자를 보게 됩니다**` | `**Words you will see**` |
+
+- Keep each heading as a bold line on its own, with its paragraph or list on the next line — same as any
+  other heading.
+- If the draft does not have one of these headings, do not add it. These layers exist only when the
+  Korean writer had a researched local-practice source.
+
+## Byline — the code adds it, you do not
+
+Every published article ends with this byline, inserted by the publishing pipeline:
+
+`Written by Jayden, a Korean living in Seoul. Prices and rules are checked against official sources; local notes describe common practice in Korea.`
+
+**Do not write it into your output.** It is here only so you know the article has it, and so the body you
+write never contradicts it.
 
 ## Structure
 

@@ -85,6 +85,45 @@ function main(): void {
   assert(inlineComment.verdict === "ok", `verdict 인라인 주석 무시 (실제: ${inlineComment.verdict})`);
   console.log("✅ verdict 인라인 주석(# ...) 무시하고 값만 파싱");
 
+  // §12 현지 관행(2026-10-30, kscene 로컬 정체성 개정). frontmatter 키가 있으면 그 값, 없으면 표를 센다.
+  const withRows = parseResearchFile(
+    "---\nkeyword: korea food waste\ntopic: kscene\nlocal_practice_rows: 3\nverdict: ok\n---\n## 1. 요약\n내용"
+  );
+  assert(withRows.localPracticeRows === 3, `local_practice_rows 파싱 (실제: ${withRows.localPracticeRows})`);
+
+  const countedTable = parseResearchFile(
+    [
+      "---",
+      "keyword: korea food waste",
+      "topic: kscene",
+      "verdict: ok",
+      "---",
+      "## 12. 현지 관행 (Local practice)",
+      "",
+      "| 구분 | 내용 | 범위 | 근거 URL | 등급 | 확인일 |",
+      "|---|---|---|---|---|---|",
+      "| 관행 | 종량기에 카드를 찍는다 | 수도권 대단지 | https://a | community | 2026-10-30 |",
+      "| 오해 | 일반 쓰레기와 같이 버리는 줄 안다 | 레딧 | https://b | community | 2026-10-30 |",
+      "",
+      "## 10. 전체 출처 목록",
+      "",
+      "| # | 등급 | 제목 | URL | 발행일 |",
+      "|---|---|---|---|---|",
+      "| 1 | official | 안내 | https://c | 2026-01-01 |",
+    ].join("\n")
+  );
+  assert(countedTable.localPracticeRows === 2, `§12 표 행 수 폴백 (실제: ${countedTable.localPracticeRows})`);
+  assert(countedTable.sourceTable.length === 1, "§12 추가가 §10 출처 표 파싱을 깨지 않는다");
+
+  const missing = parseResearchFile(
+    "---\nkeyword: x\ntopic: kscene\nverdict: ok\n---\n## 12. 현지 관행 (Local practice)\n\n관행 미확보 - 한글 질의 3회"
+  );
+  assert(missing.localPracticeRows === 0, "관행 미확보 -> 0");
+  // §12이 없는 다른 트랙 조사는 0이고, 새 키가 없어도 파서가 깨지지 않는다(기존 파일 호환).
+  const legacy = parseResearchFile("---\nkeyword: x\ntopic: 영유아 수면\nverdict: ok\n---\n## 1. 요약\n내용");
+  assert(legacy.localPracticeRows === 0 && legacy.verdict === "ok", "§12 없는 기존 파일 호환");
+  console.log("✅ §12 현지 관행 행 수(frontmatter 우선 · 표 폴백 · 미확보 0 · 기존 파일 호환)");
+
   console.log("\n✅ parseResearchFile 테스트 완료");
 }
 

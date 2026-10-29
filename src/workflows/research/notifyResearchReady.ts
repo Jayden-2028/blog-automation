@@ -107,7 +107,7 @@ export async function notifyResearchReady(
   let summary: ResearchSummary | null = null;
   try {
     const text = await readFile(researchFilePath, "utf8");
-    summary = summarizeResearchFile(text);
+    summary = summarizeResearchFile(text, job.category);
   } catch (error) {
     console.error("⚠️ 조사 요약 파일 읽기 실패 (원문 발췌로 폴백) -", error instanceof Error ? error.message : error);
   }

@@ -77,16 +77,46 @@ export function imageMarkerDescriptions(body: string): string[] {
 
 const HANGUL_RE = /[가-힣ㄱ-ㅎㅏ-ㅣ]/g;
 
+const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
+
+/**
+ * "Words you will see" 레이어의 고정 영문 소제목(2026-10-30 로컬 정체성 개정, kscene-ko-en.md).
+ * 이 블록만은 번역 지침이 **한글을 앞에 그대로 쓰라고** 요구한다("보행자 작동신호기 (pedestrian
+ * push-button signal)") - 독자가 간판·앱 버튼에서 그 글자를 찾아야 하기 때문이다. 다른 자리의
+ * 규칙(영문 먼저, 한글은 괄호 안)은 그대로다.
+ */
+const WORDS_LAYER_HEADING = "Words you will see";
+
+/** `**Words you will see**` 소제목 다음부터 다음 소제목 전까지의 줄 번호 집합. */
+function wordsLayerLineIndexes(lines: string[]): ReadonlySet<number> {
+  const inside = new Set<number>();
+  let open = false;
+  lines.forEach((line, index) => {
+    const heading = line.trim().match(HEADING_LINE_RE);
+    if (heading) {
+      open = heading[1].trim() === WORDS_LAYER_HEADING;
+      if (open) inside.add(index);
+      return;
+    }
+    if (open) inside.add(index);
+  });
+  return inside;
+}
+
 /**
  * 영어 본문에 남은 한글 글자 수. 허용 자리는 뺀다:
  *  - 이미지 마커 줄(획득 방식 접미사 `— 웹 검색`이 한글로 남는다)
  *  - 괄호 안 한글(`jjimjilbang (찜질방)` - 표지판·메뉴에서 찾는 용도)
  *  - 마크다운 링크의 URL·인용부호 안 고유명사는 괄호/링크 텍스트로 들어오므로 링크 텍스트도 뺀다
+ *  - **`**Words you will see**` 블록 전체**(2026-10-30) - 이 레이어는 지침이 한글을 괄호 밖·앞에
+ *    쓰라고 요구한다. 빼지 않으면 한글 1~2개(실측 11자)만으로 MAX_STRAY_HANGUL(8)을 넘어 번역이
+ *    "덜 번역됨"으로 반려된다.
  */
 export function strayHangulCount(body: string): number {
-  const kept = body
-    .split("\n")
-    .filter((line) => !MARKER_LINE_RE.test(line.trim()))
+  const lines = body.split("\n");
+  const wordsLayer = wordsLayerLineIndexes(lines);
+  const kept = lines
+    .filter((line, index) => !wordsLayer.has(index) && !MARKER_LINE_RE.test(line.trim()))
     .map((line) =>
       line
         .replace(/\[[^\]]*\]\([^)]*\)/g, " ") // 링크(텍스트+URL)

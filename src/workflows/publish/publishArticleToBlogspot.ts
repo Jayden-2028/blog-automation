@@ -300,6 +300,8 @@ export async function publishArticleToBlogspot(
     const bodyWithImages = substituteConfirmedImages(splitTrailingHashtags(article.content ?? "").body, confirmedImages);
     return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages), {
       semanticHeadings: target.track === "kscene",
+      // 로컬 콜아웃 박스(2026-10-30) - 사용설명서 트랙만. 다른 트랙 HTML은 바뀌지 않는다.
+      localCallouts: target.track === "kscene",
     });
   };
 

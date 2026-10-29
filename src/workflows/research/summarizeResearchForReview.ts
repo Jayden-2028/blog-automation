@@ -26,8 +26,17 @@ export type ResearchSummary = {
  * 서로 다른 값을 낸 것까지 실측에서 확인됨), 확인되지 않은 통설 블록은 메시지를 너무 길게 만들어
  * 뺐다 - 근거 상세가 필요하면 research/[키워드].md 원본을 직접 연다.
  */
-export function buildResearchSummary(parsed: ParsedResearchFile): ResearchSummary {
+export function buildResearchSummary(parsed: ParsedResearchFile, category?: string | null): ResearchSummary {
   const lines: string[] = [VERDICT_LINE[parsed.verdict]];
+
+  // 로컬 재료(2026-10-30 사용설명서 로컬 정체성 개정): §12 현지 관행이 0행이면 집필이 고정 레이어
+  // 3개(현지인은 이렇게 합니다 / 외국인이 자주 오해하는 점 / 이 글자를 보게 됩니다)를 못 쓴다.
+  // **verdict에는 영향을 주지 않는다** - 관행이 없는 주제도 있어 사람이 보고 판단할 한 줄일 뿐이다.
+  // 트랙 판정은 job.category를 먼저 쓴다 - 파일 frontmatter의 `topic`은 조사 에이전트가 주제 이름
+  // ("영유아 수면")으로 쓰기도 해서 kscene 판정에 혼자 기대면 조용히 안 뜬다.
+  if ((category ?? parsed.topic) === "kscene" && parsed.localPracticeRows === 0) {
+    lines.push("📍 로컬 재료 0 (§12 현지 관행 미확보) - 현지인 관행·오해 레이어 없이 씁니다");
+  }
 
   if (parsed.summary) {
     lines.push("", parsed.summary.trim());
@@ -37,6 +46,6 @@ export function buildResearchSummary(parsed: ParsedResearchFile): ResearchSummar
 }
 
 /** research 파일 텍스트에서 바로 요약을 만든다. 파싱 실패해도 예외를 던지지 않는다. */
-export function summarizeResearchFile(fileText: string): ResearchSummary {
-  return buildResearchSummary(parseResearchFile(fileText));
+export function summarizeResearchFile(fileText: string, category?: string | null): ResearchSummary {
+  return buildResearchSummary(parseResearchFile(fileText), category);
 }

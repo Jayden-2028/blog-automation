@@ -1,6 +1,55 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-29 (Asia/Seoul)
+기준일: 2026-10-30 (Asia/Seoul)
+
+## 2026-10-30 — Korea Plain 로컬 정체성 ② 규격(원고·번역·조사) (브랜치 `feat/kscene-local-voice`, PR 대기)
+
+> 개정안 `branding-2026-10/kp-native-identity-2026-10.md`(사용자가 Q1~Q10 전부 권고대로 승인, 10/30)의 **§D·§E·§F + 코드 접점**이
+> 이 블록이다. ①(공개 카피·바이라인·Blogger 화면 §A·§B)과 ③(시드·점수 §C)은 다른 세션이 같은 날 별도 브랜치로 넣는다.
+
+- **무엇**: 사용설명서(kscene) 원고의 화자를 "중립 가이드"에서 **"한국에서 나고 자라 서울에 사는 한국인 필자"**로 바꿨다. 실측 근거는
+  최근 발행 10편에서 "로컬이 아니면 못 쓰는 문장"이 **0/10편**이었고, 그게 우연이 아니라 규격 7곳이 정확히 그렇게 시킨 결과였다는 것이다.
+- **1인칭은 전면 허용이 아니다**(지어내기 방지가 설계의 중심이다). 세 가지만 허용한다 — ① 관행 서술("한국 사람들은 보통 ~합니다")
+  ② 화자의 일반 습관("저도 이렇게 합니다", **원고당 2문장 이하**) ③ 외국인 오해 지적. **①③은 자료조사 §12에 근거 줄이 있을 때만**이고
+  ②도 그 관행이 §12에 있어야 한다. 날짜·장소가 든 일화("지난주 강남에서 택시를 탔는데")와 "저희 집·저희 동네"는 **금지 + 검수 경고**다.
+  사실 규칙(`core-rules.md` §1 - 수치·날짜·기관명은 research에서만)은 한 줄도 손대지 않았다.
+- **고정 레이어 3개**(`kscene.md` 「고정 레이어 3개」): `**현지인은 이렇게 합니다**` / `**외국인이 자주 오해하는 점**` /
+  `**이 글자를 보게 됩니다**`. **§12에 줄이 없으면 그 레이어를 뺀다**(칸 채우기 금지). 소제목 상한은 이 셋을 포함해 **kscene 한정 2~9개**
+  (`core-rules.md` §4·§5에 person과 나란히 예외를 적었다 - **상한을 검사하는 코드는 없다.** 2~7은 프롬프트 규칙뿐이라 코드 변경이 없었다).
+- **흐름 8단계**(기존 7단계 + 레이어 ①)와 **마무리 개정**: `kscene`도 요약 문장을 쓰지 않는다 - **로컬 필자의 한마디 1~2문장**이다
+  (`core-rules.md` §3의 "`kscene`은 요약 한두 문장" → "로컬 필자의 한마디"). 10/29 엔터·person 감흥 마무리와 §1-12는 그대로다.
+- **번역 지침**(`prompts/translation/kscene-ko-en.md`): "Korea Plain has no 'I'" 조항을 **제거**하고 "a Korean local explaining Korea to
+  a friend from abroad" + "Preserve every sentence where the writer speaks as a local"로 교체했다. Tone guards의 일반화 금지는
+  **"Practice, not psychology"**로 바꿨다 - 사람들이 *무엇을 하는지*는 살리고 *무엇을 믿는지/어떤 사람인지*로 바꾸는 것만 막는다.
+  세 레이어 소제목은 **고정 영문**(`Local note: what Koreans actually do` / `Common misreading` / `Words you will see`)이다.
+- **조사 §12 신설**(`researcher.md` §4-2·§12): 공식 자료로 규정·요금·절차를 확정한 **뒤** 별도로 한글 질의로 현지 관행을 찾는다((d) 각도)
+  + 외국인 커뮤니티 1회((e) 각도). 검색 하한 **6→8회**, 공식 페이지 4건 하한은 그대로. 결과는 `## 12. 현지 관행 (Local practice)` 표
+  (구분 관행/규정 vs 관행/오해/표기 · 내용 · 범위 · 근거 URL · 등급 · 확인일)에 남기고 **§2(확인된 사실)·§6(수치)에 섞지 않는다** -
+  이 자료는 `community`/`news` 등급 그대로이고 **수치·요금·시간의 근거가 되지 못한다**. frontmatter `local_practice_rows: N`.
+- **코드 변경 6곳**:
+  - `buildWritingPrompt.ts` kscene 분기: "(개인 경험 지어내기 금지…)" → "(일화 지어내기 금지, 관행 서술은 research §12 근거가 있을
+    때만, 한국인 독자 전제 표현 금지)". 10/29 변환기 분기(`isConverterJobSource`)는 그대로 공존한다.
+  - `buildResearchPrompt.ts` kscene 분기: 현지 관행 (d)·(e) 각도 + §12 표 형식 + `local_practice_rows` 지시를 덧붙였다.
+  - `parseResearchFile.ts`: `localPracticeRows` 추가(frontmatter 우선, 없으면 §12 표를 센다 - **기존 조사 파일은 0으로 안전 통과**).
+  - `summarizeResearchForReview.ts`: kscene에서 0행이면 검수 카드에 `📍 로컬 재료 0` 한 줄. **verdict에는 영향이 없다**(관행이 없는
+    주제도 있다). 트랙 판정은 `job.category`를 먼저 쓴다(파일 frontmatter `topic`은 주제 이름일 수 있다).
+  - `bannedPatterns.ts` + `articleReviewChecks.ts` `checkVoice`: kscene **전용** 경고 2종(`저희 집/동네` · 날짜+장소+체험 동사 일화).
+    **1인칭 자체를 잡는 패턴은 코드에 원래 없었다** - 그래서 "저도 이렇게 합니다"를 위한 kscene 예외는 필요하지 않았다.
+  - `renderPublishBlocks.ts` + `convertArticleToHtml.ts` + `publishArticleToBlogspot.ts`: `localCallouts` 옵션(kscene 트랙만).
+    세 고정 영문 소제목과 그 문단을 `<div class="kp-local|kp-misread|kp-words" data-kp-label="…">`로 감싸고, `kp-words` 안의 한글을
+    `<span class="kp-ko">`로 감싼다. **소제목 텍스트는 박스 안에 넣지 않는다** - §B-4 CSS의 `::before`가 제목을 그린다.
+- **번역 검증 버그를 하나 고쳤다**: `parseTranslationOutput.strayHangulCount`는 **괄호 안** 한글만 면제했는데 §E-4는 "Words you will
+  see"에서 한글을 **괄호 밖·앞**에 쓰라고 요구한다. 실측 11자 > `MAX_STRAY_HANGUL`(8)이라 정상 번역이 "덜 번역됨"으로 반려됐을 것이다.
+  그 블록(`**Words you will see**` 소제목 ~ 다음 소제목)만 검사에서 뺐다. 다른 자리의 한글 잔존 검사는 그대로다.
+- **다른 세션에 남은 의존**: §B-4 CSS(`.kp-local::before` 등)가 Blogger 테마에 들어가기 전까지는 콜아웃 박스에 **제목이 보이지 않는다**
+  (배경·좌측 선만 보인다). CSS는 `data-kp-label`과 짝이고, 변환기가 제목을 안 내보내므로 §B-4의 `::before` 규칙을 **그대로** 넣어야 한다.
+- **검증**: `test:spec-files`(로컬 레이어 3개의 3자 계약 - 한글 소제목 = 고정 영문 소제목 = 콜아웃 클래스)·`test:article-review`
+  (kscene 화자 경고 + 다른 6트랙 불변)·`test:translation`(Words 레이어 면제)·`test:parse-research`·`test:summarize-research`·
+  `test:html-generic`(옵션 꺼짐 = 기존 출력)·`test:writing-prompt`·`test:research-prompt`·`test:enforce-rules`·`test:naver-html`·
+  `test:tistory-html`·`test:publish-blocks`·`test:tkm-structure` + 29개 회귀 테스트 + `npm run build` 통과. 최근 kscene job의
+  research·초안이 로컬에 없어(클라우드 실행) §12가 든 조사 파일을 손으로 만들어 조사·집필 프롬프트 조립과 발행 HTML까지 확인했다
+  (LLM 호출·발송·DB 쓰기 없음). **`test:article-prompt`는 main에서도 같은 이유로 실패한다**(해시태그 10개 가정이 10/12 "5개 이하"
+  개정 뒤 남은 낡은 단정 - 이 작업과 무관하고 손대지 않았다).
 
 ## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
 
