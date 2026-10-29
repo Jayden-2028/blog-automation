@@ -18,6 +18,12 @@
 // 시드를 DB `seed_queries`에 넣지 않은 이유: track 컬럼 추가가 migration(승인
 // 게이트)이고, 영문 시드가 한국 NAVER 수집 경로(seed_queries 전체를 읽는 엔터·사회 job)에 섞이면 안 된다.
 //
+// 📌 **2026-10-30 로컬 우위 축**(branding-2026-10/kp-native-identity-2026-10.md §C-3): 사이트 43편의 86%가 외국인
+// 저자 블로그가 이미 포화시킨 주제라, 한국인은 알지만 외국인 가이드가 잘 못 쓰는 질의를 **47개 추가**했다(117 -> 164).
+// 개정안의 4~5단어 질의 50개는 자동완성이 37개나 비어서(롱테일이 너무 길다) 2~3단어로 줄여 실측으로 걸러 남겼다.
+// 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 ksceneTopics.ts의 LOCAL_EDGE_TERMS / SATURATED_TOURIST_TERMS가
+// 맡는다. 라벨 5개 이름은 그대로다(Blogger 라벨 URL·About·시드 매핑이 묶여 있다).
+//
 // label은 Blogger 라벨(글 분류)로 쓴다 - CHANNEL-SETUP-2026-10.md B-2의 카테고리 체계와 같다.
 
 export const KSCENE_LABELS = [
@@ -61,6 +67,17 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea traffic signals",
     "jaywalking in korea",
     "korea rush hour commute",
+    // 2026-10-30 로컬 우위 축 - 타는 법이 아니라 타고 나서 한국 사람들이 하는 것. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
+    "korea ktx standing ticket",
+    "korea highway rest stop",
+    "priority seat korea",
+    "korea bus etiquette",
+    "korea taxi surcharge",
+    "korea taxi tip",
+    "seoul public bike",
+    "korea parking rules",
+    "korea subway etiquette",
+    "korea bus stop button",
   ]),
   ...seeds("Food & Dining", [
     "korean bbq",
@@ -83,6 +100,17 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korean breakfast",
     "korean snacks must try",
     "korea michelin restaurants",
+    // 2026-10-30 로컬 우위 축 - 외국인이 식당에서 실제로 막히는 지점. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
+    "korea restaurant call button",
+    "korean side dish refill",
+    "korea restaurant break time",
+    "korea convenience store meal",
+    "korea restaurant payment",
+    "korea delivery fee",
+    "korea delivery order",
+    "korea solo dining",
+    "korea study cafe",
+    "korea restaurant hours",
   ]),
   ...seeds("Culture & Etiquette", [
     "korean etiquette",
@@ -105,6 +133,18 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korean superstitions",
     "korean business etiquette",
     "korean school culture",
+    // 2026-10-30 로컬 우위 축 - 한국인 다수의 실제 관행. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
+    "korea gift money amount",
+    "what koreans do on chuseok",
+    "korea first birthday doljanchi",
+    "korea apology culture",
+    "korea apartment noise",
+    "korea greeting",
+    "korea 60th birthday",
+    "korea company dinner",
+    "korea age question",
+    "korea ajumma",
+    "korea elevator etiquette",
   ]),
   ...seeds("Living in Korea", [
     "living in korea foreigner",
@@ -141,6 +181,16 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea mobile banking foreigner",
     "korea clinic appointment foreigner",
     "korea health insurance bill",
+    // 2026-10-30 로컬 우위 축 - 창구·동네 실무. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
+    "korea bank certificate",
+    "korea hospital department",
+    "korea pharmacy medicine",
+    "korea dong office",
+    "korea apartment fee",
+    "korea gas inspection",
+    "korea delivery box",
+    "korea ondol",
+    "korea moving day",
   ]),
   ...seeds("K-Wave Context", [
     "kpop fan culture",
@@ -163,6 +213,14 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "kpop fandom names",
     "korea music festivals",
     "kdrama food scenes",
+    // 2026-10-30 로컬 우위 축 - 드라마 장면의 실제. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
+    "korean workplace titles",
+    "korean office culture",
+    "korean school lunch",
+    "korean hagwon",
+    "korean convenience store",
+    "korean rooftop house",
+    "korean apartment complex",
   ]),
 ];
 

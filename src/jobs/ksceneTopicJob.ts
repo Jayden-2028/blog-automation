@@ -17,7 +17,7 @@ const job: SchedulerJob = {
   execute: async () => {
     const result = await runKsceneTopicCollection({ dryRun });
 
-    console.log(`\n▶ 시드 ${result.seedsUsed.length}개 · 제안 ${result.suggestionCount}건 · 후보 ${result.candidateCount}건 · 중복 제외 ${result.droppedAsDuplicate}건`);
+    console.log(`\n▶ 시드 ${result.seedsUsed.length}개 · 제안 ${result.suggestionCount}건 · 후보 ${result.candidateCount}건 · 중복 제외 ${result.droppedAsDuplicate}건 · 로컬 우위 ${result.localEdgeCount}건 · 포화 감점 ${result.saturatedCount}건`);
     if (result.trendSeeds.length > 0) console.log(`   급상승 시드: ${result.trendSeeds.join(", ")}`);
     if (result.failedSeeds.length > 0) console.log(`   ⚠️ 자동완성 실패 시드: ${result.failedSeeds.join(", ")}`);
     for (const [index, topic] of result.topics.entries()) console.log(`   ${index + 1}. ${topic}`);

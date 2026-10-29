@@ -27,6 +27,13 @@
 //      순위가 아니라 "질문이 있었다"일 뿐이라 자동완성 위치(demand)와 같은 저울에 올릴 수 없다. 후보 집합은
 //      계속 자동완성이 정하고 레딧은 그 안에서 실제로 묻는 주제를 앞으로 당기기만 한다(최대 +10점).
 //
+// 📌 **로컬 우위 축**(2026-10-30, branding-2026-10/kp-native-identity-2026-10.md §C): 사이트 43편 중 86%가 외국인 저자
+//   블로그가 이미 포화시킨 주제였다. 점수식을 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + **로컬 우위 15**
+//   = 100으로 바꾸고, 관광 포화 용어가 든 후보는 **-10**(하한 0)한다. 감점이지 제외가 아니다 - 수요가 아주 크면
+//   여전히 올라온다. 선정에는 실용 하한과 짝으로 **로컬 우위 하한**(localEdgeFloor)을 둔다. 용어 매칭은
+//   topicTokens와 같은 korea/korean 접기·복수형 접기를 쓰되 **불용어는 지우지 않는다**("koreans how do you" 같은
+//   질문형 구가 불용어만으로 이뤄져 있어서) - matchTokens. 구(句)는 연속 토큰 일치다.
+//
 // 이 트랙의 선정은 LLM 프롬프트가 아니라 이 파일의 결정 규칙이 전부다 - 기준은 여기 적는다.
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
@@ -77,6 +84,67 @@ export function topicSimilarity(a: string, b: string): number {
 export function isDuplicateTopic(topic: string, existing: readonly string[], threshold: number): boolean {
   const normalized = normalizeTopic(topic);
   return existing.some((other) => normalizeTopic(other) === normalized || topicSimilarity(topic, other) >= threshold);
+}
+
+// ---------- 로컬 우위·관광 포화 용어(2026-10-30) ----------
+
+/** 용어 매칭용 토큰: normalizeTopic + south korea·korea/korean 접기 + 복수형 접기. 불용어는 남긴다. */
+function matchTokens(text: string): string[] {
+  return normalizeTopic(text)
+    .replace(/\bsouth (?=korea)/g, "")
+    .split(" ")
+    .filter(Boolean)
+    .map((token) => (token.length > 3 && token.endsWith("s") && !token.endsWith("ss") ? token.slice(0, -1) : token))
+    .map((token) => (KOREA_FORMS.has(token) ? KOREA_TOKEN : token));
+}
+
+/** 토큰열 안에 구(phrase)가 연속으로 들어 있는가. */
+function containsTokenPhrase(tokens: readonly string[], phrase: readonly string[]): boolean {
+  if (phrase.length === 0 || phrase.length > tokens.length) return false;
+  for (let start = 0; start + phrase.length <= tokens.length; start += 1) {
+    if (phrase.every((token, offset) => tokens[start + offset] === token)) return true;
+  }
+  return false;
+}
+
+/** 로컬 우위: 한국인은 알지만 외국인 가이드가 잘 못 쓰는 영역어(+15, 하나라도 포함). §C-1. */
+export const LOCAL_EDGE_TERMS = [
+  // 행정·금융·의료 창구
+  "gu office", "dong office", "community center", "minwon", "bank teller", "bankbook", "certificate",
+  "which hospital department", "internal medicine", "ent clinic", "pharmacy without prescription", "health checkup",
+  // 주거·동네
+  "apartment management office", "management fee", "gas inspection", "neighbor noise", "recycling day", "moving day",
+  "security guard", "delivery box",
+  // 식당·가게 관행
+  "call button", "table bell", "self service water", "refill", "pay at counter", "break time", "last order", "solo dining",
+  // 명절·가족·세대
+  "what koreans do", "koreans actually", "do koreans", "chuseok at home", "seollal", "hwangap", "doljanchi",
+  "first birthday", "100 days", "hoesik", "company dinner",
+  // 호칭·관계
+  "how to address", "ajumma", "ajeossi", "sajangnim", "title at work",
+  // 질문형 로컬 신호(레딧 교차용)
+  "koreans how do you", "do locals", "is it rude in korea", "is it normal in korea",
+] as const;
+
+/** 관광 포화: 외국인 저자 블로그가 이미 다 쓴 영역어(-10). korea·seoul은 넣지 않는다. §C-1. */
+export const SATURATED_TOURIST_TERMS = [
+  "itinerary", "day trip", "things to do", "best places", "top 10", "must try", "must visit", "cherry blossom",
+  "autumn foliage", "hanbok rental", "palace", "jeju", "busan travel", "travel budget", "layover", "k eta", "michelin",
+] as const;
+
+const LOCAL_EDGE_PHRASES = LOCAL_EDGE_TERMS.map(matchTokens);
+const SATURATED_PHRASES = SATURATED_TOURIST_TERMS.map(matchTokens);
+
+/** 후보가 로컬 우위 용어를 품었는가. */
+export function hasLocalEdge(topic: string): boolean {
+  const tokens = matchTokens(topic);
+  return LOCAL_EDGE_PHRASES.some((phrase) => containsTokenPhrase(tokens, phrase));
+}
+
+/** 후보가 관광 포화 용어를 품었는가. */
+export function isTouristSaturated(topic: string): boolean {
+  const tokens = matchTokens(topic);
+  return SATURATED_PHRASES.some((phrase) => containsTokenPhrase(tokens, phrase));
 }
 
 // ---------- 제외 규칙 ----------
@@ -271,6 +339,8 @@ export type TopicCandidate = {
   redditHits?: number;
   /** 뒷받침한 레딧 제목 하나(로그·사유용). */
   redditExample?: string;
+  /** 뒷받침 제목 중 "Koreans, how do you…" 류 로컬 질문형이 있다(2026-10-30). 있으면 redditHits를 2로 센다. */
+  redditLocalQuestion?: boolean;
 };
 
 /** 변형 질의 결과가 글이 될 의도를 품었는가 - 질문형·안내어·체류 실용 영역어·방문자 표현. */
@@ -328,7 +398,20 @@ export function buildCandidates(observations: readonly SuggestionObservation[], 
 const QUESTION_STARTERS = ["how", "what", "why", "when", "where", "which", "can", "do", "does", "is", "are", "should"];
 const GUIDE_WORDS = ["guide", "tips", "tip", "explained", "etiquette", "rules", "best", "vs", "difference", "first time", "beginner", "cost", "worth"];
 
-export type TopicScore = { total: number; demand: number; crossSignal: number; specificity: number; intent: number };
+export type TopicScore = {
+  total: number;
+  demand: number;
+  crossSignal: number;
+  specificity: number;
+  intent: number;
+  /** 로컬 우위 가산(0 또는 15). 2026-10-30. */
+  localEdge: number;
+  /** 관광 포화 감점(0 또는 10, 양수로 기록하고 total에서 뺀다). 2026-10-30. */
+  saturation: number;
+};
+
+/** 점수 구성(합계 100): 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + 로컬 우위 15. 포화는 -10(하한 0). */
+export const SCORE_WEIGHTS = { base: 5, demand: 35, crossSignal: 15, specificity: 15, intent: 15, localEdge: 15, saturation: 10 } as const;
 
 // ---------- 레딧 교차 신호(2026-10-28, C) ----------
 
@@ -353,37 +436,63 @@ export function redditTitleSupports(topic: string, title: string): boolean {
   return shared >= 2 && shared / core.size >= 0.6;
 }
 
+/** 이 제목으로 시작하면 외국인이 아니라 한국인에게 묻는 질문이다(§C-1). 뒷받침 1건을 2건으로 센다. */
+const REDDIT_LOCAL_QUESTION_PREFIXES = ["koreans how do you", "do koreans", "is it rude in korea", "is it normal in korea"].map((p) =>
+  matchTokens(p).join(" ")
+);
+
+export function isLocalQuestionTitle(title: string): boolean {
+  const normalized = matchTokens(title).join(" ");
+  return REDDIT_LOCAL_QUESTION_PREFIXES.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix} `));
+}
+
 /** 후보마다 레딧 뒷받침 수를 붙인다. 레딧 제목은 후보를 만들지 않는다 - 이미 있는 후보에만 붙는다. */
 export function attachRedditSupport(candidates: readonly TopicCandidate[], titles: readonly string[]): TopicCandidate[] {
   return candidates.map((candidate) => {
     const supporting = titles.filter((title) => redditTitleSupports(candidate.topic, title));
-    return { ...candidate, redditHits: supporting.length, ...(supporting[0] ? { redditExample: supporting[0] } : {}) };
+    return {
+      ...candidate,
+      redditHits: supporting.length,
+      ...(supporting[0] ? { redditExample: supporting[0] } : {}),
+      ...(supporting.some(isLocalQuestionTitle) ? { redditLocalQuestion: true } : {}),
+    };
   });
 }
 
 /**
- * 0~100. 수요(자동완성 위치) 40 + 교차 신호 15 + 구체성 20 + 안내글 의도 15 + 기본 10.
+ * 0~100. 기본 5 + 수요(자동완성 위치) 35 + 교차 신호 15 + 구체성 15 + 안내글 의도 15 + 로컬 우위 15, 관광 포화 -10(하한 0).
  * 교차 신호 = 자동완성 반복 관찰(0/8/15) + 레딧 질문 뒷받침(1건 5, 2건 이상 10), 합쳐 15가 상한이다(C).
+ * 로컬 질문형 레딧 제목이 뒷받침하면 그 후보의 레딧 뒷받침을 2건으로 센다(2026-10-30).
  */
 export function scoreTopic(candidate: TopicCandidate): TopicScore {
-  const demand = Math.round(Math.max(0, 10 - candidate.bestPosition) / 10 * 40);
-  const repeat = Math.round((Math.min(candidate.hits, 3) - 1) / 2 * 15);
-  const crossSignal = Math.min(15, repeat + Math.min(candidate.redditHits ?? 0, 2) * 5);
+  const demand = Math.round(Math.max(0, 10 - candidate.bestPosition) / 10 * SCORE_WEIGHTS.demand);
+  const repeat = Math.round((Math.min(candidate.hits, 3) - 1) / 2 * SCORE_WEIGHTS.crossSignal);
+  const redditHits = candidate.redditLocalQuestion ? Math.max(candidate.redditHits ?? 0, 2) : candidate.redditHits ?? 0;
+  const crossSignal = Math.min(SCORE_WEIGHTS.crossSignal, repeat + Math.min(redditHits, 2) * 5);
 
   const wordCount = candidate.topic.split(" ").length;
-  const specificity = wordCount >= 4 && wordCount <= 7 ? 20 : wordCount === 3 || wordCount === 8 ? 10 : 5;
+  const specificity = wordCount >= 4 && wordCount <= 7 ? SCORE_WEIGHTS.specificity : wordCount === 3 || wordCount === 8 ? 8 : 4;
 
   const normalized = candidate.topic;
   const isQuestion = QUESTION_STARTERS.some((starter) => normalized.startsWith(`${starter} `));
   const hasGuideWord = GUIDE_WORDS.some((word) => containsTerm(normalized, word));
-  const intent = isQuestion ? 15 : hasGuideWord ? 10 : 0;
+  const intent = isQuestion ? SCORE_WEIGHTS.intent : hasGuideWord ? 10 : 0;
 
-  return { total: Math.min(100, 10 + demand + crossSignal + specificity + intent), demand, crossSignal, specificity, intent };
+  const localEdge = hasLocalEdge(candidate.topic) ? SCORE_WEIGHTS.localEdge : 0;
+  const saturation = isTouristSaturated(candidate.topic) ? SCORE_WEIGHTS.saturation : 0;
+
+  const total = Math.max(0, Math.min(100, SCORE_WEIGHTS.base + demand + crossSignal + specificity + intent + localEdge - saturation));
+  return { total, demand, crossSignal, specificity, intent, localEdge, saturation };
 }
 
 /** 체류 실용 정보 하한의 기본값(2026-10-11, §C). topN=8이면 3건 - 라벨 상한(3)과 같은 크기다. */
 export function defaultPracticalFloor(topN: number): number {
   return Math.min(topN, Math.max(2, Math.round(topN / 3)));
+}
+
+/** 로컬 우위 하한의 기본값(2026-10-30). topN=8이면 2건. 실용 하한과 겹쳐도 된다. */
+export function defaultLocalEdgeFloor(topN: number): number {
+  return Math.min(topN, Math.max(1, Math.round(topN / 4)));
 }
 
 /**
@@ -392,6 +501,8 @@ export function defaultPracticalFloor(topN: number): number {
  * 두 규칙이 함께 작동한다:
  *   · **하한(practicalFloor)** - 체류 실용 정보를 먼저 그 수만큼 채운다(§C, 2026-10-11). 실용 후보가
  *     그보다 적으면 있는 만큼만 - 억지로 만들지 않는다.
+ *   · **로컬 우위 하한(localEdgeFloor)** - 로컬 우위 용어가 든 후보를 그 수만큼 확보한다(2026-10-30). 실용 하한으로
+ *     이미 뽑힌 후보가 로컬 우위이기도 하면 둘 다로 센다. 후보가 적으면 있는 만큼만 - 억지로 채우지 않는다.
  *   · **상한(perLabelCap)** - 한 라벨로 쏠리지 않게 막는다. 하한으로 먼저 뽑은 것도 이 상한에 포함해
  *     세므로, 실용 하한이 상한을 넘어 한 라벨을 독점하지 않는다.
  * 둘을 적용하고도 자리가 남으면 점수순으로 채운다(상한 무시 - 비우는 쪽이 손해다, 기존 동작).
@@ -405,6 +516,8 @@ export function selectTopics(
     perLabelCap?: number;
     /** 체류 실용 정보 최소 건수. 생략하면 defaultPracticalFloor(topN). 0을 주면 하한을 끈다. */
     practicalFloor?: number;
+    /** 로컬 우위 최소 건수. 생략하면 defaultLocalEdgeFloor(topN). 0을 주면 하한을 끈다. */
+    localEdgeFloor?: number;
   }
 ): { selected: (TopicCandidate & { score: TopicScore })[]; droppedAsDuplicate: number } {
   const scored = candidates
@@ -437,6 +550,16 @@ export function selectTopics(
   for (const candidate of kept) {
     if (selected.length >= Math.min(floor, options.topN)) break;
     if (!isPracticalTopic(candidate.topic, candidate.label)) continue;
+    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    take(candidate);
+  }
+
+  // 1b) 로컬 우위 하한. 실용 하한으로 이미 뽑힌 로컬 우위 후보도 센다. 라벨 상한은 지킨다.
+  const localFloor = Math.min(options.localEdgeFloor ?? defaultLocalEdgeFloor(options.topN), options.topN);
+  for (const candidate of kept) {
+    if (selected.filter((item) => item.score.localEdge > 0).length >= localFloor) break;
+    if (selected.length >= options.topN) break;
+    if (candidate.score.localEdge === 0 || selected.includes(candidate)) continue;
     if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
     take(candidate);
   }
@@ -474,13 +597,14 @@ export function toRankedKeywords(selected: readonly (TopicCandidate & { score: T
       contentDemand: item.score.demand,
       freshness: 0,
       crossSourceSignal: item.score.crossSignal,
-      clickPotential: item.score.intent + item.score.specificity,
+      // keyword_rankings.score_breakdown은 6컬럼 고정(migration 없음) - 로컬 우위는 clickPotential에 합산하고 포화 감점은 reason에 남긴다.
+      clickPotential: item.score.intent + item.score.specificity + item.score.localEdge,
       total: item.score.total,
     },
     trendDirection: "unknown",
     relatedCount: item.hits,
     sources: (item.redditHits ?? 0) > 0 ? ["google_autocomplete", "reddit"] : ["google_autocomplete"],
     latestPublishedAt: null,
-    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}`,
+    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}${item.score.localEdge > 0 ? " · 로컬 우위 +15" : ""}${item.score.saturation > 0 ? " · 관광 포화 -10" : ""}`,
   }));
 }

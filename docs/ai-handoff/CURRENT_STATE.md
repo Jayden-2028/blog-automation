@@ -79,6 +79,23 @@
 - **남은 일(팀장)**: 병합 뒤 워크플로 `tkm-structure-backfill.yml`을 **apply=true**로 돌려 기존 43편에 바이라인·Person 저자를 소급한다
   (`--jsonld` 입력은 이제 필요 없다 - 기존 블록은 자동 보존).
 
+## 2026-10-30 — Korea Plain 로컬 정체성 ③ 점수·시드 (브랜치 `feat/kscene-local-edge`, PR 대기)
+
+- **무엇**: 정체성 개정안(`branding-2026-10/kp-native-identity-2026-10.md`) §C, 사용자 승인 Q7. 사이트 43편의 86%가 외국인 저자 블로그가
+  이미 포화시킨 주제라, 주제 선정에 "한국인만 쓸 수 있는 주제" 축을 넣었다. 라벨 5개 이름은 그대로(§C-4).
+- **점수식**(`ksceneTopics.ts` `scoreTopic`): 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + **로컬 우위 15** = 100, **관광 포화 −10**(하한 0).
+  `LOCAL_EDGE_TERMS`(48)·`SATURATED_TOURIST_TERMS`(17, korea·seoul 제외)는 `matchTokens`(korea/korean·복수형 접기, **불용어는 유지** -
+  "koreans how do you" 같은 질문형 구가 불용어뿐이라) 기준 연속 토큰 일치. `TopicScore`에 `localEdge`·`saturation` 추가.
+  **DB `keyword_rankings.score_breakdown`은 6컬럼 고정(migration 없음)이라 모양을 안 바꿨다** - 로컬 우위는 `clickPotential`에 합산,
+  포화 감점은 `reason`("관광 포화 -10")에만 남는다.
+- **레딧 보정**: 제목이 `koreans how do you` / `do koreans` / `is it rude in korea` / `is it normal in korea`로 시작하면 그 후보의
+  redditHits를 2로 센다(`redditLocalQuestion`, 교차 신호 상한 15 그대로).
+- **선정**: `localEdgeFloor`(topN=8이면 2, `defaultLocalEdgeFloor`) - 실용 하한과 겹쳐도 되고 라벨 상한(3)은 지킨다. 후보가 없으면 안 채운다.
+- **시드**: 117 → **164**(개정안 50개 중 자동완성이 비는 긴 질의 37개를 2~3단어로 줄여 실측 통과분 47개만 추가, 기존 삭제·변경 없음, 중복 0). 머리 주석에 "2026-10-30 로컬 우위 축".
+- **로그**: `ksceneTopicJob.ts`의 ▶ 줄과 collection 로그에 "로컬 우위 N건 · 포화 감점 N건"(결과 `localEdgeCount`·`saturatedCount`).
+- **테스트**: `npm run test:kscene-topics`에 로컬 우위 +15·포화 −10/하한 0·합계 100·레딧 보정·로컬 하한 케이스 추가(10/28 해외 지명·정규화 테스트 불변,
+  시드 총량 단언만 164로 갱신).
+
 ## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
 
 - **무엇**: 텔레그램 링크 변환기(종합 키워드 입력 툴)에 여섯 번째 트랙 **🌏 국제**를 추가했다(사용자 지시 "국제를 누르면 블로그스팟용

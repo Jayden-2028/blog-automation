@@ -83,6 +83,10 @@ export type RunKsceneTopicCollectionResult = {
   candidateCount: number;
   droppedAsDuplicate: number;
   topics: string[];
+  /** 선정된 주제 중 로컬 우위 용어가 든 것(2026-10-30). */
+  localEdgeCount: number;
+  /** 선정된 주제 중 관광 포화 감점을 받은 것(2026-10-30). */
+  saturatedCount: number;
   failedSeeds: string[];
   trendSeeds: string[];
   reddit: RedditCollectionSummary;
@@ -284,6 +288,8 @@ export async function runKsceneTopicCollection(
     candidateCount: candidates.length,
     droppedAsDuplicate,
     topics: selected.map((item) => item.topic),
+    localEdgeCount: selected.filter((item) => item.score.localEdge > 0).length,
+    saturatedCount: selected.filter((item) => item.score.saturation > 0).length,
     failedSeeds,
     trendSeeds,
     reddit,
@@ -292,6 +298,7 @@ export async function runKsceneTopicCollection(
       .map((item) => ({ topic: item.topic, hits: item.redditHits ?? 0, example: item.redditExample ?? "" })),
   };
 
+  log(`ℹ️ 로컬 우위 ${base.localEdgeCount}건 · 포화 감점 ${base.saturatedCount}건`);
   for (const item of base.redditSupported) log(`   🟠 레딧 뒷받침 ${item.hits}건: ${item.topic} ← "${item.example}"`);
 
   if (selected.length === 0) {
