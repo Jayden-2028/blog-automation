@@ -14,7 +14,14 @@ import {
   toOauthUrl,
 } from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import {
+  LOCAL_EDGE_TERMS,
+  SATURATED_TOURIST_TERMS,
+  SCORE_WEIGHTS,
   attachRedditSupport,
+  defaultLocalEdgeFloor,
+  hasLocalEdge,
+  isLocalQuestionTitle,
+  isTouristSaturated,
   autocompleteQueriesForSeed,
   buildCandidates,
   hasIntentSignal,
@@ -45,12 +52,12 @@ async function main(): Promise<void> {
   assert(KSCENE_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
 
   // 체류 실용 축(2026-10-11, §C): 기획⑤ 확정본 100개를 지우지 않고 누적했고, 실용 시드가 들어와 있다.
-  assert(KSCENE_SEEDS.length === 117, `시드 총량 117개(기획⑤ 100 + 실용 17, 실제 ${KSCENE_SEEDS.length})`);
+  assert(KSCENE_SEEDS.length === 167, `시드 총량 167개(기획⑤ 100 + 실용 17 + 로컬 우위 50, 실제 ${KSCENE_SEEDS.length})`);
   const seedsByLabel = new Map<string, number>();
   for (const seed of KSCENE_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
-  assert(seedsByLabel.get("Living in Korea") === 32 && seedsByLabel.get("Travel & Transit") === 25, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
+  assert(seedsByLabel.get("Living in Korea") === 42 && seedsByLabel.get("Travel & Transit") === 35, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
   for (const label of ["Food & Dining", "Culture & Etiquette", "K-Wave Context"]) {
-    assert(seedsByLabel.get(label) === 20, `${label}는 기획⑤ 확정본 20개 그대로`);
+    assert(seedsByLabel.get(label) === 30, `${label}는 기획⑤ 확정본 20개 + 로컬 우위 10개`);
   }
   for (const practical of ["korea prepaid usim", "korea resident registration move", "korea utility bill payment", "korea garbage bag rules", "korea bus subway transfer", "korea traffic signals"]) {
     assert(KSCENE_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
@@ -324,6 +331,87 @@ async function main(): Promise<void> {
 
   assert(dayIndexOf(new Date("2026-10-07T15:00:00Z")) === dayIndexOf(new Date("2026-10-07T14:59:00Z")) + 1, "일 경계는 KST 자정(UTC 15:00)");
   console.log("  ✅ 전체 실행 계약(부분 실패 허용·저장→알림·후보0·저장실패)");
+
+  // ---------- 로컬 우위 축(2026-10-30, §C) ----------
+  const mk = (topic: string, over: Partial<{ label: (typeof KSCENE_LABELS)[number]; hits: number; bestPosition: number; redditHits: number; redditLocalQuestion: boolean }> = {}) => ({
+    topic, seed: "x", label: over.label ?? ("Culture & Etiquette" as const), hits: over.hits ?? 1, bestPosition: over.bestPosition ?? 3,
+    ...(over.redditHits !== undefined ? { redditHits: over.redditHits } : {}),
+    ...(over.redditLocalQuestion ? { redditLocalQuestion: true } : {}),
+  });
+
+  // 새 시드 50개: 라벨당 10개, 기존 117개 유지
+  const newSeedQueries = ["korea subway priority seat", "korea restaurant call button", "korea apartment noise neighbors", "korea which hospital department", "kdrama office culture real life"];
+  for (const query of newSeedQueries) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `로컬 우위 시드가 있어야 한다: ${query}`);
+  assert(KSCENE_LABEL_BY_SEED["korea gu office vs dong office"] === "Living in Korea" && KSCENE_LABEL_BY_SEED["korean side dish refill"] === "Food & Dining", "새 시드의 라벨 매핑");
+  assert(KSCENE_SEEDS.slice(0, 117).some((seed) => seed.query === "korea subway") && KSCENE_SEEDS.some((seed) => seed.query === "korean bbq"), "기존 시드 유지");
+
+  // (a) 로컬 우위 +15
+  const plain = mk("korea apartment recycling info");
+  const local = mk("korea apartment management office hours");
+  assert(hasLocalEdge(local.topic) && !hasLocalEdge(plain.topic), "로컬 우위 용어 판정");
+  assert(scoreTopic(local).localEdge === 15 && scoreTopic(plain).localEdge === 0, "로컬 우위 후보 +15");
+  assert(scoreTopic(local).total - scoreTopic({ ...local, topic: "korea apartment management hours" }).total === 15, "같은 조건에서 용어 유무 차이는 정확히 15");
+  // 정규화: korean/koreans 접기·복수형 접기·불용어를 지우지 않는 구 매칭
+  assert(hasLocalEdge("what koreans do on chuseok") && !hasLocalEdge("what korea does on chuseok") && !hasLocalEdge("last minute order"), "구는 연속 토큰 일치");
+  assert(hasLocalEdge("korean restaurant refills explained") && hasLocalEdge("do koreans tip"), "복수형·korea 접기 매칭");
+  assert(hasLocalEdge("koreans how do you handle noise") && hasLocalEdge("is it rude in south korea to stare"), "질문형 구 매칭");
+  assert(!hasLocalEdge("korea travel guide") && !hasLocalEdge("how to use the korea bank"), "일반어만으로는 로컬 우위가 아니다");
+  assert(LOCAL_EDGE_TERMS.length === 48 && SATURATED_TOURIST_TERMS.length === 17, "§C-1 용어 전부(로컬 48 · 포화 17)");
+
+  // (b) 포화 -10, 하한 0
+  const saturated = mk("korea seoul itinerary 3 days");
+  assert(isTouristSaturated(saturated.topic) && !isTouristSaturated("korea seoul subway card"), "포화 용어 판정(korea·seoul은 포화 아님)");
+  assert(scoreTopic(saturated).saturation === 10, "포화 감점 10");
+  assert(scoreTopic(saturated).total === Math.max(0, SCORE_WEIGHTS.base + scoreTopic(saturated).demand + scoreTopic(saturated).crossSignal + scoreTopic(saturated).specificity + scoreTopic(saturated).intent - 10), "포화는 total에서 10을 뺀다");
+  const bottom = scoreTopic({ ...mk("korea itinerary", { bestPosition: 9 }) });
+  assert(bottom.total >= 0 && bottom.saturation === 10, "하한 0");
+  const floored = scoreTopic(mk("itinerary", { bestPosition: 99 }));
+  assert(floored.total === 0 && floored.saturation === 10, `하한 0이 실제로 작동(실제 ${floored.total})`);
+  const both = scoreTopic(mk("jeju itinerary for koreans how do you"));
+  assert(both.localEdge === 15 && both.saturation === 10, "로컬 우위와 포화가 같이 걸리면 +15 -10");
+  assert((SATURATED_TOURIST_TERMS as readonly string[]).every((term) => term !== "korea" && term !== "seoul"), "포화 목록에 korea·seoul 없음");
+
+  // (c) 합계 100
+  const maxed = scoreTopic(mk("how to address a boss at work in korea", { hits: 3, bestPosition: 0, redditHits: 2 }));
+  assert(maxed.total === 100 || maxed.total === SCORE_WEIGHTS.base + maxed.demand + maxed.crossSignal + maxed.specificity + maxed.intent + maxed.localEdge, "점수 분해 합계");
+  assert(SCORE_WEIGHTS.base + SCORE_WEIGHTS.demand + SCORE_WEIGHTS.crossSignal + SCORE_WEIGHTS.specificity + SCORE_WEIGHTS.intent + SCORE_WEIGHTS.localEdge === 100, "가중치 합계 100");
+  const ceiling = scoreTopic(mk("how to address a sajangnim in korea", { hits: 3, bestPosition: 0, redditHits: 2 }));
+  assert(ceiling.total === 100 && ceiling.demand === 35 && ceiling.crossSignal === 15 && ceiling.specificity === 15 && ceiling.intent === 15 && ceiling.localEdge === 15, `만점 후보가 정확히 100(실제 ${JSON.stringify(ceiling)})`);
+  const rankedLocal = toRankedKeywords([{ ...mk("korea gu office vs dong office", { hits: 2 }), score: scoreTopic(mk("korea gu office vs dong office", { hits: 2 })) }]);
+  assert(Object.keys(rankedLocal[0].scoreBreakdown).sort().join() === "clickPotential,contentDemand,crossSourceSignal,freshness,newsVelocity,total,trendMomentum", "DB scoreBreakdown 모양 불변");
+  assert(rankedLocal[0].reason.includes("로컬 우위 +15"), "사유에 로컬 우위 표기");
+
+  // (d) 레딧 제목 보정
+  for (const title of ["Koreans, how do you handle noisy neighbors in apartments?", "Do Koreans really bow to elders at work", "Is it rude in Korea to refuse a drink", "Is it normal in Korea to share a room"]) {
+    assert(isLocalQuestionTitle(title), `로컬 질문형 제목: ${title}`);
+  }
+  assert(!isLocalQuestionTitle("What do Koreans eat on chuseok") && !isLocalQuestionTitle("Question about koreans how do you say hello"), "접두 일치만");
+  const noisy = mk("korea apartment noise neighbors");
+  const [boosted] = attachRedditSupport([noisy], ["Koreans, how do you handle apartment noise and neighbors?"]);
+  const [ordinary] = attachRedditSupport([noisy], ["How to complain about apartment noise from neighbors in Korea"]);
+  assert(boosted.redditHits === 1 && boosted.redditLocalQuestion === true && !ordinary.redditLocalQuestion, "로컬 질문형만 표시");
+  assert(scoreTopic(boosted).crossSignal === 10 && scoreTopic(ordinary).crossSignal === 5, "로컬 질문형 1건 = 2건으로 센다(+10), 일반 1건 +5");
+  assert(scoreTopic({ ...boosted, hits: 3 }).crossSignal === 15, "상한 15 그대로");
+
+  // (e) 로컬 우위 하한
+  assert(defaultLocalEdgeFloor(8) === 2 && defaultLocalEdgeFloor(1) === 1, "기본 하한: topN=8이면 2");
+  const touristy = ["korea travel guide first time", "korea best food guide", "korea cafe tour guide", "korea shopping guide tips", "korea palace visit guide", "korea nightlife guide tips", "korea hiking trails guide", "korea tea house guide"]
+    .map((topic, i) => mk(topic, { label: KSCENE_LABELS[i % 5], bestPosition: 0, hits: 3 }));
+  const localOnes = [mk("korea restaurant call button etiquette", { label: "Food & Dining", bestPosition: 8 }), mk("korea gu office vs dong office", { label: "Living in Korea", bestPosition: 8 })];
+  const withLocalFloor = selectTopics([...touristy, ...localOnes], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 2 });
+  assert(withLocalFloor.selected.filter((item) => item.score.localEdge > 0).length === 2, "로컬 우위 하한이 점수가 낮은 로컬 후보를 끌어올린다");
+  const withoutLocalFloor = selectTopics([...touristy, ...localOnes], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 0 });
+  assert(withoutLocalFloor.selected.filter((item) => item.score.localEdge > 0).length === 0, "하한을 끄면 점수순(대조군)");
+  const oneLocal = selectTopics([...touristy, localOnes[0]], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 2 });
+  assert(oneLocal.selected.length === 4 && oneLocal.selected.filter((item) => item.score.localEdge > 0).length === 1, "후보가 하나뿐이면 있는 만큼만(억지로 채우지 않음)");
+  const noLocal = selectTopics(touristy, { topN: 4, existingTopics: [], similarity: 0.95, localEdgeFloor: 2 });
+  assert(noLocal.selected.length === 4 && noLocal.selected.every((item) => item.score.localEdge === 0), "로컬 후보가 없으면 그냥 점수순");
+  // 실용 하한과 겹침: gu office(Living) 하나가 둘 다 만족 -> 둘 다로 센다
+  const overlap = selectTopics([...touristy.filter((item) => item.label !== "Living in Korea"), localOnes[1], mk("korea certificate documents at gu office", { label: "Living in Korea", bestPosition: 9 })], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 1, localEdgeFloor: 2 });
+  assert(overlap.selected.filter((item) => item.score.localEdge > 0).length === 2, "실용 하한과 겹쳐도 로컬 하한 충족");
+  const capped = selectTopics([...touristy.slice(0, 2), ...[1, 2, 3, 4].map((n) => mk(`korea ${n} neighbor noise rules`, { label: "Culture & Etiquette", bestPosition: 8 }))], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 4, perLabelCap: 2 });
+  assert(capped.selected.filter((item) => item.label === "Culture & Etiquette").length <= 4, "라벨 상한 로직은 유지(하한이 상한을 깨지 않는 단계)");
+  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 167개");
 
   console.log("\n✅ testKsceneTopics 통과");
 }
