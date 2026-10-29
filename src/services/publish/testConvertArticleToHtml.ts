@@ -70,6 +70,51 @@ function main(): void {
   assert(faq.includes("<strong>자주 묻는 질문</strong>") && faq.includes("<strong>요약</strong>"), "FAQ/요약 볼드 변환 실패");
   console.log("✅ FAQ/요약 소제목도 같은 볼드 규칙");
 
+  // 7) 로컬 콜아웃 박스(2026-10-30, 사용설명서 트랙 전용 - 개정안 §B-4·§D-2)
+  const layers = [
+    "**Local note: what Koreans actually do**",
+    "Most people in Korea tap the card on the back-door reader.",
+    "",
+    "**Common misreading**",
+    "Visitors assume the front door is the only exit.",
+    "",
+    "**Words you will see**",
+    "- 보행자 작동신호기 (pedestrian push-button signal) — on the pole",
+    "- 음식물 (food waste) — the button on the bin screen",
+    "",
+    "**Next steps**",
+    "Tap out before you leave.",
+  ].join("\n");
+
+  const callouts = convertArticleToHtml(layers, { semanticHeadings: true, localCallouts: true });
+  assert(callouts.includes('<div class="kp-local" data-kp-label="Local note: what Koreans actually do">'), `kp-local 박스 실패 (${callouts})`);
+  assert(callouts.includes('<div class="kp-misread" data-kp-label="Common misreading">'), "kp-misread 박스 실패");
+  assert(callouts.includes('<div class="kp-words" data-kp-label="Words you will see">'), "kp-words 박스 실패");
+  // 소제목 텍스트는 박스 안에 넣지 않는다 - §B-4 CSS의 ::before가 제목을 그린다.
+  assert(!callouts.includes("<strong>Local note"), "콜아웃 소제목이 박스 안에 남았다(::before와 중복)");
+  assert(!callouts.includes("<h2 style=\"font-size:19px\">Common misreading</h2>"), "콜아웃 소제목이 h2로 남았다");
+  // kp-words 안의 한글만 kp-ko로 감싼다.
+  assert(callouts.includes('<span class="kp-ko">보행자 작동신호기</span>'), `kp-ko 실패 (${callouts})`);
+  assert(callouts.includes('<span class="kp-ko">음식물</span>'), "kp-ko 두 번째 토큰 실패");
+  // 콜아웃이 아닌 소제목은 그대로 h2다.
+  assert(callouts.includes("<h2 style=\"font-size:19px\">Next steps</h2>"), `일반 소제목 회귀 (${callouts})`);
+  console.log("✅ 로컬 콜아웃 박스(kp-local/kp-misread/kp-words) + kp-ko");
+
+  // 8) 옵션을 끄면 출력이 기존과 한 글자도 다르지 않다(다른 트랙·네이버·티스토리 불변 보장)
+  const withoutCallouts = convertArticleToHtml(layers, { semanticHeadings: true });
+  assert(!withoutCallouts.includes("kp-local") && !withoutCallouts.includes("kp-ko"), "옵션 꺼짐인데 콜아웃이 나왔다");
+  assert(withoutCallouts.includes("<h2 style=\"font-size:19px\">Local note: what Koreans actually do</h2>"), `옵션 꺼짐 회귀 (${withoutCallouts})`);
+  const plainTrack = convertArticleToHtml(layers);
+  assert(!plainTrack.includes("kp-local") && plainTrack.includes("<strong>Local note: what Koreans actually do</strong>"), "기본 호출 회귀");
+  console.log("✅ localCallouts 꺼짐 = 기존 출력 그대로");
+
+  // 9) 소제목과 문단 사이에 빈 줄이 하나 끼어도 박스가 문단을 끌어온다. 재료가 없으면 빈 박스를 만들지 않는다.
+  const gapped = convertArticleToHtml("**Common misreading**\n\nVisitors assume the front door is the only exit.", { localCallouts: true });
+  assert(gapped.includes('<div class="kp-misread"') && gapped.includes("Visitors assume"), `빈 줄 끼인 콜아웃 실패 (${gapped})`);
+  const empty = convertArticleToHtml("**Common misreading**\n\n**Next steps**\nTap out.", { localCallouts: true });
+  assert(!empty.includes("kp-misread"), `재료 없는 콜아웃이 빈 박스로 나왔다 (${empty})`);
+  console.log("✅ 빈 줄 끼인 문단 흡수 / 재료 없으면 박스 없음");
+
   console.log("\n✅ 전체 테스트 통과");
 }
 

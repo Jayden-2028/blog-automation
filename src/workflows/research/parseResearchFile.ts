@@ -33,6 +33,12 @@ export type ParsedResearchFile = {
   unverifiedClaims: string[];
   /** §10 전체 출처 목록 표. */
   sourceTable: ResearchSourceRow[];
+  /**
+   * §12 현지 관행 표의 행 수(kscene 전용, 2026-10-30). frontmatter `local_practice_rows`가 있으면 그 값을,
+   * 없으면 §12 표를 세어 쓴다. kscene이 아닌 조사에는 §12가 없어 0이다 - **verdict에 영향을 주지 않는다**
+   * (관행이 없는 주제도 있다). 검수 카드가 "로컬 재료 0"을 표시하는 데만 쓴다.
+   */
+  localPracticeRows: number;
 };
 
 function emptyCounts(): Record<SourceAuthorityLevel, number> {
@@ -62,6 +68,7 @@ function parseFrontmatter(fm: string): {
   researchedAt: string | null;
   verdict: ResearchVerdict;
   sourceCounts: Record<SourceAuthorityLevel, number>;
+  localPracticeRows: number | null;
 } {
   const lines = fm.split(/\r?\n/);
   const scalars: Record<string, string> = {};
@@ -98,13 +105,38 @@ function parseFrontmatter(fm: string): {
     }
   }
 
+  const rows = Number.parseInt(scalars.local_practice_rows ?? "", 10);
+
   return {
     keyword: scalars.keyword || null,
     topic: scalars.topic || null,
     researchedAt: scalars.researched_at || null,
     verdict: coerceVerdict(scalars.verdict),
     sourceCounts: counts,
+    localPracticeRows: Number.isNaN(rows) || rows < 0 ? null : rows,
   };
+}
+
+/**
+ * §12 현지 관행 표의 데이터 행 수. 헤더 행·구분선 행과 템플릿 그대로 남은 예시 행은 세지 않는다.
+ * frontmatter가 없거나 `local_practice_rows`를 빠뜨린 조사 파일을 위한 폴백이다 - 새 frontmatter 키가
+ * 없어도 파서가 깨지지 않아야 한다(§12 자체가 없는 다른 트랙 조사는 0).
+ */
+function countLocalPracticeRows(body: string): number {
+  const section = sectionBody(body, ["현지 관행", "Local practice"]);
+  if (!section) return 0;
+  let count = 0;
+  for (const line of section.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("|")) continue;
+    const cells = trimmed.split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length < 2) continue;
+    const first = cells[0];
+    if (/^구분$/.test(first) || /^-+$/.test(first.replace(/[:\s]/g, ""))) continue;
+    if (!/^(관행|규정 vs 관행|오해|표기)$/.test(first)) continue;
+    count += 1;
+  }
+  return count;
 }
 
 /** "## N. 제목" 헤더로 섹션을 나눠, 헤더 텍스트에 keyword가 포함된 첫 섹션의 본문을 돌려준다. */
@@ -170,5 +202,6 @@ export function parseResearchFile(text: string): ParsedResearchFile {
     summary: summary.replace(/^\(.*\)$/gm, "").trim(),
     unverifiedClaims: parseUnverifiedClaims(body),
     sourceTable: parseSourceTable(body),
+    localPracticeRows: fm.localPracticeRows ?? countLocalPracticeRows(body),
   };
 }

@@ -33,6 +33,12 @@ export type PublishRenderOptions = {
    * 네이버·티스토리·뷰어 복사는 계속 생략한다 - 붙여넣기 대상 테마에 흔들리지 않게 하려던 원래 이유가 그쪽엔 그대로다.
    */
   headingTag?: "h2";
+  /**
+   * 로컬 콜아웃 박스(2026-10-30, Korea Plain 로컬 정체성 개정). 켜면 세 고정 영문 소제목과 그 다음 블록을
+   * `<div class="kp-local|kp-misread|kp-words">`로 감싸고, "Words you will see" 안의 한글을
+   * `<span class="kp-ko">`로 감싼다. **사용설명서(kscene) 트랙 전용**이고 켜지 않으면 기존 출력과 한 글자도 다르지 않다.
+   */
+  localCallouts?: boolean;
 };
 
 export function escapeHtml(text: string): string {
@@ -105,6 +111,34 @@ function renderLines(lines: string[], options: PublishRenderOptions): string {
 }
 
 /**
+ * 로컬 콜아웃 레이어(2026-10-30). 키는 **번역 지침이 고정 번역을 요구하는 영문 소제목**이고
+ * (`prompts/translation/kscene-ko-en.md` 「Local layers — fixed English headings」), 값은 Blogger 테마 CSS의
+ * 클래스다(개정안 §B-4). 소제목 문자열이 바뀌면 박스가 조용히 사라지므로 번역 지침과 이 표를 **같이** 바꾼다.
+ *
+ * 소제목 텍스트는 박스 안에 넣지 않는다 - §B-4 CSS가 `.kp-local::before` 등으로 제목을 그린다. 텍스트 자체는
+ * `data-kp-label`로 남겨 CSS 없이도 HTML에서 무슨 박스인지 읽을 수 있게 한다.
+ */
+export const LOCAL_CALLOUT_CLASSES: ReadonlyMap<string, string> = new Map([
+  ["Local note: what Koreans actually do", "kp-local"],
+  ["Common misreading", "kp-misread"],
+  ["Words you will see", "kp-words"],
+]);
+
+/** 한글 토큰(어절 사이 공백·중점 포함). 양끝이 한글이라 뒤따르는 공백은 안 먹는다. */
+const HANGUL_RUN_RE = /[가-힣ㄱ-ㅎㅏ-ㅣ][가-힣ㄱ-ㅎㅏ-ㅣ\s·]*[가-힣ㄱ-ㅎㅏ-ㅣ]|[가-힣ㄱ-ㅎㅏ-ㅣ]/g;
+
+/**
+ * 렌더된 HTML 안의 한글 토큰을 `<span class="kp-ko">`로 감싼다(§B-4 - 간판 글자를 키우고 줄바꿈을 막는 클래스).
+ * **태그 안쪽(`<...>`)은 건드리지 않는다** - href·alt에 한글이 있어도 속성값이 깨지지 않게 태그 단위로 쪼개 쓴다.
+ */
+export function wrapKoreanTokens(html: string): string {
+  return html
+    .split(/(<[^>]*>)/)
+    .map((part) => (part.startsWith("<") ? part : part.replace(HANGUL_RUN_RE, (m) => `<span class="kp-ko">${m}</span>`)))
+    .join("");
+}
+
+/**
  * 원고 본문(마크다운 부분집합)을 발행용 HTML로. 블록 사이 간격은 위 5개 규칙대로 **빈 문단**으로 넣는다.
  * 마지막에 남는 빈 문단은 떼어 낸다(글 끝에 빈 줄이 남지 않게).
  */
@@ -128,7 +162,9 @@ export function renderPublishBlocks(markdown: string, options: PublishRenderOpti
     }
   };
 
-  for (const block of markdown.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean)) {
+  const blocks = markdown.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+    const block = blocks[blockIndex];
     const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
     if (lines.length === 0) continue;
 
@@ -157,6 +193,40 @@ export function renderPublishBlocks(markdown: string, options: PublishRenderOpti
     }
 
     const headingMatch = lines[0].match(HEADING_LINE_RE);
+
+    // 로컬 콜아웃(2026-10-30, kscene 전용): 세 고정 영문 소제목이면 그 소제목과 본문을 div로 감싼다.
+    // 규격은 "소제목 다음 줄에 바로 문단"(output-format §6)이라 보통 같은 블록이지만, 빈 줄이 하나
+    // 끼면 다음 블록에 있다 - 그 경우 **소제목도 아니고 이미지·해시태그도 아닌** 다음 블록 하나만 끌어온다.
+    const calloutClass = options.localCallouts && headingMatch ? LOCAL_CALLOUT_CLASSES.get(headingMatch[1].trim()) : undefined;
+    if (calloutClass && headingMatch) {
+      let bodyLines = lines.slice(1);
+      if (bodyLines.length === 0) {
+        const next = blocks[blockIndex + 1];
+        const nextLines = next ? next.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+        const nextIsPlain =
+          nextLines.length > 0 &&
+          !HEADING_LINE_RE.test(nextLines[0]) &&
+          !IMAGE_LINE_PATTERN.test(nextLines[0]) &&
+          !IMAGE_PLACEHOLDER_PATTERN.test(nextLines[0]) &&
+          !isHashtagLine(nextLines[0]);
+        if (nextIsPlain) {
+          bodyLines = nextLines;
+          blockIndex += 1;
+        }
+      }
+      // 재료가 없으면 빈 박스를 만들지 않는다 - 소제목만 기존 방식으로 낸다.
+      if (bodyLines.length > 0) {
+        const inner = renderLines(bodyLines, options);
+        out.push(
+          `<div class="${calloutClass}" data-kp-label="${escapeHtml(headingMatch[1].trim())}">${
+            calloutClass === "kp-words" ? wrapKoreanTokens(inner) : inner
+          }</div>`
+        );
+        setSpacers(1);
+        continue;
+      }
+    }
+
     if (headingMatch) {
       out.push(
         options.headingTag

@@ -509,6 +509,37 @@ function main(): void {
   assert(checkVoice("처음엔 겹쳤거든요.", null).length === 1, "category 미지정도 기존대로 경고");
   console.log("✅ voice: person 허용 어미 3곳 통과 / 4곳 경고 / 나머지 4종 유지 / 타 카테고리 기존대로");
 
+  // ---------- kscene 로컬 화자 (2026-10-30, style/kscene.md 「화자」) ----------
+  // 허용된 1인칭(관행 서술 + "저도 이렇게 합니다")은 경고하지 않고, research §12로 뒷받침할 수 없는
+  // 사적 사실(거주지·날짜·장소가 든 일화)만 경고한다.
+  const ksceneAllowed = checkVoice(
+    "한국 사람들은 보통 뒷문 단말기에 카드를 찍습니다. 저도 평소에 이렇게 합니다.\n저는 환승할 때 단말기를 먼저 봅니다. 서울에서는 대개 카드로 냅니다.",
+    "kscene"
+  );
+  assert(ksceneAllowed.length === 0, `kscene 허용 1인칭이 경고됐다 (${JSON.stringify(ksceneAllowed)})`);
+
+  const kscenePlace = checkVoice("저희 동네 주민센터는 9시에 엽니다.", "kscene");
+  assert(kscenePlace.length === 1 && kscenePlace[0].message.includes("사용설명서 화자"), `"저희 동네" 경고 실패 (${JSON.stringify(kscenePlace)})`);
+  assert(checkVoice("저희 집에서는 종량기를 씁니다.", "kscene").length === 1, '"저희 집" 경고 실패');
+
+  // kscene.md가 금지 예로 든 문장. 한국어는 주어를 생략하므로 1인칭 없이도 잡아야 한다.
+  assert(checkVoice("지난주 강남에서 택시를 탔는데 앱이 안 됐습니다.", "kscene").length === 1, "날짜·장소 일화 경고 실패");
+  assert(checkVoice("어제 홍대에서 먹어 봤는데 괜찮았습니다.", "kscene").length === 1, "체험 동사 일화 경고 실패");
+
+  // 오탐 방지: 때·장소가 있어도 화자 체험이 아닌 사실 문장은 통과한다.
+  assert(checkVoice("지난달 서울에서 요금이 올랐습니다.", "kscene").length === 0, "사실 문장 오탐");
+  assert(checkVoice("지난해 부산에서 열린 행사에 많은 사람이 모였습니다.", "kscene").length === 0, "3인칭 서술 오탐");
+  assert(checkVoice("편의점에서 저는 T-money를 충전합니다.", "kscene").length === 0, "때 없는 1인칭 오탐");
+
+  // 다른 트랙에는 적용하지 않는다(parenting은 "저희 집"이 정상이다).
+  for (const other of ["parenting", "entertainment", "person", "incident", "trend", null]) {
+    assert(
+      checkVoice("저희 집에서는 종량기를 씁니다. 지난주 강남에서 택시를 탔는데 앱이 안 됐습니다.", other).length === 0,
+      `kscene 전용 규칙이 ${other}에 적용됐다`
+    );
+  }
+  console.log("✅ voice: kscene 로컬 화자(허용 1인칭 통과 / 저희 집·동네·일화 경고 / 다른 트랙 불변)");
+
   // ---------- 이미지 프롬프트 (2026-09-16) ----------
 
   // i1) 데이터형(대진표·일정표) 이미지를 AI 생성으로 지정하면 경고 - 실측(아시안게임 야구 대진표에 팀이 없음).

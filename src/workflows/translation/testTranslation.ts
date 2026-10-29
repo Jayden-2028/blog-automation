@@ -158,6 +158,26 @@ async function main(): Promise<void> {
   assert(imageMarkerDescriptions(KO_BODY).length === 2, "마커 추출");
   assert(strayHangulCount(EN_BODY) === 0, "허용 자리(마커 접미사·괄호 안 한글)는 세지 않는다");
   assert(strayHangulCount("Take the 지하철 to 서울 and 부산 for 여행 with a 티머니 card") > 8, "번역 안 된 한글은 센다");
+
+  // "Words you will see" 레이어(2026-10-30): 지침이 한글을 괄호 밖·앞에 쓰라고 요구하는 유일한 자리라
+  // 이 블록은 한글 잔존 검사에서 뺀다. 안 빼면 한글 한두 개(실측 11자)로 MAX_STRAY_HANGUL(8)을 넘어
+  // 정상 번역이 "덜 번역됨"으로 반려된다.
+  const wordsLayer = [
+    "**Words you will see**",
+    "- 보행자 작동신호기 (pedestrian push-button signal) — on the pole",
+    "- 음식물 (food waste) — the button on the bin screen",
+    "",
+    "**Next steps**",
+    "Tap out before you leave.",
+  ].join("\n");
+  assert(strayHangulCount(wordsLayer) === 0, `Words 레이어가 한글 잔존으로 잡혔다 (${strayHangulCount(wordsLayer)}자)`);
+  // 블록 밖의 한글은 그대로 센다 - 면제가 레이어 하나에만 걸린다.
+  const leaked = wordsLayer + "\n지하철을 타고 서울역까지 갑니다 그리고 부산까지도 갑니다";
+  assert(strayHangulCount(leaked) > 8, "Words 레이어 면제가 본문 전체로 번졌다");
+  assert(
+    strayHangulCount("**Local note: what Koreans actually do**\n한국 사람들은 보통 뒷문으로 내립니다 그리고 카드를 찍습니다") > 8,
+    "다른 레이어는 면제 대상이 아니다"
+  );
   assert(validateTranslation({ koreanBody: KO_BODY, parsed }).length === 0, "정상 번역은 통과");
 
   const dropped = parseTranslationOutput(output(EN_BODY.replace(/\[IMAGE: A subway[^\n]*\n/, "")));

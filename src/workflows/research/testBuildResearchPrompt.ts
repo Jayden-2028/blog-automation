@@ -159,5 +159,20 @@ try {
   assert(ksceneConverter.includes("category=kscene(해외 독자용 한국 사용설명서)"), "기존 kscene 분기는 유지된 채 보강만 덧붙는다");
   const nonKsceneConverter = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, category: "incident" }, converterSource: true });
   assert(!nonKsceneConverter.includes("한글일 수 있다"), "kscene이 아니면 converterSource는 무시");
-  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 입력 보강");
+  // 현지 관행 조사(2026-10-30 로컬 정체성 개정 §F) - 집필 레이어 3개의 유일한 재료다.
+  for (const needle of [
+    "현지 관행 조사",
+    "## 12. 현지 관행 (Local practice)",
+    "local_practice_rows: N",
+    "검색 하한은 8회",
+    "공식 페이지 4건 하한은 그대로",
+    "수치·요금·시간의 근거로는 쓰지 않는다",
+    "관행 미확보",
+  ]) {
+    assert(ksceneGo.includes(needle), `현지 관행 지시: ${needle}`);
+  }
+  assert(ksceneConverter.includes("현지 관행 조사"), "변환기 job에도 현지 관행 지시가 붙는다");
+  const nonKscene = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, category: "incident" } });
+  assert(!nonKscene.includes("현지 관행 조사") && !nonKscene.includes("local_practice_rows"), "kscene이 아니면 현지 관행 지시가 없다");
+  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 입력 보강 + 현지 관행 §12");
 }

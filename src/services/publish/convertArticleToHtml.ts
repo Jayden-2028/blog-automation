@@ -36,7 +36,19 @@ const BLOGSPOT_OPTIONS: PublishRenderOptions = {
  * `semanticHeadings`면 소제목을 `<h2>`로 낸다(사용설명서 트랙, 2026-10-27). 번역 프롬프트는 소제목을
  * `**굵은 줄**`로 유지하게 두고 여기서 바꾼다 - 번역 계약 검증(마커·링크·한글 잔존)과 영어본 diff가
  * 마크다운 기준이라 그쪽을 건드리지 않는 편이 안전하다.
+ *
+ * `localCallouts`면 로컬 레이어 세 개(`**Local note: what Koreans actually do**` /
+ * `**Common misreading**` / `**Words you will see**`)를 `<div class="kp-local|kp-misread|kp-words">`로
+ * 감싼다(2026-10-30 Korea Plain 로컬 정체성 개정 §B-4·§D-2). 사용설명서 트랙 전용이고, 생략하면 출력이
+ * 기존과 같다 - 다른 트랙·네이버·티스토리 변환기는 이 옵션을 쓰지 않는다.
  */
-export function convertArticleToHtml(markdown: string, options: { semanticHeadings?: boolean } = {}): string {
-  return renderPublishBlocks(markdown, options.semanticHeadings ? { ...BLOGSPOT_OPTIONS, headingTag: "h2" } : BLOGSPOT_OPTIONS);
+export function convertArticleToHtml(
+  markdown: string,
+  options: { semanticHeadings?: boolean; localCallouts?: boolean } = {}
+): string {
+  return renderPublishBlocks(markdown, {
+    ...BLOGSPOT_OPTIONS,
+    ...(options.semanticHeadings ? { headingTag: "h2" as const } : {}),
+    ...(options.localCallouts ? { localCallouts: true } : {}),
+  });
 }
