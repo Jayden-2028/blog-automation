@@ -2,6 +2,34 @@
 
 기준일: 2026-10-29 (Asia/Seoul)
 
+## 2026-10-30 — Korea Plain 로컬 정체성 ① 공개 카피·바이라인 (브랜치 `feat/kp-local-identity-copy`, PR 대기)
+
+- **무엇**: "한국에 사는 한국인(네이티브 로컬 필자)이 알려주는 한국" 정체성 개정안
+  (`branding-2026-10/kp-native-identity-2026-10.md`, 사용자 2026-10-30 Q1~Q10 전부 승인) 중 **§A 공개 카피·§B 디자인·§A-5 바이라인 코드**.
+  같은 날 다른 두 세션이 ② 규격(§D·E·F)과 ③ 시드·점수(§C)를 맡는다.
+- **바이라인**(`tkmPostStructure.ts`): `class="tkm-byline"` 블록을 **본문 마지막 문단 뒤·Related Guides 앞**에 멱등으로 넣는다
+  (Related·JSON-LD와 같은 클래스 마커 치환 방식 - `stripTkmBlocks`가 함께 걷는다). 문구는 §A-5 꼬리안 그대로.
+  `applyTkmStructure`에 `byline?: boolean`(기본 true)이 붙었고 결과에 `hasByline`이 생겼다. 꼬리 블록은 한 자리에 함께 들어가며
+  간격 문단(`<p>&nbsp;</p>`)은 묶음의 첫 블록 안에만 둔다. **첫 문단 추출(`describePost` → 검색 스니펫·JSON-LD description)은
+  블록을 걷은 본문을 보므로 바이라인을 집지 않는다**(테스트로 고정).
+- **JSON-LD 저자 분리**: `tkmJsonLdBrand`의 author가 `{"@type":"Person","name":"Jayden"}`(`TKM_AUTHOR_NAME`), publisher는
+  Korea Plain Organization 유지. `tkmRebrand.ts`의 `checkNameOnlyChange`도 같은 기준으로 바뀌었다.
+- **브랜드 설명**(`TKM_BRAND_DESCRIPTION`)을 §A-2 개정 문구로 교체 - "Step-by-step guides to Korean transport, apps, errands, and
+  customs — written in plain English by a Korean living in Seoul." 쓰이는 곳은 JSON-LD `publisher.description` 한 곳이다
+  (All Guides 페이지는 `TKM_BRAND_NAME`만 쓴다). 태그라인 `TKM_BRAND_TAGLINE`은 Q1 유지안대로 그대로.
+- **소급 경로 안전장치**: `tkmStructureBackfillCli.ts`가 **이미 JSON-LD가 든 글은 `--jsonld` 없이도 다시 만든다**.
+  전에는 `--jsonld`(또는 `--rewrite-host`) 없이 `--apply`하면 43편의 구조화 데이터가 조용히 걷혔다.
+- **고정 페이지 CLI**(신규 `kpIdentityPages.ts` + `kpIdentityPagesCli.ts`, `npm run kp:identity-pages`, 기본 dry-run):
+  About 전문 교체(§A-3, 제목·슬러그 유지), Editorial Policy의 Sources 절 뒤에 "Local review" 삽입(§A-4, 멱등),
+  Contact 첫 문단 교체(§A-6, 이메일·항목·주의 문단 그대로). dry-run은 문단 단위 LCS diff를 출력한다.
+  **2026-10-30 `--apply` 실행 완료** - 세 페이지 모두 `ok`, 라이브 확인(curl)까지 끝났다.
+- **Blogger 관리 화면**(API로 못 바꾸는 것, 같은 날 처리): 내비 LinkList 6개 링크를 `www.koreaplain.com`으로 교체(§B-1 필수),
+  메타 검색 설명 §A-2, 사이드바 HTML 가젯 "Who writes this"(§B-2), 테마 CSS 블록(§B-4), 댓글 양식 문구(§A-6).
+- **검증**: `test:tkm-structure`(바이라인 멱등·위치·첫 문단 제외 블록 추가)·`test:tkm-rebrand`·`test:tkm-cutover`·
+  신규 `test:kp-identity-pages` + `npm run build` 통과. `tkm:structure` dry-run 43편 전부 변경 Y·글자 불일치 0·JSON-LD 유지 Y.
+- **남은 일(팀장)**: 병합 뒤 워크플로 `tkm-structure-backfill.yml`을 **apply=true**로 돌려 기존 43편에 바이라인·Person 저자를 소급한다
+  (`--jsonld` 입력은 이제 필요 없다 - 기존 블록은 자동 보존).
+
 ## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
 
 - **무엇**: 텔레그램 링크 변환기(종합 키워드 입력 툴)에 여섯 번째 트랙 **🌏 국제**를 추가했다(사용자 지시 "국제를 누르면 블로그스팟용

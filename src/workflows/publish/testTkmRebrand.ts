@@ -36,7 +36,8 @@ const postHtml = [
 {
   const html = buildJsonLdHtml({ url: `${site}/2026/10/new.html`, headline: "New", description: "d", datePublished: "x", dateModified: "y", imageUrl: null });
   const data = JSON.parse(/>(.*)<\/script>/.exec(html)![1]);
-  assert(data.author.name === TKM_BRAND_NAME && data.publisher.name === TKM_BRAND_NAME, "새 JSON-LD 저자·발행자 = Korea Plain");
+  assert(data.author["@type"] === "Person" && data.author.name === "Jayden", "새 JSON-LD 저자 = Jayden(사람, 2026-10-30 §A-5)");
+  assert(data.publisher["@type"] === "Organization" && data.publisher.name === TKM_BRAND_NAME, "새 JSON-LD 발행자 = Korea Plain");
   assert(data.publisher.slogan === TKM_BRAND_TAGLINE && data.publisher.description === TKM_BRAND_DESCRIPTION, "발행자에 태그라인·설명");
   assert(data.author.slogan === undefined, "저자에는 태그라인을 중복하지 않는다");
   assert(!html.includes("Korea Manual"), "새 JSON-LD에 옛 이름 없음");
@@ -48,6 +49,7 @@ const postHtml = [
 {
   const result = rebrandTkmHtml({ path: "/2026/10/bus.html", title: "How to Ride a Seoul Bus", html: postHtml });
   assert(result.changed && result.jsonLdBlocks === 1 && result.textReplacements === 0 && !result.titleChanged, "글: JSON-LD 1블록만 변경");
+  assert(JSON.parse(/tkm-jsonld[^>]*>([\s\S]*?)<\/script>/.exec(result.html)![1]).author.name === "Jayden", "옛 글의 저자도 Jayden으로");
   assert(result.check.ok, `글: 이름 치환뿐 (${result.check.ok ? "" : result.check.reason})`);
   assert(result.html.includes("p/about-korea-manual.html") && result.html.includes("korea-manual-images-2026.pages.dev"), "주소·이미지 호스트는 그대로");
   assert(result.html.includes(`"dateModified":"2026-10-27T11:08:57.017Z"`), "dateModified 그대로");

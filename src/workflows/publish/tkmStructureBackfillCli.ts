@@ -134,7 +134,9 @@ async function main(): Promise<void> {
     // --rewrite-host: 옛 주소를 먼저 바꾼 본문을 기준으로 삼는다 - 글자 비교도 이 기준과 한다(주소 글자만 바뀌는 것은 의도).
     const rewritten = args.rewriteHost ? rewriteTkmLegacyUrls(before) : { text: before, count: 0 };
     const source = rewritten.text;
-    const withJsonLd = args.jsonld || (args.rewriteHost && /\btkm-jsonld\b/.test(before));
+    // 이미 JSON-LD가 든 글은 옵션과 무관하게 다시 만든다(2026-10-30). 전에는 --jsonld 없이 돌리면 조용히 걷혔다 -
+    // 43편 전부에 들어 있어서 소급 실행 한 번에 구조화 데이터가 사라질 수 있었다. 새로 넣는 것만 --jsonld가 정한다.
+    const withJsonLd = args.jsonld || /\btkm-jsonld\b/.test(before);
     const result = applyTkmStructure(source, {
       related: pickTkmRelated(post, tkmPosts, page.url),
       jsonLd: withJsonLd

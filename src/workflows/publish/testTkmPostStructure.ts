@@ -1,8 +1,11 @@
 // tkmPostStructure.ts 순수 함수 테스트(네트워크 없음). npm run test:tkm-structure
 import {
+  TKM_AUTHOR_NAME,
+  TKM_BYLINE_TEXT,
   applyTkmStructure,
   buildAllGuidesHtml,
   buildJsonLdHtml,
+  buildBylineHtml,
   describePost,
   pickTkmRelated,
   sameVisibleText,
@@ -84,13 +87,51 @@ const self = posts[0];
   assert(stripTkmBlocks(once.html) === upgradeLegacyHeadings(legacy).html, "블록만 걷으면 h2 변환본과 정확히 같다");
   const ld = JSON.parse(/<script[^>]*>([\s\S]*?)<\/script>/.exec(once.html)![1]);
   assert(ld["@type"] === "BlogPosting" && ld.mainEntityOfPage["@id"] === self.url && ld.image[0].includes("1.webp"), "BlogPosting 필드");
-  const removed = applyTkmStructure(once.html, { related: null, jsonLd: null });
-  assert(!removed.html.includes("tkm-related") && !removed.html.includes("ld+json"), "null이면 블록을 지운다");
+  const removed = applyTkmStructure(once.html, { related: null, jsonLd: null, byline: false });
+  assert(!removed.html.includes("tkm-related") && !removed.html.includes("ld+json") && !removed.html.includes("tkm-byline"), "null이면 블록을 지운다");
   // References가 없는 글은 끝에 붙고, 그래도 멱등
   const noRefs = legacy.split("\n").slice(0, 6).join("\n");
   const tail = applyTkmStructure(noRefs, { related, jsonLd: null });
   assert(tail.html.endsWith("</div>") && applyTkmStructure(tail.html, { related, jsonLd: null }).html === tail.html, "References 없으면 끝에, 멱등");
   console.log("✅ 적용 - 위치·멱등·글자 보존·JSON-LD");
+}
+
+// 3-b) 바이라인(2026-10-30 §A-5): Related 앞·본문 마지막 문단 뒤, 멱등, 첫 문단 추출에 안 걸린다
+{
+  const related = pickTkmRelated(self, posts, `${site}/p/all-guides.html`);
+  const once = applyTkmStructure(legacy, { related, jsonLd: null });
+  assert(once.hasByline && once.html.includes(TKM_BYLINE_TEXT), "바이라인 문구가 들어간다");
+  const bylineAt = once.html.indexOf(`class="tkm-byline"`);
+  const relatedAt = once.html.indexOf(`class="tkm-related"`);
+  const refsAt = once.html.indexOf(">References</h2>");
+  const bodyAt = once.html.indexOf("Do not</strong> forget to tap out");
+  assert(bodyAt < bylineAt && bylineAt < relatedAt && relatedAt < refsAt, `바이라인은 본문 뒤·Related 앞 (${bodyAt}/${bylineAt}/${relatedAt}/${refsAt})`);
+  const twice = applyTkmStructure(once.html, { related, jsonLd: null });
+  assert(twice.html === once.html, "바이라인도 다시 돌리면 한 번만 남는다(멱등)");
+  assert((once.html.match(/tkm-byline/g) ?? []).length === 1, "바이라인 블록은 하나");
+  assert(sameVisibleText(legacy, once.html), "바이라인은 글자 비교에서 제외된다");
+
+  // References가 없는 글: 꼬리 묶음 앞에 간격 한 번만
+  const noRefs = legacy.split("\n").slice(0, 6).join("\n");
+  const tail = applyTkmStructure(noRefs, { related, jsonLd: null });
+  assert(tail.html.indexOf("tkm-byline") < tail.html.indexOf("tkm-related"), "References 없어도 바이라인이 Related 앞");
+  assert(buildBylineHtml("before").startsWith(`<div class="tkm-byline">\n<p>&nbsp;</p>`), "끝에 붙일 때는 앞 간격 문단");
+  assert(applyTkmStructure(tail.html, { related, jsonLd: null }).html === tail.html, "References 없는 글도 멱등");
+
+  // 바이라인만(Related 없음)
+  const bylineOnly = applyTkmStructure(legacy, { related: null, jsonLd: null });
+  assert(bylineOnly.hasByline && !bylineOnly.html.includes("tkm-related"), "Related 없이 바이라인만도 들어간다");
+  assert(bylineOnly.html.indexOf("tkm-byline") < bylineOnly.html.indexOf(">References</h2>"), "바이라인만일 때도 References 앞");
+  assert(applyTkmStructure(bylineOnly.html, { related: null, jsonLd: null }).html === bylineOnly.html, "바이라인만도 멱등");
+
+  // 검색 스니펫(JSON-LD description)은 바이라인을 집지 않는다
+  assert(describePost(once.html, null).startsWith("All you need is one transit card"), "describePost는 첫 문단 - 바이라인 아님");
+  assert(!describePost(once.html, null).includes("Written by Jayden"), "검색 설명에 바이라인이 섞이지 않는다");
+
+  // 끈 경우
+  const off = applyTkmStructure(once.html, { related, jsonLd: null, byline: false });
+  assert(!off.hasByline && !off.html.includes("tkm-byline"), "byline:false면 기존 바이라인도 걷힌다");
+  console.log("✅ 바이라인 - Related 앞·멱등·첫 문단 추출 제외");
 }
 
 // 4) JSON-LD 이스케이프·설명 폴백
@@ -99,7 +140,11 @@ const self = posts[0];
   assert(!html.slice(0, -"</script>".length).includes("</script>"), "본문 속 </script>로 일찍 닫히지 않는다");
   assert(describePost(legacy, "  Given   description. ") === "Given description.", "검색 설명이 있으면 그것");
   assert(describePost(legacy, null).startsWith("All you need is one transit card & two taps."), "없으면 첫 문단");
-  console.log("✅ JSON-LD 이스케이프·description 폴백");
+  const ld = JSON.parse(/<script[^>]*>([\s\S]*?)<\/script>/.exec(html)![1]);
+  assert(ld.author["@type"] === "Person" && ld.author.name === TKM_AUTHOR_NAME && ld.author.name === "Jayden", `JSON-LD 저자는 사람(Jayden) (${JSON.stringify(ld.author)})`);
+  assert(ld.publisher["@type"] === "Organization" && ld.publisher.name === "Korea Plain", "발행자는 Korea Plain 유지");
+  assert(ld.publisher.description.includes("by a Korean living in Seoul"), "발행자 설명이 로컬 필자를 밝힌다");
+  console.log("✅ JSON-LD 이스케이프·description 폴백·저자 Person");
 }
 
 // 5) All Guides 페이지

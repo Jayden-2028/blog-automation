@@ -12,7 +12,7 @@
 // (3) About 페이지만: 제목 "About Korea Plain", 맨 위 태그라인 한 줄, 첫 문장에 "(formerly The Korea Manual)".
 // 변환 뒤 checkNameOnlyChange가 "옛 이름 -> 새 이름 + 허용한 삽입" 말고 다른 차이가 없음을 확인한다. 다시 돌려도 결과가 같다(멱등).
 
-import { TKM_BRAND_NAME, TKM_BRAND_TAGLINE, TKM_FORMER_BRAND_NAME, jsonLdForScript, tkmJsonLdBrand } from "./tkmPostStructure.js";
+import { TKM_AUTHOR_NAME, TKM_BRAND_NAME, TKM_BRAND_TAGLINE, TKM_FORMER_BRAND_NAME, jsonLdForScript, tkmJsonLdBrand } from "./tkmPostStructure.js";
 
 /** About 페이지 경로. 슬러그는 링크가 깨지지 않게 그대로 둔다(제목만 바뀐다). */
 export const TKM_ABOUT_PATH = "/p/about-korea-manual.html";
@@ -125,8 +125,9 @@ export function checkNameOnlyChange(before: string, after: string, insertions: r
   for (let i = 0; i < b.blocks.length; i += 1) {
     if (omitBrand(b.blocks[i]) !== omitBrand(a.blocks[i])) return { ok: false, reason: `JSON-LD ${i + 1}번째 블록에서 이름 외 칸이 바뀜` };
     const next = a.blocks[i] as { author?: { name?: unknown }; publisher?: { name?: unknown } } | null;
-    if (next && (next.author?.name !== TKM_BRAND_NAME || next.publisher?.name !== TKM_BRAND_NAME)) {
-      return { ok: false, reason: `JSON-LD ${i + 1}번째 블록의 author/publisher 이름이 ${TKM_BRAND_NAME}이 아님` };
+    // 저자는 사람(필명), 발행자는 브랜드다(2026-10-30 §A-5 - 전에는 둘 다 브랜드였다).
+    if (next && (next.author?.name !== TKM_AUTHOR_NAME || next.publisher?.name !== TKM_BRAND_NAME)) {
+      return { ok: false, reason: `JSON-LD ${i + 1}번째 블록의 author가 ${TKM_AUTHOR_NAME}·publisher가 ${TKM_BRAND_NAME}이 아님` };
     }
   }
   // 삽입은 양쪽에서 걷는다 - 이미 바꾼 페이지를 다시 돌릴 때(멱등) 전 본문에도 들어 있다.
