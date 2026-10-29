@@ -14,10 +14,10 @@
 - **레딧 보정**: 제목이 `koreans how do you` / `do koreans` / `is it rude in korea` / `is it normal in korea`로 시작하면 그 후보의
   redditHits를 2로 센다(`redditLocalQuestion`, 교차 신호 상한 15 그대로).
 - **선정**: `localEdgeFloor`(topN=8이면 2, `defaultLocalEdgeFloor`) - 실용 하한과 겹쳐도 되고 라벨 상한(3)은 지킨다. 후보가 없으면 안 채운다.
-- **시드**: 117 → **167**(라벨별 +10, 기존 삭제·변경 없음, 중복 0). 머리 주석에 "2026-10-30 로컬 우위 축".
+- **시드**: 117 → **164**(개정안 50개 중 자동완성이 비는 긴 질의 37개를 2~3단어로 줄여 실측 통과분 47개만 추가, 기존 삭제·변경 없음, 중복 0). 머리 주석에 "2026-10-30 로컬 우위 축".
 - **로그**: `ksceneTopicJob.ts`의 ▶ 줄과 collection 로그에 "로컬 우위 N건 · 포화 감점 N건"(결과 `localEdgeCount`·`saturatedCount`).
 - **테스트**: `npm run test:kscene-topics`에 로컬 우위 +15·포화 −10/하한 0·합계 100·레딧 보정·로컬 하한 케이스 추가(10/28 해외 지명·정규화 테스트 불변,
-  시드 총량 단언만 167로 갱신).
+  시드 총량 단언만 164로 갱신).
 
 ## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
 

@@ -52,12 +52,13 @@ async function main(): Promise<void> {
   assert(KSCENE_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
 
   // 체류 실용 축(2026-10-11, §C): 기획⑤ 확정본 100개를 지우지 않고 누적했고, 실용 시드가 들어와 있다.
-  assert(KSCENE_SEEDS.length === 167, `시드 총량 167개(기획⑤ 100 + 실용 17 + 로컬 우위 50, 실제 ${KSCENE_SEEDS.length})`);
+  assert(KSCENE_SEEDS.length === 164, `시드 총량 164개(기획⑤ 100 + 실용 17 + 로컬 우위 47, 실제 ${KSCENE_SEEDS.length})`);
   const seedsByLabel = new Map<string, number>();
   for (const seed of KSCENE_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
-  assert(seedsByLabel.get("Living in Korea") === 42 && seedsByLabel.get("Travel & Transit") === 35, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
-  for (const label of ["Food & Dining", "Culture & Etiquette", "K-Wave Context"]) {
-    assert(seedsByLabel.get(label) === 30, `${label}는 기획⑤ 확정본 20개 + 로컬 우위 10개`);
+  assert(seedsByLabel.get("Living in Korea") === 41 && seedsByLabel.get("Travel & Transit") === 35, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
+  // 로컬 우위 시드(2026-10-30): 자동완성이 비는 긴 질의는 걸러 라벨마다 개수가 다르다.
+  for (const [label, count] of [["Food & Dining", 30], ["Culture & Etiquette", 31], ["K-Wave Context", 27]] as const) {
+    assert(seedsByLabel.get(label) === count, `${label}는 기획⑤ 확정본 20개 + 로컬 우위 ${count - 20}개(실제 ${seedsByLabel.get(label)})`);
   }
   for (const practical of ["korea prepaid usim", "korea resident registration move", "korea utility bill payment", "korea garbage bag rules", "korea bus subway transfer", "korea traffic signals"]) {
     assert(KSCENE_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
@@ -339,10 +340,10 @@ async function main(): Promise<void> {
     ...(over.redditLocalQuestion ? { redditLocalQuestion: true } : {}),
   });
 
-  // 새 시드 50개: 라벨당 10개, 기존 117개 유지
-  const newSeedQueries = ["korea subway priority seat", "korea restaurant call button", "korea apartment noise neighbors", "korea which hospital department", "kdrama office culture real life"];
+  // 새 시드 47개(개정안 50개 중 자동완성이 비는 긴 질의를 2~3단어로 줄여 실측 통과분만), 기존 117개 유지
+  const newSeedQueries = ["priority seat korea", "korea restaurant call button", "korea apartment noise", "korea hospital department", "korean office culture"];
   for (const query of newSeedQueries) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `로컬 우위 시드가 있어야 한다: ${query}`);
-  assert(KSCENE_LABEL_BY_SEED["korea gu office vs dong office"] === "Living in Korea" && KSCENE_LABEL_BY_SEED["korean side dish refill"] === "Food & Dining", "새 시드의 라벨 매핑");
+  assert(KSCENE_LABEL_BY_SEED["korea dong office"] === "Living in Korea" && KSCENE_LABEL_BY_SEED["korean side dish refill"] === "Food & Dining", "새 시드의 라벨 매핑");
   assert(KSCENE_SEEDS.slice(0, 117).some((seed) => seed.query === "korea subway") && KSCENE_SEEDS.some((seed) => seed.query === "korean bbq"), "기존 시드 유지");
 
   // (a) 로컬 우위 +15
@@ -411,7 +412,7 @@ async function main(): Promise<void> {
   assert(overlap.selected.filter((item) => item.score.localEdge > 0).length === 2, "실용 하한과 겹쳐도 로컬 하한 충족");
   const capped = selectTopics([...touristy.slice(0, 2), ...[1, 2, 3, 4].map((n) => mk(`korea ${n} neighbor noise rules`, { label: "Culture & Etiquette", bestPosition: 8 }))], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 4, perLabelCap: 2 });
   assert(capped.selected.filter((item) => item.label === "Culture & Etiquette").length <= 4, "라벨 상한 로직은 유지(하한이 상한을 깨지 않는 단계)");
-  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 167개");
+  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 164개");
 
   console.log("\n✅ testKsceneTopics 통과");
 }

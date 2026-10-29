@@ -19,10 +19,10 @@
 // 게이트)이고, 영문 시드가 한국 NAVER 수집 경로(seed_queries 전체를 읽는 엔터·사회 job)에 섞이면 안 된다.
 //
 // 📌 **2026-10-30 로컬 우위 축**(branding-2026-10/kp-native-identity-2026-10.md §C-3): 사이트 43편의 86%가 외국인
-// 저자 블로그가 이미 포화시킨 주제라, 한국인은 알지만 외국인 가이드가 잘 못 쓰는 질의를 라벨별 10개씩 **50개 추가**했다
-// (117 -> 167). 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 ksceneTopics.ts의 LOCAL_EDGE_TERMS /
-// SATURATED_TOURIST_TERMS가 맡는다. 라벨 5개 이름은 그대로다(Blogger 라벨 URL·About·시드 매핑이 묶여 있다).
-// 새 시드의 자동완성 빈 결과는 dry-run으로 걸러 팀장이 제거를 결정한다.
+// 저자 블로그가 이미 포화시킨 주제라, 한국인은 알지만 외국인 가이드가 잘 못 쓰는 질의를 **47개 추가**했다(117 -> 164).
+// 개정안의 4~5단어 질의 50개는 자동완성이 37개나 비어서(롱테일이 너무 길다) 2~3단어로 줄여 실측으로 걸러 남겼다.
+// 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 ksceneTopics.ts의 LOCAL_EDGE_TERMS / SATURATED_TOURIST_TERMS가
+// 맡는다. 라벨 5개 이름은 그대로다(Blogger 라벨 URL·About·시드 매핑이 묶여 있다).
 //
 // label은 Blogger 라벨(글 분류)로 쓴다 - CHANNEL-SETUP-2026-10.md B-2의 카테고리 체계와 같다.
 
@@ -67,17 +67,17 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea traffic signals",
     "jaywalking in korea",
     "korea rush hour commute",
-    // 2026-10-30 로컬 우위 축 - 타는 법이 아니라 타고 나서 한국 사람들이 하는 것.
-    "korea subway priority seat",
-    "korea bus back door exit",
-    "korea taxi late night surcharge",
+    // 2026-10-30 로컬 우위 축 - 타는 법이 아니라 타고 나서 한국 사람들이 하는 것. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
     "korea ktx standing ticket",
     "korea highway rest stop",
-    "korea subway bike rules",
-    "seoul public bike ttareungyi",
-    "korea apartment visitor parking",
-    "korea subway elevator etiquette",
-    "korea bus stop bell when",
+    "priority seat korea",
+    "korea bus etiquette",
+    "korea taxi surcharge",
+    "korea taxi tip",
+    "seoul public bike",
+    "korea parking rules",
+    "korea subway etiquette",
+    "korea bus stop button",
   ]),
   ...seeds("Food & Dining", [
     "korean bbq",
@@ -100,17 +100,17 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korean breakfast",
     "korean snacks must try",
     "korea michelin restaurants",
-    // 2026-10-30 로컬 우위 축 - 외국인이 식당에서 실제로 막히는 지점.
+    // 2026-10-30 로컬 우위 축 - 외국인이 식당에서 실제로 막히는 지점. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
     "korea restaurant call button",
-    "korea restaurant self service water",
     "korean side dish refill",
     "korea restaurant break time",
-    "korea pay at counter",
-    "korean delivery minimum order",
     "korea convenience store meal",
-    "korea solo dining honbap",
-    "korea cafe study seat rules",
-    "korea restaurant last order",
+    "korea restaurant payment",
+    "korea delivery fee",
+    "korea delivery order",
+    "korea solo dining",
+    "korea study cafe",
+    "korea restaurant hours",
   ]),
   ...seeds("Culture & Etiquette", [
     "korean etiquette",
@@ -133,17 +133,18 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korean superstitions",
     "korean business etiquette",
     "korean school culture",
-    // 2026-10-30 로컬 우위 축 - 한국인 다수의 실제 관행.
-    "korea apartment noise neighbors",
-    "korea elevator greeting",
+    // 2026-10-30 로컬 우위 축 - 한국인 다수의 실제 관행. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
     "korea gift money amount",
     "what koreans do on chuseok",
-    "korea 60th birthday hwangap",
     "korea first birthday doljanchi",
-    "korea company dinner hoesik",
-    "korea asking age first meeting",
-    "korea addressing strangers",
     "korea apology culture",
+    "korea apartment noise",
+    "korea greeting",
+    "korea 60th birthday",
+    "korea company dinner",
+    "korea age question",
+    "korea ajumma",
+    "korea elevator etiquette",
   ]),
   ...seeds("Living in Korea", [
     "living in korea foreigner",
@@ -180,17 +181,16 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea mobile banking foreigner",
     "korea clinic appointment foreigner",
     "korea health insurance bill",
-    // 2026-10-30 로컬 우위 축 - 창구·동네 실무.
-    "korea which hospital department",
-    "korea pharmacy without prescription",
-    "korea gu office vs dong office",
+    // 2026-10-30 로컬 우위 축 - 창구·동네 실무. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
     "korea bank certificate",
-    "korea apartment management fee",
-    "korea gas safety inspection visit",
-    "korea apartment delivery box",
-    "korea civil complaint minwon",
-    "korea seasonal home checklist",
-    "korea moving day rules",
+    "korea hospital department",
+    "korea pharmacy medicine",
+    "korea dong office",
+    "korea apartment fee",
+    "korea gas inspection",
+    "korea delivery box",
+    "korea ondol",
+    "korea moving day",
   ]),
   ...seeds("K-Wave Context", [
     "kpop fan culture",
@@ -213,17 +213,14 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "kpop fandom names",
     "korea music festivals",
     "kdrama food scenes",
-    // 2026-10-30 로컬 우위 축 - 드라마 장면의 실제.
-    "kdrama office culture real life",
-    "kdrama apartment real life",
-    "korean school lunch real",
-    "korea hagwon cram school explained",
-    "korean military service explained",
+    // 2026-10-30 로컬 우위 축 - 드라마 장면의 실제. 자동완성 실측으로 2~3단어로 줄인 것만 남겼다.
     "korean workplace titles",
-    "kdrama convenience store real",
-    "korean variety show terms",
-    "kdrama rooftop house real",
-    "korea apartment complex kdrama",
+    "korean office culture",
+    "korean school lunch",
+    "korean hagwon",
+    "korean convenience store",
+    "korean rooftop house",
+    "korean apartment complex",
   ]),
 ];
 
