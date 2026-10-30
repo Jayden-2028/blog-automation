@@ -83,6 +83,7 @@
     "test:capture-ranking": "tsx src/workflows/images/testCaptureRanking.ts",
     "test:capture-pages": "tsx src/workflows/images/testCapturePages.ts",
     "test:revise-brief": "tsx src/workflows/brief/testReviseBrief.ts",
+    "test:topic-scope": "tsx src/workflows/brief/testTopicScope.ts",
     "test:keyword-brief": "tsx src/workflows/brief/testKeywordBrief.ts",
     "manuscripts:reset-web-images": "tsx src/workflows/manuscripts/resetWebImagesCli.ts",
     "manuscripts:clear-ai-substitutes": "tsx src/workflows/manuscripts/clearAiSubstitutesCli.ts",
