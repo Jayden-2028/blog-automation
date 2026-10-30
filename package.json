@@ -37,6 +37,7 @@
     "test:research-prompt": "tsx src/workflows/research/testBuildResearchPrompt.ts",
     "test:gemini-research-prompt": "tsx src/workflows/research/testBuildGeminiResearchPrompt.ts",
     "test:gemini-grounding-enforce": "tsx src/workflows/research/testEnforceGeminiGroundingUrls.ts",
+    "test:grounding-resolve": "tsx src/services/llm/testResolveGroundingUrls.ts",
     "debug:gemini-research": "tsx src/workflows/research/debugGeminiResearch.ts",
     "debug:compare-research": "tsx src/workflows/research/debugCompareResearchProviders.ts",
     "test:official-content": "tsx src/workflows/research/testFetchOfficialSourceContent.ts",

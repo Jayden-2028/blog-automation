@@ -16,6 +16,7 @@ import { buildResearchPrompt } from "./buildResearchPrompt.js";
 import { buildGeminiResearchPrompt } from "./buildGeminiResearchPrompt.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { resolveGroundingUrls } from "../../services/llm/resolveGroundingUrls.js";
 import { enforceGeminiGroundingUrls } from "./enforceGeminiGroundingUrls.js";
 import { parseResearchFile } from "./parseResearchFile.js";
 import type { ParsedResearchFile } from "./parseResearchFile.js";
@@ -88,8 +89,16 @@ async function main(): Promise<void> {
   if (!geminiResult.ok) {
     console.error(`❌ Gemini 실패 (${Math.round(geminiDurationMs / 1000)}초): ${geminiResult.error}`);
   } else {
-    const allowedUrls = new Set(geminiResult.groundingSources.map((s) => s.url));
-    const enforced = enforceGeminiGroundingUrls(stripMarkdownFence(geminiResult.text), allowedUrls);
+    const resolvedGrounding = await resolveGroundingUrls(geminiResult.groundingSources);
+    const enforced = enforceGeminiGroundingUrls(
+      stripMarkdownFence(geminiResult.text),
+      resolvedGrounding.urls,
+      resolvedGrounding.domains
+    );
+    console.log(
+      `   grounding 출처 ${geminiResult.groundingSources.length}건 - 최종 주소 해결 ${resolvedGrounding.resolvedCount} / 미해결 ${resolvedGrounding.unresolvedCount}` +
+        (enforced.domainMatchedCount > 0 ? ` · 도메인 일치 인정 ${enforced.domainMatchedCount}건` : "")
+    );
     geminiEnforcedText = enforced.text;
     geminiDowngradedCount = enforced.downgradedCount;
     await writeFile(geminiPath, `${geminiEnforcedText.trim()}\n`, "utf8");

@@ -18,21 +18,38 @@
 //   2) §10 전체 출처 목록 표 - Node가 이 표를 그대로 sources DB에 반영한다(runArticleJob.ts).
 // 강등이 일어나면 frontmatter의 verdict/source_counts도 §7 공식대로 재계산해 다시 쓴다 - 안
 // 그러면 강등 전(부풀려진) 개수로 계산된 verdict: ok가 강등 사실과 모순된 채로 남는다.
+//
+// 2026-10-30 수정(중요): grounding URL은 리디렉션 주소이고 Gemini가 본문에 적는 `· 출처:`는 실제
+// 주소라, 둘을 글자 그대로 비교하던 옛 코드는 **한 건도 일치시키지 못했다** - grounding된 공식
+// 출처까지 전부 강등돼 verdict가 항상 thin으로 떨어졌다(실측: 공식 10건 전부 강등, 강등된 URL은
+// 모두 실재하는 정상 페이지). 이제 호출자가 `resolveGroundingUrls`로 리디렉션을 **푼 뒤** 최종
+// 주소 집합을 넘긴다. 리디렉션이 풀리지 않은 출처는 도메인만 넘어오고, 그 경우에는 **경로가 있는
+// URL에 한해** 도메인 단위로 인정한다 - 2026-09-03에 막으려던 실패(최상위 도메인만 적고 인용문을
+// 지어내는 것)는 `hasPath` 조건으로 그대로 막힌다.
 
+import { hostOf, normalizeUrl } from "../../services/llm/resolveGroundingUrls.js";
 import type { SourceAuthorityLevel } from "../../types/database.js";
 
 export type GroundingEnforcementResult = {
   text: string;
   /** official/medical -> community로 강등된 항목 수(§2/§3 불릿 + §10 표 행 합계). */
   downgradedCount: number;
+  /** 최종 주소가 아니라 **도메인 일치**로 인정한 URL 수(리디렉션을 못 푼 출처의 보조 경로). */
+  domainMatchedCount: number;
   recomputedVerdict: "ok" | "thin" | "blocked";
   recomputedSourceCounts: Record<SourceAuthorityLevel, number>;
 };
 
 const URL_PATTERN = /https?:\/\/[^\s)|\]]+/g;
 
-function normalizeUrl(url: string): string {
-  return url.replace(/[),.]+$/, "").replace(/\/$/, "");
+/** 최상위 도메인만 적은 URL인가(경로·쿼리가 없다). 도메인 단위 인정에서 제외한다. */
+function hasPath(url: string): boolean {
+  try {
+    const parsed = new URL(url.trim().replace(/[),.]+$/, ""));
+    return parsed.pathname.replace(/\/$/, "").length > 0 || parsed.search.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function extractUrls(text: string): string[] {
@@ -125,10 +142,21 @@ function computeVerdict(counts: Record<SourceAuthorityLevel, number>): "ok" | "t
 
 export function enforceGeminiGroundingUrls(
   text: string,
-  allowedUrls: ReadonlySet<string>
+  allowedUrls: ReadonlySet<string>,
+  allowedDomains: ReadonlySet<string> = new Set()
 ): GroundingEnforcementResult {
   const normalizedAllowed = new Set([...allowedUrls].map(normalizeUrl));
-  const isAllowed = (url: string): boolean => normalizedAllowed.has(url);
+  const normalizedDomains = new Set([...allowedDomains].map((d) => d.trim().toLowerCase().replace(/^www\./, "")));
+  let domainMatchedCount = 0;
+  const isAllowed = (url: string): boolean => {
+    if (normalizedAllowed.has(normalizeUrl(url))) return true;
+    const host = hostOf(url);
+    if (host && normalizedDomains.has(host) && hasPath(url)) {
+      domainMatchedCount++;
+      return true;
+    }
+    return false;
+  };
 
   const frontmatterMatch = text.match(/^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   const frontmatter = frontmatterMatch ? frontmatterMatch[1] : "";
@@ -143,6 +171,7 @@ export function enforceGeminiGroundingUrls(
     return {
       text,
       downgradedCount: 0,
+      domainMatchedCount,
       recomputedVerdict: (extractFrontmatterScalar(frontmatter, "verdict") as "ok" | "thin" | "blocked") || "thin",
       recomputedSourceCounts: tallySourceTable(tablePass.lines),
     };
@@ -174,6 +203,7 @@ export function enforceGeminiGroundingUrls(
   return {
     text: `${newFrontmatter}\n${newBody}`,
     downgradedCount,
+    domainMatchedCount,
     recomputedVerdict,
     recomputedSourceCounts,
   };
