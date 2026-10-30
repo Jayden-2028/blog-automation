@@ -21,6 +21,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 import { parseBriefOutput } from "./buildKeywordBrief.js";
 import type { KeywordBrief } from "./buildKeywordBrief.js";
+import { droppedScope, readTopicScope } from "./topicScope.js";
 
 /** 1차 브리프보다 짧게 잡는다 - 재료(리서치)가 이미 있어 판단만 하면 된다. */
 export const BRIEF_REVISE_TIMEOUT_MS = 4 * 60 * 1000;
@@ -30,9 +31,19 @@ export type ReviseBriefInput = {
   brief: KeywordBrief;
   /** 자료조사 본문. 여기 있는 사실만 근거로 쓴다. */
   research: string;
+  /**
+   * 키워드가 **사용자가 직접 쓴 주제**인가(변환기 입력 - instagram_manual·keyword_input).
+   *
+   * 2026-10-30 추가. 이 재작성은 원래 "제목만 보고 만든 추정"을 고치려는 장치인데, 사용자가 보낸
+   * 주제에는 고칠 오독이 없다. 그런데도 "자료에 맞게" 질문을 갈아끼우면 **사용자가 요청한 주제가
+   * 바뀐다**(실측: "전국 10대 도시 특산품" -> "부산 기념품 판매처 4곳"). true면 범위를 줄이는
+   * 교체를 프롬프트로 금지하고, 그래도 줄었으면 코드가 1차 브리프를 그대로 쓴다.
+   */
+  userAuthoredTopic?: boolean;
 };
 
 export function buildRevisePrompt(input: ReviseBriefInput): string {
+  const scope = readTopicScope(input.keyword);
   return [
     "너는 블로그 편집장이다. 자료조사가 끝났다. **조사 전에 제목만 보고 잡았던 질문 목록**을",
     "지금 읽은 자료에 비추어 다시 쓴다. 이 목록이 곧 원고의 소제목 뼈대가 된다.",
@@ -48,6 +59,19 @@ export function buildRevisePrompt(input: ReviseBriefInput): string {
     "## 자료조사 결과 (사실은 여기에만 있다)",
     input.research,
     "",
+    ...(scope.hasScope && input.userAuthoredTopic
+      ? [
+          "## 범위는 사용자가 정했다 - 줄이지 마라 (최우선)",
+          `이 키워드는 **사용자가 직접 쓴 주제**이고 범위를 명시했다: ${scope.markers.join(", ")}${
+            scope.count ? ` (항목 ${scope.count}개 규모)` : ""
+          }.`,
+          "- 자료가 일부만 찾아졌다고 **대상 범위를 좁히지 마라.** 10곳을 묻는 질문을 1곳 질문으로",
+          "  바꾸는 것은 교정이 아니라 **다른 글을 쓰는 것**이다(2026-10-30 실측 사고).",
+          "- 자료가 없는 항목은 질문을 **그대로 두고** 아래 5번대로 둔다. 못 찾았다는 사실도 정보다.",
+          "- 고쳐도 되는 것은 각도·표현·사실 오류뿐이다. **무엇을 다루는지(대상)는 고정이다.**",
+          "",
+        ]
+      : []),
     "## 무엇을 고치나",
     "1. **사실이 틀렸으면 고친다.** 제목만 보고 주어를 반대로 잡는 일이 실제로 있었다",
     "   (\"'로또 1등' 서현우\"를 서현우가 당첨자로 읽었는데, '로또 1등'은 드라마 제목 약칭이고",
@@ -107,6 +131,16 @@ export async function reviseBriefWithResearch(
   const parsed = parseBriefOutput(result.output);
   if (!parsed || parsed.questions.length === 0) {
     return { status: "failed", error: "재작성 결과를 읽지 못했습니다." };
+  }
+
+  // 범위 가드(2026-10-30): 사용자가 쓴 주제에서 재작성이 범위 표지를 전부 지웠으면 **1차를 쓴다.**
+  // 프롬프트 금지만으로는 못 막은 실측이 있어 코드로 되돌린다.
+  const scope = readTopicScope(input.keyword);
+  if (input.userAuthoredTopic && droppedScope(scope, input.brief.questions, parsed.questions)) {
+    return {
+      status: "failed",
+      error: `재작성이 사용자 주제의 범위(${scope.markers.join(", ")})를 버려 1차 브리프를 유지합니다.`,
+    };
   }
 
   const changedLine = /^CHANGED:\s*(.+)$/m.exec(result.output)?.[1]?.trim() ?? "";

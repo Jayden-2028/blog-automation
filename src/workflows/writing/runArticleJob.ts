@@ -787,6 +787,8 @@ async function runWritingStageInner(
         keyword: job.keyword,
         brief: firstBrief,
         research,
+        // 변환기로 사용자가 직접 보낸 주제면 범위를 줄이는 재작성을 막는다(2026-10-30).
+        userAuthoredTopic: isConverterJobSource(job.metadata),
       });
       if (revised.status === "failed") {
         console.warn(`⚠️ [writing] 브리프 재작성 실패(1차를 그대로 씁니다): ${revised.error}`);
