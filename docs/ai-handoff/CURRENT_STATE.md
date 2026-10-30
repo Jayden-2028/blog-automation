@@ -2,6 +2,37 @@
 
 기준일: 2026-10-30 (Asia/Seoul)
 
+## 2026-10-31 — verdict를 카테고리별로, 코드가 계산한다 (thin 85% → 46%)
+
+- **문제**: 10월 조사 351건 중 **306건(85%)이 `thin`**이었다. `thin`은 사람이 "조사가 부실하다"를 알아채는 유일한
+  신호인데, 늘 켜져 있어 배경 소음이 됐다(부산 특산품 건의 진짜 부실 조사도 그 속에 묻혔다).
+- **원인**: 규격 §7의 `ok` 조건("official+medical ≥ 2, 전체 ≥ 8")이 **전 카테고리 공통**이다. 그런데 엔터는 공식
+  (정부·기관) 자료가 존재할 수 없는 주제다 - 실측 엔터 85건 중 79건이 공식 0건, thin 99%. OTT 93%, 사건 90%.
+  반대로 사용설명서는 관공서 안내를 인용해 공식 평균 2.6건·thin 57%로 가장 낮다. **구조적으로 통과 불가능한
+  기준이었다.** 더해서 thin 306건 중 31건은 자기가 쓴 숫자로 이미 ok 조건을 채웠는데 thin이라고 적었다(오기 10%).
+- **수정**: `research/computeResearchVerdict.ts` 신설 - ① 카테고리 프로파일(`entertainment`·`ott`·`person`은
+  **교차확인 뉴스 3건 + 전체 8건**이면 ok, 나머지는 공식 2건 기준 그대로) ② `blocked`를 **가장 먼저** 판정
+  (옛 `enforceGeminiGroundingUrls`는 `news ≥ 3`을 `total < 5`보다 먼저 봐서 규격상 blocked인 파일을 thin으로
+  돌려줬다) ③ 의료·법률·금융은 1차 근거 2건 미만이면 카테고리와 무관하게 blocked. **판정은 에이전트가 쓴 글이
+  아니라 코드가 숫자에서** 계산하고, 다르면 `metadata.researchVerdictWritten`에 원본을 남기고 로그에 적는다.
+  검수 카드의 "자료 얇음" 경고도 같은 계산값을 쓴다(전에는 writer가 옮겨 적은 에이전트 원본을 썼다).
+  `prompts/research/researcher.md` §7 표도 같은 규칙으로 갱신했다.
+- **10월 360건 재생 결과**: 판정이 바뀌는 것 151건. 전체 thin **306 → 167(46%)**.
+
+| 카테고리 | n | 옛 thin | 새 thin | 새 ok | 새 blocked |
+|---|---|---|---|---|---|
+| entertainment | 85 | 84 | **11** | 74 | 0 |
+| living | 71 | 55 | 52 | 17 | 2 |
+| incident | 61 | 55 | 49 | 11 | 1 |
+| kscene | 56 | 32 | 24 | 32 | 0 |
+| ott | 40 | 37 | **5** | 35 | 0 |
+| person | 16 | 13 | **0** | 16 | 0 |
+
+- **검증**: `npm run test:research-verdict`(신설) · `test:gemini-grounding-enforce` · `test:article-review` ·
+  `test:parse-research` · `test:spec-files` · `npm run build` 통과 + 위 전수 재생(DB 읽기 전용).
+- **관측할 것**: `living`은 52/71(73%)로 여전히 높다. 일상 트랙에 공식 자료가 없는 주제(퀴즈 정답·생활 팁)가
+  섞여 있어서인데, 정책·지원금도 같은 카테고리라 성급히 news 프로파일로 옮기지 않았다. 2주 관측 후 판단한다.
+
 ## 2026-10-30 — 범위 게이트: 사용자 주제를 안 다룬 원고는 자동 승인하지 않는다
 
 - **무엇**: write 직후 `finishWrite`가 **사용자가 직접 보낸 주제**(변환기 출처 `instagram_manual`·`keyword_input`)와

@@ -58,6 +58,7 @@ import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { collectAutocomplete } from "../brief/fetchNaverAutocomplete.js";
 import { buildGeminiResearchPrompt } from "../research/buildGeminiResearchPrompt.js";
 import { enforceGeminiGroundingUrls } from "../research/enforceGeminiGroundingUrls.js";
+import { computeResearchVerdict, reconcileVerdict } from "../research/computeResearchVerdict.js";
 import { describeShortage } from "../research/describeResearchShortage.js";
 import { parseResearchFile } from "../research/parseResearchFile.js";
 import type { ResearchVerdict } from "../research/parseResearchFile.js";
@@ -514,11 +515,30 @@ async function runResearchStageInner(
   // "파일이 없으니" 매번 조사부터 다시 했다(sources는 이미 DB에 있는데도) - 시간·비용 낭비는
   // 물론, 그 재조사 자체가 실패하면(예: claude 종료 코드 1) 이미 끝난 조사까지 덩달아 실패로
   // 보였다. runWritingStage가 이 내용으로 로컬 파일을 복원해 재조사를 건너뛴다.
+  // verdict는 에이전트가 적은 글이 아니라 **코드가 숫자에서** 계산한다(2026-10-31). 두 가지를 고친다:
+  //  ① 카테고리 - 엔터·OTT·인물은 공식(정부·기관) 출처가 존재할 수 없는 주제라 옛 단일 기준으로는
+  //     구조적으로 통과가 불가능했다(실측: 엔터 99% thin, 공식 평균 0.1건). thin이 늘 켜져 있으면
+  //     "조사가 부실하다"는 신호가 소음이 된다.
+  //  ② 오기 - 10월 thin 306건 중 31건은 자기가 쓴 숫자로 이미 ok 조건을 채웠는데 thin이라고 적었다.
+  const reconciled = reconcileVerdict(parsed.verdict, {
+    counts: sourceCounts,
+    category: job.category,
+    isMedical: isMedicalTopic(job.keyword) || (job.headline ? isMedicalTopic(job.headline) : false),
+  });
+  if (reconciled.corrected) {
+    console.log(
+      `ℹ️ [research] verdict 재계산: 파일 "${reconciled.written}" → "${reconciled.verdict}" ` +
+        `(공식 ${sourceCounts.official}·의학 ${sourceCounts.medical}·뉴스 ${sourceCounts.news}·커뮤니티 ${sourceCounts.community}, category=${job.category ?? "-"})`
+    );
+  }
+
   await ArticleJobRepository.mergeMetadata(jobId, {
     lastError: null,
     researchFilePath: outputPath,
     researchFileContent: fileText,
-    researchVerdict: parsed.verdict,
+    researchVerdict: reconciled.verdict,
+    // 감사용 - 에이전트가 파일에 적었던 값과 다르면 남긴다.
+    researchVerdictWritten: reconciled.corrected ? reconciled.written : null,
     sourceCounts,
   });
 
@@ -527,7 +547,7 @@ async function runResearchStageInner(
     job,
     sources: allSources,
     researchFilePath: outputPath,
-    verdict: parsed.verdict,
+    verdict: reconciled.verdict,
     sourceCounts,
     durationMs: Date.now() - startedAt,
   };
@@ -924,13 +944,25 @@ async function runWritingStageInner(
   const reviewSources = researchText
     ? [...sources.map((s) => ({ content: s.content })), { content: researchText }]
     : sources.map((s) => ({ content: s.content }));
+  // 검수 카드의 "자료 얇음" 경고도 **코드 계산값**을 쓴다(2026-10-31). writer가 frontmatter에 옮겨 적은
+  // verdict는 에이전트 원본이라 카테고리 보정·오기 교정이 반영돼 있지 않다.
+  const reviewVerdict = computeResearchVerdict({
+    counts: {
+      official: sources.filter((s) => s.authority === "official").length,
+      medical: sources.filter((s) => s.authority === "medical").length,
+      news: sources.filter((s) => s.authority === "news").length,
+      community: sources.filter((s) => s.authority === "community").length,
+    },
+    category: job.category,
+    isMedical,
+  });
   const review = runArticleReview({
     job: { category: job.category },
     article: { title: article.title, content: article.content, created_at: article.created_at },
     sources: reviewSources,
     hashtags: parsed.hashtags,
     isMedical,
-    researchVerdict: parsed.verdictFromResearch,
+    researchVerdict: reviewVerdict,
     researchText,
     keyword: job.keyword,
   });
