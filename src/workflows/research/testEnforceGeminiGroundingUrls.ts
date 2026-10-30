@@ -101,6 +101,63 @@ function main(): void {
   assert(untouched.text === SAMPLE, "강등이 없으면 원문을 그대로 반환한다(불필요한 재작성 없음)");
   console.log("✅ 전부 grounding된 경우 원문 보존");
 
+  // ── 2026-10-30 회귀: 본문은 실제 주소, grounding은 리디렉션 주소 ──────────────
+  // 옛 코드는 둘을 글자 그대로 비교해 grounding된 공식 출처까지 전부 강등했다(실측 10/10).
+  // 이제 호출자가 리디렉션을 푼 **최종 주소**를 넘기므로 일치해야 한다.
+  const REAL_SAMPLE = `---
+keyword: 지역 특산품
+topic: kscene
+researched_at: 2026-10-30
+source_counts:
+  official: 2
+  medical: 0
+  news: 0
+  community: 0
+verdict: ok
+---
+
+## 2. 확인된 사실
+
+- [official] 문체부는 전통시장 10곳을 K-관광 마켓으로 선정했다 — 확인일 2026-10-30
+  · 출처: https://www.korea.kr/news/policyNewsView.do?newsId=148914101
+
+- [official] 농사로에 지역 특산물 1,721개가 등록돼 있다 — 확인일 2026-10-30
+  · 출처: https://www.nongsaro.go.kr/portal/ps/psa/psae/psaeg/localSpecialitiesLst.ps?menuId=PS00012
+
+- [official] 관계 부처가 발표했다 — 확인일 2026-10-30
+  · 출처: https://www.msit.go.kr
+
+## 10. 전체 출처 목록
+
+| # | 등급 | 제목 | URL | 발행일 |
+|---|---|---|---|---|
+| 1 | official | K-관광 마켓 | https://www.korea.kr/news/policyNewsView.do?newsId=148914101 | 2023-05-03 |
+| 2 | official | 농사로 특산물 | https://www.nongsaro.go.kr/portal/ps/psa/psae/psaeg/localSpecialitiesLst.ps?menuId=PS00012 | 2024-01-01 |
+| 3 | official | 부처 발표 | https://www.msit.go.kr | 발행일 미상 |
+`;
+
+  // 리디렉션을 푼 최종 주소 1건 + 못 푼 출처의 도메인 1건
+  const resolvedUrls = new Set(["https://korea.kr/news/policyNewsView.do?newsId=148914101"]);
+  const resolvedDomains = new Set(["korea.kr", "nongsaro.go.kr"]);
+
+  const real = enforceGeminiGroundingUrls(REAL_SAMPLE, resolvedUrls, resolvedDomains);
+  assert(
+    real.text.includes("[official] 문체부는 전통시장"),
+    "최종 주소가 일치하면 official을 유지해야 한다(리디렉션 비교 회귀)"
+  );
+  assert(
+    real.text.includes("[official] 농사로에 지역 특산물"),
+    "리디렉션을 못 푼 출처는 도메인 + 경로로 인정한다"
+  );
+  assert(real.domainMatchedCount >= 1, `도메인 일치 건수를 보고해야 한다 (실제: ${real.domainMatchedCount})`);
+  assert(
+    !real.text.includes("[official] 관계 부처가 발표"),
+    "최상위 도메인만 적은 출처는 도메인 폴백으로도 인정하지 않는다(2026-09-03 가드 유지)"
+  );
+  assert(real.downgradedCount === 2, `msit.go.kr 불릿 + 표 1행만 강등 (실제: ${real.downgradedCount})`);
+  console.log("✅ 실제 주소 ↔ 리디렉션 해제 매칭 + 도메인 폴백 + 최상위 도메인 거부");
+
+
   console.log("\n✅ enforceGeminiGroundingUrls 테스트 완료");
 }
 

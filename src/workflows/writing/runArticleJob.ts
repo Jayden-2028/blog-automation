@@ -39,6 +39,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 import { enforceWritingRules } from "./enforceWritingRules.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { resolveGroundingUrls } from "../../services/llm/resolveGroundingUrls.js";
 import { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
 import { describeError } from "../../services/describeError.js";
@@ -247,15 +248,30 @@ async function runGeminiResearcherAndSave(
   // 도메인 + 지어낸 인용문)을 붙인 사례가 나왔다 - 프롬프트 요청만으로는 안 막혀 코드로 강제한다.
   // baseline(NAVER) URL과 이 응답의 실제 groundingChunks URL만 official/medical로 인정하고,
   // 그 밖의 URL로 된 official/medical 항목은 community로 자동 강등한다(verdict도 재계산).
+  // 2026-10-30: groundingChunks의 uri는 구글 리디렉션 주소라 본문의 실제 주소와 절대 일치하지
+  // 않는다 - 먼저 풀어서 최종 주소로 바꾼다(resolveGroundingUrls). 안 풀린 출처는 도메인만 넘긴다.
+  const resolvedGrounding = await resolveGroundingUrls(result.groundingSources);
   const allowedUrls = new Set<string>([
     ...input.baselineSources.map((s) => s.url).filter((url): url is string => Boolean(url)),
-    ...result.groundingSources.map((s) => s.url),
+    ...resolvedGrounding.urls,
   ]);
-  const enforced = enforceGeminiGroundingUrls(stripMarkdownFence(result.text), allowedUrls);
+  if (resolvedGrounding.unresolvedCount > 0) {
+    console.warn(
+      `⚠️ [research][gemini] grounding 리디렉션 ${resolvedGrounding.unresolvedCount}건을 풀지 못해 도메인 단위로만 인정합니다(해결 ${resolvedGrounding.resolvedCount}건).`
+    );
+  }
+  const enforced = enforceGeminiGroundingUrls(
+    stripMarkdownFence(result.text),
+    allowedUrls,
+    resolvedGrounding.domains
+  );
   if (enforced.downgradedCount > 0) {
     console.warn(
       `⚠️ [research][gemini] grounding 미확인 official/medical ${enforced.downgradedCount}건을 community로 자동 강등했습니다(재계산 verdict: ${enforced.recomputedVerdict}).`
     );
+  }
+  if (enforced.domainMatchedCount > 0) {
+    console.warn(`ℹ️ [research][gemini] 도메인 일치로 인정한 출처 ${enforced.domainMatchedCount}건(최종 주소 미확인).`);
   }
 
   await writeFile(input.outputPath, `${enforced.text.trim()}\n`, "utf8");
