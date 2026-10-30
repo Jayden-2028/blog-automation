@@ -28,6 +28,7 @@
 // 지어내는 것)는 `hasPath` 조건으로 그대로 막힌다.
 
 import { hostOf, normalizeUrl } from "../../services/llm/resolveGroundingUrls.js";
+import { computeResearchVerdict } from "./computeResearchVerdict.js";
 import type { SourceAuthorityLevel } from "../../types/database.js";
 
 export type GroundingEnforcementResult = {
@@ -131,19 +132,23 @@ function tallySourceTable(lines: string[]): Record<SourceAuthorityLevel, number>
   return counts;
 }
 
-/** researcher.md §7 verdict 판정 공식. */
-function computeVerdict(counts: Record<SourceAuthorityLevel, number>): "ok" | "thin" | "blocked" {
-  const total = counts.official + counts.medical + counts.news + counts.community;
-  if (counts.official + counts.medical >= 2 && total >= 8) return "ok";
-  if (counts.news >= 3) return "thin";
-  if (total < 5 || counts.community === total) return "blocked";
-  return "thin";
+/**
+ * researcher.md §7 verdict 판정. 2026-10-31부터 `computeResearchVerdict` 한 곳으로 모았다 -
+ * 옛 구현은 `news >= 3`을 `total < 5`보다 먼저 검사해서 규격이 blocked라고 정한 파일을 thin으로
+ * 돌려줬고, 카테고리 분기(엔터는 공식 출처가 없는 것이 정상)도 없었다.
+ */
+function computeVerdict(
+  counts: Record<SourceAuthorityLevel, number>,
+  category?: string | null
+): "ok" | "thin" | "blocked" {
+  return computeResearchVerdict({ counts, category });
 }
 
 export function enforceGeminiGroundingUrls(
   text: string,
   allowedUrls: ReadonlySet<string>,
-  allowedDomains: ReadonlySet<string> = new Set()
+  allowedDomains: ReadonlySet<string> = new Set(),
+  category?: string | null
 ): GroundingEnforcementResult {
   const normalizedAllowed = new Set([...allowedUrls].map(normalizeUrl));
   const normalizedDomains = new Set([...allowedDomains].map((d) => d.trim().toLowerCase().replace(/^www\./, "")));
@@ -178,7 +183,7 @@ export function enforceGeminiGroundingUrls(
   }
 
   const recomputedSourceCounts = tallySourceTable(tablePass.lines);
-  const recomputedVerdict = computeVerdict(recomputedSourceCounts);
+  const recomputedVerdict = computeVerdict(recomputedSourceCounts, category);
 
   const keyword = extractFrontmatterScalar(frontmatter, "keyword");
   const topic = extractFrontmatterScalar(frontmatter, "topic");
