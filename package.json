@@ -68,6 +68,7 @@
     "storage:cleanup": "tsx src/workflows/storage/storageCleanupCli.ts",
     "test:pipeline-gate": "tsx src/config/testPipelineGate.ts",
     "test:finish-write": "tsx src/workflows/writing/testFinishWrite.ts",
+    "test:topic-coverage": "tsx src/workflows/writing/testTopicCoverage.ts",
     "test:revise-images": "tsx src/workflows/manuscripts/testReconcileReviseImages.ts",
     "test:pipeline-merge-callbacks": "tsx src/notifications/testPipelineMergeCallbacks.ts",
     "test:storage-cleanup": "tsx src/workflows/storage/testStorageCleanup.ts",

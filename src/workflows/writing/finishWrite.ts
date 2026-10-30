@@ -12,10 +12,19 @@ import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js
 import { autoApproveDraft } from "./autoApproveDraft.js";
 import { notifyArticleReady } from "./notifyArticleReady.js";
 import { notifyWriteFailed } from "./notifyWriteFailed.js";
+import { shouldHoldForScope } from "./topicCoverage.js";
+import { isConverterJobSource } from "../instagram-capture/instagramTrack.js";
 import type { RunWritingStageResult } from "./runArticleJob.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
-export type FinishWritePath = "skipped" | "failed" | "auto_approved" | "auto_approved_dispatch_failed" | "legacy_review";
+export type FinishWritePath =
+  | "skipped"
+  | "failed"
+  | "auto_approved"
+  | "auto_approved_dispatch_failed"
+  | "legacy_review"
+  /** 사용자가 쓴 주제를 원고가 거의 안 다뤄 자동 승인을 멈추고 사람에게 물었다(2026-10-30). */
+  | "scope_held";
 
 export type FinishWriteDeps = {
   skipDraftReview?: (job: ArticleJobRow) => boolean;
@@ -25,6 +34,8 @@ export type FinishWriteDeps = {
   findJob?: (jobId: string) => Promise<ArticleJobRow | null>;
   /** 준비 발화 실패 경고 발송. 기본은 job의 트랙 봇. */
   sendWarning?: (job: ArticleJobRow, text: string) => Promise<void>;
+  /** 테스트 주입: 범위 게이트 판정(2026-10-30). 기본은 topicCoverage.shouldHoldForScope. */
+  checkScope?: typeof shouldHoldForScope;
 };
 
 export async function finishWrite(
@@ -58,6 +69,28 @@ export async function finishWrite(
   console.log(`   article #${result.article.id}: ${result.article.title}`);
   console.log(`   본문 길이: ${result.article.content?.length ?? 0}자`);
   console.log(`   의학 주제: ${result.isMedical ? "예 (사람 교차확인 필요)" : "아니오"}`);
+
+  // 범위 게이트(2026-10-30): **사용자가 직접 보낸 주제**에서 원고가 그 주제를 거의 안 다뤘으면
+  // 자동 승인하지 않는다. 실측 사고("전국 10대 도시 특산품" -> "부산 기념품 판매처 4곳")의 마지막
+  // 안전망이다 - 원인(브리프 재작성)은 brief/topicScope.ts가 막지만 다른 경로로 같은 일이 생겨도
+  // 조용히 통과하면 안 된다. 막지 않고 **되묻는다**: 옛 초안 알림(✅ 승인 / ✏️ 수정 / 🗑 반려)으로
+  // 보내 사람이 고르게 한다. 자동 수집 키워드에는 적용하지 않는다(매일 발행이 멈춘다).
+  const scope = (deps.checkScope ?? shouldHoldForScope)({
+    keyword: result.job.keyword,
+    text: `${result.article.title ?? ""}\n${result.article.content ?? ""}`,
+    userAuthoredTopic: isConverterJobSource(result.job.metadata),
+  });
+  if (scope.hold) {
+    console.warn(`\n⚠️ 범위 게이트: ${scope.message}`);
+    await sendWarning(
+      result.job,
+      `⚠️ <b>원고가 보내주신 주제를 다 다루지 못했습니다</b>\n${escapeTelegramHtml(result.job.keyword)}\n\n` +
+        `${escapeTelegramHtml(scope.message)}\n\n` +
+        `자동 승인을 멈췄습니다. 아래 알림에서 <b>✅ 승인</b>(이대로 진행) / <b>✏️ 수정 요청</b>(다시 쓰기) / <b>🗑 반려</b>를 골라 주세요.`
+    ).catch(() => {});
+    await notifyDraft(result);
+    return { path: "scope_held", exitCode: 0 };
+  }
 
   // 이미지가 붙은 원고는 prepare가 끝난 뒤 **통합 알림 한 번**(notifyManuscriptsReady)으로 온다.
   if (skipDraftReview(result.job)) {
