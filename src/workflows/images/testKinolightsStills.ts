@@ -8,6 +8,7 @@ import {
   cleanKeyword,
   extractStills,
   readWorkTitle,
+  resolveGotoLinks,
   searchKinolightsStills,
   titleMatchesKeyword,
   toMediaUrl,
@@ -92,6 +93,39 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
   });
   assert(wrongWork.length === 0, "제목이 안 맞으면 스틸이 있어도 안 쓴다");
   console.log("✅ 실패·오매칭은 빈 배열(예외 없음)");
+}
+
+// 6) goto 링크 해제(2026-10-30 서퍼 변경). 4위부터는 실제 주소 대신 google.com/goto가 온다 -
+//    풀지 않으면 작품 페이지가 상위 3개 밖일 때 조용히 못 찾는다.
+{
+  const GOTO = "https://www.google.com/goto?url=CAESZwHrOzAV";
+  let sent: unknown = null;
+  const fakeFetch = (async (_url: string, init?: RequestInit) => {
+    sent = JSON.parse(String(init?.body ?? "{}"));
+    return {
+      ok: true,
+      json: async () => ({ links: ["https://kinolights.com/season/118099"], credits: 0 }),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+
+  const out = await resolveGotoLinks([GOTO], "key", fakeFetch);
+  assert(out[0] === "https://kinolights.com/season/118099", `실제 주소를 돌려줘야 한다: ${out[0]}`);
+  assert(JSON.stringify(sent) === JSON.stringify({ links: [GOTO] }), `links 배열로 보낸다: ${JSON.stringify(sent)}`);
+
+  const empty = await resolveGotoLinks([], "key", (async () => {
+    throw new Error("불려선 안 된다");
+  }) as unknown as typeof fetch);
+  assert(empty.length === 0, "풀 링크가 없으면 호출하지 않는다");
+
+  const failed = await resolveGotoLinks([GOTO], "key", (async () => {
+    throw new Error("네트워크");
+  }) as unknown as typeof fetch);
+  assert(failed.length === 0, "해제가 실패해도 예외 없이 빈 배열(스틸 수집을 막지 않는다)");
+
+  const notOk = await resolveGotoLinks([GOTO], "key", (async () =>
+    ({ ok: false, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch);
+  assert(notOk.length === 0, "비정상 응답도 빈 배열");
+  console.log("✅ goto 링크 해제(0크레딧) - 요청 형식·실패 격리");
 }
 
 console.log("\n🎉 키노라이츠 스틸 테스트 통과");
