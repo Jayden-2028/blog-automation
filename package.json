@@ -259,6 +259,7 @@
     "test:person-source-pack": "tsx src/workflows/research/testPersonSourcePack.ts",
     "test:person-research-sources": "tsx src/workflows/research/testPersonResearchSources.ts",
     "test:tistory-poll": "tsx src/jobs/testTistoryPublishPollJob.ts",
+    "test:publish-interval": "tsx src/workflows/publish/testPublishInterval.ts",
     "job:tistory-poll": "tsx src/jobs/tistoryPublishPollJob.ts",
     "job:publish-request": "tsx src/jobs/publishRequestCli.ts",
     "job:export-poll": "tsx src/jobs/manuscriptExportPollJob.ts",

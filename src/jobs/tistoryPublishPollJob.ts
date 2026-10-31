@@ -29,6 +29,7 @@ import { TistoryPublisher } from "../services/publish/tistory/TistoryPublisher.j
 import { reportStaleEdits } from "./lib/staleEditReport.js";
 import type { StaleEntry } from "./lib/staleEditReport.js";
 import { publishJobToTistory } from "../workflows/publish/publishJobToTistory.js";
+import { publishIntervalGate } from "../workflows/publish/publishInterval.js";
 import {
   deferTistoryPublish,
   finishTistoryPublish,
@@ -113,6 +114,8 @@ function kstMinuteOfDay(now = new Date()): number {
 /** 테스트가 브라우저·DB·텔레그램 없이 processPending을 돌리도록 바꿔 끼우는 지점. 기본은 실제 구현. */
 export type PollDeps = {
   publish: typeof publishJobToTistory;
+  /** 최소 발행 간격 판정(2026-11-01). 생략하면 실제 판정을 쓴다 - 기존 주입 테스트가 깨지지 않게 선택값이다. */
+  intervalGate?: () => Promise<{ allowed: boolean; reason?: string }>;
   finish: typeof finishTistoryPublish;
   defer: typeof deferTistoryPublish;
   notify: (job: ArticleJobRow | null, text: string) => Promise<void>;
@@ -121,6 +124,7 @@ export type PollDeps = {
 
 const defaultDeps: PollDeps = {
   publish: publishJobToTistory,
+  intervalGate: () => publishIntervalGate("tistory"),
   finish: finishTistoryPublish,
   defer: deferTistoryPublish,
   notify,
@@ -149,6 +153,15 @@ function failureMessage(job: ArticleJobRow, detail: string): string {
 
 export async function processPending(pending: ArticleJobRow[], state: PollState, deps: PollDeps = defaultDeps): Promise<void> {
   console.log(`▶ [tistory-poll] 대기 ${pending.length}건 중 ${Math.min(pending.length, MAX_PER_RUN)}건 처리`);
+
+  // 최소 발행 간격(2026-11-01 사용자 지시, 기본 5분): 아직 안 지났으면 **미룬다** - 실패로 적지
+  // 않고 요청을 그대로 둬 다음 주기(60초)에 다시 본다. 10/31 캡차 사고가 연속 발행에서 났고,
+  // 네이버는 자동 발행으로 저품질을 받은 이력이 있다(publishInterval.ts 머리말).
+  const gate = await (deps.intervalGate ?? (() => publishIntervalGate("tistory")))();
+  if (!gate.allowed) {
+    console.log(`⏸ [tistory-poll] 최소 발행 간격 대기 - ${gate.reason}. 요청은 그대로 두고 다음 주기에 다시 봅니다.`);
+    return;
+  }
 
   for (const job of pending.slice(0, MAX_PER_RUN)) {
     console.log(`   · ${job.keyword}`);

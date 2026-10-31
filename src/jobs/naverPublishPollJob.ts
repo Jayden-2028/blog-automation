@@ -22,6 +22,7 @@ import {
 import { reportStaleEdits } from "./lib/staleEditReport.js";
 import type { StaleEntry } from "./lib/staleEditReport.js";
 import { publishJobToNaver } from "../workflows/publish/publishJobToNaver.js";
+import { publishIntervalGate } from "../workflows/publish/publishInterval.js";
 import { TelegramNotifier, escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
 
 /** 한 번에 처리할 최대 건수. 브라우저를 띄우는 작업이라 길게 돌면 다음 주기와 겹친다. */
@@ -44,6 +45,15 @@ async function main(): Promise<void> {
   const pending = await listPendingNaverRequests({ onStale: (job, state) => stale.push({ job, state }) });
   await reportStaleEdits(stale, (_job, text) => notify(text));
   if (pending.length === 0) return; // 대기열 없음 - 조용히 종료
+
+  // 최소 발행 간격(2026-11-01 사용자 지시, 기본 5분). **네이버가 이 가드의 본래 이유다** - 자동 발행으로
+  // 저품질 판정을 받은 이력이 있고, 짧은 간격의 연속 발행이 그 판정을 부르는 대표 패턴이다. 안 지났으면
+  // 실패가 아니라 미룸이다(요청을 그대로 두고 다음 주기에 다시 본다).
+  const gate = await publishIntervalGate("naver");
+  if (!gate.allowed) {
+    console.log(`⏸ [naver-poll] 최소 발행 간격 대기 - ${gate.reason}. 요청은 그대로 두고 다음 주기에 다시 봅니다.`);
+    return;
+  }
 
   console.log(`▶ [naver-poll] 대기 ${pending.length}건 중 ${Math.min(pending.length, MAX_PER_RUN)}건 처리`);
 

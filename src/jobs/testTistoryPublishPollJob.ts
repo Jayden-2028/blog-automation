@@ -143,3 +143,17 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exit(1); });
+
+// 최소 발행 간격(2026-11-01): 간격 안이면 한 건도 올리지 않고 요청을 그대로 둔다.
+{
+  let published = 0;
+  await processPending([{ id: "j1", keyword: "테스트" } as never], { } as never, {
+    publish: (async () => { published++; return { ok: true }; }) as never,
+    finish: (async () => {}) as never,
+    defer: (async () => {}) as never,
+    notify: (async () => {}) as never,
+    intervalGate: async () => ({ allowed: false, reason: "최소 5분 간격까지 3분 남음" }),
+  } as never);
+  if (published !== 0) throw new Error("❌ 간격 안에서는 발행하지 않아야 한다");
+  console.log("✅ 최소 발행 간격 - 간격 안이면 발행하지 않고 미룬다");
+}
