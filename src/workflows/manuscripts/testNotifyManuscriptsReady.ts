@@ -272,3 +272,30 @@ main().catch((error) => {
   }
   console.log("✅ person 통합 알림 - 발행 버튼 없음 + 수동 복붙 안내, 엔터 불변");
 }
+
+// --- 제공자 가시성(2026-11-01): 기본(claude)이 아닌 조사 제공자는 검수 카드에 한 줄로 드러난다 -------------------
+{
+  const JOB = "354bfe0b-1234-4abc-8def-0123456789ab";
+  const auto = { autoApprovedAt: "2026-10-08T00:00:00Z" };
+
+  const codex = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, researchProvider: "codex" })), "https://pages.example.dev");
+  if (!codex.text.includes("자료조사 제공자") || !codex.text.includes("Codex")) {
+    throw new Error(`❌ codex 조사는 검수 카드에 제공자가 드러나야 한다 (${codex.text})`);
+  }
+
+  // claude(기본)와 미설정은 줄을 보태지 않는다 - 매 알림에 한 줄이 붙으면 소음이 된다.
+  const claude = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, researchProvider: "claude" })), "https://pages.example.dev");
+  if (claude.text.includes("자료조사 제공자")) throw new Error(`❌ claude는 표시하지 않는다 (${claude.text})`);
+  const unset = buildManuscriptReadyMessage(successResult(job(JOB, auto)), "https://pages.example.dev");
+  if (unset.text.includes("자료조사 제공자")) throw new Error(`❌ 미설정은 표시하지 않는다 (${unset.text})`);
+
+  // 사회·사용설명서 트랙도 같은 줄을 받는다(검수 요약을 공유하는 자리다).
+  for (const track of ["social", "kscene"] as const) {
+    const msg = buildManuscriptReadyMessage(
+      successResult(job(JOB, { ...auto, track, researchProvider: "gemini" })),
+      "https://pages.example.dev"
+    );
+    if (!msg.text.includes("자료조사 제공자")) throw new Error(`❌ ${track} 트랙 알림에도 제공자가 드러나야 한다 (${msg.text})`);
+  }
+  console.log("✅ 제공자 가시성 - codex/gemini는 한 줄 표시, claude·미설정은 표시 없음");
+}

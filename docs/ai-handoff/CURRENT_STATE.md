@@ -1,6 +1,59 @@
 # Claude Code 인수인계 상태
 
-기준일: 2026-10-30 (Asia/Seoul)
+기준일: 2026-11-01 (Asia/Seoul)
+
+## 2026-11-01 — 자료조사 제공자 스위치 (Codex를 맥미니에서)
+
+- **배경**: 자료조사는 파이프라인에서 Claude 사용량을 가장 많이 먹는 단계다. 2026-11-01 실측 비교에서
+  Codex(GPT-6.1 Sol, 네이티브 web_search)가 Claude보다 공식 출처를 훨씬 많이 찾아왔다 - "한국 전국 10대 도시
+  지역별 특산품"에서 공식 출처 21건 대 7건·go.kr 13곳 대 5곳(도시별 시청 공식 페이지를 각각 찾아냈다),
+  "korea apartment management fee"에서 13건 대 10건. 다만 1건당 143k~325k 토큰을 먹어 Plus 한도로 상시
+  운용이 안 된다 - 그래서 **평소 Claude, Claude 한도가 빠듯할 때만 사용자가 직접 켠다**(자동 전환 없음).
+- **스위치 값이 모델과 실행 위치를 함께 정한다**(`src/config/researchProvider.ts`):
+
+  | `RESEARCH_PROVIDER` | 실행 위치 | 모델 |
+  |---|---|---|
+  | `claude` (기본, 미설정·오타 포함) | GitHub Actions `job-research.yml` | Claude Sonnet (지금과 동일) |
+  | `gemini` | GitHub Actions `job-research.yml` | Gemini (기존 경로 그대로) |
+  | `codex` | **맥미니 폴러**(`job:research-poll`) | Codex CLI(GPT-6.1 Sol), 네이티브 web_search |
+
+- **불변식 둘**(어기는 경로를 만들지 않는다 - 사용자 명시 요구):
+  ① **맥미니는 Codex만 돌린다.** Claude 조사가 맥으로 내려가면 맥이 잠들 때 통째로 죽는다. 폴러는
+  `runResearchStage(jobId, { provider: "codex" })`로 제공자를 못 박아 넘기므로 맥 `.env`의 `RESEARCH_PROVIDER`가
+  무엇이든 Claude 조사가 돌지 않고, 대기열 표식도 `provider === "codex"`가 아니면 읽지 않는다.
+  ② **Codex는 Actions에서 돌지 않는다.** CLI와 ChatGPT 구독 로그인(`~/.codex/auth.json`, 스스로 갱신돼 토큰
+  비밀값을 옮길 수 없다)이 맥에만 있다. `runCodexResearch`가 `GITHUB_ACTIONS=true`면 이유를 말하고 멈춘다.
+- **발화 분기는 한 곳이다**: `src/workflows/research/dispatchResearch.ts`. 조사를 발화하는 지점이 셋이라
+  (텔레그램 Go 버튼 `runTelegramUpdateCli`, 인스타 job 생성 `triggerResearch`, 로컬 텔레그램 폴러
+  `TelegramBot` 기본값) 각자 분기하면 한 곳만 고쳐 불변식이 깨진다. 셋 다 이 함수를 쓴다.
+- **맥미니 대기열**: `job.metadata.localResearch`(migration 없음 - `tistoryPublish`와 같은 패턴).
+  `requested → running(claim) → done/failed`. **새 status를 만들지 않았다** - 조사 대기는 기존대로
+  `selected`이고(Actions 큐에 올린 job도 디스패치까지 selected로 기다린다) 폴러가 집는 순간
+  `runResearchStage`가 `researching`으로 올린다. 중복 실행은 두 겹으로 막는다: 파일 락(겹친 launchd 발화)
+  + DB claim(프로세스가 죽어도 다음 주기가 같은 job을 다시 집지 않는다. 40분 넘긴 running만 잔재로 본다).
+- **폴백 없음**: Codex 실패는 Claude로 자동 폴백하지 않는다 - 한도 때문에 켠 스위치라 되돌리면 켠 이유가
+  사라지고, 맥에서 Claude를 돌리는 것은 불변식 ① 위반이다. 기존 실패 경로(텔레그램 알림 + 사람이 재시도)로
+  떨어진다. `RESEARCH_FALLBACK_TO_CLAUDE`는 **Gemini 전용**으로 범위를 좁혔다.
+- **URL 검증 비적용**: `enforceGeminiGroundingUrls`를 Codex에 적용하지 **않는다**. 그 함수는 Gemini
+  `groundingChunks`(모델이 실제 근거로 삼은 URL 집합)와 대조해 그 밖의 official/medical을 community로 강등하는
+  장치인데, Codex의 네이티브 web_search에는 그 메타데이터가 없어 허용 집합을 만들 수 없고 적용하면
+  baseline(NAVER) 말고 **전건이 강등**돼 모든 조사가 thin이 된다. verdict는 기존대로 `computeResearchVerdict`가
+  저장된 sources 숫자에서 계산한다(2026-10-31 §).
+- **파싱 함정**: `codex exec` stdout에는 세션 로그·"tokens used"·JSON이 섞여 나오고 JSON이 두 번 찍히기도 한다.
+  이 함정으로 15분치 실행을 한 번 날렸다. 그래서 ① 공용 `extractTrailingJson` ② 마지막
+  `{"research_markdown"` 위치에서 끝의 `}`를 줄여 가며 `JSON.parse` 두 단계로 꺼내고, 종료 코드가 0이 아니었던
+  실행의 stdout에서도 답이 있으면 건지고, 끝까지 실패하면 **원문을 `logs/codex-research/`에 덤프**한다.
+- **가시성**: `metadata.researchProvider`와 조사 파일 frontmatter `research_provider:`에 남긴다. 통합 알림
+  검수 카드와 (되살릴 경우) 조사 완료 알림에 **claude가 아닐 때만** 한 줄 표시한다(`🔬 자료조사 제공자: …`) -
+  스위치를 켠 채 잊는 것을 막는 장치다.
+- **검증**: `npm run test:research-switch`(신설 - 제공자별 발화 분기·대기열·폴러 중복 방지·stdout 파싱·불변식)
+  + 기존 `test:research-prompt` `test:parse-research` `test:research-verdict` `test:finish-write`
+  `test:spec-files` `test:research-preview` `test:notification` + `npm run build` 통과. 실제 Codex 왕복은
+  `npm run debug:codex-research -- "키워드"`(DB를 건드리지 않는 스모크 경로)로 확인했다.
+- **남은 사용자 승인 항목**: 맥미니 launchd 서비스(`research-poll`, 60초) 등록. 코드·스크립트·plist 항목
+  (`scripts/macmini/poll-research.sh`, `install-launchd.sh`의 `research-poll`)까지만 만들어 뒀고 **설치는
+  하지 않았다**. 승인 후 맥미니에서 `scripts/macmini/install-launchd.sh install research-poll` 한 줄.
+  스위치를 켜는 것(`RESEARCH_PROVIDER=codex`)도 사용자가 Claude 사용량을 보고 직접 한다.
 
 ## 2026-10-31 — Serper goto 링크 해제 (구글 결과 링크 변경 대응)
 

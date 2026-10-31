@@ -30,6 +30,7 @@ import { TelegramNotifier } from "../notifications/TelegramNotifier.js";
 import { generateTitleSuggestions } from "../workflows/keyword-notification/generateTitleSuggestions.js";
 import { dispatchGithubWorkflow } from "../services/github/dispatchWorkflow.js";
 import { enqueueAndMaybeDispatch } from "../services/github/pipelineQueue.js";
+import { dispatchResearch } from "../workflows/research/dispatchResearch.js";
 
 async function main(): Promise<void> {
   const raw = process.env.TELEGRAM_UPDATE_JSON;
@@ -89,6 +90,26 @@ async function main(): Promise<void> {
     pendingDispatches.push(promise);
   };
 
+  // 자료조사 발화는 제공자가 실행 위치까지 정한다(2026-11-01, dispatchResearch): claude/gemini는
+  // 지금처럼 heavy-pipeline 큐 -> job-research.yml, codex는 Actions로 보내지 않고 맥미니 폴러
+  // 대기열(job.metadata.localResearch)에 올린다. Codex CLI와 구독 로그인이 맥에만 있어서다.
+  const dispatchResearchForJob = (jobId: string): void => {
+    const promise = dispatchResearch(jobId)
+      .then((result) => {
+        if (result.route === "macmini-codex") {
+          console.log(
+            result.queued
+              ? `📥 [research] 맥미니 Codex 조사 대기열에 올렸습니다 (job ${jobId})`
+              : `ℹ️ [research] 맥미니 조사 대기열 유지: ${result.reason} (job ${jobId})`
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("⚠️ 자료조사 발화 실패:", error instanceof Error ? error.message : error);
+      });
+    pendingDispatches.push(promise);
+  };
+
   const dispatchPublishPrepare = (): void => {
     const promise = dispatchGithubWorkflow({ workflowFile: "job-publish-prepare.yml", inputs: {} }).catch((error) => {
       console.error("⚠️ job-publish-prepare.yml 발화 실패:", error instanceof Error ? error.message : error);
@@ -120,7 +141,7 @@ async function main(): Promise<void> {
     {
       generateTitles: (job) =>
         generateTitleSuggestions({ keyword: job.keyword, headline: job.headline, category: job.category }),
-      triggerResearch: (jobId) => enqueueHeavy(jobId, "job-research.yml"),
+      triggerResearch: (jobId) => dispatchResearchForJob(jobId),
       triggerWriting: (jobId) => enqueueHeavy(jobId, "job-write.yml"),
       triggerPublishPrepare: () => dispatchPublishPrepare(),
       triggerManuscriptsRefresh: () => dispatchManuscriptsRefresh(),
