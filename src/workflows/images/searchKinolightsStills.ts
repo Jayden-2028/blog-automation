@@ -26,6 +26,21 @@ const STILL_PATH = /original\/(content_still_cut\/\d{6}\/\d{2}\/[0-9a-f-]{36}\.(
 const WORK_URL = /https?:\/\/(?:m\.)?kinolights\.com\/(season|movie)\/(\d+)/i;
 
 const SEARCH_ENDPOINT = "https://google.serper.dev/search";
+/**
+ * goto 링크를 실제 주소로 되돌리는 엔드포인트(2026-10-30 서퍼 공지 "Changes to Google result links").
+ *
+ * 2026-10-30 01:30 UTC부터 구글이 검색 직후 열 수 있는 결과 링크를 제한했다 - **4위부터는 실제 주소 대신
+ * `https://www.google.com/goto?url=...`** 가 온다(상위 3개만 서퍼가 자동으로 풀어 준다). 이 모듈은
+ * `site:kinolights.com <제목>` 결과에서 작품 페이지 URL을 정규식으로 찾는데, goto 링크는 그 정규식에
+ * 걸리지 않으므로 **작품 페이지가 4위 밖이면 조용히 못 찾는다**(실측: 상위 3개가 리디렉션 도메인·리뷰·
+ * 컬렉션 페이지로 차는 경우가 있다). 실패해도 예외가 아니라 빈 결과라서, 일반 이미지 검색의 1200x630
+ * 공유 이미지로 떨어지고 아무도 모른다 - 그래서 푼다.
+ *
+ * 비용 0크레딧이고 한 번의 추가 호출이다(실측 확인).
+ */
+const RESOLVE_ENDPOINT = "https://google.serper.dev/resolve";
+/** goto 링크인가. */
+const GOTO_LINK = /^https?:\/\/(?:www\.)?google\.com\/goto\?/i;
 /** 모바일 UA로 받아야 미디어 섹션이 서버 렌더링된 HTML로 온다. */
 const MOBILE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
@@ -122,6 +137,30 @@ export function workTitleCandidates(keyword: string): string[] {
 }
 
 /**
+ * goto 링크 묶음을 실제 주소로 되돌린다. 실패하면 빈 배열이다 - 여기서 예외를 던져 스틸 수집 전체를
+ * 막지 않는다(못 풀면 일반 이미지 검색으로 떨어지는 기존 동작 그대로다).
+ */
+export async function resolveGotoLinks(
+  links: readonly string[],
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<string[]> {
+  if (links.length === 0) return [];
+  try {
+    const res = await fetchImpl(RESOLVE_ENDPOINT, {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ links: [...links] }),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { links?: unknown };
+    return Array.isArray(json.links) ? json.links.filter((l): l is string => typeof l === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 제목으로 작품 페이지를 찾는다. Serper 웹 검색을 쓴다.
  *
  * `site:` 한정을 먼저 걸고, 결과가 없으면 `키노라이츠 <제목>`으로 한 번 더 본다 - 색인에 따라
@@ -146,9 +185,16 @@ async function findWorkUrlForTitle(
       recordSerperUsage({ endpoint: "search", ok: res.ok, status: res.status, jobId: usage.jobId, record: usage.record });
       if (!res.ok) continue;
       const json = (await res.json()) as { organic?: { link?: string }[] };
-      for (const item of json.organic ?? []) {
-        if (item.link && WORK_URL.test(item.link)) return item.link;
-      }
+      const links = (json.organic ?? []).map((item) => item.link).filter((l): l is string => typeof l === "string");
+
+      // 먼저 그대로 본다(상위 3개는 이미 실제 주소다). 여기서 걸리면 추가 호출이 없다.
+      const direct = links.find((link) => WORK_URL.test(link));
+      if (direct) return direct;
+
+      // 못 찾았으면 goto 링크만 풀어서 다시 본다(0크레딧).
+      const resolved = await resolveGotoLinks(links.filter((link) => GOTO_LINK.test(link)), key);
+      const found = resolved.find((link) => WORK_URL.test(link));
+      if (found) return found;
     } catch {
       // 한 질의가 실패해도 다음 질의로 넘어간다. 응답을 못 받은 네트워크 실패만 여기서 기록한다.
       if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
