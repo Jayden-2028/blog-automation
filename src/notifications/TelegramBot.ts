@@ -15,6 +15,7 @@ import {
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
 import { spawnDetachedTask } from "../jobs/lib/spawnDetachedTask.js";
+import { dispatchResearch } from "../workflows/research/dispatchResearch.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
 import { isTransientNetworkError } from "./isTransientNetworkError.js";
 import { escapeTelegramHtml } from "./TelegramNotifier.js";
@@ -486,8 +487,16 @@ export class TelegramBot {
           )
           .catch(() => {});
       });
+    // 기본 구현은 제공자에 따라 갈린다(2026-11-01, dispatchResearch): claude/gemini면 기존대로
+    // (토큰이 있으면 Actions 큐, 없으면 맥 로컬 detached), codex면 맥미니 폴러 대기열에 올린다.
+    // 발화는 불 붙이고 잊는 호출이라 실패는 로그로만 남긴다 - 사람이 버튼을 다시 누르는 경로다.
     this.triggerResearch =
-      options.triggerResearch ?? ((jobId) => spawnDetachedTask("job:research", [jobId]));
+      options.triggerResearch ??
+      ((jobId) => {
+        void dispatchResearch(jobId).catch((error) => {
+          console.error(`⚠️ [research] 발화 실패(job ${jobId}):`, error instanceof Error ? error.message : error);
+        });
+      });
     this.triggerPublishPrepare = options.triggerPublishPrepare ?? (() => {});
     this.triggerManuscriptsRefresh = options.triggerManuscriptsRefresh ?? (() => {});
     this.removeManifestTopic = options.removeManifestTopic ?? ((jobId) => removeManifestTopic(jobId));

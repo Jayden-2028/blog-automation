@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 로컬 launchd 7종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status] [job이름]
+# 로컬 launchd 8종 등록/해제/상태. 사용: install-launchd.sh [install|uninstall|status] [job이름]
 #   naver-poll(60초)  tistory-poll(60초)  instagram-capture-poll(60초)  export-poll(60초)  manuscript-export(30분)
-#   creator-advisor(매일 08:30, 17:30)
+#   research-poll(60초)  creator-advisor(매일 08:30, 17:30)
 # ⚠️ 옛 맥의 같은 job을 먼저 내려야 한다 - 둘이 동시에 돌면 네이버에 같은 글이 두 번 올라갈 수 있다.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,13 +16,17 @@ AGENTS="$HOME/Library/LaunchAgents"; UID_="$(id -u)"; PFX="com.blogautomation"
 # 17:30은 18시 저녁 회차용(2026-10-01에 07:30에서 옮김), **08:30은 09시 오전 회차용**(2026-10-05 개편,
 # RESTRUCTURE-PLAN-2026-10.md §2.3). 13시 오후 회차는 08:30 값을 쓴다(TTL 24시간).
 # tistory-poll(2026-10-06, TISTORY_AUTO_PUBLISH_DESIGN.md): 사회 트랙 티스토리 발행. headless라 naver-poll과 겹쳐도 된다.
+# research-poll(2026-11-01): RESEARCH_PROVIDER=codex일 때만 할 일이 있다(그 밖에는 대기열이 비어 조용히 끝난다).
+#   **등록은 사용자 승인 사항이다** - 승인 전에는 이 항목이 목록에 있어도 install을 돌리지 않는다.
+#   개별 등록: install-launchd.sh install research-poll
 JOBS=( "naver-poll|$REPO/scripts/macmini/poll-naver.sh|60"
        "tistory-poll|$REPO/scripts/macmini/poll-tistory.sh|60"
        "instagram-capture-poll|$REPO/scripts/poll-instagram-capture.sh|60"
        "export-poll|$REPO/scripts/poll-manuscript-export.sh|60"
        "manuscript-export|$REPO/scripts/export-manuscripts.sh|1800"
        "creator-advisor|$REPO/scripts/macmini/collect-creator-advisor.sh|08:30,17:30"
-       "person-pack|$REPO/scripts/macmini/poll-person-pack.sh|60" )
+       "person-pack|$REPO/scripts/macmini/poll-person-pack.sh|60"
+       "research-poll|$REPO/scripts/macmini/poll-research.sh|60" )
 
 # 두 번째 인자로 job 이름을 주면 그 하나만 다룬다(2026-10-15) - 세션별로 폴러 소유가 갈려 있어
 # 전체 재등록(install)이 남의 폴러를 리로드하면 안 된다. 예: install-launchd.sh install person-pack

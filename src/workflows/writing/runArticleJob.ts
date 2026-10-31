@@ -32,6 +32,7 @@ import { isMedicalTopic } from "../../config/medicalTopicRules.js";
 import { shouldSkipDraftReview } from "../../config/pipelineGate.js";
 import { PIPELINE_ROOT, draftFilePath, researchFilePath } from "../../config/pipelinePaths.js";
 import { RESEARCH_PROVIDER, RESEARCH_FALLBACK_TO_CLAUDE } from "../../config/researchProvider.js";
+import type { ResearchProvider } from "../../config/researchProvider.js";
 import { createArticleForJob } from "../../services/supabase/repositories/articleRepository.js";
 import { createSources, listSourcesByJobId } from "../../services/supabase/repositories/sourceRepository.js";
 import { createImage } from "../../services/supabase/repositories/imageRepository.js";
@@ -39,6 +40,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 import { enforceWritingRules } from "./enforceWritingRules.js";
 import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
+import { runCodexResearch } from "../../services/llm/runCodexResearch.js";
 import { resolveGroundingUrls } from "../../services/llm/resolveGroundingUrls.js";
 import { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import { runWithHeavyPipelineLock } from "../../jobs/lib/heavyPipelineLock.js";
@@ -102,6 +104,15 @@ export type RunResearchStageOptions = {
   runResearcher?: (prompt: string, outputPath: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** 테스트 주입: research 파일 읽기를 대체한다. */
   readResearchFile?: (path: string) => Promise<string | null>;
+  /** 테스트 주입: research 파일 되쓰기를 대체한다(frontmatter에 제공자를 남길 때만 쓴다). */
+  writeResearchFile?: (path: string, text: string) => Promise<void>;
+  /**
+   * 조사 제공자를 명시적으로 고정한다(2026-11-01). 기본은 RESEARCH_PROVIDER(환경변수).
+   *
+   * **맥미니 폴러가 "codex"를 반드시 넘긴다** - 그래야 환경변수가 어떻게 설정돼 있든 맥에서
+   * Claude 조사가 도는 일이 구조적으로 불가능하다(불변식 ①). config/researchProvider.ts 참고.
+   */
+  provider?: ResearchProvider;
   /**
    * 기획 브리프 생성(2026-09-17). 기본은 자동완성 + headless Claude. false면 건너뛴다(테스트 -
    * 외부 HTTP·LLM을 타면 안 된다). 실패해도 조사는 계속된다.
@@ -185,6 +196,8 @@ type DefaultResearcherInput = {
   personAutocomplete?: PersonAutocomplete | null;
   /** 인물 백과: 맥이 수집한 인물DB·나무위키 원문(`metadata.researchSourcePack`). 못 받았으면 null. */
   personSourcePack?: PersonSourcePack | null;
+  /** 이번 조사의 제공자. 호출자가 반드시 정해서 넘긴다(환경변수를 여기서 다시 읽지 않는다). */
+  provider: ResearchProvider;
 };
 
 /**
@@ -280,15 +293,49 @@ async function runGeminiResearcherAndSave(
 }
 
 /**
- * RESEARCH_PROVIDER에 따라 researcher를 고른다(config/researchProvider.ts). 기본은 claude라
- * 이 함수를 안 건드리면 기존 동작과 동일하다. gemini 선택 시 실패하면 RESEARCH_FALLBACK_TO_CLAUDE
- * (기본 true)에 따라 같은 job에 한해 claude로 1회 폴백한다 - Gemini 쿼터/네트워크 장애가 job
- * 전체를 막지 않게 하기 위해서다.
+ * Codex도 Write 도구가 없다(샌드박스 read-only) - 응답 본문을 직접 outputPath에 쓴다.
+ * runResearcher 계약(파일이 outputPath에 저장돼 있으면 ok)은 그대로 지킨다.
+ *
+ * **enforceGeminiGroundingUrls를 적용하지 않는다**(2026-11-01). 그 함수는 "모델이 실제로 근거로
+ * 삼은 URL 집합"(Gemini groundingChunks)과 대조해 그 밖의 official/medical을 community로 강등하는
+ * 장치다. Codex의 네이티브 web_search에는 그 메타데이터가 없어 허용 URL 집합을 만들 수 없고,
+ * 그대로 적용하면 baseline(NAVER) 말고 **전건이 강등**돼 모든 조사가 thin이 된다. 그래서 적용하지
+ * 않고, verdict는 기존대로 computeResearchVerdict가 저장된 sources 숫자에서 계산한다(2026-10-31).
+ */
+async function runCodexResearcherAndSave(
+  input: DefaultResearcherInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await runCodexResearch({
+    job: input.job,
+    baselineSources: input.baselineSources,
+    today: input.today,
+    label: input.job.id,
+  });
+  if (!result.ok) return { ok: false, error: `[codex] ${result.error}` };
+
+  console.log(`ℹ️ [research][codex] 조사 완료 ${Math.round(result.durationMs / 1000)}초`);
+  await writeFile(input.outputPath, `${stripMarkdownFence(result.markdown)}\n`, "utf8");
+  return { ok: true };
+}
+
+/**
+ * 제공자에 따라 researcher를 고른다(config/researchProvider.ts의 표). 기본은 claude라 이 함수를
+ * 안 건드리면 기존 동작과 동일하다.
+ *
+ * - gemini: 실패하면 RESEARCH_FALLBACK_TO_CLAUDE(기본 true)에 따라 같은 job에 한해 claude로 1회
+ *   폴백한다 - Gemini 쿼터/네트워크 장애가 job 전체를 막지 않게 하기 위해서다.
+ * - codex: **폴백하지 않는다**(2026-11-01 사용자 결정). Claude 한도가 빠듯해서 켠 스위치라 되돌리면
+ *   켠 이유가 사라지고, Codex는 맥에서만 도는데 그 맥에서 Claude 조사를 돌리는 것은 금지다
+ *   (불변식 ①). 실패는 기존 실패 경로(텔레그램 알림 + 사람이 재시도)로 떨어진다.
  */
 async function runDefaultResearcher(
   input: DefaultResearcherInput
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (RESEARCH_PROVIDER === "gemini") {
+  if (input.provider === "codex") {
+    return runCodexResearcherAndSave(input);
+  }
+
+  if (input.provider === "gemini") {
     const geminiResult = await runGeminiResearcherAndSave(input);
     if (geminiResult.ok) return geminiResult;
     if (!RESEARCH_FALLBACK_TO_CLAUDE) return geminiResult;
@@ -338,6 +385,30 @@ async function defaultBuildBrief(input: {
   });
 }
 
+/**
+ * 조사 파일 frontmatter에 `research_provider`를 남긴다(2026-11-01).
+ *
+ * 왜 파일에까지 남기나: 나중에 "이 조사는 왜 출처가 적지/많지"를 되짚을 때 제공자를 알아야 품질을
+ * 역추적할 수 있다. metadata.researchProvider는 job이 지워지면 사라지지만 조사 파일은 남는다.
+ * parseResearchFile은 모르는 frontmatter 스칼라를 무시하므로 이 줄이 파싱을 깨지 않는다.
+ *
+ * 이미 같은 값이 있으면 null을 돌려준다(되쓰기를 건너뛰어 재사용 파일의 mtime을 건드리지 않는다).
+ */
+export function stampResearchProvider(text: string, provider: ResearchProvider): string | null {
+  const match = text.match(/^\ufeff?---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!match) return null; // frontmatter가 없는 파일(규격 위반)은 건드리지 않는다 - 파서가 따로 처리한다.
+  const line = `research_provider: ${provider}`;
+  const existing = match[1].match(/^research_provider:\s*(.*)$/m);
+  if (existing) {
+    if (existing[1].trim() === provider) return null;
+    return text.replace(/^research_provider:\s*.*$/m, line);
+  }
+  // frontmatter 블록 끝(닫는 `---`) 바로 앞에 끼운다.
+  const head = match[0];
+  const insertAt = head.lastIndexOf("---");
+  return text.slice(0, insertAt) + `${line}\n` + text.slice(insertAt);
+}
+
 /** 파일이 존재하고 maxAgeMs 안에 수정됐으면 true. 재조사 생략 판정에 쓴다. */
 function fileModifiedWithin(path: string, maxAgeMs: number): boolean {
   try {
@@ -383,6 +454,10 @@ async function runResearchStageInner(
   options: RunResearchStageOptions,
   startedAt: number
 ): Promise<RunResearchStageResult> {
+  // 제공자는 여기서 한 번만 정하고 아래로 넘긴다(2026-11-01). 맥미니 폴러는 options.provider로
+  // "codex"를 못 박아 넘기므로 환경변수와 무관하게 맥에서 Claude 조사가 돌 수 없다(불변식 ①).
+  const provider = options.provider ?? RESEARCH_PROVIDER;
+
   // 1) 기준 자료(baseline) - NAVER 검색 API. 하이브리드의 감사 베이스라인이다. 비어 있어도
   //    바로 실패하지 않는다 - 에이전트가 WebSearch로 채울 수 있다(단, 그 사실을 프롬프트에 알린다).
   const collected = await collectSourcesForJob(jobId, job.keyword, { category: job.category });
@@ -464,7 +539,7 @@ async function runResearchStageInner(
       const prompt = buildResearchPrompt({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, converterSource, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
       ran = await options.runResearcher(prompt, outputPath);
     } else {
-      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, converterSource, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack });
+      ran = await runDefaultResearcher({ job, baselineSources: baseline, outputPath, today, brief, sourceContext, userSourceText, userSourceUrl, converterSource, retryHint, personBackground, personAutocomplete: collected.personAutocomplete, personSourcePack, provider });
     }
     if (!ran.ok) {
       await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${ran.error}` });
@@ -475,11 +550,20 @@ async function runResearchStageInner(
 
   // 3) 산출 파일 읽기 + 파싱
   const readResearchFile = options.readResearchFile ?? defaultReadResearchFile;
-  const fileText = await readResearchFile(outputPath);
-  if (!fileText || fileText.trim().length === 0) {
+  const rawFileText = await readResearchFile(outputPath);
+  if (!rawFileText || rawFileText.trim().length === 0) {
     const error = `researcher가 파일을 만들지 않았습니다: ${outputPath}`;
     await ArticleJobRepository.mergeMetadata(jobId, { lastError: `[research] ${error}` });
     return { status: "failed", error };
+  }
+  // 어느 제공자로 조사했는지 파일에도 남긴다(가시성). 되쓰기 실패는 조사를 실패시키지 않는다.
+  const stamped = stampResearchProvider(rawFileText, provider);
+  const fileText = stamped ?? rawFileText;
+  if (stamped) {
+    const writeResearchFileFn = options.writeResearchFile ?? ((path: string, text: string) => writeFile(path, text, "utf8"));
+    await writeResearchFileFn(outputPath, stamped).catch((error) => {
+      console.warn(`⚠️ [research] frontmatter에 제공자를 남기지 못했습니다(진행은 계속): ${describeError(error)}`);
+    });
   }
   const parsed = parseResearchFile(fileText);
 
@@ -536,6 +620,9 @@ async function runResearchStageInner(
     lastError: null,
     researchFilePath: outputPath,
     researchFileContent: fileText,
+    // 어느 제공자로 조사했나(2026-11-01). 검수 카드가 이 값을 한 줄로 보여 준다 - 스위치를 켠 채
+    // 잊는 것을 막고, 나중에 조사 품질을 제공자별로 역추적할 수 있다.
+    researchProvider: provider,
     researchVerdict: reconciled.verdict,
     // 감사용 - 에이전트가 파일에 적었던 값과 다르면 남긴다.
     researchVerdictWritten: reconciled.corrected ? reconciled.written : null,
