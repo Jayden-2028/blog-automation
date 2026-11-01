@@ -142,6 +142,25 @@ async function notify(job: ArticleJobRow | null, text: string): Promise<void> {
 
 const LOGIN_GUIDE = "맥미니에서 <code>npm run setup:tistory</code>를 실행해 카카오 로그인하면 대기 중인 발행이 자동으로 이어집니다.";
 
+const DRAFT_LIST_URL = `${TISTORY_CONFIG.blogUrl.replace(/\/$/, "")}/manage/posts?category=&searchKeyword=&page=1`;
+
+/** 캡차로 막혔을 때. "실패했으니 다시 누르세요"가 아니라 "캡차만 풀면 됩니다"로 안내한다. */
+function captchaMessage(job: ArticleJobRow, draftSaved: boolean): string {
+  return [
+    "🧩 <b>티스토리 캡차가 떠서 자동 발행이 막혔습니다</b>",
+    "",
+    `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+    ...(draftSaved
+      ? [
+          "원고는 <b>임시저장</b>해 두었습니다. 글 관리에서 열어 캡차를 풀고 발행하면 됩니다.",
+          escapeTelegramHtml(DRAFT_LIST_URL),
+        ]
+      : ["임시저장도 실패했습니다 - 원고 페이지에서 복사해 직접 올려주세요."]),
+    "",
+    "자동 재시도는 하지 않습니다(또 막힙니다). 캡차가 가라앉은 뒤 발행 버튼을 다시 누르면 자동으로 올라갑니다.",
+  ].join("\n");
+}
+
 function failureMessage(job: ArticleJobRow, detail: string): string {
   return [
     "⚠️ <b>티스토리 발행에 실패했습니다</b>",
@@ -206,6 +225,17 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
         ].join("\n")
       );
       continue;
+    }
+
+    if (result.reason === "captcha") {
+      // 2026-11-02: 캡차는 **사람이 풀면 끝나는 일**이다. 자동 재시도는 또 막히므로 하지 않고,
+      // 원고를 임시저장에 남긴 뒤 사람이 이어서 발행하도록 안내한다. 버튼은 되살려 둔다 -
+      // 캡차가 가라앉은 뒤 다시 누르면 자동 발행이 되기 때문이다.
+      await deps.finish(job.id, { ok: false, error: result.detail });
+      console.log(`   🧩 ${job.keyword} - 캡차로 막힘(임시저장 ${result.draftSaved ? "성공" : "실패"})`);
+      await deps.notify(job, captchaMessage(job, result.draftSaved));
+      // 캡차는 보통 연달아 뜬다 - 이 주기의 남은 건은 건드리지 않는다.
+      return;
     }
 
     if (result.reason === "login_required") {
