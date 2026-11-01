@@ -29,7 +29,7 @@ import { TistoryPublisher } from "../services/publish/tistory/TistoryPublisher.j
 import { reportStaleEdits } from "./lib/staleEditReport.js";
 import type { StaleEntry } from "./lib/staleEditReport.js";
 import { publishJobToTistory } from "../workflows/publish/publishJobToTistory.js";
-import { publishIntervalGate } from "../workflows/publish/publishInterval.js";
+import { dailyPublishLimitGate, publishIntervalGate } from "../workflows/publish/publishInterval.js";
 import {
   deferTistoryPublish,
   finishTistoryPublish,
@@ -116,6 +116,7 @@ export type PollDeps = {
   publish: typeof publishJobToTistory;
   /** 최소 발행 간격 판정(2026-11-01). 생략하면 실제 판정을 쓴다 - 기존 주입 테스트가 깨지지 않게 선택값이다. */
   intervalGate?: () => Promise<{ allowed: boolean; reason?: string }>;
+  dailyLimitGate?: () => Promise<{ allowed: boolean; reason?: string }>;
   finish: typeof finishTistoryPublish;
   defer: typeof deferTistoryPublish;
   notify: (job: ArticleJobRow | null, text: string) => Promise<void>;
@@ -125,6 +126,7 @@ export type PollDeps = {
 const defaultDeps: PollDeps = {
   publish: publishJobToTistory,
   intervalGate: () => publishIntervalGate("tistory"),
+  dailyLimitGate: () => dailyPublishLimitGate("tistory"),
   finish: finishTistoryPublish,
   defer: deferTistoryPublish,
   notify,
@@ -160,6 +162,15 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
   const gate = await (deps.intervalGate ?? (() => publishIntervalGate("tistory")))();
   if (!gate.allowed) {
     console.log(`⏸ [tistory-poll] 최소 발행 간격 대기 - ${gate.reason}. 요청은 그대로 두고 다음 주기에 다시 봅니다.`);
+    return;
+  }
+
+  // 일일 발행 상한(2026-11-01 사용자 승인, 기본 1건/일, KST 자정 기준): 애드센스가 "가치가 별로
+  // 없는 콘텐츠"로 반려했고 하루 2.3건 속보 재가공이 그 원인 쪽이다(publishInterval.ts 머리말).
+  // 간격 가드와 같이 **미루기**다 - 요청을 그대로 두면 내일 올라간다.
+  const daily = await (deps.dailyLimitGate ?? (() => dailyPublishLimitGate("tistory")))();
+  if (!daily.allowed) {
+    console.log(`⏸ [tistory-poll] 일일 발행 상한 - ${daily.reason} 요청은 그대로 두고 내일 다시 봅니다.`);
     return;
   }
 

@@ -11,6 +11,15 @@
 /** 19시 핫이슈 스타 알림 run(KEYWORD-REFRESH-2026-10.md §B). 키워드 run과 섞이면 안 된다. */
 export const HOT_STAR_RUN_KIND = "entertainment-hot-star";
 
+/** 엔터 트랙 키워드 수집 run. */
+export const ENTERTAINMENT_RUN_KIND = "entertainment";
+
+/**
+ * 엔터 트랙이 소재를 집어 가는 run 전부(2026-11-01). 사회 리포트가 "오늘 엔터가 이미 가져간 것"을
+ * 찾을 때 이 목록으로 run을 고른다 - `entertainmentPicksOfDay.ts` 참고.
+ */
+export const ENTERTAINMENT_RUN_KINDS: readonly string[] = [ENTERTAINMENT_RUN_KIND, HOT_STAR_RUN_KIND];
+
 /**
  * 키워드 선택(Go/Pass) 알림의 재료가 될 수 없는 run 종류.
  *

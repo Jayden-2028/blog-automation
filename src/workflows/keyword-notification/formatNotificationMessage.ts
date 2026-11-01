@@ -98,10 +98,17 @@ export function expiryRiskWarning(item: {
 }
 
 /** 주제·시드쿼리·카테고리만 보여준다 - 원문(headline)과 항목별 배점표(scoreBreakdown)는 뺀다(2026-09-04 사용자 요청, 폰 화면에서 항목당 너무 길었다). */
-function formatItemBlock(item: NotificationKeywordItem, isCommunity = false, evergreen = false): string {
+function formatItemBlock(
+  item: NotificationKeywordItem,
+  isCommunity = false,
+  evergreen = false,
+  badge: string | null = null
+): string {
   const keyword = escapeTelegramHtml(item.keyword);
 
-  const lines: string[] = [`<b>${item.rank}. ${isCommunity ? "📡 " : ""}${keyword}</b>`];
+  // 뱃지는 📡(커뮤니티 유래) 뒤에 붙는다. 사회 리포트의 🔥(공분 신호)가 지금 유일한 쓰임이다.
+  const prefix = `${isCommunity ? "📡 " : ""}${badge ? `${escapeTelegramHtml(badge)} ` : ""}`;
+  const lines: string[] = [`<b>${item.rank}. ${prefix}${keyword}</b>`];
   if (item.seedQuery) {
     lines.push(`   seedQuery: ${escapeTelegramHtml(item.seedQuery)} · category: ${escapeTelegramHtml(item.category ?? "N/A")}`);
   }
@@ -139,6 +146,11 @@ export type FormatNotificationMessageOptions = {
   evergreen?: boolean;
   /** 섹션별로 묶기(사회 데일리 리포트). 생략하면 순위대로 평평하게. */
   sections?: KeywordSectionConfig;
+  /**
+   * 항목 제목에 붙일 뱃지(2026-11-01). null이면 안 붙인다. 사회 리포트가 공분 신호에 🔥를 붙인다 -
+   * 점수에는 넣지 않고 표시만 한다(`socialReportSections.socialItemBadge`).
+   */
+  itemBadge?: (item: NotificationKeywordItem) => string | null;
 };
 
 export function formatNotificationMessage(
@@ -165,7 +177,9 @@ export function formatNotificationMessage(
     communityQueries.has(item.keyword.trim().toLowerCase()) ||
     (item.seedQuery !== null && communityQueries.has(item.seedQuery.trim().toLowerCase()));
   const toChunk = (item: NotificationKeywordItem): NotificationMessageChunk => ({
-    text: truncateForTelegram(formatItemBlock(item, isCommunityItem(item), options.evergreen ?? false)),
+    text: truncateForTelegram(
+      formatItemBlock(item, isCommunityItem(item), options.evergreen ?? false, options.itemBadge?.(item) ?? null)
+    ),
     ranks: [item.rank],
   });
 

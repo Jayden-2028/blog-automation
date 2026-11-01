@@ -76,18 +76,38 @@ export function isExcludedCategory(category: string | null | undefined): boolean
   return EXCLUDED_CATEGORIES.includes(category as KeywordCategory);
 }
 
+/**
+ * 2026-11-01: 정치 배제가 **트랙별로 갈린다.**
+ *
+ * 그 전까지 이 함수는 두 트랙 공용이라 정치를 엔터·사회 양쪽에서 버렸다. 사회(티스토리)는 독자를
+ * 4060 남성으로 잡고 정치를 받기로 했다 - 발행본 103건 실측에서 `정치와 국정`이 평균 조회수
+ * 1.46배로 최상위였고 조회수 0회 글이 17건 중 0건이었다(전 카테고리 중 유일). 엔터(네이버)는
+ * 그대로 배제한다.
+ *
+ * `allowPolitics`를 켜도 **스포츠·육아 배제는 그대로**다. 정치 하나만 푼다.
+ */
+export type CandidateExclusionOptions = {
+  /** 사회 트랙에서만 true. 정치 어휘를 통과시킨다. 기본 false(엔터 트랙 = 기존 동작). */
+  allowPolitics?: boolean;
+};
+
 /** 이 후보(키워드+분류된 카테고리)를 수집 단계에서 버릴지 판정한다. */
 export function shouldExcludeCandidate(
   keyword: string,
   category: string | null | undefined,
-  seedQuery?: string | null
+  seedQuery?: string | null,
+  options: CandidateExclusionOptions = {}
 ): boolean {
+  const political = options.allowPolitics
+    ? false
+    : isPoliticalKeyword(keyword) || (!!seedQuery && isPoliticalKeyword(seedQuery));
+
   // 기사 제목에는 구단·종목이 안 나와도(예: "투타겸업 하현승의 가치?") 찾아낸 시드 검색어에 있으면
   // 스포츠 기사다(2026-10-07) - 제목과 시드 검색어를 모두 본다.
   return (
     isExcludedCategory(category) ||
-    isPoliticalKeyword(keyword) ||
+    political ||
     isSportsKeyword(keyword) ||
-    (!!seedQuery && (isPoliticalKeyword(seedQuery) || isSportsKeyword(seedQuery)))
+    (!!seedQuery && isSportsKeyword(seedQuery))
   );
 }

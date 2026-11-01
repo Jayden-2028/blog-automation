@@ -12,7 +12,16 @@
 // 개편1에서 엔터가 자체 수집으로 독립해 그 의존은 사라졌다.)
 import "dotenv/config";
 
-import { formatSocialReportHeader, isEntertainmentLeak, SOCIAL_REPORT_SECTION_CONFIG } from "../config/socialReportSections.js";
+import {
+  formatSocialReportHeader,
+  isEntertainmentLeak,
+  socialItemBadge,
+  SOCIAL_REPORT_SECTION_CONFIG,
+} from "../config/socialReportSections.js";
+import {
+  loadEntertainmentPicksOfDay,
+  overlapsEntertainmentPicks,
+} from "../workflows/keyword-discovery/entertainmentPicksOfDay.js";
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
 import type { SchedulerJob } from "../scheduler/Scheduler.js";
@@ -29,12 +38,24 @@ const NON_FATAL_STAGES = new Set(["trendCollect", "competition"]);
 const job: SchedulerJob = {
   name: "social-issue-keyword",
   execute: async () => {
+    // 오늘 엔터 트랙(18시 키워드 + 19시 핫이슈 스타)이 이미 집어 간 키워드·인물. 사람 이름뿐인
+    // 키워드는 어휘로 못 잡아서(강유미·김용건·이찬혁) 출처로 거른다 - entertainmentPicksOfDay.ts.
+    const entertainmentPicks = await loadEntertainmentPicksOfDay();
+    if (entertainmentPicks.keywords.length || entertainmentPicks.people.length) {
+      console.log(
+        `ℹ️ 오늘 엔터 선점: 키워드 ${entertainmentPicks.keywords.length}건 · 인물 ${entertainmentPicks.people.length}명`
+      );
+    }
+
     const result = await runDailyKeywordWorkflow({
       // community는 수집 목록에 두되 크롤링은 끈다 - 엔터 회차가 채워 둔 오늘치를 읽기만 한다(위 머리말).
       collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community"],
       communityOptions: { enabled: false },
       // community category = 인터넷 화제·논쟁(keywordCategoryRules). 사회 계열 커뮤니티 키워드가 여기 속한다.
       includeCategories: ["incident", "living", "community"],
+      // 2026-11-01 사용자 결정: 티스토리 독자를 4060 남성으로 잡고 정치를 받는다. 엔터 트랙은
+      // 그대로 배제한다(이 플래그가 없으면 기존 동작). 집필 균형 조건은 style/incident.md 정치 블록.
+      allowPolitics: true,
       // 엔터를 뺀 뒤에도 10건이 되도록 20위까지 저장해 둔다(알림에서 isEntertainmentLeak로 거른다).
       rankOptions: { topN: 20 },
       metadata: { kind: "social_issue", track: "social" },
@@ -42,7 +63,9 @@ const job: SchedulerJob = {
         track: "social",
         headerTitle: formatSocialReportHeader(),
         sections: SOCIAL_REPORT_SECTION_CONFIG,
-        excludeItem: isEntertainmentLeak,
+        // 엔터 제외는 두 겹이다 - 어휘(isEntertainmentLeak) + 오늘 엔터가 집어 간 것(출처).
+        excludeItem: (item) => isEntertainmentLeak(item) || overlapsEntertainmentPicks(item, entertainmentPicks),
+        itemBadge: socialItemBadge,
         topN: 10,
       },
     });
