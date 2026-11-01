@@ -7,7 +7,12 @@
 //  · 더 큰 이유는 네이버다 - **자동 발행으로 저품질 판정을 받은 이력이 있다**(사용자). 짧은 간격의 연속
 //    발행은 그 판정을 부르는 대표적 패턴이라, 캡차보다 회복 비용이 훨씬 크다.
 //
-// 그래서 폴러가 발행을 집기 전에 "그 채널의 **마지막 성공 발행**으로부터 N분이 지났는가"를 본다.
+// 그래서 폴러가 발행을 집기 전에 "그 채널의 **마지막 시도**로부터 N분이 지났는가"를 본다.
+//
+// **성공만 세면 안 된다**(2026-11-01 실측으로 드러난 구멍): 11/01 12:47과 12:48에 두 건이 **1분 간격**으로
+// 시도돼 둘 다 캡차에 막혔다. 첫 건이 실패해 성공 기록이 남지 않았고, 성공만 보던 가드가 다음 건을
+// 그대로 통과시킨 것이다. 캡차가 막 뜬 직후가 가장 두드리면 안 되는 때인데 정확히 그때 다시 두드렸다.
+// 그래서 **실패한 시도도 센다** - 마지막 시도 시각 = max(마지막 성공 발행, 마지막 시도 종료).
 // 안 지났으면 **실패가 아니라 미룸**이다 - 요청을 그대로 두고 다음 주기(60초)에 다시 본다. 사용자가 누른
 // 버튼은 살아 있고, 알림도 보내지 않는다(60초마다 알림이 오면 소음이다).
 //
@@ -71,8 +76,44 @@ export function checkInterval(
     allowed: false,
     waitMs,
     lastPublishedAt,
-    reason: `${platform} 마지막 발행에서 ${Math.floor(elapsed / 60_000)}분 지남 - 최소 ${minutes}분 간격까지 ${Math.ceil(waitMs / 60_000)}분 남음`,
+    reason: `${platform} 마지막 시도에서 ${Math.floor(elapsed / 60_000)}분 지남 - 최소 ${minutes}분 간격까지 ${Math.ceil(waitMs / 60_000)}분 남음`,
   };
+}
+
+/** job.metadata의 발행 시도 기록 키. 성공·실패 모두 `finishedAt`을 남긴다. */
+const ATTEMPT_KEY: Partial<Record<PublishPlatform, string>> = {
+  tistory: "tistoryPublish",
+  naver: "naverPublish",
+};
+
+/** 그 채널의 가장 최근 **시도 종료** 시각(실패 포함). 기록이 없으면 null. */
+export async function lastAttemptAtFor(platform: PublishPlatform): Promise<string | null> {
+  const key = ATTEMPT_KEY[platform];
+  if (!key) return null;
+  const { data, error } = await supabase
+    .from("article_jobs")
+    .select("metadata")
+    .not(`metadata->${key}->>finishedAt`, "is", null)
+    .order(`metadata->${key}->>finishedAt`, { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn(`⚠️ [publish-interval] 마지막 시도 시각 조회 실패(건너뜁니다): ${error.message}`);
+    return null;
+  }
+  const meta = data?.[0]?.metadata as Record<string, { finishedAt?: unknown }> | undefined;
+  const finishedAt = meta?.[key]?.finishedAt;
+  return typeof finishedAt === "string" && finishedAt.trim() ? finishedAt : null;
+}
+
+/** 둘 중 더 최근 시각. 둘 다 없으면 null. */
+export function laterOf(a: string | null, b: string | null): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  const pa = Date.parse(a);
+  const pb = Date.parse(b);
+  if (Number.isNaN(pa)) return b;
+  if (Number.isNaN(pb)) return a;
+  return pa >= pb ? a : b;
 }
 
 /** 그 채널의 가장 최근 성공 발행 시각. 없으면 null. */
@@ -93,11 +134,12 @@ export async function lastPublishedAtFor(platform: PublishPlatform): Promise<str
   return (data?.[0]?.published_at as string | undefined) ?? null;
 }
 
-/** 폴러가 쓰는 한 줄짜리 판정. 조회 + 판정. */
+/** 폴러가 쓰는 한 줄짜리 판정. 성공·실패를 **함께** 보고 더 최근 쪽을 기준으로 삼는다. */
 export async function publishIntervalGate(
   platform: PublishPlatform,
   now: Date = new Date(),
   env: NodeJS.ProcessEnv = process.env
 ): Promise<IntervalGate> {
-  return checkInterval(await lastPublishedAtFor(platform), platform, now, env);
+  const [published, attempted] = await Promise.all([lastPublishedAtFor(platform), lastAttemptAtFor(platform)]);
+  return checkInterval(laterOf(published, attempted), platform, now, env);
 }

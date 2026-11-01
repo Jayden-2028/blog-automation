@@ -3,7 +3,7 @@
 // 배경: 10/31 23:47에 티스토리로 두 건을 연달아 올린 직후 7번째에서 카카오 캡차가 떴다. 더 큰 이유는
 // 네이버 - 자동 발행으로 저품질 판정을 받은 이력이 있다(사용자). 그래서 채널별 최소 간격을 둔다.
 
-import { checkInterval, DEFAULT_MIN_INTERVAL_MINUTES, minIntervalMinutes } from "./publishInterval.js";
+import { checkInterval, DEFAULT_MIN_INTERVAL_MINUTES, laterOf, minIntervalMinutes } from "./publishInterval.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -51,6 +51,23 @@ const ago = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toIS
   const env = { TISTORY_PUBLISH_MIN_INTERVAL_MIN: "30", NAVER_PUBLISH_MIN_INTERVAL_MIN: "5" };
   assert(!checkInterval(ago(10), "tistory", NOW, env).allowed, "티스토리는 30분 기준이라 10분은 막힘");
   assert(checkInterval(ago(10), "naver", NOW, env).allowed, "네이버는 5분 기준이라 10분은 통과");
+}
+
+// ── 5. 실패한 시도도 센다(2026-11-01 구멍) ──────────────────────
+// 11/01 12:47·12:48에 두 건이 1분 간격으로 시도돼 둘 다 캡차에 막혔다. 첫 건이 실패해 성공 기록이
+// 남지 않았고, 성공만 보던 가드가 다음 건을 통과시켰다. 이제 마지막 "시도"를 기준으로 본다.
+{
+  const published = ago(60);   // 한 시간 전 성공
+  const attempted = ago(1);    // 1분 전 실패
+  assert(laterOf(published, attempted) === attempted, "더 최근 쪽(실패 시도)을 고른다");
+  assert(laterOf(published, null) === published, "한쪽만 있으면 그것");
+  assert(laterOf(null, null) === null, "둘 다 없으면 null");
+  assert(laterOf("깨진값", attempted) === attempted, "못 읽는 값은 반대쪽");
+
+  // 성공만 봤다면 통과했을 상황이 이제 막힌다.
+  assert(checkInterval(published, "tistory", NOW, {}).allowed, "성공만 보면 1시간 전이라 통과했다");
+  assert(!checkInterval(laterOf(published, attempted), "tistory", NOW, {}).allowed, "시도를 세면 막힌다");
+  console.log("✅ 실패 시도 포함 - 캡차 직후 재시도를 막는다");
 }
 
 console.log("✅ 최소 발행 간격: 기본 5분·채널별 설정·사고 재현·모르면 통과");
