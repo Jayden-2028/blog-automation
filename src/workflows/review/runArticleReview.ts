@@ -15,6 +15,7 @@ import {
   checkLegal,
   checkQuality,
   checkVoice,
+  checkSubheadFocus,
 } from "./articleReviewChecks.js";
 import type { ReviewCheck } from "./articleReviewChecks.js";
 import type { ArticleJobRow, ArticleRow, SourceRow } from "../../types/database.js";
@@ -58,6 +59,7 @@ export function runArticleReview(input: ArticleReviewInput): ArticleReviewResult
     ...checkAttributionHedging(input.article.content),
     ...checkInstitutionAttribution(input.article.content, input.researchText),
     ...checkVoice(input.article.content, input.job.category),
+    ...checkSubheadFocus(input.article.content),
     ...checkImagePrompts(input.article.content, input.job.category),
   ];
 

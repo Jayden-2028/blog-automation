@@ -416,6 +416,127 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
   return checks;
 }
 
+// ---------- 소제목 합침 (2026-11-01, core-rules.md §0-2) ----------
+//
+// 사용자 피드백(2026-11-01): 여러 내용을 합쳐 하나의 문단·하나의 소제목으로 만들지 말고, 분량이
+// 안 나오면 생략하라. 나쁜 예로 든 것이 `작품 활동부터 바자회 기부까지`(오윤아 원고 #801)다.
+//
+// **왜 이렇게 보수적인가 - 실측(10/20 이후 person·entertainment·ott 원고 42건, 소제목 253개).**
+//   - 쉼표는 **소제목 절반(127/253)에 있고 거의 전부 정상**이다. `손석구, 한지민에게 건넨 반말`처럼
+//     "키워드 + 그 문단의 판단"을 잇는 쉼표가 이 블로그의 기본형(core-rules.md §5)이기 때문이다.
+//     그래서 **쉼표만으로는 잡지 않는다.** 잡으면 경고가 소제목 절반에 붙어 카드를 못 읽는다.
+//   - `와/과`도 그냥 잡으면 57/253이 걸리는데 절반 이상이 오탐이다. 한 주제 안의 대비·짝
+//     (`비판과 옹호`, `웃음과 공포의 완급`), 공동격 조사(`세븐과 결혼`, `최희서와 다섯 번째 협업`),
+//     한 주제의 수식(`원작 웹소설과 달라진 점`)이 전부 정상 소제목이다.
+//   - 그래서 **두 주제가 각각 여러 어절의 명사구일 때만** 합침으로 본다. 한쪽이 한 어절이면
+//     조사·대비·짝일 확률이 높아 넘긴다. 이 기준으로 실측 253개 중 16개(6.3%)가 걸렸고 그중
+//     14개가 진짜 합침이었다.
+//
+// 코드가 전부 잡지는 못한다(`전희미 1인 2역과 옌안`처럼 한쪽이 한 어절인 합침은 통과한다).
+// 판정은 규격(core-rules.md §0-2)이 하고, 이 검사는 가장 분명한 모양만 카드에 올린다.
+
+/** 소제목 줄(`**소제목**` 볼드 단독 줄)만 뽑는다. 고정 블록 두 개는 소제목이 아니다. */
+const FIXED_SUBHEAD_BLOCKS = new Set(["함께 보면 좋은 글", "참고 자료"]);
+
+export function extractSubheads(rawBody: string): string[] {
+  return [...rawBody.matchAll(/^\*\*([^*]+)\*\*$/gm)]
+    .map((m) => m[1].trim())
+    .filter((s) => s.length > 0 && !FIXED_SUBHEAD_BLOCKS.has(s));
+}
+
+/**
+ * 한 주제 안의 대비·짝. `A와 B`가 이 짝이면 두 주제가 아니라 한 주제(반응·완급)다.
+ * 실측에서 나온 것만 넣는다 - 넓히면 오탐이 아니라 미탐이 늘어난다.
+ */
+const PAIRED_CONTRAST = [
+  ["호평", "혹평"], ["비판", "옹호"], ["지지", "반박"], ["웃음", "공포"],
+  ["여유", "여백"], ["욕망", "속죄"], ["긍정", "부정"], ["찬성", "반대"],
+];
+
+/** 오른쪽이 이런 의존명사로 끝나면 `A와 B`가 한 주제를 수식하는 것이다(`원작 웹소설과 달라진 점`). */
+const BOUND_NOUN_TAIL = /(점|이유|까닭|사이|완급|정도|수준|방식|셈|뿐|차이|무게|의미)$/;
+
+/** 어절이 둘 이상인가. 한 어절이면 조사·고유명사일 확률이 높아 합침으로 보지 않는다. */
+function isMultiWordPhrase(text: string): boolean {
+  return text.trim().split(/\s+/).filter(Boolean).length >= 2;
+}
+
+function hasPairedContrast(left: string, right: string): boolean {
+  return PAIRED_CONTRAST.some(([a, b]) => (left.includes(a) && right.includes(b)) || (left.includes(b) && right.includes(a)));
+}
+
+/** 양쪽에 숫자가 있으면 한 주제의 값 병기다(`제작비 800억과 750억대 추정`). */
+function bothHaveDigits(left: string, right: string): boolean {
+  return /[0-9]/.test(left) && /[0-9]/.test(right);
+}
+
+/**
+ * 소제목 하나가 두 주제를 합쳤는가. 합쳤으면 그 모양을 돌려준다.
+ *
+ * 잡는 두 모양:
+ *   ① `A부터 B까지` - `까지`가 소제목 끝이고 A·B가 각각 여러 어절 (`작품 활동부터 바자회 기부까지`)
+ *   ② `A와/과 B`   - A·B가 각각 여러 어절이고, 뒤에 쉼표가 없고, 대비·짝·값병기·의존명사가 아닐 때
+ */
+export function findSubheadMerge(subhead: string): { kind: "range" | "conjunction"; left: string; right: string } | null {
+  const text = subhead.trim();
+
+  // ① A부터 B까지 - `까지`로 끝날 때만. `초3부터 고3까지 반장`처럼 뒤에 머리 명사가 오면 기간·범위다.
+  const range = text.match(/^(.*?)부터\s+(.*?)까지$/);
+  if (range) {
+    const left = range[1].trim();
+    const right = range[2].trim();
+    if (isMultiWordPhrase(left) && isMultiWordPhrase(right)) {
+      return { kind: "range", left, right };
+    }
+  }
+
+  // ② A와/과 B - 마지막 쉼표·가운뎃점 뒤 조각 안에서만 본다(`원작 결말, 숨진 앤드루와 로라`는
+  //    쉼표 뒤 조각 `숨진 앤드루와 로라`를 보고, 오른쪽 `로라`가 한 어절이라 넘어간다).
+  const conj = text.match(/^(.*)(?:와|과)\s+([^,·]+)$/);
+  if (conj) {
+    const leftWhole = conj[1];
+    const right = conj[2].trim();
+    // 쉼표·가운뎃점이 `와/과` 뒤에 있으면 그 뒤가 진짜 주제다(`김 회장과 박 반장, 67년 연기 인생`).
+    const left = leftWhole.split(/[,·]/).pop()!.trim();
+    if (
+      isMultiWordPhrase(left) &&
+      isMultiWordPhrase(right) &&
+      !hasPairedContrast(left, right) &&
+      !bothHaveDigits(left, right) &&
+      !BOUND_NOUN_TAIL.test(right)
+    ) {
+      return { kind: "conjunction", left, right };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 소제목이 두 주제를 합쳤는지 검수 카드에 경고로 남긴다(core-rules.md §0-2).
+ *
+ * `warning`이고 발행을 막지 않는다 - 보수적으로 잡아도 오탐이 남고(실측 16건 중 2건),
+ * 두 주제인지 한 주제인지는 끝내 사람이 읽어야 갈린다.
+ */
+export function checkSubheadFocus(rawBody: string | null): ReviewCheck[] {
+  if (!rawBody) return [];
+  const merged: string[] = [];
+  for (const subhead of extractSubheads(stripReferencesSection(rawBody))) {
+    if (findSubheadMerge(subhead)) merged.push(subhead);
+  }
+  if (merged.length === 0) return [];
+  return [
+    {
+      category: "quality",
+      severity: "warning",
+      message: `소제목이 두 주제를 합친 것으로 보입니다 ${merged.length}건: ${merged
+        .slice(0, 3)
+        .map((s) => `"${s}"`)
+        .join(", ")} - core-rules.md §0-2: 소제목은 한 주제만 가리킵니다. 한 문단으로 쓸 분량이 안 나오면 더 후킹한 쪽만 쓰고 나머지는 생략합니다`,
+    },
+  ];
+}
+
 // ---------- 인용/헤지 문체 (2026-09-15, 2026-09-16 강화) ----------
 //
 // rules/facts-and-hedging.md 핵심 원칙 1·2(보도 경위 언급 금지, 확인/확정 여부 언급 금지)를
