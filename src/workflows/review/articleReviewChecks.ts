@@ -206,15 +206,21 @@ export type CheckQualityInput = {
   /** 이 job의 메인 키워드. 제목 첫 마디에 들어갔는지 본다(2026-10-02). */
   keyword?: string | null;
   /**
-   * job.category. person(인물 백과)이면 하한은 공통과 같고(2,000자) 상한만 4,000자로 넓다.
-   * 4,000자 초과는 집필 상한 위반이 아니라 목표 구간(2,500~4,000자) 초과 신호로 경고만 한다
-   * (2026-10-15 Q8 판정, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
+   * job.category. person(인물 백과)이면 하한은 공통과 같고(2,000자) 상한만 6,000자로 넓다.
+   * 6,000자 초과는 집필 상한 위반이 아니라 목표 구간(4,000~6,000자) 초과 신호로 경고만 한다
+   * (2026-10-15 Q8 판정 → **2026-11-02 상향**, core-rules.md §4). 그 외·미지정은 기존 TARGET_ARTICLE_LENGTH.
    */
   category?: string | null;
 };
 
-/** 인물 백과 분량 경고 상한(공백 제외). 집필 상한이 아니라 목표 구간 초과 신호다. 하한은 공통 min. */
-export const PERSON_MAX_ARTICLE_LENGTH = 4000;
+/**
+ * 인물 백과 분량 경고 상한(공백 제외). 집필 상한이 아니라 목표 구간 초과 신호다. 하한은 공통 min.
+ *
+ * 2026-11-02에 4,000 → 6,000으로 올렸다. 인물 원고는 탐사식 심층 보고서로 의도한 것인데 옛 상한이
+ * 대표작을 잘라 냈다 - 서현진 원고가 3,871자로 상한에 거의 닿아 「사랑의 온도」·「뷰티 인사이드」가
+ * 빠졌다(사용자 지시, core-rules.md §4 person 예외).
+ */
+export const PERSON_MAX_ARTICLE_LENGTH = 6000;
 
 /** 제목 꼬리의 "~정리/총정리/모음". 후킹을 죽이는 자리다(core-rules.md §5). */
 const TITLE_SUMMARY_TAIL = /(?:정리|총정리|모음|총집합)\s*$/;
@@ -320,7 +326,7 @@ export function checkQuality(input: CheckQualityInput): ReviewCheck[] {
       message: isPerson
         ? length < minLength
           ? `분량 ${length.toLocaleString()}자 (인물 백과 하한 ${minLength.toLocaleString()}자 미달, 공백·목록 제외)`
-          : `분량 ${length.toLocaleString()}자 (인물 백과 목표 구간 2,500~${maxLength.toLocaleString()}자 초과 신호입니다. 상한 위반이 아니니 늘어진 곳이 없는지만 확인하세요, 공백·목록 제외)`
+          : `분량 ${length.toLocaleString()}자 (인물 백과 목표 구간 4,000~${maxLength.toLocaleString()}자 초과 신호입니다. 상한 위반이 아니니 늘어진 곳이 없는지만 확인하세요, 공백·목록 제외)`
         : `분량 ${length.toLocaleString()}자 (목표 ${TARGET_ARTICLE_LENGTH.min.toLocaleString()}~${TARGET_ARTICLE_LENGTH.max.toLocaleString()}, 공백·목록 제외)`,
     });
   }

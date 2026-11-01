@@ -198,7 +198,7 @@ function main(): void {
   assert(tooLong.some((c) => c.message.includes("분량")), "분량 초과를 경고해야 한다");
   console.log("✅ 품질: 분량 목표 이탈 경고");
 
-  // 12-2) 인물 백과(2026-10-15 Q8): 하한은 공통 2,000자, 상한만 4,000자 초과 시 "목표 구간 초과 신호" 경고. 다른 카테고리는 기존 2,000~3,000자.
+  // 12-2) 인물 백과(2026-10-15 Q8): 하한은 공통 2,000자, 상한만 6,000자 초과 시 "목표 구간 초과 신호" 경고. 다른 카테고리는 기존 2,000~3,000자.
   {
     const personBase = { title: "진선규 연기", hashtags: Array.from({ length: 5 }, (_, i) => `#태그${i}`), isMedical: false, category: "person" } as const;
     const bodyOf = (chars: number): string => `${"가".repeat(chars)}\n\n## 참고 자료\n\n- [a](https://a.kr/)`;
@@ -206,8 +206,12 @@ function main(): void {
       checkQuality({ ...personBase, category, body: bodyOf(chars) }).filter((c) => c.message.includes("분량"));
     assert(lengthWarns(1900, "person").length === 1, "person 1,900자는 하한(2,000자) 미달 경고");
     assert(lengthWarns(3900, "person").length === 0, "person 3,900자는 통과");
-    const over = lengthWarns(4100, "person");
-    assert(over.length === 1 && over[0].severity === "warning" && over[0].message.includes("초과 신호") && over[0].message.includes("상한 위반이 아니"), "person 4,100자는 초과 신호 경고(상한 위반 아님 명시)");
+    // 2026-11-02 상향: 옛 상한 4,000자에서 걸리던 분량이 이제 통과한다. 서현진 원고(3,871자)가
+    // 상한에 닿아 대표작이 잘린 것이 상향의 이유다.
+    assert(lengthWarns(4100, "person").length === 0, "person 4,100자는 통과(옛 상한 4,000 → 6,000)");
+    assert(lengthWarns(5900, "person").length === 0, "person 5,900자는 통과");
+    const over = lengthWarns(6100, "person");
+    assert(over.length === 1 && over[0].severity === "warning" && over[0].message.includes("초과 신호") && over[0].message.includes("상한 위반이 아니"), "person 6,100자는 초과 신호 경고(상한 위반 아님 명시)");
     assert(lengthWarns(3100, "entertainment").length === 0, "상한 3,500자로 상향(2026-10-16) - 3,100자는 통과");
     assert(lengthWarns(3600, "entertainment").length === 1, "다른 카테고리는 3,600자면 상한(3,500자) 초과 경고");
     assert(lengthWarns(3900, "entertainment").length === 1, "다른 카테고리는 3,900자 경고 유지");
