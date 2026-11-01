@@ -16,6 +16,7 @@ import {
   checkImagePrompts,
   checkLegal,
   checkQuality,
+  checkSubheadFocus,
   checkVoice,
 } from "./articleReviewChecks.js";
 import { formatReviewLines, runArticleReview } from "./runArticleReview.js";
@@ -695,6 +696,50 @@ function main(): void {
   });
   assert(!empty.passed && empty.checks.length > 0, "본문 없음은 검수에서 걸려야 한다");
   console.log("✅ 통합: 본문 없음 안전 처리");
+
+
+  // 19) 소제목 합침 (2026-11-01, core-rules.md §0-2). 사용자가 나쁜 예로 든 소제목이 걸리고,
+  //     실측에서 정상으로 확인된 소제목들이 통과해야 한다(오탐이 카드를 덮으면 검사가 무용지물이다).
+  const mergedSubhead = checkSubheadFocus(
+    "**작품 활동부터 바자회 기부까지**\n올해 영화에 출연했습니다.\n\n**참고 자료**\n- https://example.com",
+  );
+  assert(
+    mergedSubhead.length === 1 && mergedSubhead[0].message.includes("작품 활동부터 바자회 기부까지"),
+    `사용자가 든 합침 소제목이 걸려야 한다 (실제: ${JSON.stringify(mergedSubhead)})`,
+  );
+
+  const mergedConjunction = checkSubheadFocus("**최불암 허리디스크 수술과 3월 이상설**\n본문입니다.");
+  assert(mergedConjunction.length === 1, "여러 어절 명사구 둘을 `과`로 이은 소제목이 걸려야 한다");
+
+  // 실측 253개에서 정상으로 확인된 소제목들 - 전부 통과해야 한다.
+  const cleanSubheads = [
+    "손석구, 한지민에게 건넨 반말", // 쉼표 = 키워드 + 판단(core-rules.md §5 기본형)
+    "범죄도시2 강해상, 메인 빌런의 얼굴",
+    "비판과 옹호, 시청률 19.5%", // 한 주제 안의 대비 짝
+    "청불 호러, 웃음과 공포의 완급",
+    "한 여자를 둘러싼 욕망과 속죄",
+    "세븐과 결혼, 딸을 기다리는 근황", // 공동격 조사
+    "최희서와 다섯 번째 협업, 베드포드 파크",
+    "이영복과 이어진 비밀 자금",
+    "원작 웹소설과 달라진 점", // 한 주제를 수식(의존명사 꼬리)
+    "최종면접 호평과 혹평 갈린 이유",
+    "제작비 800억과 750억대 추정", // 한 주제의 값 병기
+    "김 회장과 박 반장, 67년 연기 인생", // 와/과 뒤 쉼표 = 그 뒤가 진짜 주제
+    "초3부터 고3까지 반장", // 기간·범위(까지 뒤에 머리 명사)
+    "꿀알바 출연진, 이재욱부터 이희준까지", // 한 주제(출연진) 안의 범위
+    "오후 6시면 퇴근하는 외과의", // person.md v3 채택본
+    "유재석이 이로 뜯은 포장지",
+    "명함과 CD를 받은 중3", // 한 어절 + 와/과
+  ];
+  for (const subhead of cleanSubheads) {
+    const result = checkSubheadFocus(`**${subhead}**\n본문입니다.`);
+    assert(result.length === 0, `정상 소제목이 걸렸다(오탐): "${subhead}"`);
+  }
+
+  // 고정 블록 두 개는 소제목이 아니다(실측에서 이 둘을 세면 person 평균이 7.7 -> 9.7로 뛴다).
+  const fixedBlocks = checkSubheadFocus("**함께 보면 좋은 글**\n- 링크\n\n**참고 자료**\n- https://example.com");
+  assert(fixedBlocks.length === 0, "고정 블록은 소제목으로 세지 않는다");
+  console.log("✅ 소제목 합침: 합침 2건 검출 + 정상 소제목 17건 통과");
 
   console.log("\n✅ 원고 검수 규칙 테스트 완료");
 }
