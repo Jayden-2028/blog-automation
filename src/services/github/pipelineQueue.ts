@@ -31,14 +31,66 @@ export type EnqueueInput = {
   inputs?: Record<string, string>;
 };
 
-/** 테스트 주입 지점. 기본은 실제 supabase 클라이언트 + GitHub API. */
+/** 테스트 주입 지점. 기본은 실제 supabase 클라이언트 + GitHub API + Telegram. */
 export type PipelineQueueDeps = {
   supabaseClient?: typeof supabase;
   dispatchToGithub?: (input: { workflowFile: string; inputs: Record<string, string> }) => Promise<void>;
   now?: () => Date;
+  /** 큐 행이 failed로 끝났을 때의 알림. 테스트에서 주입한다. */
+  notifyFailure?: (input: QueueFailureNotice) => Promise<void>;
 };
 
-async function releaseStaleLockIfAny(db: typeof supabase, now: () => Date): Promise<void> {
+export type QueueFailureNotice = {
+  jobId: string | null;
+  workflowFile: string | null;
+  /** "stale_lock_recovered"면 워크플로우가 **시작조차 못 한** 경우다(GH가 대기 중에 취소). */
+  error: string;
+};
+
+/**
+ * 큐 실패를 사용자에게 알린다(2026-11-02 신설).
+ *
+ * 왜: 그 전까지 큐 실패는 **DB에만 적히고 아무에게도 안 갔다.** 11/01 "하트 오브 비스트"가 Go를
+ * 연달아 누른 탓에 GitHub concurrency 큐에서 취소됐는데(대기 2개 초과), 워크플로우가 시작조차
+ * 못 해 `always()` 마감 스텝도 안 돌았고, 40분 뒤 stale-lock 회수가 조용히 failed로 적었다.
+ * 사용자는 **24시간 뒤에야** 원고가 안 왔다는 걸 알았다. 발행 실패는 알림이 가는데 조사·집필
+ * 큐 실패는 안 가던 비대칭을 없앤다.
+ *
+ * 이 함수는 **절대 예외를 던지지 않는다** - 알림 실패가 큐 배수(drain)를 막으면 파이프라인 전체가
+ * 멈춘다(notifyPipelineFailure와 같은 원칙).
+ */
+async function defaultNotifyQueueFailure(input: QueueFailureNotice): Promise<void> {
+  try {
+    if (!input.jobId) return;
+    const [{ notifierForJobId }, { ArticleJobRepository }, { escapeTelegramHtml }] = await Promise.all([
+      import("../../notifications/notifierForJob.js"),
+      import("../../repositories/ArticleJobRepository.js"),
+      import("../../notifications/TelegramNotifier.js"),
+    ]);
+    const job = await ArticleJobRepository.findById(input.jobId).catch(() => null);
+    const notifier = await notifierForJobId(input.jobId);
+    const stage = input.workflowFile?.replace(/^job-|\.yml$/g, "") ?? "파이프라인";
+    const neverStarted = input.error === "stale_lock_recovered";
+    await notifier.sendMessages([
+      {
+        text: [
+          `⚠️ <b>${escapeTelegramHtml(stage)} 단계가 끝내 실패했습니다</b>`,
+          "",
+          `<b>${escapeTelegramHtml(job?.keyword ?? input.jobId)}</b>`,
+          neverStarted
+            ? "워크플로우가 시작되지 못했습니다(동시 실행이 몰려 취소됐을 수 있습니다)."
+            : escapeTelegramHtml(input.error),
+          "",
+          "자동 재시도는 없습니다 - 키워드 버튼을 다시 눌러주세요.",
+        ].join("\n"),
+      },
+    ]);
+  } catch (error) {
+    console.warn(`⚠️ [pipeline-queue] 실패 알림 발송 실패(무시하고 계속): ${(error as Error).message}`);
+  }
+}
+
+async function releaseStaleLockIfAny(db: typeof supabase, now: () => Date, deps: PipelineQueueDeps = {}): Promise<void> {
   const { data: lock } = await db.from("pipeline_lock").select("*").eq("id", 1).maybeSingle();
   if (!lock?.is_busy || !lock.locked_at) return;
 
@@ -51,11 +103,25 @@ async function releaseStaleLockIfAny(db: typeof supabase, now: () => Date): Prom
   );
   // 붙잡고 있던 큐 행도 실패로 남겨야 다음 조회에서 다시 걸리지 않는다.
   if (lock.current_queue_id) {
-    await db
+    const { data: stale } = await db
+      .from("pipeline_dispatch_queue")
+      .select("job_id, workflow_file, status")
+      .eq("id", lock.current_queue_id)
+      .maybeSingle();
+    const { data: updated } = await db
       .from("pipeline_dispatch_queue")
       .update({ status: "failed", finished_at: now().toISOString(), error: "stale_lock_recovered" })
       .eq("id", lock.current_queue_id)
-      .eq("status", "dispatched");
+      .eq("status", "dispatched")
+      .select("id");
+    // 실제로 failed로 바꾼 경우에만 알린다(이미 마감된 행이면 중복 알림을 보내지 않는다).
+    if (updated && updated.length > 0) {
+      await (deps.notifyFailure ?? defaultNotifyQueueFailure)({
+        jobId: (stale?.job_id as string | null) ?? null,
+        workflowFile: (stale?.workflow_file as string | null) ?? null,
+        error: "stale_lock_recovered",
+      });
+    }
   }
   await db.from("pipeline_lock").update({ is_busy: false, current_queue_id: null, locked_at: null }).eq("id", 1);
 }
@@ -66,7 +132,7 @@ export async function tryDispatchNext(deps: PipelineQueueDeps = {}): Promise<voi
   const now = deps.now ?? (() => new Date());
   const dispatchToGithub = deps.dispatchToGithub ?? defaultDispatchToGithub;
 
-  await releaseStaleLockIfAny(db, now);
+  await releaseStaleLockIfAny(db, now, deps);
 
   const acquired = await db
     .from("pipeline_lock")
@@ -143,10 +209,26 @@ export async function markDoneAndDrain(
   const db = deps.supabaseClient ?? supabase;
   const now = deps.now ?? (() => new Date());
 
+  // 알림에 쓸 job·workflow를 **지우기 전에** 읽어 둔다.
+  const { data: row } = await db
+    .from("pipeline_dispatch_queue")
+    .select("job_id, workflow_file")
+    .eq("id", queueId)
+    .maybeSingle();
+
   await db
     .from("pipeline_dispatch_queue")
     .update({ status: outcome, finished_at: now().toISOString(), error: deps.error ?? null })
     .eq("id", queueId);
+
+  // 2026-11-02: 실패는 사용자에게 알린다. 그 전까지 DB에만 적혀 아무도 몰랐다(머리말 참고).
+  if (outcome === "failed") {
+    await (deps.notifyFailure ?? defaultNotifyQueueFailure)({
+      jobId: (row?.job_id as string | null) ?? null,
+      workflowFile: (row?.workflow_file as string | null) ?? null,
+      error: deps.error ?? "워크플로우가 실패로 끝났습니다.",
+    });
+  }
 
   // 이 큐 행을 잡고 있던 락일 때만 놓는다 - stale-lock 회수가 이미 먼저 풀었을 수도 있어(그 경우
   // current_queue_id가 다르거나 null) 조건을 맞춰서만 갱신한다(이중 해제 방지).
