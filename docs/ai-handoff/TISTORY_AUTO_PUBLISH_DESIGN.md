@@ -45,7 +45,16 @@
 
 - 큐·중복 방지·결과 기록은 `naverPublishQueue.ts`·`publishJobToNaver.ts`와 같은 모양(jsonb 키 `tistoryPublish`, `publications` 테이블에 `platform="tistory"`). **migration 없음.**
 - 발행 원고는 네이버와 같이 `pickFinalArticle` → `articles.content`를 읽는다. 사회 트랙 전용 가공: `참고 자료` 링크아웃은 **유지**(티스토리는 바깥 링크 OK), "함께 보면 좋은 글"은 **같은 블로그(`<blogName>.tistory.com`) 링크만 유지하고 다른 호스트(blogspot·naver 등)는 제거**(2026-10-28 변경. 전에는 블록 통째 제거 - 당시 링크가 전부 Blogspot 주소였다). 남는 링크가 0개면 제목까지 블록째 뺀다. `filterRelatedPostsByHost`(`appendRelatedPosts.ts`), 허용 호스트는 `TISTORY_BLOG_URL`에서 파생.
-- 공개 범위: 기본 **비공개**, `TISTORY_PUBLISH_VISIBILITY=public`으로 공개(네이버와 같은 첫 운영 원칙). 카테고리는 `config/tistoryCategoryMapping.ts`(job.category → 티스토리 카테고리 id).
+- 공개 범위: 기본 **비공개**, `TISTORY_PUBLISH_VISIBILITY=public`으로 공개(네이버와 같은 첫 운영 원칙).
+- 카테고리는 `config/tistoryCategoryMapping.ts`가 정한다. **2026-11-01 개편**: 티스토리 카테고리를
+  `왜 지금 이슈일까` · `일상 생활 정보` 둘에서 **대분류 3 · 하위 8**로 바꾸고(이슈 해설 / 생활과 돈 /
+  오늘의 화제) 발행본 129건을 재분배했다. 내부 수집 라벨(incident·living·community)로는 8칸을 고를 수
+  없어서 - 발행본 115건 중 `living` 하나에 51건이 몰려 있었고 그 안에 부동산·주가·개인정보 유출·방송인·
+  커뮤니티 밈이 섞여 있었다 - **제목 낱말로 판정하고** 아무 규칙도 안 걸릴 때만 내부 라벨의 기본값으로
+  떨어진다. 규칙 순서가 판정의 일부다(유출 > 제도 > 국방 > 동물·과학 > 재판 > 정치 > 돈 > 인물 > 넓은 생활).
+  사람이 배정한 129건에 대고 맞춘 인샘플 정확도는 126/129이고, **새 글 정확도는 이보다 낮다.** 카테고리는
+  틀려도 글 관리에서 일괄 변경으로 고치는 표시값이라 LLM 호출을 더 두지 않았다(`ksceneTopics.ts`와 같은 선택).
+  `TISTORY_DEFAULT_CATEGORY`로 전부 한 칸에 몰아넣는 스위치는 그대로 있다.
 
 ## 2. 뷰어에서 고친 내용으로 발행되게
 

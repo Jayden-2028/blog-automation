@@ -127,7 +127,11 @@ export async function publishJobToTistory(
       bodyHtml,
       images: imageInputs,
       tags: tistoryTagsFor(job, content),
-      categoryName: tistoryCategoryName(job.category),
+      categoryName: tistoryCategoryName({
+        category: job.category,
+        title: article.title ?? job.keyword,
+        keyword: job.keyword,
+      }),
     },
     visibility
   );

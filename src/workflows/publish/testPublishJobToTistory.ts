@@ -73,7 +73,9 @@ async function main(): Promise<void> {
     assert(input.bodyHtml.includes("<strong>"), "굵게는 strong");
     assert(JSON.stringify(input.tags) === JSON.stringify(["사회", "이슈"]), `태그는 본문 끝 해시태그 (${JSON.stringify(input.tags)})`);
     assert(!input.bodyHtml.includes("#사회") && !input.bodyHtml.includes("#이슈"), "본문에는 해시태그 줄이 없어야 한다(2026-10-06)");
-    assert(input.categoryName === "일상 생활 정보", `living -> 일상 생활 정보 (${input.categoryName})`);
+    // 2026-11-01: 카테고리는 제목 낱말로 판정한다. "블로그 제목"에는 아무 규칙도 안 걸리므로
+    // 내부 라벨 living의 기본값(화제와 발견)으로 떨어진다(`config/tistoryCategoryMapping.ts`).
+    assert(input.categoryName === "화제와 발견", `낱말 없는 living -> 화제와 발견 (${input.categoryName})`);
     console.log("✅ 기본 비공개 + 표식 이미지 + 참고자료 유지/내부링크 제거 + 태그·카테고리");
   }
 
