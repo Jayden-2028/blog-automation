@@ -40,6 +40,18 @@ function buildReviewActionRow(job: ArticleJobRow): TelegramInlineKeyboardButton[
 }
 
 /**
+ * 기본(Claude)이 아닌 제공자로 조사했으면 한 줄 알린다(2026-11-01). 스위치를 켠 채 잊는 것을 막는
+ * 장치다 - RESEARCH_PROVIDER=codex는 Claude 한도가 빠듯할 때만 켜는 임시 전환인데, 알림에 아무
+ * 표시가 없으면 원고 품질이 달라진 이유를 사람이 알 수 없다. claude일 때는 줄을 보태지 않는다(소음).
+ */
+function buildResearchProviderNote(metadata: Record<string, unknown>): string[] {
+  const provider = typeof metadata.researchProvider === "string" ? metadata.researchProvider : "";
+  if (!provider || provider === "claude") return [];
+  const label = provider === "codex" ? "Codex (GPT-6.1 Sol · 맥미니)" : provider === "gemini" ? "Gemini" : provider;
+  return [`🔬 자료조사 제공자: ${escapeTelegramHtml(label)}`];
+}
+
+/**
  * 옛 초안 알림이 보여주던 것 중 승인 판단에 쓰이던 두 가지를 통합 알림에 옮긴다: 의학 주제 경고와 검수(팩트·법률·광고)
  * 결과. 초안 단계가 없어졌으므로 여기서 안 보여주면 사람이 볼 기회가 사라진다. 검수 결과는 차단하지 않는 참고 정보다.
  */
@@ -47,6 +59,7 @@ function buildAutoApprovedNotes(job: ArticleJobRow): string[] {
   if (!isAutoApproved(job)) return [];
   const metadata = (job.metadata ?? {}) as Record<string, unknown>;
   const lines: string[] = [];
+  lines.push(...buildResearchProviderNote(metadata));
   if (metadata.requiresMedicalReview === true) {
     lines.push("⚕️ <b>의학 주제 — 원고와 출처를 직접 확인한 뒤 발행해 주세요</b>");
   }

@@ -30,11 +30,16 @@ const AUTHORITY_TAG: Record<SourceAuthorityLevel, string> = {
 };
 
 function buildHeaderLines(job: ArticleJobRow): string[] {
+  // 기본(Claude)이 아닌 제공자로 조사했으면 한 줄 덧붙인다(2026-11-01) - 스위치를 켠 채 잊지 않게.
+  const provider = typeof (job.metadata as Record<string, unknown> | null)?.researchProvider === "string"
+    ? String((job.metadata as Record<string, unknown>).researchProvider)
+    : "";
   return [
     "🔍 <b>자료조사 완료 — 원고를 쓸까요?</b>",
     "",
     `<b>${escapeTelegramHtml(job.keyword)}</b>`,
     `category: ${escapeTelegramHtml(job.category ?? "N/A")} · ${job.total_score ?? "?"}점`,
+    ...(provider && provider !== "claude" ? [`🔬 자료조사 제공자: ${escapeTelegramHtml(provider)}`] : []),
   ];
 }
 

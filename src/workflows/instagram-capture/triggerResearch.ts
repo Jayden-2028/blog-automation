@@ -6,19 +6,18 @@
 // 고리**가 비어 있었다 - 키워드 job은 텔레그램 "Go" 버튼이 job-research.yml을 깨우지만 인스타
 // job은 그 알림 자체가 없다. 그래서 job이 status=selected로 만들어진 채 아무도 집어가지 않았다.
 //
-// 분기 원칙은 runResearchStageCli.ts의 triggerWriting과 같다: GH Actions 러너면 heavy-pipeline
-// DB 큐에 올리고(동시 실행 순서를 그쪽이 관리한다), 맥 로컬이면 detached 자식으로 띄운다.
+// 분기는 dispatchResearch 한 곳에 있다(2026-11-01) - RESEARCH_PROVIDER가 모델과 실행 위치를
+// 함께 정하므로(claude/gemini -> Actions, codex -> 맥미니 폴러) 발화 지점마다 따로 분기하지 않는다.
 
-import { spawnDetachedTask } from "../../jobs/lib/spawnDetachedTask.js";
-import { warnLocalFallback } from "../../jobs/lib/warnLocalFallback.js";
-import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
+import { dispatchResearch } from "../research/dispatchResearch.js";
 
 export async function triggerResearchForJob(jobId: string): Promise<void> {
-  if (process.env.GITHUB_TOKEN) {
-    await enqueueAndMaybeDispatch({ jobId, workflowFile: "job-research.yml" });
-    return;
+  const result = await dispatchResearch(jobId);
+  if (result.route === "macmini-codex") {
+    console.log(
+      result.queued
+        ? `📥 [research] 맥미니 Codex 조사 대기열에 올렸습니다 (job ${jobId})`
+        : `ℹ️ [research] 맥미니 조사 대기열 유지: ${result.reason} (job ${jobId})`
+    );
   }
-  // 토큰이 없으면 맥에서 돈다 - 맥이 잠들면 죽는다. 조용히 떨어지지 않게 알린다(2026-09-24).
-  await warnLocalFallback("research", jobId);
-  spawnDetachedTask("job:research", [jobId]);
 }

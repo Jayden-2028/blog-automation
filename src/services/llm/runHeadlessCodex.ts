@@ -44,8 +44,13 @@ export type RunHeadlessCodexOptions = {
 };
 
 export type RunHeadlessCodexResult =
-  | { ok: true; data: unknown; durationMs: number }
-  | { ok: false; error: string; durationMs: number };
+  | { ok: true; data: unknown; durationMs: number; rawStdout?: string }
+  | { ok: false; error: string; durationMs: number; rawStdout?: string };
+
+// rawStdout는 runHeadlessCodex가 항상 채운다(다른 WebSearchAgent 구현·테스트 주입은 생략해도 된다).
+// 왜 필요한가(2026-11-01): codex exec의 stdout에는 세션 로그·"tokens used"·JSON이
+// 섞여 나오고 JSON이 두 번 찍히기도 한다. 아래 extractTrailingJson이 못 꺼내면 15~25분짜리 실행이
+// 통째로 날아가므로, 호출부가 원문으로 한 번 더 시도하고 실패 시 파일로 남길 수 있어야 한다.
 
 /**
  * 웹 검색 + 구조화 JSON을 돌려주는 실행기의 공통 계약. Codex(로컬)와 Claude(클라우드)가 이 모양을
@@ -162,12 +167,12 @@ export async function runHeadlessCodex(options: RunHeadlessCodexOptions): Promis
 
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        finish({ ok: false, error: `Codex 실행이 ${timeoutMs}ms 안에 끝나지 않아 중단했습니다.`, durationMs: Date.now() - startedAt });
+        finish({ ok: false, error: `Codex 실행이 ${timeoutMs}ms 안에 끝나지 않아 중단했습니다.`, durationMs: Date.now() - startedAt, rawStdout: stdout });
       }, timeoutMs);
 
       child.on("error", (error) => {
         clearTimeout(timer);
-        finish({ ok: false, error: `codex 실행 실패(${binary}): ${error.message}`, durationMs: Date.now() - startedAt });
+        finish({ ok: false, error: `codex 실행 실패(${binary}): ${error.message}`, durationMs: Date.now() - startedAt, rawStdout: stdout });
       });
 
       child.on("close", (code) => {
@@ -179,17 +184,18 @@ export async function runHeadlessCodex(options: RunHeadlessCodexOptions): Promis
             ok: false,
             error: `codex가 종료 코드 ${code}로 끝났습니다${stderr ? ` - ${stderr.trim().slice(-500)}` : ""}`,
             durationMs,
+            rawStdout: stdout,
           });
           return;
         }
 
         const data = extractTrailingJson(stdout);
         if (data === null) {
-          finish({ ok: false, error: `codex 출력에서 JSON을 찾지 못했습니다: ${stdout.trim().slice(-300)}`, durationMs });
+          finish({ ok: false, error: `codex 출력에서 JSON을 찾지 못했습니다: ${stdout.trim().slice(-300)}`, durationMs, rawStdout: stdout });
           return;
         }
 
-        finish({ ok: true, data, durationMs });
+        finish({ ok: true, data, durationMs, rawStdout: stdout });
       });
 
       child.stdin.write(options.prompt);

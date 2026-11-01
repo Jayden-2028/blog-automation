@@ -77,6 +77,12 @@ jobs:
           TELEGRAM_UPDATE_JSON: ${{ toJson(github.event.client_payload) }}
           # 원고 준비 완료 알림의 "🚀 블로그 발행" 버튼이 여기서 바로 Blogger를 호출한다(2026-09-19).
           # 배리에이션 원고가 이미 있어 LLM 호출이 없고 수 초면 끝나므로 별도 워크플로우로 넘기지 않는다.
+          # 자료조사 제공자 스위치(2026-11-01). Go 버튼이 조사를 어디로 보낼지 이 값이 정한다 -
+          # claude/gemini면 job-research.yml(클라우드), codex면 맥미니 폴러 대기열
+          # (job.metadata.localResearch)이다. **job-research.yml에는 이 변수를 넘기지 않는다** -
+          # Actions는 Claude만 돌릴 수 있으므로(Codex CLI·구독 로그인이 맥에만 있다) 거기서는 항상
+          # 기본값 claude여야 한다. 비어 있으면(미설정) claude - 기존 동작 그대로다.
+          RESEARCH_PROVIDER: ${{ vars.RESEARCH_PROVIDER }}
           BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
           BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
           BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
