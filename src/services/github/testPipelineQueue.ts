@@ -1,6 +1,18 @@
 // pipelineQueue 오케스트레이션 테스트. 실제 Supabase/GitHub 호출 없이 인메모리 스텁으로
 // enqueue -> dispatch -> markDone -> 다음 항목 자동 체인을 검증한다.
 import { enqueueAndMaybeDispatch, markDoneAndDrain, tryDispatchNext } from "./pipelineQueue.js";
+import type { QueueFailureNotice } from "./pipelineQueue.js";
+
+/** stale 락 회수는 console.warn을 남긴다 - 테스트 출력만 조용히 한다. */
+const quietWarn = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.warn = warn;
+  }
+};
 import type { PipelineDispatchQueueRow, PipelineLockRow, PipelineQueueStatus } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -62,12 +74,18 @@ function makeFakeDb() {
       },
       then(resolve: (v: { data: PipelineDispatchQueueRow[] | null; error: null }) => void) {
         // update(...).eq(...) 체인의 마지막(await 대상)으로 쓰인다.
+        // **바꾼 행을 돌려준다** - 실제 Supabase의 `update().select()`가 그렇고, 호출부가
+        // "정말 바뀌었나"로 중복 알림을 막는 데 쓴다(2026-11-02).
+        const updated: PipelineDispatchQueueRow[] = [];
         if (api._pendingUpdate) {
           for (const row of queue) {
-            if (api._filters.every((f) => f(row))) Object.assign(row, api._pendingUpdate);
+            if (api._filters.every((f) => f(row))) {
+              Object.assign(row, api._pendingUpdate);
+              updated.push(row);
+            }
           }
         }
-        resolve({ data: [], error: null });
+        resolve({ data: updated, error: null });
       },
     };
     return api;
@@ -211,6 +229,60 @@ async function main(): Promise<void> {
       `FIFO 순서로 디스패치돼야 한다 (실제: ${dispatchedJobIds.join(",")})`
     );
     console.log("✅ 먼저 쌓인 순서(FIFO)대로 디스패치");
+  }
+
+  // 4-b) 큐 실패는 사용자에게 알린다(2026-11-02). 그 전까지 DB에만 적혀 아무도 몰랐고,
+  //      11/01 "하트 오브 비스트"가 24시간 묻혔다.
+  {
+    const { db, queue } = makeFakeDb();
+    const notices: QueueFailureNotice[] = [];
+    const deps = {
+      supabaseClient: db,
+      dispatchToGithub: async () => {},
+      notifyFailure: async (n: QueueFailureNotice) => void notices.push(n),
+    };
+    await enqueueAndMaybeDispatch({ jobId: "job-x", workflowFile: "job-write.yml" }, deps);
+    const id = queue[0]!.id;
+
+    await markDoneAndDrain(id, "done", deps);
+    // assert가 `asserts condition`이라 length를 리터럴로 좁힌다 - 개수는 변수에 담아 비교한다.
+    const afterDone = notices.length;
+    assert(afterDone === 0, "성공은 알리지 않는다");
+
+    queue[0]!.status = "dispatched";
+    await markDoneAndDrain(id, "failed", { ...deps, error: "집필 단계 예외" });
+    const afterFailed = notices.length;
+    assert(afterFailed === 1, "실패는 알린다");
+    assert(notices[0]!.jobId === "job-x", `알림에 jobId가 담겨야 한다 (${notices[0]!.jobId})`);
+    assert(notices[0]!.workflowFile === "job-write.yml", "어느 단계인지 담겨야 한다");
+    assert(notices[0]!.error === "집필 단계 예외", "사유가 담겨야 한다");
+    console.log("✅ 큐 실패 -> 알림(jobId·단계·사유), 성공은 안 알림");
+  }
+
+  // 4-c) 워크플로우가 **시작도 못 한** 경우(GH 동시성 큐가 대기 중에 취소)도 알린다.
+  //      이 경로는 always() 마감 스텝이 안 돌아서 stale-lock 회수만이 유일한 마감 지점이다.
+  {
+    const { db, queue, lock } = makeFakeDb();
+    const staleTime = new Date(Date.now() - 40 * 60 * 1000).toISOString();
+    queue.push({
+      id: 1, job_id: "cancelled-job", workflow_file: "job-research.yml", inputs: {},
+      status: "dispatched", created_at: staleTime, dispatched_at: staleTime, finished_at: null, error: null,
+    });
+    Object.assign(lock, { is_busy: true, current_queue_id: 1, locked_at: staleTime });
+
+    const notices: QueueFailureNotice[] = [];
+    await quietWarn(() =>
+      tryDispatchNext({
+        supabaseClient: db,
+        dispatchToGithub: async () => {},
+        notifyFailure: async (n: QueueFailureNotice) => void notices.push(n),
+      })
+    );
+    const staleNotices = notices.length;
+    assert(staleNotices === 1, "stale 회수도 알린다");
+    assert(notices[0]!.error === "stale_lock_recovered", "시작조차 못 했음을 구분할 수 있어야 한다");
+    assert(notices[0]!.jobId === "cancelled-job", "어느 job인지 담겨야 한다");
+    console.log("✅ stale 락 회수(시작조차 못 한 실행) -> 알림");
   }
 
   // 5) GitHub API 호출 자체가 실패해도 락이 풀려 다음 항목이 진행된다(영구 정지 방지).
