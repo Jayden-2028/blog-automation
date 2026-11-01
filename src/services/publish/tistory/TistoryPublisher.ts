@@ -70,7 +70,9 @@ export type TistoryPublishStage =
   | "images"
   | "tags"
   | "publish-layer"
-  | "publish";
+  | "publish"
+  /** 카카오 캡차가 떠 발행이 막혔다. 실패가 아니라 **사람이 풀어야 하는 상태**다(2026-11-02). */
+  | "captcha";
 
 export type TistoryVisibility = "public" | "private";
 
@@ -89,7 +91,13 @@ export type TistoryPublishInput = {
 export type TistoryPublishResult =
   /** urlSource: 주소를 어느 단계에서 확정했나(tistoryPublishedUrl.ts). slug-unverified면 404일 수 있다. */
   | { ok: true; url: string; urlSource: TistoryUrlSource; warnings: string[] }
-  | { ok: false; stage: TistoryPublishStage; error: string };
+  | {
+      ok: false;
+      stage: TistoryPublishStage;
+      error: string;
+      /** stage "captcha"일 때만. 임시저장에 성공했으면 true - 사람이 글 관리에서 이어서 발행하면 된다. */
+      draftSaved?: boolean;
+    };
 
 export type TistoryLoginCheckResult = { loggedIn: true } | { loggedIn: false; reason: string };
 
@@ -160,6 +168,10 @@ const SELECTORS = {
   visibilityRadios: "input[name=basicSet]",
   urlSlug: "#urlPublish",
   publishButton: "#publish-btn",
+  /** 카카오 캡차 레이어(2026-11-01 실측 스냅샷: `.capcha_layer` 안에 `#dkaptcha` iframe). */
+  captchaLayer: ".capcha_layer",
+  /** 임시저장 버튼. 캡차로 막혔을 때 원고를 남겨 두는 자리다. */
+  draftSaveButton: ".btn-draft a.action",
 } as const;
 
 const EDITOR_INIT_TIMEOUT_MS = 25_000;
@@ -168,6 +180,8 @@ const FILE_CHOOSER_TIMEOUT_MS = 10_000;
 const IMAGE_UPLOAD_WAIT_MS = 40_000;
 const UPLOAD_SETTLE_MS = 1_200;
 const PUBLISH_WAIT_MS = 30_000;
+/** 임시저장 클릭 뒤 저장이 끝나길 기다리는 시간(2026-11-02 캡차 대응). */
+const DRAFT_SAVE_WAIT_MS = 4_000;
 const MANAGE_LIST_WAIT_MS = 10_000;
 const FAILURE_SNAPSHOT_DIR = ".local/dom-snapshots/tistory/failures";
 const EDIT_BODY_SETTLE_MS = 8_000;
@@ -485,6 +499,26 @@ export class TistoryPublisher {
         await left;
       } catch (error) {
         await this.saveFailureSnapshot(page, "publish");
+
+        // 2026-11-02: 화면을 못 벗어난 원인이 **카카오 캡차**면 실패로 끝내지 않는다.
+        //
+        // 왜: 캡차는 사람만 풀 수 있는데 맥미니 앞에는 사람이 없다(헤드리스를 꺼도 창을 볼 사람이
+        // 없고, 30초 안에 풀 수도 없다). 그대로 실패로 두면 버튼을 다시 눌러도 또 막혀 원고가
+        // 영영 못 나간다 - 10/31·11/01에 실제로 그랬고 사용자가 매번 손으로 임시저장 글을 열어
+        // 풀었다. 그 손작업을 코드가 미리 해 둔다: **임시저장해서 원고를 남기고**, 알림이 그 사실과
+        // 링크를 알려 주면 사람은 캡차만 풀면 된다.
+        if (await this.hasCaptcha(page)) {
+          const draftSaved = await this.saveAsDraft(page);
+          return {
+            ok: false,
+            stage: "captcha",
+            draftSaved,
+            error: draftSaved
+              ? "카카오 캡차가 떠서 자동 발행이 막혔습니다. 원고는 임시저장해 두었습니다."
+              : "카카오 캡차가 떠서 자동 발행이 막혔고, 임시저장도 실패했습니다.",
+          };
+        }
+
         return { ok: false, stage: "publish", error: `발행 확인 신호(글쓰기 화면 이탈)를 ${PUBLISH_WAIT_MS / 1000}초 내 감지하지 못했습니다: ${this.errorMessage(error).split("\n")[0]}` };
       }
 
@@ -493,6 +527,35 @@ export class TistoryPublisher {
       return { ok: true, url: resolved.url, urlSource: resolved.urlSource, warnings };
     } finally {
       await context.close().catch(() => {});
+    }
+  }
+
+  /** 카카오 캡차 레이어가 떠 있는가. 레이어가 DOM에 있어도 숨어 있을 수 있어 보이는지까지 본다. */
+  private async hasCaptcha(page: Page): Promise<boolean> {
+    try {
+      return await page.locator(SELECTORS.captchaLayer).first().isVisible({ timeout: 2_000 });
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 임시저장. 캡차 레이어가 떠 있으면 버튼이 가려지므로 **DOM 클릭**으로 누른다(포인터 가로채기 회피).
+   * 저장 확인은 티스토리가 띄우는 안내에 기대지 않고 **다이얼로그 수락 + 짧은 대기**로 끝낸다 -
+   * 여기서 더 기다리다 실패하면 원고를 남길 기회 자체를 잃는다.
+   */
+  private async saveAsDraft(page: Page): Promise<boolean> {
+    try {
+      page.once("dialog", (dialog) => void dialog.accept().catch(() => {}));
+      // 이 파일의 다른 DOM 조작과 같이 **문자열 evaluate**를 쓴다(tsconfig에 dom lib이 없다).
+      const clicked = (await page.evaluate(
+        `(() => { const b = document.querySelector(${JSON.stringify(SELECTORS.draftSaveButton)}); if (!b) return false; b.click(); return true; })()`
+      )) as boolean;
+      if (!clicked) return false;
+      await page.waitForTimeout(DRAFT_SAVE_WAIT_MS);
+      return true;
+    } catch {
+      return false;
     }
   }
 

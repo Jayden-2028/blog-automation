@@ -91,6 +91,43 @@ async function main(): Promise<void> {
     console.log("✅ 폴러 예외 - failed 기록 + 알림 + 다음 건 계속");
   }
 
+  // 1-b) 캡차(2026-11-02) - "실패했으니 다시 누르세요"가 아니라 "임시저장했으니 캡차만 푸세요"
+  {
+    const { deps, rec } = makeDeps((async () => ({
+      ok: false,
+      reason: "captcha",
+      detail: "카카오 캡차가 떠서 자동 발행이 막혔습니다. 원고는 임시저장해 두었습니다.",
+      draftSaved: true,
+    })) as PollDeps["publish"]);
+    await quiet(() => processPending([job("c1"), job("c2")], {} as never, deps));
+
+    assert(rec.finished.length === 1 && rec.finished[0].id === "c1", "캡차 건만 마감한다(버튼을 되살린다)");
+    assert(rec.deferred.length === 0, "캡차는 deferred가 아니다 - 로그인 풀림과 다르다");
+    const text = rec.notices[0] ?? "";
+    assert(text.includes("캡차"), `알림이 캡차를 알려야 한다 (${text.slice(0, 60)})`);
+    assert(text.includes("임시저장"), "임시저장했다는 사실을 알려야 한다");
+    assert(text.includes("/manage/posts"), "글 관리 링크를 줘야 한다");
+    assert(!text.includes("발행에 실패했습니다"), "일반 실패 문구를 쓰지 않는다");
+    // 캡차는 연달아 뜨므로 같은 주기의 뒤 건은 건드리지 않는다.
+    assert(!rec.finished.some((f) => f.id === "c2") && rec.notices.length === 1, "뒤 건은 이번 주기에 시도하지 않는다");
+    console.log("✅ 캡차 - 임시저장 안내 + 글 관리 링크, 뒤 건은 다음 주기로");
+  }
+
+  // 1-c) 임시저장까지 실패하면 그 사실을 숨기지 않는다
+  {
+    const { deps, rec } = makeDeps((async () => ({
+      ok: false,
+      reason: "captcha",
+      detail: "카카오 캡차가 떠서 자동 발행이 막혔고, 임시저장도 실패했습니다.",
+      draftSaved: false,
+    })) as PollDeps["publish"]);
+    await quiet(() => processPending([job("c3")], {} as never, deps));
+    const text = rec.notices[0] ?? "";
+    assert(text.includes("임시저장도 실패"), "임시저장 실패를 알려야 한다");
+    assert(text.includes("복사해"), "대체 수단(원고 페이지 복사)을 안내해야 한다");
+    console.log("✅ 캡차 - 임시저장까지 실패하면 숨기지 않고 대체 수단을 안내");
+  }
+
   // 2) 발행 성공 후 기록 실패 -> published_unrecorded, failed·재시도 아님
   {
     const { deps, rec } = makeDeps((async () => ({

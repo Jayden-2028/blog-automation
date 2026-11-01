@@ -44,6 +44,11 @@ export type PublishJobToTistoryResult =
   | { ok: true; publicationId: number; url: string; alreadyDone: boolean; warnings?: string[]; urlSource?: TistoryUrlSource }
   /** 로그인이 풀렸다 - 실패가 아니라 **대기**다. 폴러가 deferred로 기록하고 재로그인 후 다시 시도한다. */
   | { ok: false; reason: "login_required"; detail: string }
+  /**
+   * 카카오 캡차로 자동 발행이 막혔다(2026-11-02). 실패가 아니라 **사람이 캡차만 풀면 되는 상태**다.
+   * `draftSaved`면 원고가 티스토리 임시저장에 남아 있다.
+   */
+  | { ok: false; reason: "captcha"; detail: string; draftSaved: boolean }
   /** 티스토리에는 올라갔는데 publications 기록이 실패했다. 다시 올리면 중복 발행이므로 재시도 큐로 되돌리지 않는다. */
   | { ok: false; reason: "published_unrecorded"; detail: string; url: string }
   | { ok: false; reason: "disabled" | "job_not_found" | "job_not_approved" | "base_article_not_found" | "tistory_failed"; detail: string };
@@ -138,6 +143,11 @@ export async function publishJobToTistory(
 
   if (!result.ok) {
     if (result.stage === "login") return { ok: false, reason: "login_required", detail: result.error };
+    if (result.stage === "captcha") {
+      // 캡차는 publications에 failed를 남기지 않는다 - 원고는 임시저장에 살아 있고, 사람이
+      // 이어서 발행하면 그때 published로 기록된다(login 대기와 같은 취급).
+      return { ok: false, reason: "captcha", detail: result.error, draftSaved: result.draftSaved === true };
+    }
     await savePublication({ articleId: article.id, status: "failed", publishedUrl: null }).catch(() => {});
     return { ok: false, reason: "tistory_failed", detail: `[${result.stage}] ${result.error}` };
   }
