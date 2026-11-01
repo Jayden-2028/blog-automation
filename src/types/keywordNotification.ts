@@ -58,6 +58,11 @@ export type SendKeywordNotificationOptions = {
   sections?: KeywordSectionConfig;
   /** true를 돌려주는 항목은 알림에서 뺀다(사회 리포트의 엔터 제외). 저장된 순위가 topN보다 많아야 대체가 올라온다. */
   excludeItem?: (item: NotificationKeywordItem) => boolean;
+  /**
+   * 항목 제목에 붙일 뱃지(2026-11-01). 사회 리포트가 공분 신호에 🔥를 붙인다 - 점수에는 넣지 않고
+   * 표시만 한다(`config/socialReportSections.socialItemBadge`).
+   */
+  itemBadge?: (item: NotificationKeywordItem) => string | null;
   /** true면 Telegram으로 실제 발송하지 않고 메시지 내용만 만들어서 반환한다. 기본 false. */
   dryRun?: boolean;
   /** Top N. 기본 10. */

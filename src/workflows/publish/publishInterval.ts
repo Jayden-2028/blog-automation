@@ -143,3 +143,78 @@ export async function publishIntervalGate(
   const [published, attempted] = await Promise.all([lastPublishedAtFor(platform), lastAttemptAtFor(platform)]);
   return checkInterval(laterOf(published, attempted), platform, now, env);
 }
+
+// ──────────────────────────────────────────────────────────────────
+// 일일 발행 상한 (2026-11-01, 사용자 승인)
+//
+// 왜: 애드센스가 "가치가 별로 없는 콘텐츠"로 티스토리를 반려했다. 9/6부터 56일간 129건
+// (하루 약 2.3건)을 속보 재가공으로 올렸고, 발행본 103건(게시 7일 경과)의 **조회수 중앙값이 5회,
+// 0회가 8건**이었다. 구글이 든 세 항목 중 "실제적인 사용자 관심"이 가장 약하다. 하루 2건을
+// 찍어내는 한 조회수도 애드센스도 풀리지 않는다 - 적게, 깊게로 간다.
+//
+// 상한은 **하루 1건**이고 "하루"는 **한국시간 자정** 기준이다(BLOGGER_DAILY_LIMIT과 같은 원칙 -
+// 서버 UTC 자정이면 오전 9시에 초기화된다). 끄려면 `TISTORY_PUBLISH_DAILY_LIMIT=0`.
+
+/** 기본 1건/일. 사용자가 정한 값이다. */
+export const DEFAULT_DAILY_PUBLISH_LIMIT = 1;
+
+const DAILY_LIMIT_ENV_KEY: Record<PublishPlatform, string> = {
+  tistory: "TISTORY_PUBLISH_DAILY_LIMIT",
+  naver: "NAVER_PUBLISH_DAILY_LIMIT",
+  blogspot: "BLOGSPOT_PUBLISH_DAILY_LIMIT",
+};
+
+/** 설정된 일일 상한. 음수·숫자 아님은 기본값. **0은 "끄기"로 허용한다.** */
+export function dailyPublishLimit(platform: PublishPlatform, env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env[DAILY_LIMIT_ENV_KEY[platform]]?.trim();
+  if (!raw) return DEFAULT_DAILY_PUBLISH_LIMIT;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_DAILY_PUBLISH_LIMIT;
+  return Math.floor(parsed);
+}
+
+/** 한국시간 하루의 시작(UTC ISO). now가 KST 11/1 08:00이면 11/1 00:00 KST = 10/31 15:00 UTC. */
+export function kstDayStartIso(now: Date = new Date()): string {
+  const kstMs = now.getTime() + 9 * 60 * 60 * 1000;
+  const kstMidnight = Math.floor(kstMs / 86_400_000) * 86_400_000;
+  return new Date(kstMidnight - 9 * 60 * 60 * 1000).toISOString();
+}
+
+export type DailyLimitGate = { allowed: true } | { allowed: false; publishedToday: number; limit: number; reason: string };
+
+/** 오늘(KST) 그 채널로 성공 발행한 건수. 조회 실패는 0으로 본다 - 모르는 것 때문에 막지 않는다. */
+export async function publishedTodayCount(platform: PublishPlatform, now: Date = new Date()): Promise<number> {
+  const { count, error } = await supabase
+    .from("publications")
+    .select("id", { count: "exact", head: true })
+    .eq("platform", platform)
+    .eq("status", "published")
+    .gte("published_at", kstDayStartIso(now));
+  if (error) {
+    console.warn(`⚠️ [publish-daily-limit] 오늘 발행 건수 조회 실패(상한 검사를 건너뜁니다): ${error.message}`);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+export function checkDailyLimit(publishedToday: number, limit: number): DailyLimitGate {
+  if (limit <= 0) return { allowed: true };
+  if (publishedToday < limit) return { allowed: true };
+  return {
+    allowed: false,
+    publishedToday,
+    limit,
+    reason: `오늘 이미 ${publishedToday}건 발행했습니다(상한 ${limit}건/일). 내일 다시 올라갑니다.`,
+  };
+}
+
+/** 폴러가 쓰는 한 줄짜리 판정. */
+export async function dailyPublishLimitGate(
+  platform: PublishPlatform,
+  now: Date = new Date(),
+  env: NodeJS.ProcessEnv = process.env
+): Promise<DailyLimitGate> {
+  const limit = dailyPublishLimit(platform, env);
+  if (limit <= 0) return { allowed: true };
+  return checkDailyLimit(await publishedTodayCount(platform, now), limit);
+}

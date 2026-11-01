@@ -283,6 +283,7 @@
     "test:relay-track": "tsx cloudflare/telegram-relay/src/testTrack.ts",
     "test:relay-fetch": "tsx cloudflare/telegram-relay/src/testFetch.ts",
     "test:telegram-tracks": "tsx src/notifications/testTelegramTracks.ts",
+    "test:entertainment-picks": "tsx src/workflows/keyword-discovery/testEntertainmentPicksOfDay.ts",
     "test:social-report": "tsx src/config/testSocialReportSections.ts",
     "test:manuscript-track-pages": "tsx src/workflows/manuscripts/testManuscriptTrackPages.ts",
     "test:keyword-round": "tsx src/config/testKeywordRound.ts",

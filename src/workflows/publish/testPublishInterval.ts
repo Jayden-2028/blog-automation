@@ -3,7 +3,16 @@
 // 배경: 10/31 23:47에 티스토리로 두 건을 연달아 올린 직후 7번째에서 카카오 캡차가 떴다. 더 큰 이유는
 // 네이버 - 자동 발행으로 저품질 판정을 받은 이력이 있다(사용자). 그래서 채널별 최소 간격을 둔다.
 
-import { checkInterval, DEFAULT_MIN_INTERVAL_MINUTES, laterOf, minIntervalMinutes } from "./publishInterval.js";
+import {
+  checkDailyLimit,
+  checkInterval,
+  dailyPublishLimit,
+  DEFAULT_DAILY_PUBLISH_LIMIT,
+  DEFAULT_MIN_INTERVAL_MINUTES,
+  kstDayStartIso,
+  laterOf,
+  minIntervalMinutes,
+} from "./publishInterval.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -71,3 +80,27 @@ const ago = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toIS
 }
 
 console.log("✅ 최소 발행 간격: 기본 5분·채널별 설정·사고 재현·모르면 통과");
+
+// ── 5. 일일 발행 상한(2026-11-01) ─────────────────────────────────
+{
+  assert(DEFAULT_DAILY_PUBLISH_LIMIT === 1, "기본 1건/일");
+  assert(dailyPublishLimit("tistory", {}) === 1, "미설정이면 기본값");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "3" }) === 3, "변수로 덮어쓴다");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "0" }) === 0, "0은 끄기로 허용");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "-2" }) === 1, "음수는 기본값");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "많이" }) === 1, "숫자가 아니면 기본값");
+  assert(dailyPublishLimit("naver", { TISTORY_PUBLISH_DAILY_LIMIT: "9" }) === 1, "다른 채널 변수는 안 본다");
+
+  assert(checkDailyLimit(0, 1).allowed, "오늘 0건이면 통과");
+  const blocked = checkDailyLimit(1, 1);
+  assert(!blocked.allowed, "오늘 1건이면 막는다");
+  assert(!blocked.allowed && blocked.publishedToday === 1 && blocked.limit === 1, "사유에 건수·상한을 담는다");
+  assert(checkDailyLimit(5, 0).allowed, "상한 0(끄기)이면 몇 건이든 통과");
+  assert(checkDailyLimit(2, 3).allowed, "상한 미만이면 통과");
+
+  // KST 자정 경계 - 서버 UTC 자정으로 끊으면 오전 9시에 초기화된다(BLOGGER_DAILY_LIMIT과 같은 함정).
+  assert(kstDayStartIso(new Date("2026-11-01T11:30:00.000Z")) === "2026-10-31T15:00:00.000Z", "KST 11/1 20:30 -> 11/1 00:00 KST");
+  assert(kstDayStartIso(new Date("2026-11-01T14:59:00.000Z")) === "2026-10-31T15:00:00.000Z", "KST 11/1 23:59는 아직 같은 날");
+  assert(kstDayStartIso(new Date("2026-11-01T15:00:00.000Z")) === "2026-11-01T15:00:00.000Z", "KST 11/2 00:00부터 새 날");
+  console.log("✅ 일일 발행 상한 - 기본 1건/일, 0은 끄기, KST 자정 기준");
+}

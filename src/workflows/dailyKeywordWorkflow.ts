@@ -14,7 +14,8 @@
 // 어느 단계에서 왜 멈췄는지 알 수 있다(예: NAVER API 실패 vs Supabase 저장 실패 vs Telegram 발송 실패).
 
 import type { TrendSource } from "../config/trendSources.js";
-import { shouldExcludeCandidate } from "../config/keywordExclusionRules.js";
+import { isPoliticalKeyword, shouldExcludeCandidate } from "../config/keywordExclusionRules.js";
+import type { CandidateExclusionOptions } from "../config/keywordExclusionRules.js";
 import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
@@ -79,11 +80,13 @@ export type CollectCandidatesOptions = CollectNaverCandidatesOptions;
 
 export async function collectCandidates(
   queries: string[],
-  options: CollectCandidatesOptions = {}
+  options: CollectCandidatesOptions = {},
+  exclusion: CandidateExclusionOptions = {}
 ): Promise<CollectNaverCandidatesResult> {
   // 스포츠·정치 시드 검색어는 수집 전에 뺀다(API 호출도 아낀다). 이미 쌓인 시드가 후보를 계속 만들어
   // 내므로(2026-10-07 "키움 하현승 계약금") 후보 필터만으로는 제목에 어휘가 없는 기사를 못 거른다.
-  const allowedQueries = queries.filter((query) => !shouldExcludeCandidate(query, null));
+  // 2026-11-01: 사회 트랙은 exclusion.allowPolitics로 정치를 통과시킨다.
+  const allowedQueries = queries.filter((query) => !shouldExcludeCandidate(query, null, null, exclusion));
   const result = await collectNaverCandidates(allowedQueries, options);
 
   // 육아 카테고리·정치 키워드는 수집 단계에서 원천 차단한다(2026-09-07 채널 개편). seed_queries에
@@ -94,7 +97,8 @@ export async function collectCandidates(
       !shouldExcludeCandidate(
         candidate.keyword,
         candidate.category,
-        typeof candidate.metadata?.query === "string" ? candidate.metadata.query : null
+        typeof candidate.metadata?.query === "string" ? candidate.metadata.query : null,
+        exclusion
       )
   );
   const excludedCount = result.candidates.length - filtered.length;
@@ -417,6 +421,13 @@ export type DailyKeywordWorkflowOptions = {
    * 켜도 기본은 preview(로그·metadata만)다. 실제 탈락은 ENT_TREND_GATE_APPLY=true일 때만.
    */
   entertainmentTrendGate?: boolean;
+  /**
+   * 정치 키워드를 받을지(2026-11-01). **사회 트랙만 true**다 - 티스토리 독자를 4060 남성으로 잡고
+   * 정치를 받기로 했다(발행본 실측에서 `정치와 국정`이 평균 조회수 1.46배로 최상위, 0회 글 0/17).
+   * 엔터(네이버) 트랙은 생략 = false로 지금까지와 같다. `trend_candidates` 저장소는 정치를 품고
+   * (`excludeCandidateInserts`), 트랙별 판정은 읽는 이 자리에서 한다.
+   */
+  allowPolitics?: boolean;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -633,13 +644,24 @@ export async function runDailyKeywordWorkflow(
       );
     }
 
-    const scopedEntries = options.includeCategories
+    const categoryScoped = options.includeCategories
       ? queryPool.entries.filter((entry) => options.includeCategories!.includes(entry.category))
       : queryPool.entries;
+    // 저장소(trend_candidates)는 정치를 품는다(excludeCandidateInserts.ts 머리말). 정치를 받지 않는
+    // 트랙(엔터)은 읽는 이 자리에서 뺀다 - includeCategories로 대부분 걸리지만, 정치 기사가
+    // entertainment/ott로 잘못 분류된 경우를 위한 두 번째 겹이다.
+    const scopedEntries = options.allowPolitics
+      ? categoryScoped
+      : categoryScoped.filter((entry) => !isPoliticalKeyword(entry.keyword));
+    if (!options.allowPolitics && categoryScoped.length !== scopedEntries.length) {
+      console.log(
+        `\u2139\uFE0F [dailyKeywordWorkflow] 정치 키워드 제외: ${categoryScoped.length}건 -> ${scopedEntries.length}건`
+      );
+    }
     if (options.includeCategories) {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] category 필터(${options.includeCategories.join(", ")}) 적용: ` +
-          `${queryPool.entries.length}건 -> ${scopedEntries.length}건`
+          `${queryPool.entries.length}건 -> ${categoryScoped.length}건`
       );
     }
 
@@ -661,7 +683,8 @@ export async function runDailyKeywordWorkflow(
     categoryByQuery: { ...seedCategoryByQuery, ...options.collectOptions?.categoryByQuery },
   };
 
-  const collected = await runStage(stageLog, "collect", () => collectCandidates(queries!, collectOptions));
+  const exclusion: CandidateExclusionOptions = { allowPolitics: options.allowPolitics === true };
+  const collected = await runStage(stageLog, "collect", () => collectCandidates(queries!, collectOptions, exclusion));
   if (!collected) {
     skipRemaining(stageLog, ["relevance", "cluster", "rank", "competition", "save", "notify"]);
     return result;

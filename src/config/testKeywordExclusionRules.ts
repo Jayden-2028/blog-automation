@@ -121,3 +121,38 @@ function main(): void {
 }
 
 main();
+
+// ── 트랙별 정치 배제(2026-11-01) ────────────────────────────────
+// 사회(티스토리)는 정치를 받고 엔터(네이버)는 그대로 배제한다. 근거: 발행본 103건 실측에서
+// `정치와 국정`이 평균 조회수 1.46배로 최상위, 조회수 0회 글이 17건 중 0건(전 카테고리 유일).
+{
+  const political = "국민의힘 원내대표 발언";
+  assert(shouldExcludeCandidate(political, "living") === true, "엔터 트랙(기본값)은 정치를 계속 버린다");
+  assert(
+    shouldExcludeCandidate(political, "living", null, { allowPolitics: true }) === false,
+    "사회 트랙은 정치를 통과시킨다"
+  );
+
+  // allowPolitics를 켜도 스포츠·육아는 그대로 버린다 - 정치 하나만 푸는 것이다.
+  assert(
+    shouldExcludeCandidate("손흥민 멀티골", "living", null, { allowPolitics: true }) === true,
+    "allowPolitics여도 스포츠는 버린다"
+  );
+  assert(
+    shouldExcludeCandidate("아동수당 신청", "parenting", null, { allowPolitics: true }) === true,
+    "allowPolitics여도 육아 카테고리는 버린다"
+  );
+
+  // 시드 검색어에만 정치 어휘가 있는 경우도 트랙을 따른다.
+  assert(shouldExcludeCandidate("원내대표 발언 파장", null, "총선 판세") === true, "엔터: 시드가 정치면 버린다");
+  assert(
+    shouldExcludeCandidate("예산 심사 쟁점", null, "총선 판세", { allowPolitics: true }) === false,
+    "사회: 시드가 정치여도 통과"
+  );
+  // 시드가 스포츠면 트랙과 무관하게 버린다.
+  assert(
+    shouldExcludeCandidate("계약금 규모", null, "프로야구 FA", { allowPolitics: true }) === true,
+    "시드가 스포츠면 사회 트랙도 버린다"
+  );
+  console.log("✅ 트랙별 정치 배제 - 사회는 통과, 엔터는 차단, 스포츠·육아는 양쪽 다 차단");
+}
