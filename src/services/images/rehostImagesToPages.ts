@@ -20,6 +20,11 @@
 //      프로젝트 자체이므로 그 자원을 직접 본다 - 사람이 손으로 배포한 것까지 같이 막힌다.
 //   2) **사후 검증**: 배포한 뒤 manifest를 다시 읽어 내 파일이 들어갔는지 확인하고, 사라졌으면 재구성부터 다시 한다.
 //      락을 잡기 직전에 다른 배포가 시작되는 틈(API 반영 지연)이 남으므로 이 그물이 필요하다.
+// **그런데 2026-10-31에 또 터졌다** - 사용설명서 세 건을 5초 안에 발행하자 셋 다 "진행 중 0건"을 보고 함께 출발했다.
+// 락은 **먼저 출발한 배포**만 막지 같은 순간에 출발한 배포는 막지 못하고, 사후 검증은 그 시점의 사진일 뿐이라
+// 먼저 끝난 두 건은 검증을 통과한 **뒤에** 마지막 배포에 덮였다(이미지 12장 404, 11-03 복구).
+// 그래서 사후 검증을 **진행 중인 배포가 다 빠진 뒤로** 미룬다 - 그 뒤에 출발하는 배포는 내 파일이 든 manifest를
+// 읽으므로 더는 나를 덮지 못한다. 그래도 깨지면 `npm run images:repair-pages -- <jobId>`로 되살린다(같은 URL).
 // manifest는 **캐시를 우회해서** 읽는다 - `_headers`의 `/*` 영구 캐시가 manifest.json에도 걸려 있어서(실측:
 // `cache-control: max-age=31536000, immutable`) 캐시된 옛 목록을 읽으면 경합 없이도 같은 사고가 난다.
 
@@ -150,12 +155,9 @@ export async function rehostImagesToPages(
       .then((response) => (response ? (JSON.parse(Buffer.from(response.bytes).toString("utf8")) as SiteManifest) : null));
 
   // 다른 배포가 돌고 있으면 기다린다(락). 다투는 자원이 Pages 프로젝트라 그 자원을 직접 본다.
-  for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
-    const active = await deps.countActiveDeployments(config).catch(() => 0); // 확인 불가면 진행한다 - 사후 검증이 받는다.
-    if (active === 0) break;
-    if (attempt === 0) console.log(`⏳ [rehost] 같은 프로젝트에 배포 ${active}건이 진행 중입니다 - 끝나기를 기다립니다`);
-    await deps.sleep(LOCK_WAIT_INTERVAL_MS);
-  }
+  await waitForDeploymentsToDrain(config, deps, (active) =>
+    console.log(`⏳ [rehost] 같은 프로젝트에 배포 ${active}건이 진행 중입니다 - 끝나기를 기다립니다`)
+  );
 
   for (let round = 1; round <= CLOBBER_ATTEMPTS; round += 1) {
     const outcome = await deployRound(
@@ -169,13 +171,26 @@ export async function rehostImagesToPages(
       failures.push(`동시 배포에 ${CLOBBER_ATTEMPTS}번 연속 덮였습니다(${outcome.missing.join(", ")}) - Supabase URL로 발행합니다`);
       return passthrough(failures);
     }
-    for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
-      const active = await deps.countActiveDeployments(config).catch(() => 0);
-      if (active === 0) break;
-      await deps.sleep(LOCK_WAIT_INTERVAL_MS);
-    }
+    await waitForDeploymentsToDrain(config, deps);
   }
   return passthrough(failures);
+}
+
+/**
+ * 이 프로젝트에 진행 중인 배포가 없어질 때까지 기다린다. 상한을 넘기면 그냥 진행한다 - 락을 못 잡아
+ * 발행을 막는 것보다 사후 검증에 맡기는 쪽이 낫다. 확인 자체가 실패해도 같다(0건으로 본다).
+ */
+async function waitForDeploymentsToDrain(
+  config: KsceneImagesConfig,
+  deps: RehostDeps,
+  onWait?: (active: number) => void
+): Promise<void> {
+  for (let attempt = 0; attempt < LOCK_WAIT_ATTEMPTS; attempt += 1) {
+    const active = await deps.countActiveDeployments(config).catch(() => 0);
+    if (active === 0) return;
+    if (attempt === 0) onWait?.(active);
+    await deps.sleep(LOCK_WAIT_INTERVAL_MS);
+  }
 }
 
 type RoundInput = {
@@ -262,6 +277,12 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
     //    내 신규 파일을 못 본 스냅샷을 올렸으면 여기서 걸린다(2026-10-15 사고의 그물). 서비스 확인이 실패한
     //    것도 대개 같은 원인이라, 던지기 전에 먼저 목록을 본다 - 덮인 것이면 재시도가 맞고 포기가 아니다.
     if (deployed) {
+      // **진행 중인 배포가 다 끝난 뒤에** 본다(2026-10-31). 바로 확인하면 나를 덮을 배포가 아직 날아오는
+      // 중이라 통과한 뒤에 덮인다 - 그날 세 건이 5초 안에 발행돼 셋 다 "진행 중 0건"을 보고 출발했고,
+      // 먼저 끝난 두 건이 검증을 통과한 다음 마지막 배포에 덮여 이미지 12장이 404가 됐다.
+      // 배포가 다 빠진 뒤에도 내 파일이 남아 있으면 안전하다 - 그 뒤에 출발하는 배포는 내 파일이 든
+      // manifest를 읽기 때문이다.
+      await waitForDeploymentsToDrain(config, deps);
       const current = await readManifest().catch(() => null);
       const missing = current ? [...newPaths].filter((path) => !current.files?.[path]) : [];
       if (missing.length > 0) return { kind: "clobbered", missing };

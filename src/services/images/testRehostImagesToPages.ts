@@ -286,6 +286,33 @@ async function main(): Promise<void> {
     console.log("  ✅ 파일 한도 근접 경고");
   }
 
+  // 2026-10-31 재현: 내 배포 **뒤에** 아직 날아오는 중이던 다른 배포가 내 파일을 덮는다.
+  // 바로 검증하면 그 시점에는 멀쩡해서 통과한다 - 진행 중인 배포가 다 빠진 뒤에 봐야 잡힌다.
+  {
+    const folder = JOB.replace(/-/g, "").slice(0, 8);
+    const { world, deps } = makeWorld(new Map(), { "https://supabase/late/1.webp": "L" });
+    let clobbered = false;
+    const spied: RehostDeps = {
+      ...deps,
+      countActiveDeployments: async () => {
+        if (world.deploys.length === 0) return 0; // 셋이 같은 순간에 출발한 상황 - 락은 아무도 못 잡는다
+        if (clobbered) return 0;
+        clobbered = true;
+        // 늦게 끝난 배포가 내 파일을 못 본 스냅샷을 올린다.
+        const site: Site = new Map([...world.site].filter(([path]) => !path.startsWith(`${folder}/`)));
+        const files = Object.fromEntries([...site].filter(([path]) => path !== "manifest.json").map(([path, b]) => [path, { bytes: b.length }]));
+        site.set("manifest.json", bytes(JSON.stringify({ version: 1, files })));
+        world.site = site;
+        return 1; // 그 배포는 아직 진행 중이다
+      },
+    };
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/late/1.webp")], config: CONFIG }, spied);
+    assert(world.deploys.length === 2, `덮인 것을 알아채고 다시 배포해야 한다 (배포 ${world.deploys.length}회)`);
+    assert(result.complete && result.images[0].url?.startsWith(BASE), `재배포 뒤 Pages URL이어야 한다 (${result.images[0].url})`);
+    assert([...world.site.keys()].some((path) => path.startsWith(`${folder}/`)), "최종 사이트에 내 파일이 남아야 한다");
+    console.log("  ✅ 배포가 다 빠진 뒤 검증해 늦은 덮어쓰기를 잡는다(2026-10-31)");
+  }
+
   console.log("\n✅ testRehostImagesToPages 통과");
 }
 
