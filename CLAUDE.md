@@ -238,7 +238,10 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
 - **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: thekoreamanual → 티스토리. whynowissue.blogspot.com은 폐쇄돼 2026-10-11에 제외했다).
   비면 `GSC_SITE_URL` 단일 폴백. 속성 = `page_url` 호스트라 `search_performance_daily` 구조는 그대로다(migration 없음).
   새 속성 추가는 변수에 한 항목 덧붙이고 `analytics:search -- --site=<속성> --days=N --apply`로 백필.
-- **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 월요일 `analytics-index-health.yml`에 동승한다.
+- **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 주간 `analytics-index-health.yml`에 동승한다.
+  주간 슬롯(`0 1 * * 1`)은 표현식이 월요일인데 **실제 발화는 일요일 10:00 KST다**(2026-11-02 실측 - 10/18·10/25·11/01
+  세 주 연속). run을 찾을 때 월요일 자리를 보면 없다. 점검이 15분 타임아웃에 걸려 주간 리포트까지 건너뛰어진 적이
+  있어(11/01) 색인 점검은 호출 6개 병렬 + 타임아웃 30분이다(2026-11-02).
   Worker cron은 4/5 사용, 마지막 1슬롯은 예약이다. 14일 미만 데이터 속성은 "축적 중"만 표기한다.
 - GA4 수집은 서비스 계정(기존 `GSC_SERVICE_ACCOUNT_JSON` 재사용)으로 `analytics:ga4`가 `ga4_performance_daily`에 upsert한다
   (repo variable `GA4_PROPERTY_IDS`=`라벨:숫자속성ID` 콤마 목록, 일일 `analytics-search.yml`에 동승) - `docs/ai-handoff/ANALYTICS_OPS.md` §2. 네이버 조회수는 GSC·GA4 밖이고 맥미니 수집 세션 소유다.
