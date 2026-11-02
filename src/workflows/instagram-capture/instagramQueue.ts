@@ -84,7 +84,15 @@ export function markEntry(
   patch: Partial<
     Pick<
       InstagramQueueEntry,
-      "status" | "jobId" | "attempts" | "lastError" | "askedMessageId" | "userTopic" | "track" | "askedTrackMessageId"
+      | "status"
+      | "jobId"
+      | "attempts"
+      | "lastError"
+      | "askedMessageId"
+      | "userTopic"
+      | "track"
+      | "askedTrackMessageId"
+      | "deferredSince"
     >
   >,
   path: string = INSTAGRAM_QUEUE_PATH

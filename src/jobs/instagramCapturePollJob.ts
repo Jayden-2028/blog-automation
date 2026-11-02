@@ -217,6 +217,7 @@ async function main(): Promise<void> {
 
   console.log(
     `▶ [ig-capture-poll] ${captured.attempted}건 처리 - 생성 ${captured.created} / 실패 ${captured.failed}` +
+      (captured.deferred > 0 ? ` / 대기 ${captured.deferred}` : "") +
       (captured.givenUp > 0 ? ` / 포기 ${captured.givenUp}` : "") +
       (captured.asked > 0 ? ` / 주제 질문 ${captured.asked}` : "")
   );
@@ -227,10 +228,14 @@ async function main(): Promise<void> {
   // 성공은 안 보낸다. URL을 보낼 때 봇이 "접수했습니다"로 답하고 집필이 끝나면 초안이 오므로,
   // 그 사이의 "캡처 처리됨"은 세 번째 알림이라 소음이다.
   if (captured.messages.length > 0) {
+    // 설비 고장 대기만 있으면 제목도 그렇게 적는다(2026-11-02). "확인 필요"로 나가면 사용자가
+    // 게시물·인스타 로그인을 들여다보게 되는데, 고쳐야 하는 것은 맥의 claude 로그인이었다.
+    const waitingOnly = captured.deferred > 0 && captured.messages.length === captured.deferred;
+    const head = waitingOnly ? "⏸ <b>인스타 캡처 - 대기 중</b>" : "⚠️ <b>인스타 캡처 - 확인 필요</b>";
     await TelegramNotifier.fromEnv()
       .sendMessages([
         {
-          text: `⚠️ <b>인스타 캡처 - 확인 필요</b>\n\n${captured.messages.map((m) => escapeTelegramHtml(m)).join("\n\n")}`,
+          text: `${head}\n\n${captured.messages.map((m) => escapeTelegramHtml(m)).join("\n\n")}`,
         },
       ])
       .catch(() => {});

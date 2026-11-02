@@ -2,7 +2,8 @@
 
 import { strict as assert } from "node:assert";
 
-import { MAX_ATTEMPTS, captureFromUserTopic, processPendingCaptures } from "./processPendingCaptures.js";
+import { classifyCaptureFailure } from "./captureFailureKind.js";
+import { DEFER_MAX_HOURS, MAX_ATTEMPTS, captureFromUserTopic, processPendingCaptures } from "./processPendingCaptures.js";
 import type { InstagramQueueEntry } from "./types.js";
 import type { RunCaptureSessionResult } from "./runCaptureSession.js";
 
@@ -221,6 +222,80 @@ const tests: Array<[string, () => Promise<void>]> = [
       const h = harness(okSession, [entry({ id: "1" }), entry({ id: "2" }), entry({ id: "3" })]);
       const r = await processPendingCaptures({ ...h.deps, limit: 2 });
       assert.equal(r.attempted, 2);
+    },
+  ],
+  [
+    "맥 claude 로그인 만료는 설비 고장이고, 인스타 로그인 만료는 아니다",
+    () => {
+      // 2026-11-02 실측 문장 그대로.
+      assert.equal(
+        classifyCaptureFailure(
+          "슬라이드 판정 실패: claude가 종료 코드 1로 끝났습니다 - stdout: Failed to authenticate: OAuth session expired and could not be refreshed"
+        ),
+        "claude_auth"
+      );
+      assert.equal(classifyCaptureFailure("Not logged in · Please run /login"), "claude_auth");
+      assert.equal(classifyCaptureFailure("getaddrinfo ENOTFOUND api.anthropic.com"), "network");
+      assert.equal(classifyCaptureFailure("Credit balance is too low"), "claude_usage");
+      // 인스타 쪽 문제는 예전 경로(ig:login 안내 + 3회 포기)로 가야 한다.
+      assert.equal(classifyCaptureFailure("로그인 만료"), "post");
+      assert.equal(classifyCaptureFailure("게시물을 열지 못했습니다"), "post");
+      assert.equal(classifyCaptureFailure("선택자 불일치"), "post");
+      return Promise.resolve();
+    },
+  ],
+  [
+    "설비 고장은 재시도 횟수를 쓰지 않고 기다린다 (2026-11-02: 로그인 만료로 링크를 버렸다)",
+    async () => {
+      const h = harness({ status: "failed", error: "슬라이드 판정 실패: OAuth session expired" }, [
+        entry({ attempts: MAX_ATTEMPTS - 1 }),
+      ]);
+      const r = await processPendingCaptures(h.deps);
+      assert.equal(r.deferred, 1);
+      assert.equal(r.failed, 0, "그 링크의 잘못이 아니다");
+      assert.equal(r.givenUp, 0, "마지막 시도였어도 포기하지 않는다");
+      const patch = h.marks[0][1];
+      assert.ok(!("attempts" in patch), `재시도 횟수를 쓰면 안 된다: ${JSON.stringify(patch)}`);
+      assert.ok(!("status" in patch), "pending으로 남아 다음 폴링에서 이어져야 한다");
+      assert.ok(typeof patch.deferredSince === "string", "기다리기 시작한 시각을 남긴다");
+      assert.ok(r.messages[0].includes("setup-token"), r.messages[0]);
+      assert.ok(r.messages[0].includes("다시 보낼 필요가 없습니다"), r.messages[0]);
+      assert.ok(!r.messages[0].includes("비공개"), `원인을 게시물 탓으로 돌리면 안 된다: ${r.messages[0]}`);
+    },
+  ],
+  [
+    "고장이 이어지는 동안 같은 알림을 다시 보내지 않는다",
+    async () => {
+      const h = harness({ status: "failed", error: "Failed to authenticate" }, [
+        entry({ deferredSince: "2026-11-02T05:00:00Z" }),
+      ]);
+      const r = await processPendingCaptures({ ...h.deps, now: () => new Date("2026-11-02T06:00:00Z") });
+      assert.equal(r.deferred, 1);
+      assert.deepEqual(r.messages, [], "매 분 같은 알림이 오면 사람이 읽지 않는다");
+      assert.ok(!("deferredSince" in h.marks[0][1]), "처음 시각을 덮어쓰면 72시간을 셀 수 없다");
+    },
+  ],
+  [
+    `설비 고장이 ${DEFER_MAX_HOURS}시간을 넘기면 포기한다`,
+    async () => {
+      const h = harness({ status: "failed", error: "Not logged in" }, [
+        entry({ deferredSince: "2026-11-02T05:00:00Z" }),
+      ]);
+      const r = await processPendingCaptures({ ...h.deps, now: () => new Date("2026-11-05T06:00:00Z") });
+      assert.equal(r.givenUp, 1);
+      assert.equal(r.deferred, 0);
+      assert.equal(h.marks[0][1].status, "skipped");
+      assert.ok(r.messages[0].includes("다시 보내주세요"), r.messages[0]);
+    },
+  ],
+  [
+    "고쳐지고 성공하면 대기 표시를 지운다",
+    async () => {
+      const h = harness(okSession, [entry({ deferredSince: "2026-11-02T05:00:00Z" })]);
+      const r = await processPendingCaptures(h.deps);
+      assert.equal(r.created, 1);
+      const patch = h.marks[0][1];
+      assert.ok("deferredSince" in patch && patch.deferredSince === undefined, "지우지 않으면 다음 고장에서 알림이 안 간다");
     },
   ],
 ];

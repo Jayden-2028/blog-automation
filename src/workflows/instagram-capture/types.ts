@@ -52,6 +52,14 @@ export type InstagramQueueEntry = {
   /** 마지막 실패 사유. 사람이 대기열을 볼 때 무엇이 막혔는지 알 수 있게 남긴다. */
   lastError?: string;
   /**
+   * 설비 고장(맥 claude 로그인·사용량·네트워크)으로 기다리기 시작한 시각(2026-11-02).
+   *
+   * 이 실패는 그 링크의 잘못이 아니라서 attempts를 쓰지 않는다 - pending 그대로 두고 고쳐지면
+   * 다음 폴링에서 처리된다(captureFailureKind.ts). 알림은 **기다리기 시작할 때 한 번만** 보낸다 -
+   * 이 값이 그 분간을 한다. 성공하면 지운다. DEFER_MAX_HOURS를 넘기면 포기한다.
+   */
+  deferredSince?: string;
+  /**
    * "어떤 주제로 쓸까요?" 질문 메시지의 telegram message_id(2026-09-23).
    *
    * 사용자가 그 메시지에 **답장**하면 어느 항목에 대한 답인지 이걸로 짚는다. 답장이 아니어도
