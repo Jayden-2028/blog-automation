@@ -16,6 +16,7 @@ import { rm } from "node:fs/promises";
 // 무거운 의존(브라우저·모델·DB)은 **함수 안에서 동적으로** 부른다. 정적 import면 이 모듈을 읽는
 // 것만으로 supabase 클라이언트가 로드되고, 그 모듈은 자격증명이 없으면 throw한다 - 테스트가 전부
 // 가짜를 주입하는데도 돌지 않게 된다(실제로 한 번 막혔다).
+import { classifyCaptureFailure, describeOurFault, isOurFault } from "./captureFailureKind.js";
 import { instagramProfilePath } from "./captureInstagramCarousel.js";
 import { listPendingEntries, markEntry } from "./instagramQueue.js";
 import { parseCaptureFile } from "./parseCaptureFile.js";
@@ -26,11 +27,19 @@ import type { InstagramCaptureResult, InstagramQueueEntry } from "./types.js";
 
 export const MAX_ATTEMPTS = 3;
 
+/**
+ * 설비 고장을 기다려 주는 한도(2026-11-02). 넘기면 포기한다 - 사람이 며칠째 안 고쳤다는 뜻이고,
+ * 그때는 매 분 브라우저를 띄우는 쪽이 손해다. 티스토리 로그인 대기도 3일이다(CLAUDE.md).
+ */
+export const DEFER_MAX_HOURS = 72;
+
 export type ProcessResult = {
   attempted: number;
   created: number;
   failed: number;
   givenUp: number;
+  /** 설비 고장으로 재시도 횟수를 쓰지 않고 기다린 건수(2026-11-02). */
+  deferred: number;
   /** 사용자에게 주제를 물어본 건수. */
   asked: number;
   /** 사람이 손을 대야 하는 것만 담는다 - 성공은 넣지 않는다(2026-09-23). */
@@ -51,6 +60,8 @@ export type ProcessDeps = {
   checkLogin?: () => Promise<LoginState>;
   /** 한 번의 폴링에서 처리할 최대 건수. 게시물 열기 + 모델 판정이 건당 수십 초 걸린다. */
   limit?: number;
+  /** 대기 시간을 재는 기준 시각. 테스트가 72시간을 흘려보내기 위해 주입한다. */
+  now?: () => Date;
 };
 
 export function captureAutoEnabled(): boolean {
@@ -87,6 +98,22 @@ export function captureFromUserTopic(entry: InstagramQueueEntry): InstagramCaptu
   };
 }
 
+/** 알림에서 항목을 가리키는 머리말. 직접 입력은 URL이 없다. */
+function entryLabel(entry: InstagramQueueEntry): string {
+  return entry.instagramUrl || `직접 입력 "${(entry.userTopic ?? "").slice(0, 40)}"`;
+}
+
+function hoursSince(iso: string, now: Date): number {
+  const started = Date.parse(iso);
+  if (Number.isNaN(started)) return 0;
+  return (now.getTime() - started) / 3_600_000;
+}
+
+/** 성공·질문으로 넘어갈 때 대기 표시를 지운다. 안 지우면 다음 고장에서 알림이 안 간다. */
+function clearDefer(entry: InstagramQueueEntry): { deferredSince?: undefined } {
+  return entry.deferredSince ? { deferredSince: undefined } : {};
+}
+
 function giveUpMessage(entry: InstagramQueueEntry, error: string, login: LoginState): string {
   const head = `⛔ ${entry.instagramUrl}\n   ${MAX_ATTEMPTS}회 실패해 포기했습니다: ${error}`;
   if (login === "logged_out") {
@@ -114,9 +141,58 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
     deps.triggerResearch ?? (async (jobId) => (await import("./triggerResearch.js")).triggerResearchForJob(jobId));
   const checkLogin = deps.checkLogin ?? (async () => (await import("./checkInstagramLogin.js")).checkInstagramLogin());
   const limit = deps.limit ?? 2;
+  const now = deps.now ?? (() => new Date());
 
-  const result: ProcessResult = { attempted: 0, created: 0, failed: 0, givenUp: 0, asked: 0, messages: [] };
+  const result: ProcessResult = { attempted: 0, created: 0, failed: 0, givenUp: 0, deferred: 0, asked: 0, messages: [] };
   const pending = listPending().slice(0, limit);
+
+  /**
+   * 설비 고장(맥 claude 로그인·사용량·네트워크)이면 **그 링크의 잘못이 아니다** - 재시도 횟수를
+   * 쓰지 않고 pending으로 두고, 고쳐지면 다음 폴링이 집는다(2026-11-02 사고: 로그인 만료로 3회를
+   * 소진하고 링크를 버려 사용자가 다시 보내야 했다).
+   *
+   * 알림은 **기다리기 시작할 때 한 번만** 보낸다 - 매 분 같은 알림이 오면 사람이 읽지 않는다.
+   * 처리했으면 true를 돌려준다(호출한 쪽은 다음 항목으로 넘어간다).
+   */
+  const deferIfOurFault = (entry: InstagramQueueEntry, error: string): boolean => {
+    const kind = classifyCaptureFailure(error);
+    if (!isOurFault(kind)) return false;
+
+    const waitedHours = entry.deferredSince ? hoursSince(entry.deferredSince, now()) : 0;
+    if (entry.deferredSince && waitedHours >= DEFER_MAX_HOURS) {
+      result.failed += 1;
+      result.givenUp += 1;
+      mark(entry.id, { status: "skipped", lastError: error });
+      result.messages.push(
+        [
+          `⛔ ${entryLabel(entry)}`,
+          `   설비 고장이 ${DEFER_MAX_HOURS}시간 넘게 이어져 대기를 끝냈습니다: ${error}`,
+          "",
+          describeOurFault(kind),
+          "",
+          "   고친 뒤 같은 링크를 다시 보내주세요.",
+        ].join("\n")
+      );
+      return true;
+    }
+
+    result.deferred += 1;
+    const first = !entry.deferredSince;
+    mark(entry.id, { lastError: error, ...(first ? { deferredSince: now().toISOString() } : {}) });
+    if (first) {
+      result.messages.push(
+        [
+          `⏸ ${entryLabel(entry)}`,
+          `   설비 고장이라 기다립니다(재시도 횟수를 쓰지 않습니다): ${error}`,
+          "",
+          describeOurFault(kind),
+          "",
+          "   고쳐지면 다음 폴링에서 이어집니다 - 링크를 다시 보낼 필요가 없습니다.",
+        ].join("\n")
+      );
+    }
+    return true;
+  };
 
   for (const entry of pending) {
     result.attempted += 1;
@@ -127,7 +203,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
       try {
         const created = await createInput(entry);
         result.created += 1;
-        mark(entry.id, { attempts });
+        mark(entry.id, { attempts, ...clearDefer(entry) });
         await triggerResearch(created.jobId).catch((error) => {
           result.messages.push(
             `⚠️ job ${created.jobId}는 만들었지만 자료조사 발화에 실패했습니다: ${error instanceof Error ? error.message : error}\n   이어서: npm run job:research -- ${created.jobId}`
@@ -135,6 +211,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (deferIfOurFault(entry, message)) continue;
         result.failed += 1;
         const giveUp = attempts >= MAX_ATTEMPTS;
         if (giveUp) result.givenUp += 1;
@@ -157,6 +234,8 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
       });
 
       if (session.status === "failed") {
+        // 설비 고장은 재시도 횟수를 쓰지 않는다 - 게시물 탓일 때만 아래 규칙을 쓴다.
+        if (deferIfOurFault(entry, session.error)) continue;
         result.failed += 1;
         if (attempts >= MAX_ATTEMPTS) {
           result.givenUp += 1;
@@ -174,7 +253,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
         // 실패가 아니다 - 게시물은 열렸는데 읽을 글자가 없었다. attempts를 올리지 않는다:
         // 재시도해도 결과가 같고, 사용자의 답을 기다리는 동안 포기로 내려가면 안 된다.
         const askedMessageId = deps.askTopic ? await deps.askTopic(entry).catch(() => null) : null;
-        mark(entry.id, { status: "needs_topic", askedMessageId: askedMessageId ?? undefined });
+        mark(entry.id, { status: "needs_topic", askedMessageId: askedMessageId ?? undefined, ...clearDefer(entry) });
         result.asked += 1;
         continue;
       }
@@ -204,7 +283,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
     const created = await createJob({ ...parsed.capture, ...(entry.track ? { track: entry.track } : {}) });
     result.created += 1;
     // createInstagramJob이 큐 항목을 done으로 바꾼다. attempts는 기록용으로 남긴다.
-    mark(entry.id, { attempts });
+    mark(entry.id, { attempts, ...clearDefer(entry) });
 
     await triggerResearch(created.jobId).catch((error) => {
       // job은 이미 만들어졌다 - 조사 발화만 실패한 것이라 수동으로 이어 돌릴 수 있다.
