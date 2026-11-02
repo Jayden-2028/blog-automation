@@ -1,5 +1,6 @@
 // 성과 수집의 순수 로직 테스트. 외부 호출 없음. 실행: npm run test:search-performance
-import { buildAssertion, mapAnalyticsRows } from "../../services/searchConsole/SearchConsoleClient.js";
+import { buildAssertion, mapAnalyticsRows, SearchConsoleClient } from "../../services/searchConsole/SearchConsoleClient.js";
+import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { aggregateRows, attachJobIds, normalizePageUrl, reportDate } from "./normalizeSearchRows.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
 import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
@@ -284,6 +285,67 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   assert(rows[0].sessions === 3 && rows[0].totalUsers === 2 && rows[0].pageViews === 7, "지표 매핑");
   assert(mapGa4Rows({}).length === 0, "rows 없으면 빈 배열(데이터 없음)");
   console.log("✅ GA4 응답 매핑 - 날짜 변환·깨진 행 격리");
+}
+
+// --- 11. URL Inspection 일시 오류 재시도 - 500 한 번은 넘어간다 ---------------------------------
+{
+  // 2026-11-01 실측: 티스토리 글 1건이 500("Internal error encountered")으로 떨어졌다. URL
+  // 문제가 아니라 구글 쪽 일시 오류라 다시 물으면 통한다 - 그걸 "검사 실패"로 보고하면 안 된다.
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const serviceAccountJson = JSON.stringify({ client_email: "a@b.iam.gserviceaccount.com", private_key: pem });
+
+  const reply = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+
+  const makeClient = (inspectReplies: Response[]) => {
+    const calls: string[] = [];
+    const fetchImpl = (async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes("oauth2.googleapis.com")) return reply({ access_token: "tok", expires_in: 3600 });
+      return inspectReplies.shift() ?? reply({ error: { message: "replies 소진" } }, 500);
+    }) as unknown as typeof fetch;
+    const client = new SearchConsoleClient({
+      serviceAccountJson,
+      siteUrl: "https://wooahpapa.tistory.com/",
+      fetchImpl,
+      retryDelayMs: 0,
+    });
+    return { client, calls };
+  };
+
+  const indexed = { inspectionResult: { indexStatusResult: { verdict: "PASS", coverageState: "Submitted and indexed" } } };
+
+  const transient = makeClient([reply({ error: { message: "Internal error encountered." } }, 500), reply(indexed)]);
+  const recovered = await transient.client.inspectUrl("https://wooahpapa.tistory.com/entry/a");
+  assert(recovered.ok, "500 뒤 재시도가 성공하면 ok여야 한다");
+  assert(recovered.ok && recovered.data.coverageState === "Submitted and indexed", "재시도 응답을 돌려줘야 한다");
+  const inspectCalls = transient.calls.filter((u) => u.includes("urlInspection")).length;
+  assert(inspectCalls === 2, `inspect를 두 번만 불러야 한다 (${inspectCalls})`);
+
+  // 영구 오류(403 소유권 미확인)는 다시 묻지 않는다 - 할당량만 쓴다.
+  const permanent = makeClient([reply({ error: { message: "You do not own this site" } }, 403)]);
+  const refused = await permanent.client.inspectUrl("https://example.com/x");
+  assert(!refused.ok, "403은 실패로 남아야 한다");
+  const permanentCalls = permanent.calls.filter((u) => u.includes("urlInspection")).length;
+  assert(permanentCalls === 1, `403은 한 번만 물어야 한다 (${permanentCalls})`);
+
+  console.log("✅ URL Inspection 재시도 - 500은 한 번 더, 403은 그대로 실패");
+}
+
+// --- 12. 병렬 점검 - 순서가 섞이지 않는다 -------------------------------------------------------
+{
+  // 색인 점검은 호출을 6개씩 병렬로 돌린다(구글 응답이 호출당 6.5초라 순차로는 타임아웃).
+  // 결과를 주소와 짝지어 보고하므로 **입력 순서가 유지돼야** 엉뚱한 글에 상태가 붙지 않는다.
+  const order = ["a", "b", "c", "d", "e", "f", "g"];
+  const out = await mapWithConcurrency(order, 6, async (item, index) => {
+    await new Promise((resolve) => setTimeout(resolve, (order.length - index) * 2));
+    return item.toUpperCase();
+  });
+  assert(out.join("") === "ABCDEFG", `입력 순서를 유지해야 한다 (${out.join("")})`);
+  console.log("✅ 병렬 점검 - 늦게 끝난 호출이 앞자리를 밀어내지 않는다");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");

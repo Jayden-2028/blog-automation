@@ -15,17 +15,20 @@ import "dotenv/config";
 import { SearchConsoleClient } from "../../services/searchConsole/SearchConsoleClient.js";
 import type { UrlInspectionResult } from "../../services/searchConsole/SearchConsoleClient.js";
 import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { loadPublishedUrlToJobId } from "../../services/supabase/repositories/searchPerformanceRepository.js";
 import { normalizePageUrl } from "./normalizeSearchRows.js";
 import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
 
 /** URL Inspection은 사이트당 하루 2,000건이다. 한 번에 이만큼만 본다(여유 있게). */
-const MAX_URLS = 100;
-/** 호출 간 간격(ms). 분당 한도(600)를 넉넉히 밑돈다. */
-const DELAY_MS = 150;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const MAX_URLS = 200;
+/**
+ * 동시에 묻는 개수. **이 점검이 느린 이유는 호출 간격이 아니라 구글의 응답 지연이다** -
+ * 2026-11-01 실측 호출당 약 6.5초였고, 순차로 150건을 묻다가 15분 타임아웃에 걸려 점검과
+ * 그 뒤 주간 리포트가 통째로 날아갔다. 6개면 분당 약 55건이라 분당 한도(600)에 한참 못 미친다.
+ */
+const INSPECT_CONCURRENCY = 6;
 
 type SiteOutcome = { siteUrl: string; message: string; broken: number };
 
@@ -49,22 +52,24 @@ async function checkSite(siteUrl: string, published: Map<string, string>): Promi
 
   console.log(`▶ 색인 점검 ${targets.length}건\n`);
 
+  const outcomes = await mapWithConcurrency(targets, INSPECT_CONCURRENCY, (url) => client.inspectUrl(url));
+
   const results: UrlInspectionResult[] = [];
   const failures: string[] = [];
 
-  for (const url of targets) {
-    const result = await client.inspectUrl(url);
+  // 로그는 입력 순서대로 몰아서 찍는다 - 워커가 그때그때 찍으면 순서가 섞여 읽을 수 없다.
+  targets.forEach((url, index) => {
+    const result = outcomes[index];
     if (!result.ok) {
       failures.push(`${url}: ${result.error}`);
       console.log(`❌ ${url} → ${result.error}`);
-    } else {
-      results.push(result.data);
-      const bucket = classifyCoverage(result.data.coverageState);
-      const mark = bucket === "indexed" ? "✅" : bucket === "broken" ? "⚠️ " : "· ";
-      console.log(`${mark} ${new URL(url).pathname.padEnd(38)} ${result.data.coverageState}`);
+      return;
     }
-    await sleep(DELAY_MS);
-  }
+    results.push(result.data);
+    const bucket = classifyCoverage(result.data.coverageState);
+    const mark = bucket === "indexed" ? "✅" : bucket === "broken" ? "⚠️ " : "· ";
+    console.log(`${mark} ${new URL(url).pathname.padEnd(38)} ${result.data.coverageState}`);
+  });
 
   const report = buildReport(results, failures);
   console.log(
