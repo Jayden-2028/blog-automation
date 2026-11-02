@@ -45,7 +45,8 @@ export async function collectPersonSourcePacks(deps: CollectPersonSourcePackDeps
     }
     const ok = pack.errors.length === 0;
     log(
-      `${ok ? "✅" : "⚠️"} [person-pack] ${job.keyword}: 인물DB ${pack.personDb.length.toLocaleString()}자 · 나무위키 ${pack.namuwiki.length.toLocaleString()}자` +
+      `${ok ? "✅" : "⚠️"} [person-pack] ${job.keyword}${pack.resolvedName ? ` → "${pack.resolvedName}"` : ""}` +
+        `: 인물DB ${pack.personDb.length.toLocaleString()}자 · 나무위키 ${pack.namuwiki.length.toLocaleString()}자` +
         ` · AI탭 ${(pack.naverAiAnswer ?? "").length.toLocaleString()}자 · 레퍼런스 블로그 ${pack.referenceBlogPosts?.length ?? 0}건` +
         `${saved ? "" : " · 저장 확인 실패"}${ok ? "" : ` · ${pack.errors.join(" / ")}`}`
     );
@@ -64,6 +65,7 @@ export function defaultCollectPersonSourcePackDeps(): CollectPersonSourcePackDep
         // 차단 - "잘못된 접근입니다"). 켜 두면 job마다 헛 브라우저 최대 25초 + errors 노이즈만 남는다.
         // 차단이 풀렸는지 재시도할 때만 PERSON_AI_TAB=1로 켠다. 평시 공급 경로는 수동 첨부(--naver-ai-file)다.
         ...(process.env.PERSON_AI_TAB === "1" ? { fetchNaverAi: (name: string) => fetchNaverAiAnswer(name) } : {}),
+        log: (m) => console.log(m),
         fetchReferenceBlogs: (name) =>
           collectReferenceBlogPosts(name, {
             search: searchNaverBlogs,

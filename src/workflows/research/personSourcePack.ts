@@ -8,6 +8,8 @@
 import { parse } from "node-html-parser";
 
 import type { ReferenceBlogPost } from "./referenceBlogPosts.js";
+import { resolvePersonName } from "./personNameFromKeyword.js";
+import type { ResolvedPersonName } from "./personNameFromKeyword.js";
 
 /** 항목(personDb / namuwiki)당 UTF-8 바이트 상한. 프롬프트는 stdin으로 넘어가 argv 제한은 없지만 조사 에이전트의 읽기 비용이 있다. */
 export const PERSON_SOURCE_PACK_MAX_BYTES = 40 * 1024;
@@ -26,6 +28,15 @@ export type PersonSourcePack = {
   googleAiAnswer?: string;
   /** 드라마 테마 블로그 풀의 같은 인물 글(§B). 구성 참고 전용, 건당 8KB·합계 20KB. */
   referenceBlogPosts?: ReferenceBlogPost[];
+  /**
+   * 조회에 실제로 쓴 인물명(2026-11-02). 키워드가 문장이면 여기서 뽑은 이름이 들어간다 -
+   * 키워드와 같으면 생략한다. 어떻게 골랐는지는 `nameResolvedBy`다.
+   */
+  resolvedName?: string;
+  /** 인물명을 고른 방법. `first-candidate`면 확정 못 하고 추정한 것이다(§personNameFromKeyword). */
+  nameResolvedBy?: ResolvedPersonName["resolvedBy"];
+  /** 나무위키에서 실제로 읽은 문서 제목. 동명이인 문서를 따라간 경우 `박정민(배우)`처럼 괄호가 붙는다. */
+  namuwikiTitle?: string;
   fetchedAt: string;
   /** 항목별 실패·누락 사유. 비어 있으면 모두 받았다. */
   errors: string[];
@@ -35,6 +46,29 @@ export type PersonSourcePack = {
 export const PERSON_AI_ANSWER_MAX_BYTES = 6 * 1024;
 /** 소스팩 총량 상한 = 기존 두 항목(인물DB·나무위키) 상한의 합. 새 항목을 넣어도 이 총량은 늘지 않는다. */
 export const PERSON_SOURCE_PACK_TOTAL_MAX_BYTES = 2 * PERSON_SOURCE_PACK_MAX_BYTES;
+
+/**
+ * 나무위키 동명이인 안내 문서를 가리는 기준(2026-11-02). `namu.wiki/w/박정민`·`/박정연`은 본인 문서가 아니라
+ * **목록 문서**다 - 1,473자·1,498자짜리를 받아 놓고 "나무위키를 읽었다"고 넘어가고 있었다. 그 문서가
+ * 친절하게 `박정민(배우)`로 가리키므로 직업 괄호를 붙여 한 번 더 받는다.
+ */
+const DISAMBIGUATION_MAX_CHARS = 4_000;
+/** 괄호에 붙여 볼 직업. 인물DB 카드에 적힌 직업이 있으면 그것을 맨 앞에 둔다. */
+const OCCUPATION_SUFFIXES = ["배우", "가수", "방송인", "아나운서", "모델", "성우", "코미디언"];
+/** 동명이인 문서를 따라갈 최대 시도 횟수. */
+const DISAMBIGUATION_MAX_TRIES = 3;
+
+/** 받은 본문이 본인 문서가 아니라 동명이인 목록 문서인가. */
+export function isDisambiguationPage(text: string): boolean {
+  return text.length > 0 && text.length < DISAMBIGUATION_MAX_CHARS && text.includes("동명이인");
+}
+
+/** 인물DB 카드에 적힌 직업을 앞세워 괄호 후보를 만든다. */
+export function namuwikiTitleCandidates(name: string, personDbCard: string): string[] {
+  const fromCard = OCCUPATION_SUFFIXES.filter((job) => personDbCard.includes(job));
+  const ordered = [...fromCard, ...OCCUPATION_SUFFIXES.filter((job) => !fromCard.includes(job))];
+  return ordered.slice(0, DISAMBIGUATION_MAX_TRIES).map((job) => `${name}(${job})`);
+}
 
 export const SOURCE_PACK_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -210,6 +244,7 @@ export type FetchPersonSourcePackOptions = {
   fetchNaverAi?: (keyword: string) => Promise<{ answer: string; error?: string }>;
   /** 테마 블로그 풀 글 수집. 없으면 수집하지 않는다(필드 생략). 비치명. */
   fetchReferenceBlogs?: (keyword: string) => Promise<{ posts: ReferenceBlogPost[]; errors: string[] }>;
+  log?: (message: string) => void;
 };
 
 async function fetchHtml(url: string, fetchImpl: FetchLike, timeoutMs: number): Promise<string> {
@@ -236,22 +271,62 @@ export async function fetchPersonSourcePack(
   const timeoutMs = options.timeoutMs ?? 20_000;
   const maxBytes = options.maxBytes ?? PERSON_SOURCE_PACK_MAX_BYTES;
   const errors: string[] = [];
-  const name = keyword.trim();
+  const log = options.log ?? (() => {});
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  const naverSearch = (query: string) => `https://search.naver.com/search.naver?query=${encodeURIComponent(query)}`;
+
+  // 키워드가 문장일 수 있다. URL에 그대로 넣으면 나무위키가 404다(2026-11-02 실측) - 인물명을 먼저 고른다.
+  // 후보를 가르느라 받은 인물 검색 결과는 버리지 않고 personDb에 재사용한다(같은 페이지를 두 번 받지 않는다).
+  const cardByName = new Map<string, string>();
+  const resolved = await resolvePersonName(keyword, {
+    hasPersonCard: async (candidate) => {
+      const html = await fetchHtml(naverSearch(candidate), fetchImpl, timeoutMs);
+      const card = extractNaverPersonDb(html, candidate);
+      cardByName.set(candidate, card);
+      return card.length > 0;
+    },
+    log,
+  });
+  const name = resolved.name;
+  if (resolved.resolvedBy === "first-candidate") {
+    errors.push(`personName: 인물 카드로 확정 못 해 "${name}"로 추정 진행(후보 ${resolved.tried.join(", ")})`);
+  }
 
   let personDb = "";
   try {
-    const html = await fetchHtml(`https://search.naver.com/search.naver?query=${encodeURIComponent(name)}`, fetchImpl, timeoutMs);
-    personDb = capUtf8(extractNaverPersonDb(html, name), maxBytes);
+    const cached = cardByName.get(name);
+    const card = cached ?? extractNaverPersonDb(await fetchHtml(naverSearch(name), fetchImpl, timeoutMs), name);
+    personDb = capUtf8(card, maxBytes);
     if (!personDb) errors.push("personDb: 인물DB 카드 없음(등재 안 된 이름이거나 페이지 구조 변경)");
   } catch (error) {
     errors.push(`personDb: ${message(error)}`);
   }
 
   let namuwiki = "";
+  let namuwikiTitle = name;
+  const readNamuwiki = async (title: string) =>
+    capUtf8(extractNamuwikiText(await fetchHtml(`https://namu.wiki/w/${encodeURIComponent(title)}`, fetchImpl, timeoutMs), maxBytes), maxBytes);
   try {
-    const html = await fetchHtml(`https://namu.wiki/w/${encodeURIComponent(name)}`, fetchImpl, timeoutMs);
-    namuwiki = capUtf8(extractNamuwikiText(html, maxBytes), maxBytes);
+    namuwiki = await readNamuwiki(name);
+    // 동명이인 목록 문서면 직업 괄호를 붙여 본인 문서를 찾는다. 실패하면 목록 문서라도 남긴다(비치명).
+    if (isDisambiguationPage(namuwiki)) {
+      const tried: string[] = [];
+      for (const title of namuwikiTitleCandidates(name, personDb)) {
+        tried.push(title);
+        try {
+          const body = await readNamuwiki(title);
+          if (body && !isDisambiguationPage(body)) {
+            namuwiki = body;
+            namuwikiTitle = title;
+            log(`· 나무위키 동명이인 → "${title}" (${body.length.toLocaleString()}자)`);
+            break;
+          }
+        } catch {
+          // 그 제목이 없으면 다음 후보로 넘어간다.
+        }
+      }
+      if (namuwikiTitle === name) errors.push(`namuwiki: 동명이인 목록 문서만 받았다(시도 ${tried.join(", ")})`);
+    }
     if (!namuwiki) errors.push("namuwiki: 본문 비어 있음");
   } catch (error) {
     errors.push(`namuwiki: ${message(error)}`);
@@ -282,6 +357,11 @@ export async function fetchPersonSourcePack(
   }
 
   const pack: PersonSourcePack = { personDb, namuwiki, fetchedAt: (options.now ?? (() => new Date()))().toISOString(), errors };
+  if (name !== keyword.trim()) {
+    pack.resolvedName = name;
+    pack.nameResolvedBy = resolved.resolvedBy;
+  }
+  if (namuwikiTitle !== name) pack.namuwikiTitle = namuwikiTitle;
   if (naverAiAnswer !== undefined) pack.naverAiAnswer = naverAiAnswer;
   if (referenceBlogPosts !== undefined) pack.referenceBlogPosts = referenceBlogPosts;
   return fitPersonSourcePack(pack);
@@ -296,6 +376,9 @@ export function readPersonSourcePack(metadata: Record<string, unknown> | null | 
   const out: PersonSourcePack = {
     personDb: typeof pack.personDb === "string" ? pack.personDb : "",
     namuwiki: typeof pack.namuwiki === "string" ? pack.namuwiki : "",
+    ...(typeof pack.resolvedName === "string" ? { resolvedName: pack.resolvedName } : {}),
+    ...(typeof pack.nameResolvedBy === "string" ? { nameResolvedBy: pack.nameResolvedBy as ResolvedPersonName["resolvedBy"] } : {}),
+    ...(typeof pack.namuwikiTitle === "string" ? { namuwikiTitle: pack.namuwikiTitle } : {}),
     fetchedAt: pack.fetchedAt,
     errors: Array.isArray(pack.errors) ? pack.errors.filter((e): e is string => typeof e === "string") : [],
   };
