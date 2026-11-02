@@ -163,9 +163,12 @@ blog.naver.com
 {
   const filler = (n: number) => "가".repeat(Math.floor(n / 3));
   const post = (id: string) => ({ blogId: id, title: id, url: `https://m.blog.naver.com/${id}/1`, excerpt: filler(8 * 1024) });
+  // 작품 등장인물(2026-11-02)은 나무위키 다음·AI 답변 앞이다 - 역할·관계의 유일한 출처다.
+  const cast = (work: string) => ({ work, role: "역", namuwikiTitle: `${work}/등장인물`, excerpt: filler(4 * 1024) });
   const pack: PersonSourcePack = {
-    personDb: filler(30 * 1024),
+    personDb: filler(40 * 1024),
     namuwiki: filler(40 * 1024),
+    workCasts: ["a", "b", "c", "d", "e", "f"].map(cast),
     naverAiAnswer: filler(6 * 1024),
     googleAiAnswer: filler(6 * 1024),
     referenceBlogPosts: [post("a"), post("b"), post("c")],
@@ -174,15 +177,21 @@ blog.naver.com
   };
   const fitted = fitPersonSourcePack(pack);
   const sum = (p: PersonSourcePack) =>
-    bytes(p.personDb) + bytes(p.namuwiki) + bytes(p.naverAiAnswer ?? "") + bytes(p.googleAiAnswer ?? "") + (p.referenceBlogPosts ?? []).reduce((s, x) => s + bytes(x.excerpt), 0);
-  assert(sum(fitted) <= PERSON_SOURCE_PACK_TOTAL_MAX_BYTES, `총량 80KB 불변 (${sum(fitted)})`);
+    bytes(p.personDb) +
+    bytes(p.namuwiki) +
+    (p.workCasts ?? []).reduce((s, x) => s + bytes(x.excerpt), 0) +
+    bytes(p.naverAiAnswer ?? "") +
+    bytes(p.googleAiAnswer ?? "") +
+    (p.referenceBlogPosts ?? []).reduce((s, x) => s + bytes(x.excerpt), 0);
+  assert(sum(fitted) <= PERSON_SOURCE_PACK_TOTAL_MAX_BYTES, `총량 상한 불변 (${sum(fitted)})`);
   assert(fitted.personDb === pack.personDb && fitted.namuwiki === pack.namuwiki, "인물DB·나무위키는 안 잘린다");
+  assert((fitted.workCasts ?? []).length === 6, "등장인물 발췌는 AI 답변보다 먼저 자리를 받는다");
   assert(bytes(fitted.naverAiAnswer ?? "") > 0 && (fitted.referenceBlogPosts ?? []).length < 3, "우선순위 낮은 블로그 글부터 잘린다");
-  const small = { ...pack, personDb: filler(3 * 1024), namuwiki: filler(20 * 1024) };
-  assert(JSON.stringify(fitPersonSourcePack(small)) === JSON.stringify(small), "여유가 있으면 그대로(총량 80KB 안)");
+  const small = { ...pack, personDb: filler(3 * 1024), namuwiki: filler(20 * 1024), workCasts: [cast("a")] };
+  assert(JSON.stringify(fitPersonSourcePack(small)) === JSON.stringify(small), "여유가 있으면 그대로(총량 안)");
   const old: PersonSourcePack = { personDb: "a", namuwiki: "b", fetchedAt: "t", errors: [] };
   assert(!("naverAiAnswer" in fitPersonSourcePack(old)) && !("referenceBlogPosts" in fitPersonSourcePack(old)), "새 필드가 없던 팩은 그대로(하위 호환)");
-  console.log("✅ 워터필링: 총량 80KB 불변, 새 항목이 먼저 잘림, 하위 호환");
+  console.log("✅ 워터필링: 총량 상한 불변, 새 항목이 먼저 잘림, 등장인물은 AI 답변보다 앞, 하위 호환");
 }
 
 // 7) fetchPersonSourcePack 통합(주입) + readPersonSourcePack 라운드트립 + 비치명

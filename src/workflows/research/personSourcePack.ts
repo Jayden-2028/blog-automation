@@ -10,6 +10,8 @@ import { parse } from "node-html-parser";
 import type { ReferenceBlogPost } from "./referenceBlogPosts.js";
 import { resolvePersonName } from "./personNameFromKeyword.js";
 import type { ResolvedPersonName } from "./personNameFromKeyword.js";
+import { WORK_CAST_MAX_BYTES, WORK_CAST_MAX_WORKS, fetchWorkCasts, pickWorksForCast } from "./personWorkCast.js";
+import type { WorkCast } from "./personWorkCast.js";
 
 /** 항목(personDb / namuwiki)당 UTF-8 바이트 상한. 프롬프트는 stdin으로 넘어가 argv 제한은 없지만 조사 에이전트의 읽기 비용이 있다. */
 export const PERSON_SOURCE_PACK_MAX_BYTES = 40 * 1024;
@@ -19,6 +21,11 @@ export type PersonSourcePack = {
   personDb: string;
   /** 나무위키 문서 본문(편집 UI·각주·둘러보기 제외). 실패하면 빈 문자열. */
   namuwiki: string;
+  /**
+   * 대표작 후보의 나무위키 `등장인물` 발췌(2026-11-02). 캐릭터 네 항목 중 **역할·관계**가 여기 있다 -
+   * 인물 문서에는 배역명·비중·시청률까지만 있다(personWorkCast.ts). 없거나 못 받으면 필드 생략·빈 배열.
+   */
+  workCasts?: WorkCast[];
   /**
    * 네이버 AI 탭 답변(2026-10-17, PERSON-RESEARCH-SOURCES §A). **구조·커버리지 참고 전용** - 사실 출처가 아니다.
    * 상한 6KB. 없으면(차단·미수집) 비어 있거나 필드 자체가 없다.
@@ -44,8 +51,13 @@ export type PersonSourcePack = {
 
 /** AI 답변 항목 상한(UTF-8 바이트). */
 export const PERSON_AI_ANSWER_MAX_BYTES = 6 * 1024;
-/** 소스팩 총량 상한 = 기존 두 항목(인물DB·나무위키) 상한의 합. 새 항목을 넣어도 이 총량은 늘지 않는다. */
-export const PERSON_SOURCE_PACK_TOTAL_MAX_BYTES = 2 * PERSON_SOURCE_PACK_MAX_BYTES;
+/** 작품 등장인물 발췌 전체 몫(UTF-8 바이트). 작품당 상한 × 작품 수 상한. */
+export const PERSON_WORK_CAST_TOTAL_MAX_BYTES = WORK_CAST_MAX_WORKS * WORK_CAST_MAX_BYTES;
+/**
+ * 소스팩 총량 상한 = 인물DB·나무위키 상한의 합 + 작품 등장인물 몫. AI 답변·블로그 글은 이 안에서
+ * 뒤에서부터 잘린다(새 항목이 기존 재료를 밀어내지 않는다).
+ */
+export const PERSON_SOURCE_PACK_TOTAL_MAX_BYTES = 2 * PERSON_SOURCE_PACK_MAX_BYTES + PERSON_WORK_CAST_TOTAL_MAX_BYTES;
 
 /**
  * 나무위키 동명이인 안내 문서를 가리는 기준(2026-11-02). `namu.wiki/w/박정민`·`/박정연`은 본인 문서가 아니라
@@ -202,7 +214,7 @@ export function fitSections(sections: string[], maxBytes: number): string {
 }
 
 /**
- * 소스팩 총량을 맞춘다(§공통 3). 우선순위: 인물DB > 나무위키 > 네이버 AI > 구글 AI > 블로그 글.
+ * 소스팩 총량을 맞춘다(§공통 3). 우선순위: 인물DB > 나무위키 > 작품 등장인물 > 네이버 AI > 구글 AI > 블로그 글.
  * 앞 항목이 자기 몫을 먼저 가져가고, 총량을 넘으면 **뒤(우선순위 낮은) 항목부터** 잘린다. 새 항목이 없으면 그대로다.
  */
 export function fitPersonSourcePack(pack: PersonSourcePack, totalMax: number = PERSON_SOURCE_PACK_TOTAL_MAX_BYTES): PersonSourcePack {
@@ -216,6 +228,11 @@ export function fitPersonSourcePack(pack: PersonSourcePack, totalMax: number = P
   };
   const personDb = take(pack.personDb);
   const namuwiki = take(pack.namuwiki);
+  const workCasts: WorkCast[] = [];
+  for (const cast of pack.workCasts ?? []) {
+    const excerpt = remaining < 200 ? "" : take(cast.excerpt);
+    if (excerpt) workCasts.push({ ...cast, excerpt });
+  }
   const naverAiAnswer = take(pack.naverAiAnswer);
   const googleAiAnswer = take(pack.googleAiAnswer);
   const posts: ReferenceBlogPost[] = [];
@@ -224,6 +241,7 @@ export function fitPersonSourcePack(pack: PersonSourcePack, totalMax: number = P
     if (excerpt) posts.push({ ...post, excerpt });
   }
   const next: PersonSourcePack = { ...pack, personDb, namuwiki };
+  if (pack.workCasts !== undefined) next.workCasts = workCasts;
   if (pack.naverAiAnswer !== undefined) next.naverAiAnswer = naverAiAnswer;
   if (pack.googleAiAnswer !== undefined) next.googleAiAnswer = googleAiAnswer;
   if (pack.referenceBlogPosts !== undefined) next.referenceBlogPosts = posts;
@@ -244,6 +262,11 @@ export type FetchPersonSourcePackOptions = {
   fetchNaverAi?: (keyword: string) => Promise<{ answer: string; error?: string }>;
   /** 테마 블로그 풀 글 수집. 없으면 수집하지 않는다(필드 생략). 비치명. */
   fetchReferenceBlogs?: (keyword: string) => Promise<{ posts: ReferenceBlogPost[]; errors: string[] }>;
+  /**
+   * 대표작 `등장인물` 발췌까지 받을지(기본 받는다). 인물 문서를 못 받았으면 고를 작품이 없어 자동으로
+   * 건너뛴다. `false`면 작품 문서를 아예 열지 않는다 - 요청 수를 묶어 두고 싶은 테스트용이다.
+   */
+  collectWorkCasts?: boolean;
   log?: (message: string) => void;
 };
 
@@ -332,6 +355,29 @@ export async function fetchPersonSourcePack(
     errors.push(`namuwiki: ${message(error)}`);
   }
 
+  // 작품 등장인물(2026-11-02) - 역할·관계는 인물 문서에 없다(personWorkCast.ts 머리글). 인물 문서를
+  // 읽었을 때만 돈다: 고를 작품을 그 문서의 출연 목록 표에서 얻는다.
+  let workCasts: WorkCast[] | undefined;
+  if (options.collectWorkCasts !== false && namuwiki) {
+    const works = pickWorksForCast(namuwiki);
+    if (works.length > 0) {
+      log(`· 등장인물 수집 대상 ${works.length}편: ${works.map((w) => `${w.work}(${w.role})`).join(", ")}`);
+      const collected = await fetchWorkCasts(works, {
+        // 발췌를 떠낼 때까지는 자르지 않는다 - 절 단위로 미리 줄이면 그 배역 항목이 먼저 날아간다.
+        readNamuwiki: async (title) =>
+          extractNamuwikiText(
+            await fetchHtml(`https://namu.wiki/w/${encodeURIComponent(title)}`, fetchImpl, timeoutMs),
+            Number.MAX_SAFE_INTEGER
+          ),
+        log,
+      });
+      workCasts = collected.casts.map((cast) => ({ ...cast, excerpt: capUtf8(cast.excerpt, WORK_CAST_MAX_BYTES) }));
+      errors.push(...collected.errors);
+    } else {
+      errors.push("workCast: 출연 목록에서 작품을 못 골랐다(표 구조 변경이거나 작품이 없는 인물)");
+    }
+  }
+
   let naverAiAnswer: string | undefined;
   if (options.fetchNaverAi) {
     try {
@@ -362,6 +408,7 @@ export async function fetchPersonSourcePack(
     pack.nameResolvedBy = resolved.resolvedBy;
   }
   if (namuwikiTitle !== name) pack.namuwikiTitle = namuwikiTitle;
+  if (workCasts !== undefined) pack.workCasts = workCasts;
   if (naverAiAnswer !== undefined) pack.naverAiAnswer = naverAiAnswer;
   if (referenceBlogPosts !== undefined) pack.referenceBlogPosts = referenceBlogPosts;
   return fitPersonSourcePack(pack);
@@ -382,6 +429,12 @@ export function readPersonSourcePack(metadata: Record<string, unknown> | null | 
     fetchedAt: pack.fetchedAt,
     errors: Array.isArray(pack.errors) ? pack.errors.filter((e): e is string => typeof e === "string") : [],
   };
+  if (Array.isArray(pack.workCasts)) {
+    out.workCasts = pack.workCasts.filter(
+      (c): c is WorkCast =>
+        !!c && typeof c === "object" && typeof (c as WorkCast).work === "string" && typeof (c as WorkCast).excerpt === "string"
+    );
+  }
   if (typeof pack.naverAiAnswer === "string") out.naverAiAnswer = pack.naverAiAnswer;
   if (typeof pack.googleAiAnswer === "string") out.googleAiAnswer = pack.googleAiAnswer;
   if (Array.isArray(pack.referenceBlogPosts)) {

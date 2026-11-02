@@ -264,9 +264,37 @@ function formatPersonSourcePack(pack: PersonSourcePack | null): string[] {
     "",
     ...block("네이버 인물DB", pack.personDb, failureOf("personDb:")),
     ...block("나무위키", pack.namuwiki, failureOf("namuwiki:")),
+    ...formatWorkCasts(pack.workCasts, pack.fetchedAt),
     ...formatAiAnswer("네이버 AI", pack.naverAiAnswer, pack.fetchedAt),
     ...formatAiAnswer("구글 AI", pack.googleAiAnswer, pack.fetchedAt),
     ...formatReferenceBlogPosts(pack.referenceBlogPosts),
+  ];
+}
+
+/**
+ * 작품별 등장인물 절(2026-11-02). 캐릭터 네 항목 중 **역할·관계**는 인물 문서에 없다 - 작품 문서의
+ * `등장인물`에 있고 그 문서도 클라우드에서는 403이라 맥이 받아 왔다(personWorkCast.ts).
+ * 발췌는 그 사람 배역 주변만이라 다른 배역·줄거리는 들어 있지 않다.
+ */
+function formatWorkCasts(casts: PersonSourcePack["workCasts"], fetchedAt: string): string[] {
+  if (!casts || casts.length === 0) return [];
+  return [
+    `## 작품별 등장인물 발췌 (맥 수집, ${fetchedAt})`,
+    "**§2-6-2 캐릭터 네 항목의 `역할`·`관계`를 여기서 채운다.** 인물 문서(위 나무위키)에는 배역명·비중·",
+    "시청률까지만 있고 극 중 직업·신분·상대 배역은 작품 문서에만 있다. 아래는 각 작품 `등장인물` 문서에서",
+    "**이 사람 배역 주변만** 떠낸 것이다 - 다른 배역 설명이나 줄거리는 담겨 있지 않으니 없는 내용을 짐작하지 않는다.",
+    "등급은 나무위키와 같다(community). §10 출처 표에는 각 발췌의 문서 URL을 올린다.",
+    "여기 없는 작품은 `역할`·`관계`를 **\"미확인\"으로 적는다** - 다른 작품 발췌로 메우지 않는다.",
+    "제목에 **(언급)**이 붙은 발췌는 그 배역의 항목을 찾지 못해 본문 언급 주변을 떠낸 것이다 - **옆 인물**",
+    "**설명이 섞여 있을 수 있으니** 이 배역 이야기인지 먼저 확인하고, 아니면 그 칸을 미확인으로 적는다.",
+    "",
+    ...casts.flatMap((cast) => [
+      `### ${cast.work} — ${cast.role}${cast.matched === "mention" ? " (언급)" : ""} (\`https://namu.wiki/w/${cast.namuwikiTitle}\`)`,
+      "```text",
+      cast.excerpt,
+      "```",
+      "",
+    ]),
   ];
 }
 

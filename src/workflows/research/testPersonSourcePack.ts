@@ -15,6 +15,15 @@ import {
 } from "./personSourcePack.js";
 import type { FetchLike, PersonSourcePack } from "./personSourcePack.js";
 import { isDisambiguationPage, namuwikiTitleCandidates } from "./personSourcePack.js";
+import {
+  excerptAroundRole,
+  fetchWorkCasts,
+  findRoleExcerpt,
+  parseFilmographyRows,
+  pickWorksForCast,
+  pointedRoleDocument,
+  roleDocumentExcerpt,
+} from "./personWorkCast.js";
 import { personNameCandidates, resolvePersonName } from "./personNameFromKeyword.js";
 import { SOURCE_PACK_WAIT_MS, resolvePersonSourcePack, waitForPersonSourcePack } from "./personSourcePackWait.js";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -97,7 +106,7 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
   console.log("✅ 분량 상한: 40KB 이하·문자 경계·절 단위 안배(수상·기타 보존)");
 }
 
-// 4) 수집 - 주입 fetch. 실패는 비치명이다.
+// 4) 수집 - 주입 fetch. 실패는 비치명이다. 요청 수를 세는 블록이라 작품 등장인물 수집은 끈다(8번에서 따로 본다).
 {
   const calls: Array<{ url: string; ua: string }> = [];
   const ok: FetchLike = async (url, init) => {
@@ -105,7 +114,7 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
     return { ok: true, status: 200, text: async () => (url.includes("namu.wiki") ? NAMU_HTML : NAVER_HTML) };
   };
   const now = () => new Date("2026-10-15T12:00:00Z");
-  const pack = await fetchPersonSourcePack("차정원", { fetchImpl: ok, now });
+  const pack = await fetchPersonSourcePack("차정원", { fetchImpl: ok, now, collectWorkCasts: false });
   assert(pack.errors.length === 0 && pack.personDb.includes("사람엔터테인먼트") && pack.namuwiki.includes("본명 | 차미영"), "둘 다 성공");
   assert(pack.fetchedAt === "2026-10-15T12:00:00.000Z", "fetchedAt 기록");
   assert(calls.length === 2 && calls[0].url === `https://search.naver.com/search.naver?query=${encodeURIComponent("차정원")}` && calls[1].url === `https://namu.wiki/w/${encodeURIComponent("차정원")}`, "URL은 인코딩된 이름");
@@ -113,17 +122,17 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
 
   const namuBlocked: FetchLike = async (url) =>
     url.includes("namu.wiki") ? { ok: false, status: 403, text: async () => "" } : { ok: true, status: 200, text: async () => NAVER_HTML };
-  const partial = await fetchPersonSourcePack("차정원", { fetchImpl: namuBlocked, now });
+  const partial = await fetchPersonSourcePack("차정원", { fetchImpl: namuBlocked, now, collectWorkCasts: false });
   assert(partial.personDb !== "" && partial.namuwiki === "" && partial.errors.length === 1 && partial.errors[0] === "namuwiki: HTTP 403", `나무위키 403은 errors에만 남고 인물DB는 유지 (${JSON.stringify(partial.errors)})`);
 
   const allThrow: FetchLike = async () => {
     throw new Error("fetch failed");
   };
-  const none = await fetchPersonSourcePack("차정원", { fetchImpl: allThrow, now });
+  const none = await fetchPersonSourcePack("차정원", { fetchImpl: allThrow, now, collectWorkCasts: false });
   assert(none.personDb === "" && none.namuwiki === "" && none.errors.length === 2 && none.errors.every((e) => e.includes("fetch failed")), "네트워크 예외도 던지지 않는다");
 
   const noCard: FetchLike = async (url) => ({ ok: true, status: 200, text: async () => (url.includes("namu.wiki") ? NAMU_HTML : "<html><body>검색 결과 없음</body></html>") });
-  const cardless = await fetchPersonSourcePack("차정원", { fetchImpl: noCard, now });
+  const cardless = await fetchPersonSourcePack("차정원", { fetchImpl: noCard, now, collectWorkCasts: false });
   assert(cardless.personDb === "" && cardless.errors.some((e) => e.startsWith("personDb: 인물DB 카드 없음")), "카드 없음은 사유를 남긴다");
 
   let aborted = false;
@@ -134,7 +143,7 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
         reject(new Error("aborted"));
       });
     });
-  const timedOut = await fetchPersonSourcePack("차정원", { fetchImpl: hang, now, timeoutMs: 20 });
+  const timedOut = await fetchPersonSourcePack("차정원", { fetchImpl: hang, now, timeoutMs: 20, collectWorkCasts: false });
   assert(aborted && timedOut.errors.length === 2, "타임아웃이면 요청을 끊고 비치명 처리");
   console.log("✅ 수집: 성공/나무위키 403/네트워크 예외/카드 없음/타임아웃 모두 비치명, 크롬 UA·URL 인코딩");
 }
@@ -218,6 +227,17 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
   const failedPrompt = prompt("person", failedPack);
   assert(failedPrompt.includes("네이버 인물DB: 맥 수집 실패 - HTTP 403") && failedPrompt.includes("대조 미완으로 기록한다"), "수집 실패 항목은 사유와 대체 지시");
   assert(failedPrompt.includes("문서 있음"), "성공한 항목은 그대로 싣는다");
+
+  // 작품 등장인물 절(2026-11-02) - 네 항목의 역할·관계 재료다. 없으면 절 자체가 안 실린다.
+  const withCasts = prompt("person", {
+    ...pack,
+    workCasts: [{ work: "또! 오해영", role: "오해영", namuwikiTitle: "또! 오해영/등장인물", excerpt: "박도경과 얽히는 식품회사 대리." }],
+  });
+  assert(withCasts.includes("## 작품별 등장인물 발췌"), "등장인물 절 머리");
+  assert(withCasts.includes("박도경과 얽히는 식품회사 대리."), "발췌 원문이 실린다");
+  assert(withCasts.includes("https://namu.wiki/w/또! 오해영/등장인물"), "§10에 올릴 문서 URL을 준다");
+  assert(withCasts.includes('"미확인"으로 적는다'), "발췌가 없는 작품은 미확인으로 적게 한다");
+  assert(!withPack.includes("작품별 등장인물 발췌"), "수집 못 했으면 절을 싣지 않는다");
 
   const without = prompt("person", null);
   assert(!without.includes("맥이 수집한") && !without.includes("소스팩"), "소스팩이 없으면(대기 만료) 아무것도 싣지 않는다 - 지금과 동일");
@@ -328,6 +348,110 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
   assert(noCard.length <= 3, "시도 횟수를 제한한다");
 
   console.log("✅ 나무위키 동명이인 - 목록 문서 판정, 직업 괄호 순서");
+}
+
+// --- 작품 등장인물: 역할·관계는 인물 문서에 없다 -----------------------------------------------
+{
+  // 실측(서현진, 2026-11-02) 모양을 줄여 옮겼다 - 칸 수가 행마다 다르다. 방송사가 앞 행과 같으면
+  // 생략되고(사랑의 온도), 비고·시청률도 비어 있을 수 있다.
+  const namu = [
+    "## 1. 개요",
+    "대한민국의 가수 출신 배우.",
+    "## 2. 특징",
+    "MBC 《신들의 만찬》에서 라이벌 하인주 역을 맡아 연기력을 인정받았고, 《또! 오해영》의 주인공 오해영 역으로 성장했다.",
+    "## 5. 출연 목록",
+    "### 5.2. 드라마",
+    "연도 | 방송사 | 방송명 | 배역 | 비고 | 시청률",
+    "2012년 | MBC | 신들의 만찬 | 하인주 | 주연 | 20.4%",
+    "2014년 | tvN | 삼총사 | 강빈 | 2.0%",
+    "2016년 | 또! 오해영 | 오해영(흙) | 10.0%",
+    "2016년~2017년 | SBS | 낭만닥터 김사부 | 윤서정 | 주연 | 27.6%",
+    "2017년 | 사랑의 온도 | 이현수 | 11.2%",
+    "2018년 | tvN | 식샤를 합시다 3 | 백수지 | 특별출연",
+  ].join("\n");
+
+  const rows = parseFilmographyRows(namu);
+  const byWork = new Map(rows.map((r) => [r.work, r]));
+  assert(byWork.get("또! 오해영")?.role === "오해영", `괄호 수식은 떼고 배역명만 (${byWork.get("또! 오해영")?.role})`);
+  assert(byWork.get("사랑의 온도")?.role === "이현수" && byWork.get("사랑의 온도")?.rating === 11.2, "방송사 칸이 생략된 행도 읽는다");
+  assert(byWork.get("낭만닥터 김사부")?.weight === "주연" && byWork.get("낭만닥터 김사부")?.rating === 27.6, "비중·시청률 칸을 가린다");
+  assert(!byWork.has("방송명") && !byWork.has("연도"), "표 머리글은 작품이 아니다");
+
+  // 수상 경력 표가 작품으로 새어 들어오면 "제53회 백상예술대상"을 작품으로 집는다(실측 오류).
+  const withAwards = `${namu}\n## 7. 수상 경력\n연도 | 시상식 | 부문\n2017년 | 제53회 백상예술대상 | TV부문 여자 최우수연기상`;
+  assert(!parseFilmographyRows(withAwards).some((r) => r.work.includes("백상예술대상")), "출연 목록 절만 읽는다 - 수상 표는 작품이 아니다");
+
+  const picks = pickWorksForCast(namu);
+  assert(picks[0].work === "신들의 만찬" || picks[0].work === "또! 오해영", `특징 문단이 부른 작품이 1순위 (${picks[0].work})`);
+  assert(picks.slice(0, 2).every((p) => p.featured), "개요·특징 언급이 시청률을 이긴다");
+  assert(!picks.some((p) => p.work === "식샤를 합시다 3"), "특별출연은 대표작이 아니다");
+  assert(picks.some((p) => p.work === "낭만닥터 김사부"), "언급이 없어도 시청률 높은 주연작은 든다");
+  assert(pickWorksForCast(namu, 2).length === 2, "작품 수 상한을 지킨다");
+
+  // 발췌는 배역명 주변만 떠낸다 - 문서 전체(수십 KB)와 다른 배역은 이 원고의 재료가 아니다.
+  const castDoc = `## 1. 주요 인물\n${"다른 배역 설명 ".repeat(300)}\n### 1.5. 오해영\n박도경(에릭 남)의 전 약혼녀이자 같은 이름 때문에 평생 비교당한 식품회사 대리.\n${"뒤 배역 ".repeat(300)}`;
+  const excerpt = excerptAroundRole(castDoc, "오해영");
+  assert(excerpt.includes("박도경") && excerpt.includes("식품회사 대리"), "배역 설명(역할·관계)이 발췌에 든다");
+  assert(excerpt.startsWith("…") && excerpt.length < 2_200, `앞을 잘라냈음을 표시하고 분량을 묶는다 (${excerpt.length}자)`);
+  assert(excerptAroundRole(castDoc, "없는배역").startsWith("## 1. 주요 인물"), "배역명을 못 찾으면 앞머리를 쓴다");
+  assert(excerptAroundRole("", "오해영") === "", "빈 본문은 빈 발췌");
+  assert(findRoleExcerpt(castDoc, "오해영").matched === "heading", "배역 소제목을 찾으면 heading");
+  assert(findRoleExcerpt(`${"머리글 ".repeat(400)}\n본문에서 오해영이 한 번 나온다.`, "오해영").matched === "mention", "소제목이 없으면 mention");
+
+  // `### 3.1. 오해영 父`처럼 이름이 들어가기만 한 소제목은 **그 배역 항목이 아니다**(2026-11-02 또!
+  // 오해영 실측 - 그걸 heading으로 집으면 아버지 설명을 배역 설명으로 넘긴다). 그런 문서는 heading을
+  // 못 찾은 것으로 보고 `mention`으로 표시해 조사 에이전트가 걸러 내게 한다.
+  const fatherOnly = `## 2. 주요 인물\n### 2.1. 흙해영\n${"흙해영 설명 ".repeat(60)}\n### 3.1. 오해영 父\n아버지 설명.`;
+  assert(findRoleExcerpt(fatherOnly, "오해영").matched === "mention", "父 소제목은 배역 항목으로 인정하지 않는다");
+
+  // 대작은 배역마다 문서가 하나다 - 그 배역을 가리키는 안내만 따라간다(옆 배역 안내가 섞여 있다).
+  const seeAlso = "### 2.1. 김사부\n자세한 내용은 김사부 문서를 참고하십시오.\n### 2.3. 윤서정\n자세한 내용은 윤서정 문서를 참고하십시오.";
+  assert(pointedRoleDocument(seeAlso, "윤서정") === "윤서정", "그 배역을 가리키는 안내만 따라간다");
+  assert(pointedRoleDocument(seeAlso, "서우진") === null, "없으면 따라가지 않는다");
+  assert(pointedRoleDocument("설명만 있다", "윤서정") === null, "안내가 없으면 null");
+
+  // 배역 전용 문서는 ±창으로 떠내면 관계가 밀려난다(맨 위가 OST·회차 둘러보기 틀이다).
+  const roleDoc = `${"OST 목록 ".repeat(200)}\n## 1. 개요\n응급의학과 전문의.\n## 3. 작중 행적\n${"행적 ".repeat(400)}\n## 4. 인간관계\n### 4.1. 김사부\n스승이자 은인.`;
+  const picked = roleDocumentExcerpt(roleDoc);
+  assert(picked.includes("응급의학과 전문의.") && picked.includes("스승이자 은인."), "개요(역할)와 인간관계(관계)를 함께 담는다");
+  assert(!picked.includes("OST 목록") && picked.length <= 1_400, `둘러보기 틀은 빼고 분량을 묶는다 (${picked.length}자)`);
+  assert(roleDocumentExcerpt("## 1. 줄거리\n없는 절뿐") === "", "쓸 절이 없으면 빈 문자열");
+
+  // `<작품>/등장인물`을 먼저 보고 없으면 작품 문서로 내려간다. 실패한 작품만 빠진다(비치명).
+  const asked: string[] = [];
+  const { casts, errors } = await fetchWorkCasts(
+    [
+      { work: "또! 오해영", role: "오해영", weight: "", featured: true },
+      { work: "삼총사", role: "강빈", weight: "", featured: false },
+      { work: "없는작품", role: "누구", weight: "", featured: false },
+    ],
+    {
+      readNamuwiki: async (title) => {
+        asked.push(title);
+        if (title === "또! 오해영/등장인물") return "### 오해영\n박도경과 얽히는 식품회사 대리.";
+        if (title === "삼총사") return "## 등장인물\n강빈 - 소현세자의 세자빈.";
+        throw new Error("HTTP 404");
+      },
+    }
+  );
+  assert(asked[0] === "또! 오해영/등장인물" && !asked.includes("또! 오해영"), "등장인물 분리 문서가 있으면 작품 문서는 안 받는다");
+  assert(asked.includes("삼총사/등장인물") && asked.includes("삼총사"), "분리 문서가 없으면 작품 문서로 내려간다");
+  assert(casts.length === 2 && casts[0].namuwikiTitle === "또! 오해영/등장인물", "실제로 읽은 문서 제목을 남긴다");
+  assert(errors.length === 1 && errors[0].includes("없는작품"), `못 받은 작품만 사유를 남긴다 (${JSON.stringify(errors)})`);
+
+  // `뷰티 인사이드/등장인물`은 영화 문서다 - 배역명이 없으면 그 문서를 집지 않고 괄호 제목을 본다.
+  const sameName: string[] = [];
+  const other = await fetchWorkCasts([{ work: "뷰티 인사이드", role: "한세계", weight: "주연", featured: true }], {
+    readNamuwiki: async (title) => {
+      sameName.push(title);
+      if (title === "뷰티 인사이드(드라마)/등장인물") return "### 2.1. 한세계\n한 달에 한 번 모습이 바뀌는 배우.";
+      return "## 1. 개요\n영화 뷰티 인사이드의 등장인물. 홍이수·김우진.";
+    },
+  });
+  assert(other.casts.length === 1 && other.casts[0].namuwikiTitle === "뷰티 인사이드(드라마)/등장인물", "배역명 없는 동명 문서는 건너뛰고 드라마 문서를 집는다");
+  assert(sameName[0] === "뷰티 인사이드/등장인물" && sameName.includes("뷰티 인사이드(드라마)/등장인물"), "순서는 분리 문서 → 작품 문서 → 괄호 제목");
+
+  console.log("✅ 작품 등장인물: 표 파싱(칸 생략·괄호 배역)·대표작 선정·배역 주변 발췌·분리 문서 폴백");
 }
 
 console.log("\n🎉 인물 소스팩 테스트 통과");
