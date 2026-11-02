@@ -8,6 +8,11 @@
 # classifyIndexHealth.ts가 "발견됨/대기"를 고장으로 치지 않기 때문에 거짓 경보가 나지 않는다.
 #
 # 발화는 Cloudflare Worker 크론(월요일 10:00 KST). 상태를 저장하지 않아 언제 돌려도 안전하다.
+#
+# 2026-11-02: 15분 타임아웃에 걸려 점검이 중간에 끊기고 뒤따르는 주간 리포트가 통째로 건너뛰어진
+# 적이 있다(11/01). 원인은 URL Inspection 호출당 약 6.5초인 구글 응답 지연이고, 채널이 늘면서
+# 검사 건수도 같이 늘었다. 호출을 6개씩 병렬로 돌려 시간을 줄였고(checkIndexHealthCli.ts)
+# 글이 더 쌓여도 버티도록 여유를 30분으로 뒀다.
 
 name: analytics-index-health
 
@@ -24,7 +29,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

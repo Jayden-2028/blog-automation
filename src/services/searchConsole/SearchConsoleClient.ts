@@ -19,6 +19,14 @@ const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 /** API 1회 응답 상한. 이보다 많으면 startRow로 이어 받는다. */
 const ROW_LIMIT = 25_000;
 
+/**
+ * URL Inspection은 간헐적으로 500("Internal error encountered")을 낸다 - URL 문제가 아니라
+ * 구글 쪽 일시 오류라 다음 호출에서 그냥 통한다(2026-11-01 실측 1건). 한 번만 다시 묻는다.
+ * 429(분당 한도)도 같이 받는다.
+ */
+const INSPECT_RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const INSPECT_RETRY_DELAY_MS = 1_500;
+
 export type SearchAnalyticsRow = {
   date: string;
   pageUrl: string;
@@ -52,6 +60,8 @@ export type SearchConsoleOptions = {
   siteUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => Date;
+  /** 일시 오류 재시도 대기(ms). 테스트에서 0으로 줄인다. */
+  retryDelayMs?: number;
 };
 
 type ServiceAccount = { client_email: string; private_key: string };
@@ -114,6 +124,7 @@ export class SearchConsoleClient {
   private readonly siteUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
+  private readonly retryDelayMs: number;
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
   constructor(options: SearchConsoleOptions = {}) {
@@ -121,6 +132,7 @@ export class SearchConsoleClient {
     this.siteUrl = options.siteUrl ?? process.env.GSC_SITE_URL ?? "";
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.now = options.now ?? (() => new Date());
+    this.retryDelayMs = options.retryDelayMs ?? INSPECT_RETRY_DELAY_MS;
   }
 
   /** 설정 누락을 호출 전에 거른다 - "토큰 없음"이 401 API 오류로 둔갑하지 않게. */
@@ -237,15 +249,24 @@ export class SearchConsoleClient {
     const token = await this.getAccessToken();
     if (!token.ok) return token;
 
-    const res = await this.fetchImpl("https://searchconsole.googleapis.com/v1/urlInspection/index:inspect", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token.data}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ inspectionUrl: url, siteUrl: this.siteUrl }),
-    });
-    const json = (await res.json().catch(() => ({}))) as {
-      inspectionResult?: { indexStatusResult?: Record<string, unknown> };
-      error?: { message?: string };
+    const ask = async () => {
+      const res = await this.fetchImpl("https://searchconsole.googleapis.com/v1/urlInspection/index:inspect", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token.data}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ inspectionUrl: url, siteUrl: this.siteUrl }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        inspectionResult?: { indexStatusResult?: Record<string, unknown> };
+        error?: { message?: string };
+      };
+      return { res, json };
     };
+
+    let { res, json } = await ask();
+    if (!res.ok && INSPECT_RETRY_STATUSES.has(res.status)) {
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
+      ({ res, json } = await ask());
+    }
 
     if (!res.ok) {
       return { ok: false, stage: "inspect", error: `urlInspection 실패(${res.status}): ${json.error?.message ?? ""}`.trim() };
