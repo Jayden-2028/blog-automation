@@ -251,6 +251,16 @@ function formatPersonSourcePack(pack: PersonSourcePack | null): string[] {
     "person-researcher.md §2-1의 이 두 고정 출처 열람은 아래 원문으로 갈음할 수 있다 - 같은 곳을 다시 열려고 시도하지 않는다.",
     "등급·교차확인·인용 규칙은 규격과 동일하다(인물DB = official, 나무위키 = community, 인물DB와 충돌하면 인물DB가 이긴다).",
     "§6 출처 표(§10)에는 두 출처를 URL(`https://search.naver.com/search.naver?query=<이름>`, `https://namu.wiki/w/<이름>`)로 올린다.",
+    // 키워드가 문장이면 수집에 쓴 이름이 키워드와 다르다(2026-11-02). 조사 에이전트가 URL을 적을 때 쓸 이름이다.
+    ...(pack.resolvedName
+      ? [
+          `수집에 쓴 인물명은 **"${pack.resolvedName}"**이다(키워드에서 뽑았다${pack.nameResolvedBy === "first-candidate" ? " - **인물 카드로 확정하지 못한 추정이다. 원문이 다른 사람이면 쓰지 않고 §9-1에 적는다**" : ""}). 위 URL의 \`<이름>\` 자리에 이 이름을 넣는다.`,
+        ]
+      : []),
+    // 동명이인 문서를 따라갔으면 §10 출처 표에 적을 URL이 달라진다(2026-11-02).
+    ...(pack.namuwikiTitle
+      ? [`나무위키는 동명이인 목록 문서를 지나 **\`${pack.namuwikiTitle}\`** 문서를 읽었다. §10에는 \`https://namu.wiki/w/${pack.namuwikiTitle}\`를 적는다.`]
+      : []),
     "",
     ...block("네이버 인물DB", pack.personDb, failureOf("personDb:")),
     ...block("나무위키", pack.namuwiki, failureOf("namuwiki:")),

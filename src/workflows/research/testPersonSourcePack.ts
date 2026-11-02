@@ -14,6 +14,8 @@ import {
   readPersonSourcePack,
 } from "./personSourcePack.js";
 import type { FetchLike, PersonSourcePack } from "./personSourcePack.js";
+import { isDisambiguationPage, namuwikiTitleCandidates } from "./personSourcePack.js";
+import { personNameCandidates, resolvePersonName } from "./personNameFromKeyword.js";
 import { SOURCE_PACK_WAIT_MS, resolvePersonSourcePack, waitForPersonSourcePack } from "./personSourcePackWait.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
@@ -254,6 +256,78 @@ const NAMU_HTML = `<!doctype html><html><head><title>차정원 - 나무위키</t
   const empty = await collectPersonSourcePacks({ ...deps, listCandidates: async () => [] });
   assert(empty.processed.length === 0, "대기열이 없으면 아무것도 하지 않는다");
   console.log("✅ 수집기: 12시간 창·저장 확인·덮임 재시도·실패 팩 저장·빈 대기열");
+}
+
+// --- 인물명 해석 - 문장 키워드가 404를 만들던 자리 (2026-11-02) --------------------------------
+{
+  // 실측: `namu.wiki/w/배우 서현진의 모든 것`은 404, `namu.wiki/w/서현진`은 200이다. 차단이 아니라
+  // 키워드를 URL에 그대로 넣은 것이 원인이었다. 버튼 경로(키워드 = 이름)는 동작이 바뀌지 않아야 한다.
+  assert(personNameCandidates("오윤아")[0] === "오윤아", "이름만 있는 키워드는 그대로 1순위");
+  assert(personNameCandidates("오윤아").length === 1, "이름만 있으면 후보가 하나 - 조회를 더 돌리지 않는다");
+
+  const seohyun = personNameCandidates("배우 서현진의 모든 것");
+  assert(seohyun[0] === "서현진", `"서현진"이 1순위여야 한다 (${seohyun.join(",")})`);
+  assert(!seohyun.includes("배우"), "직군 명사는 후보가 아니다");
+  assert(!seohyun.includes("모든"), "글의 성격을 가리키는 말은 후보가 아니다");
+
+  // 3글자가 4글자·2글자보다 앞이다 - 한국 사람 이름은 세 글자가 압도적이다.
+  const park = personNameCandidates("100일의 거짓말에서 나오는 친일파의 고명딸 박정연은 누구?");
+  assert(park[0] === "박정연", `3글자 이름이 1순위여야 한다 (${park.join(",")})`);
+  assert(!park.includes("누구"), "'누구'는 후보가 아니다");
+  assert(park.indexOf("박정연") < park.indexOf("친일파의"), "3글자가 4글자보다 앞이다");
+
+  assert(personNameCandidates("")[0] === undefined, "빈 키워드는 후보 없음");
+  assert(personNameCandidates("BTS 2026 comeback").length === 0, "한글 후보가 없으면 빈 배열");
+}
+
+// --- 후보가 둘 이상이면 인물 카드로 가른다 ------------------------------------------------------
+{
+  // 키워드 순서상 `친일파`가 `박정연`보다 앞에 나오지만, 사람 이름인 쪽에만 네이버 인물 카드가 있다.
+  const asked: string[] = [];
+  const picked = await resolvePersonName("박정민 시각장애인 위해 오디오북 기증", {
+    hasPersonCard: async (name) => {
+      asked.push(name);
+      return name === "박정민";
+    },
+  });
+  assert(picked.name === "박정민" && picked.resolvedBy === "person-card", `인물 카드로 확정해야 한다 (${picked.name})`);
+  assert(asked[0] === "박정민", "1순위부터 물어본다");
+
+  // 아무 후보도 카드가 없으면 1순위로 진행하고 그 사실을 남긴다(지어내지 않는다).
+  const guessed = await resolvePersonName("가상 인물 홍길동전 이야기", { hasPersonCard: async () => false });
+  assert(guessed.resolvedBy === "first-candidate", "확정 못 하면 추정으로 표시한다");
+  assert(guessed.tried.length > 1, "물어본 후보를 남긴다");
+
+  // 후보가 하나면 조회를 아예 돌리지 않는다(버튼 경로의 호출 수가 늘지 않는다).
+  let calls = 0;
+  const single = await resolvePersonName("오윤아", {
+    hasPersonCard: async () => {
+      calls += 1;
+      return true;
+    },
+  });
+  assert(calls === 0 && single.resolvedBy === "only-candidate", `후보 하나면 조회 0회 (${calls}회)`);
+
+  console.log("✅ 인물명 해석 - 문장 키워드에서 이름 추출, 인물 카드로 확정, 버튼 경로 무변경");
+}
+
+// --- 나무위키 동명이인 목록 문서를 따라간다 -----------------------------------------------------
+{
+  // 실측: `namu.wiki/w/박정민`은 본인 문서가 아니라 1,473자짜리 **목록 문서**다. 그걸 받아 놓고
+  // "나무위키를 읽었다"고 넘어가고 있었다. 목록 문서가 `박정민(배우)`로 가리키므로 따라간다.
+  const listing = "분류 동명이인\n## 1. 개요\n성이 박씨, 이름이 정민인 인물의 목록.\n박정민(배우)\n박정민(성우)";
+  assert(isDisambiguationPage(listing), "동명이인 목록 문서를 가려내야 한다");
+  assert(!isDisambiguationPage("배우 박정민은 ".repeat(400)), "긴 본문은 목록 문서가 아니다");
+  assert(!isDisambiguationPage(""), "빈 본문은 목록 문서 판정 대상이 아니다");
+
+  // 인물DB 카드에 적힌 직업이 맨 앞에 온다 - 엉뚱한 괄호를 먼저 받지 않는다.
+  const fromCard = namuwikiTitleCandidates("박정민", "박정민 / 배우 / 1987년생");
+  assert(fromCard[0] === "박정민(배우)", `카드의 직업이 1순위 (${fromCard.join(",")})`);
+  const noCard = namuwikiTitleCandidates("박정민", "");
+  assert(noCard[0] === "박정민(배우)", "카드가 없으면 배우부터 - person 트랙이다");
+  assert(noCard.length <= 3, "시도 횟수를 제한한다");
+
+  console.log("✅ 나무위키 동명이인 - 목록 문서 판정, 직업 괄호 순서");
 }
 
 console.log("\n🎉 인물 소스팩 테스트 통과");
