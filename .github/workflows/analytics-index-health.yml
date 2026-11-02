@@ -7,7 +7,9 @@
 # 조용한 주에는 알림이 짧다(집계 한 줄). 고장이 있을 때만 목록이 붙는다 -
 # classifyIndexHealth.ts가 "발견됨/대기"를 고장으로 치지 않기 때문에 거짓 경보가 나지 않는다.
 #
-# 발화는 Cloudflare Worker 크론(월요일 10:00 KST). 상태를 저장하지 않아 언제 돌려도 안전하다.
+# 발화는 Cloudflare Worker 크론(일요일 10:00 KST - 표현식은 `0 1 * * 1`이지만 실제로는 일요일에
+# 깨어난다. 2026-11-02 실측, cloudflare/telegram-relay/src/schedule.ts 주석 참고).
+# 상태를 저장하지 않아 언제 돌려도 안전하다.
 #
 # 2026-11-02: 15분 타임아웃에 걸려 점검이 중간에 끊기고 뒤따르는 주간 리포트가 통째로 건너뛰어진
 # 적이 있다(11/01). 원인은 URL Inspection 호출당 약 6.5초인 구글 응답 지연이고, 채널이 늘면서
@@ -51,7 +53,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: npm run analytics:index-health -- --notify
 
-      # 주간 검색 성과 리포트(2026-10-08). 새 Worker cron을 쓰지 않고 월요일 색인 점검 경로에 동승한다.
+      # 주간 검색 성과 리포트(2026-10-08). 새 Worker cron을 쓰지 않고 주간 색인 점검 경로에 동승한다.
       - name: Run analytics:weekly-report
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

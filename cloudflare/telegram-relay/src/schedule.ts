@@ -37,7 +37,13 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
 /** 키워드 수집 외 단독 cron. 문자열이 곧 키다. */
 const SINGLE_CRONS: Record<string, ScheduledDispatch[]> = {
   "30 0 * * *": [{ workflow: "analytics-search.yml" }], // 09:30 KST - Search Console 일일 성과
-  // 월요일 10:00 KST - 색인 건강 점검 + 네이버 문체 학습(style-learn, 2026-10-29). 새 cron 슬롯을 쓰지 않고 동승한다
+  // **일요일** 10:00 KST - 색인 건강 점검 + 네이버 문체 학습(style-learn, 2026-10-29). 새 cron 슬롯을
+  // 쓰지 않고 동승한다
+  //
+  // ⚠️ 표현식은 `* * 1`(월요일)인데 **실제 발화는 일요일이다** - 10/18·10/25·11/01 세 주 연속
+  // 일요일 01:00 UTC에 깨어났고 월요일에는 깨어나지 않았다(2026-11-02 run 이력 실측). 주 1회라는
+  // 성질은 그대로이고 두 워크플로 모두 상태를 저장하지 않아 요일은 중요하지 않으므로 표현식은
+  // 건드리지 않는다. 다만 **"월요일에 돌았겠지"로 run을 찾으면 못 찾는다** - 일요일 자리를 본다.
   // (wrangler.toml 변경 없음). 두 워크플로는 서로 독립이라 동시에 깨워도 된다.
   "0 1 * * 1": [{ workflow: "analytics-index-health.yml" }, { workflow: "style-learn.yml" }],
   // 일요일 03:00 KST(토 18:00 UTC) - Storage 정리(개편2.5 D). 기본 dry-run이고 실삭제는 워크플로의 apply 게이트가 정한다.
