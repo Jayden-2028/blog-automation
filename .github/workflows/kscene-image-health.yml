@@ -1,0 +1,59 @@
+# 발행된 사용설명서 이미지 생존 점검, 하루 1회(2026-11-03).
+#
+# 왜 만들었나: Pages 배포가 사이트 전체 스냅샷이라 동시 발행이 겹치면 앞 글의 이미지가 사라진다.
+# 2026-10-15과 10-31 두 번 다 **사용자가 블로그 관리 화면에서 깨진 썸네일을 눈으로 발견했다** -
+# 그때까지 감지 수단이 없었다. 늦게 알면 `storage-cleanup`이 발행 14일 뒤 Supabase 원본을 지운
+# 뒤라 되살릴 수 없으므로, 날마다 보고 깨진 날에만 알린다(classifyPagesImageHealth.ts).
+#
+# 가볍다 - 블로그 글을 긁지 않고 DB에 남은 Pages URL만 HEAD로 찍는다(실측 53편 320장, 1분 미만).
+# 상태를 저장하지 않아 언제 몇 번 돌려도 안전하다.
+#
+# 발화는 Cloudflare Worker 크론(09:30 KST). 새 cron 슬롯을 쓰지 않고 일일 analytics-search 슬롯에
+# 동승한다(schedule.ts의 `30 0 * * *`) - 무료 플랜 cron 5개 중 마지막 1칸은 예약이다.
+#
+# 깨진 글이 있으면 CLI가 **실패로 끝낸다**(exit 1). 알림을 놓쳐도 실행 목록에 빨간 줄로 남는다.
+
+name: kscene-image-health
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "최근 몇 편을 볼지(비우면 300 = 사실상 전체)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kscene-image-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run images:health
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 점검 대상 Pages 프로젝트. 비어 있으면 CLI가 설정 없음으로 끝낸다(조용히 통과하지 않는다).
+          KSCENE_IMAGES_PAGES_PROJECT: ${{ vars.KSCENE_IMAGES_PAGES_PROJECT }}
+          KSCENE_IMAGES_BASE_URL: ${{ vars.KSCENE_IMAGES_BASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # 사용설명서 블로그 이야기라 그 트랙 봇으로 보낸다(notifications/telegramTracks.ts).
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+        run: npm run images:health -- --notify ${{ inputs.limit && format('--limit={0}', inputs.limit) || '' }}
