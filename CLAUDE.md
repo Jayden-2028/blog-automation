@@ -243,6 +243,13 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
   세 주 연속). run을 찾을 때 월요일 자리를 보면 없다. 점검이 15분 타임아웃에 걸려 주간 리포트까지 건너뛰어진 적이
   있어(11/01) 색인 점검은 호출 6개 병렬 + 타임아웃 30분이다(2026-11-02).
   Worker cron은 4/5 사용, 마지막 1슬롯은 예약이다. 14일 미만 데이터 속성은 "축적 중"만 표기한다.
+- **발행 이미지 생존 점검**(`images:health`, 2026-11-03): 사용설명서 발행본의 Pages 이미지를 하루 1회 HEAD로 찍어
+  사라진 게 있으면 사용설명서 봇으로 알린다(조용한 날은 보내지 않는다). 새 cron 슬롯 없이 일일 `analytics-search`
+  슬롯(`30 0 * * *`, 09:30 KST)에 동승한다 - `kscene-image-health.yml`. **블로그 글을 긁지 않는다**: 발행 HTML이
+  가리키는 Pages URL은 `job.metadata.rehostedBySource`에 있으므로 DB에서 읽는다(사이트맵 크롤은 구글이 50여 편에서
+  429로 끊는다 - 2026-11-03 실측). 404·410만 고장으로 보고 타임아웃·5xx는 「확인 실패」로 따로 센다. 깨진 글의
+  Supabase 원본까지 찍어 **복구 가능 여부**를 같이 알린다 - 복구는 `npm run images:repair-pages -- <jobId...> --apply`이고
+  원본이 지워지기 전에만 된다(`storage-cleanup`이 발행 14일 뒤 지운다). 상세는 `images/classifyPagesImageHealth.ts`.
 - GA4 수집은 서비스 계정(기존 `GSC_SERVICE_ACCOUNT_JSON` 재사용)으로 `analytics:ga4`가 `ga4_performance_daily`에 upsert한다
   (repo variable `GA4_PROPERTY_IDS`=`라벨:숫자속성ID` 콤마 목록, 일일 `analytics-search.yml`에 동승) - `docs/ai-handoff/ANALYTICS_OPS.md` §2. 네이버 조회수는 GSC·GA4 밖이고 맥미니 수집 세션 소유다.
 
