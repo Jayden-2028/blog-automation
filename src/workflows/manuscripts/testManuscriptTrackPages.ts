@@ -46,19 +46,25 @@ assert(socialHtml.includes("🟠 티스토리 버튼으로 발행") && !socialHt
 assert(entHtml.includes("--pen:#1B5E3A") && !entHtml.includes("#E8590C"), "엔터(네이버용) 강조색은 다크 그린");
 assert(socialHtml.includes("--pen:#1F3A68") && !socialHtml.includes("#E8590C"), "사회 강조색은 네이비");
 assert(socialHtml.includes('var TRACK = "social"') && entHtml.includes('var TRACK = "entertainment"'), "페이지 스크립트가 자기 트랙을 안다");
-// 뷰어 발행 버튼은 **사회 페이지에만** 있다(2026-11-05 복원). 엔터·사용설명서는 코드조차 없어야 한다 -
-// 들어 있지 않은 것이 "그 트랙에는 진입점이 없다"는 사실을 가장 분명히 한다(PUBLISH_SCRIPT는 트랙으로 가린다).
+const kHtml = renderManuscriptPage(manifest, new Date(), { track: "kscene" });
+
+// 뷰어 발행 버튼은 **사회·사용설명서 페이지에만** 있다(2026-11-05 사용자 지시). 엔터는 코드조차 없어야
+// 한다 - 네이버는 뷰어에서 복사해 직접 올리는 채널이라 버튼이 가리킬 곳이 없고, 들어 있지 않은 것이
+// "그 트랙에는 진입점이 없다"는 사실을 가장 분명히 한다(publishScript는 PUBLISH_BUTTONS로 가린다).
 assert(socialHtml.includes("/api/publish-request") && socialHtml.includes('id="publish-tistory"'), "사회 페이지에는 뷰어 발행 버튼과 요청 코드가 있어야 한다");
-assert(socialHtml.includes("btn-publish") && socialHtml.includes("publish-bar"), "발행 버튼은 툴바와 구분되는 전용 스타일을 쓴다");
-for (const [name, html] of [["엔터", entHtml], ["사용설명서", renderManuscriptPage(manifest, new Date(), { track: "kscene" })]] as const) {
-  assert(!html.includes("/api/publish-request") && !html.includes("publish-tistory"), `${name} 페이지에 뷰어 발행 버튼 코드가 없어야 한다`);
+assert(socialHtml.includes('channel: "tistory"'), "사회 버튼은 티스토리로 요청한다");
+assert(kHtml.includes("/api/publish-request") && kHtml.includes('id="publish-blogspot"'), "사용설명서 페이지에도 뷰어 발행 버튼이 있어야 한다");
+assert(kHtml.includes('channel: "blogspot"') && !kHtml.includes('channel: "tistory"'), "사용설명서 버튼은 Blogger로 요청한다");
+assert(kHtml.includes("🔵 Blogger 발행") && !kHtml.includes("TISTORY_DRAFT_ONLY ? '🔵"), "Blogger에는 임시저장 모드가 없어 라벨이 하나뿐이다");
+for (const [name, html] of [["사회", socialHtml], ["사용설명서", kHtml]] as const) {
+  assert(html.includes("btn-publish") && html.includes("publish-bar"), `${name} 발행 버튼은 툴바와 구분되는 전용 스타일을 쓴다`);
 }
+assert(!entHtml.includes("/api/publish-request") && !entHtml.includes("publish-tistory") && !entHtml.includes("publish-blogspot"), "엔터 페이지에 뷰어 발행 버튼 코드가 없어야 한다");
 assert(entHtml.includes("텔레그램의 🟢 네이버 발행 버튼으로만 됩니다"), "엔터는 그대로 텔레그램 버튼 안내");
 assert(socialHtml.includes("또는 텔레그램 버튼으로 됩니다"), "사회는 뷰어·텔레그램 두 진입점을 안내한다");
-const kHtml = renderManuscriptPage(manifest, new Date(), { track: "kscene" });
-assert(kHtml.includes("텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다") && kHtml.includes("/api/image-pick"), "사용설명서 페이지도 발행 안내와 후보 교체 코드가 있다");
+assert(kHtml.includes("아래 🔵 Blogger 버튼 또는 텔레그램 버튼으로 됩니다") && kHtml.includes("/api/image-pick"), "사용설명서 페이지도 두 진입점 안내와 후보 교체 코드가 있다");
 assert(socialHtml.includes("/api/image-pick") && entHtml.includes("/api/image-pick"), "후보 클릭 교체 코드는 전 트랙 페이지가 공유한다");
-console.log("✅ 트랙별 페이지 분리 - 엔터/사회 분리, 뷰어 발행 버튼은 사회만, 트랙별 안내");
+console.log("✅ 트랙별 페이지 분리 - 엔터/사회 분리, 뷰어 발행 버튼은 사회·사용설명서, 트랙별 안내");
 
 assert(viewerPageLink("https://p.dev", "entertainment", "j1") === "https://p.dev/#j1", "엔터 링크는 루트 그대로");
 assert(viewerPageLink("https://p.dev", "social", "j1") === "https://p.dev/social.html#j1", "사회 링크는 social.html");

@@ -46,7 +46,7 @@ const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: str
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
-    title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
+    title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 🔵 Blogger 버튼으로 발행", hint: "발행은 아래 🔵 Blogger 버튼 또는 텔레그램 버튼으로 됩니다(같은 경로 - 되돌릴 수 없습니다)",
     pen: "#E8590C", penSoft: "#FDF0E6",
   },
 };
@@ -104,43 +104,97 @@ function escapeHtml(value: string): string {
 }
 
 /** <script type="application/json"> 안에 JSON을 안전하게 넣는다 - "</script" 시퀀스만 깨뜨린다. */
-/** 발행 버튼 리스너 연결. markup·함수와 같은 이유로 사회 트랙 페이지에만 넣는다. */
-const PUBLISH_WIRE_SCRIPT = `      var pubBtn = document.getElementById("publish-tistory");
+/**
+ * 뷰어 발행 버튼이 붙는 트랙과 그 채널(2026-11-05). **엔터는 없다** - 네이버는 뷰어에서 복사해
+ * 직접 올리는 채널이라 버튼이 가리킬 곳이 없다. 사회=티스토리, 사용설명서=Blogger.
+ *
+ * 트랙 차이는 전부 "JS 식 네 개"로 모아 둔다 - 아래 세 빌더는 이 식들을 그대로 끼워 넣기만 한다.
+ * 그래서 채널이 하나 더 늘어도 markup·리스너·요청 코드를 다시 쓰지 않는다.
+ */
+type PublishButtonSpec = {
+  /** /api/publish-request의 channel. publishApi.ts·publishRequestCli.ts의 CHANNELS에 있어야 한다. */
+  channel: "tistory" | "blogspot";
+  /** 버튼 element id. 트랙별로 달라 테스트가 "이 트랙에 버튼이 있는가"를 id로 단정한다. */
+  id: string;
+  /** 요청 중 라벨에 쓰는 표식. */
+  mark: string;
+  /** 평상시 버튼 라벨(JS 식). */
+  labelExpr: string;
+  /** 버튼 옆 안내(JS 식). */
+  noteExpr: string;
+  /** confirm 문구(JS 식). */
+  askExpr: string;
+  /** 요청이 받아들여진 뒤의 버튼 라벨(JS 식). */
+  doneExpr: string;
+};
+
+const PUBLISH_BUTTONS: Partial<Record<Track, PublishButtonSpec>> = {
+  // 티스토리는 맥미니 폴러가 올린다(큐). 임시저장 모드(TISTORY_PUBLISH_MODE=draft)면 문구가 전부 바뀐다.
+  social: {
+    channel: "tistory",
+    id: "publish-tistory",
+    mark: "🟠",
+    labelExpr: "TISTORY_DRAFT_ONLY ? '🟠 티스토리 임시저장' : '🟠 티스토리 발행'",
+    noteExpr:
+      "TISTORY_DRAFT_ONLY ? '맥미니가 티스토리에 임시저장하고 글 관리 링크를 텔레그램으로 보냅니다 — 발행은 직접 해주세요' : '맥미니가 티스토리에 올리고 결과를 텔레그램으로 보냅니다'",
+    askExpr:
+      'TISTORY_DRAFT_ONLY ? "이 원고를 티스토리에 임시저장합니다.\\n맥미니가 올린 뒤 글 관리 링크를 텔레그램(사회 봇)으로 보냅니다.\\n발행은 직접 해주세요. 계속할까요?" : "이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 결과를 텔레그램(사회 봇)으로 알립니다. 계속할까요?"',
+    doneExpr: 'TISTORY_DRAFT_ONLY ? "🟠 임시저장 요청됨" : "🟠 발행 요청됨"',
+  },
+  // Blogger는 맥미니를 거치지 않는다 - GitHub Actions가 Blogger API로 그 자리에서 올린다(텔레그램
+  // 🔵 버튼과 같은 경로). 임시저장 모드가 없으므로 문구도 하나뿐이다.
+  kscene: {
+    channel: "blogspot",
+    id: "publish-blogspot",
+    mark: "🔵",
+    labelExpr: "'🔵 Blogger 발행'",
+    noteExpr: "'Korea Plain 블로그에 올리고 주소를 텔레그램으로 보냅니다'",
+    askExpr:
+      '"이 원고를 Blogger(Korea Plain)에 발행합니다.\\n올린 뒤 주소를 텔레그램(사용설명서 봇)으로 보냅니다.\\n되돌릴 수 없습니다. 계속할까요?"',
+    doneExpr: '"🔵 발행 요청됨"',
+  },
+};
+
+/** 발행 버튼 리스너 연결. markup·함수와 같은 이유로 버튼이 있는 트랙 페이지에만 넣는다. */
+function publishWireScript(spec: PublishButtonSpec): string {
+  return `      var pubBtn = document.getElementById("${spec.id}");
       if (pubBtn) pubBtn.addEventListener("click", function () { submitPublish(topic, pubBtn); });`;
+}
 
 /**
- * 발행(임시저장) 바 markup. PUBLISH_SCRIPT와 같은 이유로 **사회 트랙 페이지에만** 끼운다 -
+ * 발행(임시저장) 바 markup. publishScript와 같은 이유로 **버튼이 있는 트랙 페이지에만** 끼운다 -
  * 다른 트랙 페이지에는 버튼 markup도 들어 있지 않아야 한다.
  */
-const PUBLISH_BAR_SCRIPT = `      // 발행(임시저장) 바 - 사회 트랙만, **툴바 밖 자기 줄에** 둔다(2026-11-05 사용자 요청으로 복원).
+function publishBarScript(spec: PublishButtonSpec): string {
+  return `      // 발행 바 - **툴바 밖 자기 줄에** 둔다(2026-11-05 사용자 요청으로 복원).
       // 2026-10-07에 "진입점은 텔레그램 하나"로 뺐던 버튼이다 - 그때 서버 쪽 publishApi·워크플로·CLI를
       // 남겨 둬서 여기만 되살리면 된다. 되돌릴 수 없는 동작이라 복사·수정 버튼 사이에 섞지 않는다.
       //
       // **저장 안 된 수정이 있으면 누를 수 없다**: 발행은 DB 원고를 읽으므로, 뷰어에서 고치고 바로 누르면
       // 옛 글이 올라간다. 저장 요청이 날아가는 중(sentAt)에도 막는다 - 그 사이 올리면 경합이다.
       var pubBlocked = pendingCount > 0 || !!sentAt;
-      var pubLabel = TISTORY_DRAFT_ONLY ? '🟠 티스토리 임시저장' : '🟠 티스토리 발행';
+      var pubLabel = ${spec.labelExpr};
       h += '<div class="publish-bar">';
-      h += '<button class="btn-publish" id="publish-tistory"' + (pubBlocked ? ' disabled' : '') + '>' + pubLabel + '</button>';
+      h += '<button class="btn-publish" id="${spec.id}"' + (pubBlocked ? ' disabled' : '') + '>' + pubLabel + '</button>';
       h += '<span class="publish-note' + (pubBlocked ? ' bad' : '') + '">' + (pubBlocked
         ? '먼저 💾 수정본 저장을 누르고, 저장이 끝난 뒤(1~2분) 새로고침하고 누르세요'
-        : (TISTORY_DRAFT_ONLY
-          ? '맥미니가 티스토리에 임시저장하고 글 관리 링크를 텔레그램으로 보냅니다 — 발행은 직접 해주세요'
-          : '맥미니가 티스토리에 올리고 결과를 텔레그램으로 보냅니다')) + '</span>';
+        : (${spec.noteExpr})) + '</span>';
       h += '</div>';
 
 `;
+}
 
 /**
- * 뷰어 발행(임시저장) 요청 스크립트. **사회 트랙 페이지에만** 끼운다(2026-11-05) - 엔터·사용설명서
- * 페이지에는 발행 진입점이 없어야 하고, 코드가 들어 있지 않은 것이 그 사실을 가장 분명히 한다
+ * 뷰어 발행 요청 스크립트. **버튼이 있는 트랙 페이지에만** 끼운다(2026-11-05) - 엔터 페이지에는
+ * 발행 진입점이 없어야 하고, 코드가 들어 있지 않은 것이 그 사실을 가장 분명히 한다
  * (testManuscriptTrackPages가 그걸 단정한다).
  *
  * 템플릿 리터럴 안에 두지 않는다 - 중첩되면 \\n 같은 이스케이프가 한 겹 더 꼬인다.
  */
-const PUBLISH_SCRIPT = `    /**
-     * 🟠 티스토리 발행/임시저장 요청(사회 트랙, 2026-11-05 복원). **텔레그램 버튼과 같은 큐**로 간다 -
-     * 둘 다 눌러도 한 번만 올라간다(tistoryPublishQueue). 결과 알림도 텔레그램으로 같이 온다.
+function publishScript(spec: PublishButtonSpec): string {
+  return `    /**
+     * 뷰어 발행 요청(2026-11-05 복원). **텔레그램 버튼과 같은 경로**로 간다 - 둘 다 눌러도 한 번만
+     * 올라간다. 결과 알림도 텔레그램으로 같이 온다.
      *
      * 저장 안 된 수정은 호출부가 버튼으로 막지만 여기서 한 번 더 본다 - 버튼이 활성인 채로 화면이
      * 오래 떠 있었을 수 있다(수정은 localStorage에 쌓이고 화면은 그대로다).
@@ -150,25 +204,23 @@ const PUBLISH_SCRIPT = `    /**
       if (pending > 0) { toast("먼저 💾 수정본 저장을 눌러주세요 (" + pending + "곳 미저장)"); return; }
       if (loadSent(topic.jobId)) { toast("수정본 저장이 끝날 때까지 기다렸다가(1~2분) 새로고침 후 눌러주세요"); return; }
       if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 요청할 수 있습니다"); return; }
-      var ask = TISTORY_DRAFT_ONLY
-        ? "이 원고를 티스토리에 임시저장합니다.\\n맥미니가 올린 뒤 글 관리 링크를 텔레그램(사회 봇)으로 보냅니다.\\n발행은 직접 해주세요. 계속할까요?"
-        : "이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 결과를 텔레그램(사회 봇)으로 알립니다. 계속할까요?";
+      var ask = ${spec.askExpr};
       if (!window.confirm(ask)) return;
       var label = btn.textContent;
       btn.disabled = true;
-      btn.textContent = "🟠 요청 중…";
+      btn.textContent = "${spec.mark} 요청 중…";
       function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
       fetch("/api/publish-request", {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jobId: topic.jobId, channel: "tistory" }),
+        body: JSON.stringify({ jobId: topic.jobId, channel: "${spec.channel}" }),
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) {
           if (res.status === 202) {
             // 버튼은 **되살리지 않는다** - 다시 누르면 요청이 하나 더 간다. 큐가 중복을 막지만
             // 임시저장 모드에서는 글이 하나 더 생길 수 있다(새로고침하면 버튼이 돌아온다).
-            btn.textContent = TISTORY_DRAFT_ONLY ? "🟠 임시저장 요청됨" : "🟠 발행 요청됨";
+            btn.textContent = ${spec.doneExpr};
             toast("요청했습니다 — 결과는 텔레그램으로 옵니다");
             return;
           }
@@ -180,6 +232,7 @@ const PUBLISH_SCRIPT = `    /**
     }
 
 `;
+}
 
 function safeJson(data: unknown): string {
   return JSON.stringify(data).replace(/<\/script/gi, "<\\/script");
@@ -216,6 +269,8 @@ export function renderManuscriptPage(
 ): string {
   const track = options.track ?? DEFAULT_TRACK;
   const copy = TRACK_PAGE_COPY[track];
+  // 이 트랙에 뷰어 발행 버튼이 있는가(없으면 markup·함수·리스너를 아예 넣지 않는다).
+  const publishButton = PUBLISH_BUTTONS[track];
   const topics = manifest.topics
     .filter((topic) => topicTrack(topic) === track)
     .sort(
@@ -1035,7 +1090,7 @@ export function renderManuscriptPage(
       });
     }
 
-${track === "social" ? PUBLISH_SCRIPT : ""}
+${publishButton ? publishScript(publishButton) : ""}
     function render(jobId) {
       var topic = findTopic(jobId);
       if (!topic) return;
@@ -1115,7 +1170,7 @@ ${track === "social" ? PUBLISH_SCRIPT : ""}
       h += '<span class="pub-hint">' + esc(PUBLISH_HINT) + '</span>';
       h += '</div>';
 
-${track === "social" ? PUBLISH_BAR_SCRIPT : ""}
+${publishButton ? publishBarScript(publishButton) : ""}
       if (blocks.length > 0) {
         h += '<h2 class="sec">캡션 ' + blocks.length + '줄</h2><table><tbody>';
         blocks.forEach(function (block, i) {
@@ -1257,7 +1312,7 @@ ${track === "social" ? PUBLISH_BAR_SCRIPT : ""}
       var titleEl = wrap.querySelector(".doc-title[data-title]");
       if (titleEl) titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") ev.preventDefault(); });
 
-${track === "social" ? PUBLISH_WIRE_SCRIPT : ""}
+${publishButton ? publishWireScript(publishButton) : ""}
       var submitBtn = document.getElementById("submit-edits");
       if (submitBtn) submitBtn.addEventListener("click", function () { submitEdits(topic, submitBtn); });
 

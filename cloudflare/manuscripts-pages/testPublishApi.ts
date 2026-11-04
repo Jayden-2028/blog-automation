@@ -14,7 +14,8 @@ async function main(): Promise<void> {
   // 1) 본문 검사
   assert(validatePublishBody({ jobId: JOB, channel: "tistory" }).ok, "정상 본문");
   assert(!validatePublishBody({ jobId: "nope", channel: "tistory" }).ok, "jobId 검사");
-  assert(!validatePublishBody({ jobId: JOB, channel: "naver" }).ok, "지원하지 않는 채널 거절");
+  assert(validatePublishBody({ jobId: JOB, channel: "blogspot" }).ok, "사용설명서 뷰어 버튼의 blogspot도 받는다(2026-11-05)");
+  assert(!validatePublishBody({ jobId: JOB, channel: "naver" }).ok, "지원하지 않는 채널 거절 - 네이버는 복붙 발행이다");
   console.log("✅ 본문 검사");
 
   const req = (over: Partial<{ method: string; origin: string; cookie: string; body: string }> = {}) =>
