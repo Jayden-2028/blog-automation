@@ -25,7 +25,7 @@
 // workflow_dispatch 호출이 403(Resource not accessible)으로 실패했다(실측 확인). 1분 주기
 // 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
-import { resolveScheduled, type ScheduledDispatch } from "./schedule.js";
+import { catchUpTargets, resolveScheduled, type ScheduledDispatch } from "./schedule.js";
 import { forwardsPlainMessages, trackFromPath, type RelayTrack } from "./track.js";
 
 export interface Env {
@@ -297,9 +297,65 @@ export default {
       throw new Error(`알 수 없는 cron 표현식/시각: ${event.cron}`);
     }
     for (const target of targets) ctx.waitUntil(dispatchWorkflow(env, target));
+    // 이 시각의 수집과 **독립**이다. 앞 시각이 빠졌는지는 여기서만 알 수 있다(다음 발화가 없으면 영영 못 잡는다).
+    ctx.waitUntil(catchUpMissed(env, event));
   },
 };
 
 function describeTarget(target: ScheduledDispatch): string {
   return target.inputs ? `${target.workflow} ${JSON.stringify(target.inputs)}` : target.workflow;
+}
+
+/**
+ * 그 날짜 이후에 이 워크플로의 run이 하나라도 있는가. **실패한 run도 "깨어났다"로 센다** - 메우려는
+ * 구멍은 "아예 안 돈 것"이고, 실패는 다시 깨울 일이 아니라 사람이 로그를 볼 일이다.
+ * GitHub의 `created` 필터는 UTC 날짜 기준이다(catchUpTargets 주석의 경계 설명 참고).
+ */
+async function hasRunSince(env: Env, workflow: string, day: string): Promise<boolean> {
+  const query = `per_page=1&created=${encodeURIComponent(`>=${day}`)}`;
+  const res = await fetch(
+    `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflow}/runs?${query}`,
+    {
+      headers: {
+        Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "blog-automation-telegram-relay",
+      },
+    }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`run 목록 조회 실패: HTTP ${res.status} ${text.slice(0, 200)}`);
+  }
+  const body = (await res.json()) as { total_count?: number };
+  return (body.total_count ?? 0) > 0;
+}
+
+/**
+ * 따라잡기(catch-up). 앞 시각에 돌았어야 할 수집 중 **오늘 run이 아예 없는 것**을 다시 깨운다.
+ *
+ * 계기(2026-11-04): GitHub 장애(09:49~11:30 UTC)에 10·11 UTC 회차가 통째로 사라졌다. dispatch 재시도
+ * (약 20초)로는 그만큼 긴 장애를 못 넘지만, 같은 cron이 한 시간 뒤 또 깨어나므로 그때 앞을 돌아보면
+ * 공짜로 메울 수 있다. 그날이면 수집일(KST 05:00 경계)이 같아 그날 분으로 집계된다.
+ *
+ * 실패해도 **이 시각의 본 수집은 건드리지 않는다** - 보조 기능이 주 기능을 깨우면 안 되므로 던지지
+ * 않고 로그만 남긴다. 조회가 막히면(토큰에 run 읽기 권한이 없으면) 아무것도 깨우지 않는다 - 그
+ * 경우에도 watchdog 알림은 그대로 나가므로 고치기 전과 같아진다.
+ */
+async function catchUpMissed(env: Env, event: ScheduledController): Promise<void> {
+  const targets = catchUpTargets(event.cron, event.scheduledTime);
+  if (targets.length === 0) return;
+  const day = new Date(event.scheduledTime).toISOString().slice(0, 10);
+
+  // 한 건씩 본다 - 몰아서 깨우면 러너와 알림이 한꺼번에 몰린다.
+  for (const target of targets) {
+    try {
+      if (await hasRunSince(env, target.workflow, day)) continue;
+      console.log(`[catch-up] ${describeTarget(target)} - ${day} run이 없어 다시 깨운다`);
+      await dispatchWorkflow(env, target);
+    } catch (error) {
+      console.error(`[catch-up] ${target.workflow} 따라잡기 실패(무시):`, error instanceof Error ? error.message : error);
+    }
+  }
 }
