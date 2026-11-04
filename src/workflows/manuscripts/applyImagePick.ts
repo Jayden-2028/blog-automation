@@ -153,7 +153,7 @@ export type ApplyImagePickDeps = {
   publishPage: (manifest: ManuscriptManifest) => Promise<void>;
   /** 이 원고가 이미 발행됐는지(publications 또는 발행 큐 done). */
   isPublished: (job: ArticleJobRow) => Promise<boolean>;
-  /** 실패·경고를 텔레그램으로 알린다. 알림 실패가 처리를 막지 않는다(호출부가 삼킨다). */
+  /** 결과를 텔레그램으로 알린다(성공·실패 모두). 알림 실패가 처리를 막지 않는다(호출부가 삼킨다). */
   notify: (job: ArticleJobRow, text: string) => Promise<void>;
   now?: () => Date;
 };
@@ -177,6 +177,28 @@ export function fileNameFor(current: string | undefined, index: number, mimeType
   const ext = uploadedExtension || fallbackExt;
   if (!current) return `${String(index).padStart(2, "0")}-image.${ext}`;
   return uploadedExtension ? current.replace(/\.[A-Za-z0-9]+$/, "") + `.${uploadedExtension}` : current;
+}
+
+/**
+ * 교체 완료 알림 문구. **성공도 알린다**(2026-11-05 사용자 요청) - 교체가 1~2분 걸리는데 전에는 성공이 조용해서
+ * 끝났는지 보려고 뷰어를 계속 새로고침해야 했다. 뷰어의 "⏳ 교체 중" 표식은 localStorage라 **다른 기기에서는
+ * 아예 보이지 않는다**(renderManuscriptPage pickBusy) - 알림이 그 구멍도 메운다.
+ *
+ * 캡션을 함께 짚는 이유: 교체는 그림만 바꾸고 캡션(description)은 그대로 둔다(§3-b-4). 새 그림과 맞지 않으면
+ * 뷰어에서 고쳐야 하므로 매번 확인을 권한다.
+ */
+export function imagePickDoneMessage(
+  keyword: string,
+  request: ImagePickRequest,
+  alreadyPublished: boolean
+): string {
+  const lines = [
+    `🖼 "${keyword}" ${request.index}번 이미지를 후보 ${request.candidateNumber}번으로 바꿨습니다.`,
+    "캡션은 그대로입니다 - 새 그림과 맞는지 확인하고 필요하면 뷰어에서 고치세요.",
+  ];
+  // 이미 발행된 글이면 뷰어·원고만 바뀐다. 전에도 이 경우만 알렸다 - 문구를 그대로 유지한다.
+  if (alreadyPublished) lines.push("이미 발행된 글에는 반영되지 않습니다(원고·뷰어만 바뀜).");
+  return lines.join("\n");
 }
 
 export async function applyImagePick(request: ImagePickRequest, deps: ApplyImagePickDeps): Promise<ApplyImagePickOutcome> {
@@ -289,12 +311,11 @@ export async function applyImagePick(request: ImagePickRequest, deps: ApplyImage
   await deps.saveTopic(updated);
   await deps.publishPage({ topics: [...manifest.topics.filter((t) => t.jobId !== updated.jobId), updated] });
 
-  if (alreadyPublished) {
-    try {
-      await deps.notify(job, `ℹ️ "${job.keyword}" ${request.index}번 이미지를 바꿨습니다. 이미 발행된 글에는 반영되지 않습니다(원고·뷰어만 바뀜).`);
-    } catch (error) {
-      console.warn(`⚠️ 텔레그램 알림 실패(무시): ${error instanceof Error ? error.message : error}`);
-    }
+  // 알림은 **배포까지 끝난 뒤** 보낸다 - 알림을 보고 페이지를 열었을 때 이미 바뀐 그림이 보여야 한다.
+  try {
+    await deps.notify(job, imagePickDoneMessage(job.keyword, request, alreadyPublished));
+  } catch (error) {
+    console.warn(`⚠️ 텔레그램 알림 실패(무시): ${error instanceof Error ? error.message : error}`);
   }
   return { status: "applied", record };
 }

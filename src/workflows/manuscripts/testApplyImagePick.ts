@@ -84,7 +84,7 @@ function makeDeps(job: ArticleJobRow, over: Partial<ApplyImagePickDeps> = {}): {
     saveTopic: async (t) => { calls.events.push("save"); calls.topics.push(t); },
     publishPage: async () => { calls.events.push("publish"); calls.published += 1; },
     isPublished: async () => false,
-    notify: async (_j, text) => { calls.notified.push(text); },
+    notify: async (_j, text) => { calls.events.push("notify"); calls.notified.push(text); },
     now: (() => { let n = 0; return () => new Date(Date.UTC(2026, 9, 7, 0, 0, n++)); })(),
     ...over,
   };
@@ -144,7 +144,13 @@ async function main(): Promise<void> {
     assert(t.images.find((i) => i.index === 1)!.url === "https://x.supabase.co/new.webp?v=bbb" && t.imageCandidates!["1"].find((c) => c.picked)?.number === 3 && t.imagePick?.status === "done", "manifest 동기화");
     assert(calls.published === 1, "배포 1회");
     assert(calls.events.indexOf("save") > calls.events.findIndex((e) => e.startsWith("meta:images")), "DB가 먼저, 뷰어 사본이 나중");
-    assert(calls.notified.length === 0, "정상 교체는 텔레그램 알림 없음(준비 완료 알림 재발송 금지)");
+    // 2026-11-05: 정상 교체도 알린다. 교체가 1~2분 걸리는데 전에는 성공이 조용해서 끝났는지 보려고 뷰어를
+    // 계속 새로고침해야 했다. 다시 보내지 않는 것은 **준비 완료 알림**이고(원고 준비 재실행 금지), 이건 별개의 한 통이다.
+    assert(calls.notified.length === 1, `정상 교체도 알린다 (실제 ${calls.notified.length}통)`);
+    assert(calls.notified[0].includes("1번 이미지를 후보 3번으로"), `어느 자리를 어느 후보로 바꿨는지 담는다 (${calls.notified[0]})`);
+    assert(calls.notified[0].includes("캡션"), "캡션이 그대로라는 안내를 담는다 - 교체는 그림만 바꾼다");
+    assert(!calls.notified[0].includes("이미 발행"), "발행 전 글에 발행본 문구가 섞이면 안 된다");
+    assert(calls.events[calls.events.length - 1] === "notify", `알림은 배포 뒤에 보낸다 (${calls.events.join(">")})`);
     // ⑥ 가드: 접수 -> 완료
     const merged = { ...(job.metadata as Record<string, unknown>), ...calls.metadata[0], ...finalPatch };
     assert(readEditPending(merged, Date.UTC(2026, 9, 7, 0, 0, 30)).state === "idle", "완료 후 가드 해제");
