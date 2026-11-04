@@ -145,6 +145,11 @@ async function main(): Promise<void> {
     assert(!text.includes("다시 눌러"), "다시 누르라고 하지 않는다 - 재시도할 일이 아니다");
     // 캡차와 다른 점: 임시저장은 연달아 막히는 일이 아니라 **뒤 건도 이어서 처리한다**.
     assert(rec.finished.map((f) => f.id).join() === "d1,d2", `뒤 건도 같은 주기에 처리한다 (${rec.finished.map((f) => f.id).join()})`);
+    // 상태는 failed가 아니라 **draft**다 - failed면 버튼을 다시 눌러 임시저장이 하나 더 생긴다(2026-11-05).
+    assert(
+      rec.finished.every((f) => (f.outcome as { ok: unknown }).ok === "draft"),
+      `임시저장은 draft로 마감한다 (${JSON.stringify(rec.finished[0]?.outcome)})`
+    );
     assert(rec.notices.length === 2, `건마다 알린다 (실제 ${rec.notices.length}통)`);
     assert(rec.deferred.length === 0, "deferred가 아니다");
     console.log("✅ 임시저장 모드 - 링크 안내 + 실패 문구 없음 + 뒤 건도 계속");

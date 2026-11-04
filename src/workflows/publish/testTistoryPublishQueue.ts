@@ -48,7 +48,22 @@ async function main(): Promise<void> {
     assert(!done.queued && merged() === 0, "완료 건은 다시 넣지 않는다");
     const failed = await requestTistoryPublish(job("d", { status: "failed", requestedAt: "", error: "x" }), { mergeMetadata });
     assert(failed.queued && merged() === 1, "실패 건은 다시 넣을 수 있다");
-    console.log("✅ 중복 클릭·완료·실패 처리");
+    // 임시저장(draft)은 **끝난 일**이다(2026-11-05) - 다시 넣으면 임시저장이 하나 더 생긴다.
+    const draft = await requestTistoryPublish(job("e2", { status: "draft", requestedAt: "", finishedAt: "x" }), { mergeMetadata });
+    assert(!draft.queued && merged() === 1, "임시저장 건은 다시 넣지 않는다");
+    assert(draft.reason?.includes("글 관리") === true, `어디서 발행하면 되는지 알려야 한다 (${draft.reason})`);
+    console.log("✅ 중복 클릭·완료·실패·임시저장 처리");
+  }
+
+  // 2.5) 임시저장 종료 기록: failed가 아니라 draft로 남는다(2026-11-05)
+  {
+    const patches: Record<string, unknown>[] = [];
+    const mergeMetadata = async (_id: string, patch: Record<string, unknown>) => { patches.push(patch); return null; };
+    await finishTistoryPublish("j", { ok: "draft", error: "임시저장까지만 했습니다" }, { mergeMetadata, now: () => T0 });
+    const saved = patches[0]?.[TISTORY_REQUEST_KEY] as { status: string; finishedAt: string; error: string };
+    assert(saved.status === "draft", `임시저장은 draft로 남는다 (${saved.status})`);
+    assert(saved.finishedAt === T0.toISOString() && saved.error.includes("임시저장"), "종료 시각과 사유도 남긴다");
+    console.log("✅ 임시저장 종료 기록");
   }
 
   // 3) 로그인 풀림 -> deferred. 요청 시각·deferredAt은 재시도에도 보존, 알림 시각은 notified일 때만

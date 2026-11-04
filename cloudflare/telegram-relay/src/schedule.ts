@@ -42,9 +42,14 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
 
 /** 키워드 수집 외 단독 cron. 문자열이 곧 키다. */
 const SINGLE_CRONS: Record<string, ScheduledDispatch[]> = {
-  // 09:30 KST - Search Console 일일 성과 + 발행 이미지 생존 점검(2026-11-03). 둘은 서로 독립이라
-  // 같이 깨워도 된다. 이미지 점검에 새 cron 슬롯을 쓰지 않은 이유는 마지막 1칸이 예약이기 때문이다.
-  "30 0 * * *": [{ workflow: "analytics-search.yml" }, { workflow: "kscene-image-health.yml" }],
+  // 09:30 KST - Search Console 일일 성과 + 발행 이미지 생존 점검(2026-11-03) + 티스토리 발행본 적립
+  // (2026-11-05). 셋은 서로 독립이라 같이 깨워도 된다. 새 cron 슬롯을 쓰지 않고 동승하는 이유는
+  // 마지막 1칸이 예약이기 때문이다. 적립은 09:30이면 전날 글과 그날 새벽 글까지 다 들어온다.
+  "30 0 * * *": [
+    { workflow: "analytics-search.yml" },
+    { workflow: "kscene-image-health.yml" },
+    { workflow: "tistory-inventory.yml" },
+  ],
   // **일요일** 10:00 KST - 색인 건강 점검 + 네이버 문체 학습(style-learn, 2026-10-29). 새 cron 슬롯을
   // 쓰지 않고 동승한다
   //
