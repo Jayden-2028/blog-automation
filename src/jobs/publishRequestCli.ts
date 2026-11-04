@@ -7,6 +7,7 @@
 import "dotenv/config";
 
 import { escapeTelegramHtml } from "../notifications/TelegramNotifier.js";
+import { TISTORY_CONFIG } from "../config/publishTargets.js";
 import { notifierForJob } from "../notifications/notifierForJob.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { isChannelAllowedForTrack, trackOfJob } from "../notifications/telegramTracks.js";
@@ -39,6 +40,7 @@ async function main(): Promise<void> {
     throw new Error(`${trackOfJob(job)} 트랙 원고는 ${channel}로 발행할 수 없습니다: ${job.keyword}`);
   }
 
+  const draftOnly = TISTORY_CONFIG.publishMode === "draft";
   const queued = await requestTistoryPublish(job, { source: "viewer" });
   console.log(`${queued.queued ? "✅" : "ℹ️"} [publish-request] ${channel} ${job.keyword}: ${queued.queued ? "예약" : queued.reason}`);
 
@@ -46,10 +48,18 @@ async function main(): Promise<void> {
     .sendMessages([
       {
         text: [
-          queued.queued ? "🟠 <b>뷰어에서 티스토리 발행을 예약했습니다</b>" : "ℹ️ <b>티스토리 발행 - 이미 예약돼 있습니다</b>",
+          // 문구는 발행 모드를 따른다(2026-11-05) - 임시저장 모드인데 "올라갑니다 / 주소를 보내드립니다"라고
+          // 하면 올라간 줄 알고 기다리게 된다.
+          queued.queued
+            ? (draftOnly ? "📝 <b>뷰어에서 티스토리 임시저장을 예약했습니다</b>" : "🟠 <b>뷰어에서 티스토리 발행을 예약했습니다</b>")
+            : "ℹ️ <b>티스토리 - 이미 예약돼 있습니다</b>",
           "",
           `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-          queued.queued ? "맥미니가 켜져 있으면 곧 올라갑니다. 완료되면 주소를 보내드립니다." : escapeTelegramHtml(queued.reason ?? ""),
+          queued.queued
+            ? (draftOnly
+              ? "맥미니가 켜져 있으면 곧 임시저장합니다. 끝나면 글 관리 링크를 보내드립니다 - 발행은 직접 해주세요."
+              : "맥미니가 켜져 있으면 곧 올라갑니다. 완료되면 주소를 보내드립니다.")
+            : escapeTelegramHtml(queued.reason ?? ""),
         ].join("\n"),
       },
     ])
