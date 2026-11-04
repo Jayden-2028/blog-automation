@@ -1,6 +1,7 @@
 // buildManuscriptReadyMessage 테스트. pagesUrl을 주입해 Cloudflare 설정 전/후 두 분기를 검증한다
 // (cloudflarePagesUrl()은 환경변수 기반 상수라 직접 흔들지 않고 인자로 override).
 import { buildManuscriptReadyMessage } from "./notifyManuscriptsReady.js";
+import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
@@ -142,6 +143,15 @@ main().catch((error) => {
   }
   if (!all.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼이 있어야 한다");
   if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 발행 안내가 있어야 한다");
+  // 2026-11-05: 버튼 문구는 모드를 따른다. 임시저장 모드에서 "발행"이라고 적으면 거짓말이 된다.
+  // env에 기대지 않고 설정값과 맞는지만 본다 - 모드를 되돌려도 이 단정이 따라온다.
+  {
+    const expected = TISTORY_CONFIG.publishMode === "draft" ? "🟠 티스토리 임시저장" : "🟠 티스토리 발행";
+    const button = all.find((b) => b.callback_data === `publish:tistory:${JOB}`)!;
+    if (button.text !== expected) throw new Error(`❌ 버튼 문구가 모드와 맞아야 한다(기대 "${expected}", 실제 "${button.text}")`);
+    const guide = TISTORY_CONFIG.publishMode === "draft" ? "임시저장" : "맥미니가 올립니다";
+    if (!msg.text.includes(guide)) throw new Error(`❌ 안내 문구도 모드를 따라야 한다(기대 "${guide}")`);
+  }
   if (msg.text.includes("🟢 네이버")) throw new Error("❌ 사회 알림에 네이버 표기가 있으면 안 된다");
 
   // 엔터 job(트랙 값이 없으면 엔터) - 네이버 버튼은 일시 해제 토글을 따른다(2026-10-16).

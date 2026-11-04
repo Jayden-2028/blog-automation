@@ -23,6 +23,7 @@ import type {
   TistoryPublishImageInput,
   TistoryPublishInput,
   TistoryPublishResult,
+  TistoryPublishMode,
   TistoryUrlSource,
   TistoryVisibility,
 } from "../../services/publish/tistory/TistoryPublisher.js";
@@ -49,6 +50,11 @@ export type PublishJobToTistoryResult =
    * `draftSaved`면 원고가 티스토리 임시저장에 남아 있다.
    */
   | { ok: false; reason: "captcha"; detail: string; draftSaved: boolean }
+  /**
+   * 임시저장 모드로 **의도대로** 끝났다(2026-11-05, `TISTORY_PUBLISH_MODE=draft`). 실패가 아니다 -
+   * publications에 아무 행도 남기지 않고, 사람이 글 관리에서 발행하면 그때 published로 기록된다.
+   */
+  | { ok: false; reason: "draft_saved"; detail: string; draftSaved: boolean }
   /** 티스토리에는 올라갔는데 publications 기록이 실패했다. 다시 올리면 중복 발행이므로 재시도 큐로 되돌리지 않는다. */
   | { ok: false; reason: "published_unrecorded"; detail: string; url: string }
   | { ok: false; reason: "disabled" | "job_not_found" | "job_not_approved" | "base_article_not_found" | "tistory_failed"; detail: string };
@@ -59,8 +65,10 @@ export type PublishJobToTistoryOptions = {
   loadJobPublications?: (articleIds: number[]) => Promise<PublicationRow[]>;
   savePublication?: (input: { articleId: number; status: PublicationRow["status"]; publishedUrl: string | null }) => Promise<PublicationRow>;
   /** TistoryPublisher.publish와 같은 시그니처. 테스트에서 브라우저 대신 가짜 결과를 준다. */
-  publish?: (input: TistoryPublishInput, visibility: TistoryVisibility) => Promise<TistoryPublishResult>;
+  publish?: (input: TistoryPublishInput, visibility: TistoryVisibility, mode: TistoryPublishMode) => Promise<TistoryPublishResult>;
   visibility?: TistoryVisibility;
+  /** 기본은 설정값(TISTORY_PUBLISH_MODE, 기본 draft). */
+  mode?: TistoryPublishMode;
   enabled?: boolean;
 };
 
@@ -100,6 +108,7 @@ export async function publishJobToTistory(
         published_url: input.publishedUrl,
       }));
   const visibility = options.visibility ?? TISTORY_CONFIG.visibility;
+  const mode = options.mode ?? TISTORY_CONFIG.publishMode;
 
   const job = await loadJob(jobId);
   if (!job) return { ok: false, reason: "job_not_found", detail: `job을 찾을 수 없습니다: ${jobId}` };
@@ -125,7 +134,7 @@ export async function publishJobToTistory(
   const { html: bodyHtml, images } = convertArticleToTistoryHtml(manuscriptBodyWithoutImages(bodyWithImages));
   const imageInputs: TistoryPublishImageInput[] = images.map((image) => ({ url: image.url, alt: image.alt, marker: image.marker }));
 
-  const publish = options.publish ?? ((input, vis) => new TistoryPublisher().publish(input, vis));
+  const publish = options.publish ?? ((input, vis, m) => new TistoryPublisher().publish(input, vis, m));
   const result = await publish(
     {
       title: article.title ?? job.keyword,
@@ -138,11 +147,16 @@ export async function publishJobToTistory(
         keyword: job.keyword,
       }),
     },
-    visibility
+    visibility,
+    mode
   );
 
   if (!result.ok) {
     if (result.stage === "login") return { ok: false, reason: "login_required", detail: result.error };
+    if (result.stage === "draft-saved") {
+      // 의도한 종착지다 - publications에 아무 것도 남기지 않는다. 사람이 글 관리에서 발행하면 그때 기록된다.
+      return { ok: false, reason: "draft_saved", detail: result.error, draftSaved: result.draftSaved === true };
+    }
     if (result.stage === "captcha") {
       // 캡차는 publications에 failed를 남기지 않는다 - 원고는 임시저장에 살아 있고, 사람이
       // 이어서 발행하면 그때 published로 기록된다(login 대기와 같은 취급).

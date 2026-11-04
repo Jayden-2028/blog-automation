@@ -128,6 +128,43 @@ async function main(): Promise<void> {
     console.log("✅ 캡차 - 임시저장까지 실패하면 숨기지 않고 대체 수단을 안내");
   }
 
+  // 1-d) 임시저장 모드(2026-11-05, TISTORY_PUBLISH_MODE=draft) - 실패가 아니라 의도한 종착지다.
+  {
+    const { deps, rec } = makeDeps((async () => ({
+      ok: false,
+      reason: "draft_saved",
+      detail: "임시저장까지만 했습니다(TISTORY_PUBLISH_MODE=draft). 글 관리에서 열어 발행하세요.",
+      draftSaved: true,
+    })) as PollDeps["publish"]);
+    await quiet(() => processPending([job("d1"), job("d2")], {} as never, deps));
+
+    const text = rec.notices[0] ?? "";
+    assert(text.includes("임시저장"), `임시저장했다는 사실을 알려야 한다 (${text.slice(0, 60)})`);
+    assert(text.includes("/manage/posts"), "글 관리 링크를 줘야 한다 - 사용자가 거기서 발행한다");
+    assert(!text.includes("실패"), `실패 문구를 쓰지 않는다 - 의도한 종착지다 (${text.slice(0, 80)})`);
+    assert(!text.includes("다시 눌러"), "다시 누르라고 하지 않는다 - 재시도할 일이 아니다");
+    // 캡차와 다른 점: 임시저장은 연달아 막히는 일이 아니라 **뒤 건도 이어서 처리한다**.
+    assert(rec.finished.map((f) => f.id).join() === "d1,d2", `뒤 건도 같은 주기에 처리한다 (${rec.finished.map((f) => f.id).join()})`);
+    assert(rec.notices.length === 2, `건마다 알린다 (실제 ${rec.notices.length}통)`);
+    assert(rec.deferred.length === 0, "deferred가 아니다");
+    console.log("✅ 임시저장 모드 - 링크 안내 + 실패 문구 없음 + 뒤 건도 계속");
+  }
+
+  // 1-e) 임시저장 모드인데 임시저장조차 실패하면 숨기지 않는다
+  {
+    const { deps, rec } = makeDeps((async () => ({
+      ok: false,
+      reason: "draft_saved",
+      detail: "임시저장 모드인데 임시저장 클릭이 실패했습니다.",
+      draftSaved: false,
+    })) as PollDeps["publish"]);
+    await quiet(() => processPending([job("d3")], {} as never, deps));
+    const text = rec.notices[0] ?? "";
+    assert(text.includes("임시저장이 실패"), `임시저장 실패를 알려야 한다 (${text.slice(0, 60)})`);
+    assert(text.includes("복사해"), "대체 수단(원고 페이지 복사)을 안내해야 한다");
+    console.log("✅ 임시저장 모드 - 임시저장조차 실패하면 숨기지 않는다");
+  }
+
   // 2) 발행 성공 후 기록 실패 -> published_unrecorded, failed·재시도 아님
   {
     const { deps, rec } = makeDeps((async () => ({

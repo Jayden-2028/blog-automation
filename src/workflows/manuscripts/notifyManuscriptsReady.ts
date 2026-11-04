@@ -19,6 +19,7 @@ import { isManualPublishOnly, isPublishActionPaused } from "../publish/manualPub
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
 import { buildArticleReviewCallbackData } from "../../notifications/articleReviewCallbackData.js";
 import { isAutoApproved } from "../../config/pipelineGate.js";
+import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { ArticleJobRow } from "../../types/database.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 
@@ -97,7 +98,8 @@ export function buildReadyKeyboard(
   try {
     const publishButton: TelegramInlineKeyboardButton =
       track === "social"
-        ? { text: "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }
+        // 버튼 문구는 모드를 따른다(2026-11-05) - 임시저장 모드에서 "발행"이라고 적으면 거짓말이 된다.
+        ? { text: TISTORY_CONFIG.publishMode === "draft" ? "🟠 티스토리 임시저장" : "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }
         : track === "kscene"
           ? { text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }
           : // 엔터는 네이버 발행만 한다(RESTRUCTURE-PLAN-2026-10.md §2.5 - Blogspot 버튼은 2026-10-05에 뺐다).
@@ -127,7 +129,9 @@ function withLeadingBlank(lines: string[]): string[] {
 
 /** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 저장)을 문구로 알린다. */
 const SOCIAL_MANUAL_PUBLISH_GUIDE =
-  "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.";
+  TISTORY_CONFIG.publishMode === "draft"
+    ? "🟠 티스토리 임시저장을 누르면 맥미니가 티스토리에 임시저장하고 링크를 보냅니다 - 발행은 직접 해주세요(캡차 회피). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요."
+    : "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.";
 
 /**
  * 사회 이슈 트랙(2026-10-05 §3.3 → 2026-10-06 TISTORY_AUTO_PUBLISH_DESIGN.md): 네이버·Blogger 버튼 없이

@@ -72,9 +72,19 @@ export type TistoryPublishStage =
   | "publish-layer"
   | "publish"
   /** 카카오 캡차가 떠 발행이 막혔다. 실패가 아니라 **사람이 풀어야 하는 상태**다(2026-11-02). */
-  | "captcha";
+  | "captcha"
+  /**
+   * 임시저장 모드로 의도대로 끝났다(2026-11-05, `TISTORY_PUBLISH_MODE=draft`). **`ok: false`로 돌려준다** -
+   * 발행된 게 아니므로 url이 없고, 호출자가 publications에 published를 남기면 안 된다. ok의 뜻을
+   * "발행됐다"로 좁게 유지하는 쪽이, 새 성공 변종을 만들어 모든 소비자가 url 유무를 다시 따지게 하는
+   * 것보다 안전하다. draftSaved가 false면 임시저장 클릭조차 실패한 것이다.
+   */
+  | "draft-saved";
 
 export type TistoryVisibility = "public" | "private";
+
+/** 어디까지 하나. "draft"는 임시저장까지만 하고 멈춘다(2026-11-05, publishTargets.ts publishMode 참고). */
+export type TistoryPublishMode = "draft" | "publish";
 
 export type TistoryPublishImageInput = { url: string; alt?: string; marker?: string };
 
@@ -95,7 +105,7 @@ export type TistoryPublishResult =
       ok: false;
       stage: TistoryPublishStage;
       error: string;
-      /** stage "captcha"일 때만. 임시저장에 성공했으면 true - 사람이 글 관리에서 이어서 발행하면 된다. */
+      /** stage "captcha"·"draft-saved"일 때만. 임시저장에 성공했으면 true - 사람이 글 관리에서 이어서 발행하면 된다. */
       draftSaved?: boolean;
     };
 
@@ -404,7 +414,11 @@ export class TistoryPublisher {
     }
   }
 
-  async publish(input: TistoryPublishInput, visibility: TistoryVisibility): Promise<TistoryPublishResult> {
+  async publish(
+    input: TistoryPublishInput,
+    visibility: TistoryVisibility,
+    mode: TistoryPublishMode = "publish"
+  ): Promise<TistoryPublishResult> {
     const warnings: string[] = [];
     const context = await this.launch();
     try {
@@ -469,6 +483,21 @@ export class TistoryPublisher {
         } catch (error) {
           warnings.push(`태그 입력 실패: ${this.errorMessage(error).split("\n")[0]}`);
         }
+      }
+
+      // 임시저장 모드(2026-11-05): 발행 레이어를 **열지 않는다**. 임시저장은 공개 범위를 묻지 않으므로
+      // 레이어를 열 이유가 없고, 레이어를 열면 그 화면에서 캡차가 뜰 수 있다 - 피하려는 바로 그 지점이다.
+      if (mode === "draft") {
+        const draftSaved = await this.saveAsDraft(page);
+        if (!draftSaved) await this.saveFailureSnapshot(page, "draft-saved");
+        return {
+          ok: false,
+          stage: "draft-saved",
+          draftSaved,
+          error: draftSaved
+            ? "임시저장까지만 했습니다(TISTORY_PUBLISH_MODE=draft). 글 관리에서 열어 발행하세요."
+            : "임시저장 모드인데 임시저장 클릭이 실패했습니다.",
+        };
       }
 
       // 발행 레이어
