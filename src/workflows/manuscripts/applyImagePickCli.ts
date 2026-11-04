@@ -5,7 +5,8 @@
 //   npm run manuscripts:image-pick -- <요청.json>        (손으로 재실행할 때)
 //
 // **DB(job.metadata, manuscript_manifest_topics)와 Storage에 쓴다** - 사용자가 뷰어에서 후보를 눌렀을 때만 돈다.
-// 원고 준비 재실행·준비 완료 알림 재발송은 하지 않는다(그 슬롯만 바꾼다). 순수 로직은 applyImagePick.ts.
+// 원고 준비 재실행·준비 완료 알림 재발송은 하지 않는다(그 슬롯만 바꾼다). 끝나면 그 트랙 봇으로 결과를 한 통 알린다
+// (2026-11-05, 뷰어 링크 버튼 포함). 순수 로직은 applyImagePick.ts.
 import "dotenv/config";
 
 import { readFile } from "node:fs/promises";
@@ -15,15 +16,19 @@ import { listArticlesByJobId } from "../../services/supabase/repositories/articl
 import { listPublicationsByArticleIds } from "../../services/supabase/repositories/publicationRepository.js";
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
 import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
+import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.js";
 import { trackOfJob } from "../../notifications/telegramTracks.js";
 import { defaultFetchImage } from "../images/collectWebImages.js";
 import { loadManifest, saveManifest } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
+import type { ArticleJobRow } from "../../types/database.js";
 import { readImageSize } from "./exportManuscript.js";
 import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
 import { applyImagePick, parseImagePickRequest } from "./applyImagePick.js";
+import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
+import { viewerPageLink } from "../../config/manuscriptViewerPages.js";
 
 /** applyViewerEditCli와 같은 순서: 페이지 -> 비용 스냅샷 -> 배포. */
 async function publishPage(manifest: ManuscriptManifest): Promise<void> {
@@ -35,6 +40,21 @@ async function publishPage(manifest: ManuscriptManifest): Promise<void> {
   if (deploy.status === "success") console.log(`✅ 배포 완료: ${deploy.url}`);
   else if (deploy.status === "failed") throw new Error(`배포 실패: ${deploy.error}`);
   else console.log(`ℹ️ 배포 건너뜀: ${deploy.reason}`);
+}
+
+/**
+ * 알림에 붙이는 "원고 페이지 열기" 버튼. 주소 규칙은 준비 완료 알림(buildReadyKeyboard)과 같다 - 엔터는 해시,
+ * 나머지 트랙은 트랙별 페이지다. Pages 주소가 설정돼 있지 않으면 버튼 없이 글만 보낸다.
+ *
+ * 왜 버튼을 붙이나(2026-11-05): 교체 알림을 받는 이유가 "가서 확인하는 것"이라, 알림에서 한 번에 열리지 않으면
+ * 뷰어를 다시 찾아 들어가야 한다.
+ */
+function viewerKeyboard(job: ArticleJobRow): TelegramReplyMarkup | undefined {
+  const pagesUrl = cloudflarePagesUrl();
+  if (!pagesUrl) return undefined;
+  const track = trackOfJob(job);
+  const url = track === "entertainment" ? `${pagesUrl}/#${job.id}` : viewerPageLink(pagesUrl, track, job.id);
+  return { inline_keyboard: [[{ text: "📄 원고 페이지 열기", url }]] };
 }
 
 async function readRequestJson(): Promise<string> {
@@ -77,7 +97,7 @@ async function main(): Promise<void> {
       return publications.some((p) => p.status === "published");
     },
     notify: async (job, text) => {
-      await TelegramNotifier.fromEnv(trackOfJob(job)).sendMessages([{ text }]);
+      await TelegramNotifier.fromEnv(trackOfJob(job)).sendMessages([{ text, replyMarkup: viewerKeyboard(job) }]);
     },
   });
 
