@@ -81,15 +81,16 @@ const ago = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000).toIS
 
 console.log("✅ 최소 발행 간격: 기본 5분·채널별 설정·사고 재현·모르면 통과");
 
-// ── 5. 일일 발행 상한(2026-11-01) ─────────────────────────────────
+// ── 5. 일일 발행 상한(2026-11-01 도입 -> 2026-11-05 폐지) ─────────
 {
-  assert(DEFAULT_DAILY_PUBLISH_LIMIT === 1, "기본 1건/일");
-  assert(dailyPublishLimit("tistory", {}) === 1, "미설정이면 기본값");
-  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "3" }) === 3, "변수로 덮어쓴다");
+  // 폐지는 "장치를 지운다"가 아니라 "기본값이 0(상한 없음)"이다 - 되살리려면 환경변수 한 줄이다.
+  assert(DEFAULT_DAILY_PUBLISH_LIMIT === 0, "기본 상한 없음(2026-11-05 폐지)");
+  assert(dailyPublishLimit("tistory", {}) === 0, "미설정이면 상한 없음");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "3" }) === 3, "변수로 되살린다");
   assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "0" }) === 0, "0은 끄기로 허용");
-  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "-2" }) === 1, "음수는 기본값");
-  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "많이" }) === 1, "숫자가 아니면 기본값");
-  assert(dailyPublishLimit("naver", { TISTORY_PUBLISH_DAILY_LIMIT: "9" }) === 1, "다른 채널 변수는 안 본다");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "-2" }) === 0, "음수는 기본값");
+  assert(dailyPublishLimit("tistory", { TISTORY_PUBLISH_DAILY_LIMIT: "많이" }) === 0, "숫자가 아니면 기본값");
+  assert(dailyPublishLimit("naver", { TISTORY_PUBLISH_DAILY_LIMIT: "9" }) === 0, "다른 채널 변수는 안 본다");
 
   assert(checkDailyLimit(0, 1).allowed, "오늘 0건이면 통과");
   const blocked = checkDailyLimit(1, 1);
@@ -102,5 +103,5 @@ console.log("✅ 최소 발행 간격: 기본 5분·채널별 설정·사고 재
   assert(kstDayStartIso(new Date("2026-11-01T11:30:00.000Z")) === "2026-10-31T15:00:00.000Z", "KST 11/1 20:30 -> 11/1 00:00 KST");
   assert(kstDayStartIso(new Date("2026-11-01T14:59:00.000Z")) === "2026-10-31T15:00:00.000Z", "KST 11/1 23:59는 아직 같은 날");
   assert(kstDayStartIso(new Date("2026-11-01T15:00:00.000Z")) === "2026-11-01T15:00:00.000Z", "KST 11/2 00:00부터 새 날");
-  console.log("✅ 일일 발행 상한 - 기본 1건/일, 0은 끄기, KST 자정 기준");
+  console.log("✅ 일일 발행 상한 - 기본 상한 없음(폐지), 환경변수로 되살림, KST 자정 기준");
 }
