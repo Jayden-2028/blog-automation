@@ -130,36 +130,72 @@ async function answerCallbackQuery(
  * 남지 않았다. 던지면 이 호출이 대시보드 Metrics의 오류로 잡히고 로그에 사유가 남는다.
  * 성공도 한 줄 남긴다 - "호출은 됐다"는 사실이 있어야 "호출이 안 됐다"와 구분된다.
  */
+/**
+ * dispatch 재시도 간격(ms). 2026-11-04 GitHub 장애(09:49~11:30 UTC, impact major)에 10·11 UTC
+ * 회차(핫이슈 스타·사회)가 통째로 사라졌다 - POST **한 번**의 실패가 그날 수집 전부였고 다음
+ * 기회는 24시간 뒤였다. 짧은 흔들림은 여기서 넘긴다.
+ *
+ * 이 창(약 20초)으로 **몇 시간짜리 장애는 못 넘는다**. 그건 재시도가 아니라 뒤늦게 따라잡는
+ * 문제이고, 지금은 watchdog(21:00 KST)이 누락을 잡아 알리면 사람이 재발행한다.
+ * 창을 더 늘리지 않은 이유: scheduled()의 waitUntil이 얼마나 오래 살아 있는지는 무료 플랜에서
+ * 실측하지 않았다(30초 안팎으로 보는 게 안전하다). 늘리려면 **먼저 재시도가 끝까지 가는지
+ * [cron] 로그로 확인할 것** - 중간에 잘리면 조용히 아무 일도 안 한 셈이 된다.
+ */
+const DISPATCH_RETRY_DELAYS_MS = [2_000, 6_000, 12_000];
+
+/** 다시 던져볼 만한 실패인가. 4xx는 토큰·권한·입력 문제라 재시도해도 같은 답이 온다. */
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function dispatchWorkflow(env: Env, target: ScheduledDispatch): Promise<void> {
   const workflowFile = target.workflow;
-  let res: Response;
-  try {
-    res = await fetch(
-      `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
-          "X-GitHub-Api-Version": "2022-11-28",
-          "User-Agent": "blog-automation-telegram-relay",
-        },
-        body: JSON.stringify(target.inputs ? { ref: "main", inputs: target.inputs } : { ref: "main" }),
-      }
-    );
-  } catch (error) {
-    console.error(`workflow_dispatch 네트워크 오류(${workflowFile}):`, error);
-    throw error;
-  }
+  const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
+  let lastError: Error | undefined;
 
-  if (!res.ok) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // 1회차는 전과 같은 문구로 남긴다 - 재시도한 경우만 회차가 보이게.
+    const label = attempt === 1 ? workflowFile : `${workflowFile} ${attempt}/${attempts}회차`;
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}/actions/workflows/${workflowFile}/dispatches`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+            Accept: "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "blog-automation-telegram-relay",
+          },
+          body: JSON.stringify(target.inputs ? { ref: "main", inputs: target.inputs } : { ref: "main" }),
+        }
+      );
+    } catch (error) {
+      console.error(`workflow_dispatch 네트워크 오류(${label}):`, error);
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt === attempts) break;
+      await sleep(DISPATCH_RETRY_DELAYS_MS[attempt - 1]);
+      continue;
+    }
+
+    if (res.ok) {
+      console.log(`workflow_dispatch 성공(${label}): HTTP ${res.status}`);
+      return;
+    }
+
     const text = await res.text().catch(() => "");
-    console.error(`workflow_dispatch 실패(${workflowFile}):`, res.status, text.slice(0, 300));
-    throw new Error(`workflow_dispatch 실패(${workflowFile}): HTTP ${res.status}`);
+    console.error(`workflow_dispatch 실패(${label}):`, res.status, text.slice(0, 300));
+    lastError = new Error(`workflow_dispatch 실패(${workflowFile}): HTTP ${res.status}`);
+    // 4xx는 남은 창을 써도 같은 답이다 - 바로 던져서 사유가 로그에 남게 한다.
+    if (!isRetryableStatus(res.status) || attempt === attempts) break;
+    await sleep(DISPATCH_RETRY_DELAYS_MS[attempt - 1]);
   }
 
-  console.log(`workflow_dispatch 성공(${workflowFile}): HTTP ${res.status}`);
+  throw lastError ?? new Error(`workflow_dispatch 실패(${workflowFile})`);
 }
 
 export default {

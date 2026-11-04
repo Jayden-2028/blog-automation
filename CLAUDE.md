@@ -192,6 +192,13 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
 (`cloudflare/telegram-relay/src/schedule.ts` + `wrangler.toml` - **둘을 항상 같이 바꾼다.** 한쪽만
 바꾸면 발화가 조용히 죽는다). cron 슬롯은 4/5, 마지막 1칸은 예약이다.
 
+- **dispatch는 흔들리면 다시 던져본다**(2026-11-04): 네트워크 오류·5xx·429·408이면 2·6·12초 뒤까지 최대
+  4회(`dispatchWorkflow`). 4xx는 토큰·권한·입력 문제라 재시도하지 않고 바로 오류로 남긴다. 계기는
+  2026-11-04 GitHub 장애(09:49~11:30 UTC, impact major) - 10·11 UTC 회차(핫이슈 스타·사회)가 통째로
+  사라졌다(POST 한 번 실패 = 그날 수집 전부, 다음 기회는 24시간 뒤). **이 창(약 20초)으로 몇 시간짜리
+  장애는 못 넘는다** - 그때는 watchdog(21:00 KST) 알림을 보고 사람이 `gh workflow run <파일>`로 다시
+  돌린다. 수집일 경계가 KST 05:00이라 자정 전에 돌리면 그날 분으로 집계된다.
+
 | KST | UTC | 워크플로 | 알림 |
 |---|---|---|---|
 | 18:00 | 09 | `entertainment-keyword.yml` (round=evening) | 엔터 메인봇 · Go/Pass |
