@@ -161,6 +161,29 @@ function captchaMessage(job: ArticleJobRow, draftSaved: boolean): string {
   ].join("\n");
 }
 
+/**
+ * 임시저장까지만 한 경우(2026-11-05, `TISTORY_PUBLISH_MODE=draft`). **실패 알림이 아니다** - 의도한 종착지이고,
+ * 사람이 링크를 열어 발행하면 끝난다. 캡차 알림과 달리 "자동 재시도 없음" 같은 사과 문구를 붙이지 않는다.
+ */
+function draftSavedMessage(job: ArticleJobRow, draftSaved: boolean): string {
+  if (!draftSaved) {
+    return [
+      "⚠️ <b>티스토리 임시저장이 실패했습니다</b>",
+      "",
+      `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+      "원고 페이지에서 복사해 직접 올려주세요. 발행 버튼을 다시 눌러도 됩니다.",
+    ].join("\n");
+  }
+  return [
+    "📝 <b>티스토리에 임시저장했습니다 - 발행은 직접 해주세요</b>",
+    "",
+    `<b>${escapeTelegramHtml(job.keyword)}</b>`,
+    escapeTelegramHtml(DRAFT_LIST_URL),
+    "",
+    "자동 발행은 꺼져 있습니다(캡차 회피). 글 관리에서 열어 내용을 보고 발행하세요.",
+  ].join("\n");
+}
+
 function failureMessage(job: ArticleJobRow, detail: string): string {
   return [
     "⚠️ <b>티스토리 발행에 실패했습니다</b>",
@@ -224,6 +247,15 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
           ...(warnings.length > 0 ? ["", "⚠️ 확인이 필요합니다", ...warnings.map((w) => `· ${escapeTelegramHtml(w)}`)] : []),
         ].join("\n")
       );
+      continue;
+    }
+
+    if (result.reason === "draft_saved") {
+      // 의도한 종착지다. 요청은 끝낸 것으로 닫고(재시도 큐에 두지 않는다) 링크를 보낸다.
+      // 캡차와 달리 **다음 건으로 계속 간다** - 임시저장은 연달아 막히는 일이 아니다.
+      await deps.finish(job.id, { ok: false, error: result.detail });
+      console.log(`   📝 ${job.keyword} - 임시저장${result.draftSaved ? "" : " 실패"}(자동 발행 꺼짐)`);
+      await deps.notify(job, draftSavedMessage(job, result.draftSaved));
       continue;
     }
 

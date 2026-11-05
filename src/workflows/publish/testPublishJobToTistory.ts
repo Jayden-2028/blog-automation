@@ -155,6 +155,30 @@ async function main(): Promise<void> {
     console.log("✅ 발행 성공 후 기록 실패 - published_unrecorded");
   }
 
+  // 임시저장 모드(2026-11-05, TISTORY_PUBLISH_MODE=draft가 기본)
+  {
+    // 기본값이 draft라는 것부터 본다 - 발행기에 넘기는 mode가 설정에서 와야 한다.
+    let seenMode: string | null = null;
+    await publishJobToTistory("job-1", { ...baseDeps, publish: async (_i, _v, m) => { seenMode = m; return okPublish(); } });
+    assert(seenMode === "draft", `기본 모드는 draft여야 한다 (실제 ${seenMode})`);
+
+    // mode를 넘기면 그 값이 간다(옛 자동 발행으로 되돌릴 때의 경로).
+    await publishJobToTistory("job-1", { ...baseDeps, mode: "publish", publish: async (_i, _v, m) => { seenMode = m; return okPublish(); } });
+    assert(seenMode === "publish", `넘긴 모드가 그대로 가야 한다 (실제 ${seenMode})`);
+
+    // 발행기가 draft-saved로 끝내면 draft_saved로 바꿔 돌려주고 **publications에 아무 것도 남기지 않는다**.
+    const saved: PublicationRow["status"][] = [];
+    const out = await publishJobToTistory("job-1", {
+      ...baseDeps,
+      savePublication: async (i) => { saved.push(i.status); return baseDeps.savePublication(i); },
+      publish: async () => ({ ok: false, stage: "draft-saved", draftSaved: true, error: "임시저장까지만 했습니다(TISTORY_PUBLISH_MODE=draft). 글 관리에서 열어 발행하세요." }),
+    });
+    assert(!out.ok && out.reason === "draft_saved", `draft_saved로 돌려준다 (${JSON.stringify(out)})`);
+    assert(!out.ok && out.reason === "draft_saved" && out.draftSaved === true, "임시저장 성공 여부를 싣는다");
+    assert(saved.length === 0, `publications에 아무 행도 남기지 않는다 (실제 ${JSON.stringify(saved)}) - published도 failed도 아니다`);
+    console.log("✅ 임시저장 모드 - 기본값 draft + draft_saved 매핑 + publications 무기록");
+  }
+
   console.log("\n✅ publishJobToTistory 테스트 전체 통과");
 }
 

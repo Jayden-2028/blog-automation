@@ -177,6 +177,17 @@ export type TistoryConfig = {
   visibility: "public" | "private";
   /** 로그인 풀림으로 미뤄진 발행이 이 일수를 넘기면 자동 재개하지 않는다(2026-10-06 사용자 결정: 3일). */
   deferredMaxDays: number;
+  /**
+   * 발행 버튼을 눌렀을 때 어디까지 하나(2026-11-05 사용자 지시). **기본은 "draft"** - 티스토리 임시저장까지만
+   * 하고 알림으로 링크를 보내 **사람이 직접 발행**한다.
+   *
+   * 왜: 카카오 캡차가 매번 자동 발행을 막는다(10/31·11/01·11/02 실측). 막힐 때마다 임시저장으로 떨어지는
+   * 상태를 그대로 두면 네이버가 자동 발행으로 저품질을 받았던 전례처럼 블로그 품질에 영향이 갈 수 있다는
+   * 사용자 판단이다. 그래서 **캡차를 피해 임시저장을 정상 경로로 삼는다.**
+   *
+   * `TISTORY_PUBLISH_MODE=publish`면 옛 자동 발행으로 돌아간다. **승인 없이 바꾸지 않는다**(발행 게이트).
+   */
+  publishMode: "draft" | "publish";
 };
 
 export const TISTORY_CONFIG: TistoryConfig = {
@@ -185,6 +196,8 @@ export const TISTORY_CONFIG: TistoryConfig = {
   profileDir: process.env.TISTORY_PROFILE_DIR || ".local/tistory-publish-profile",
   visibility: process.env.TISTORY_PUBLISH_VISIBILITY === "public" ? "public" : "private",
   deferredMaxDays: parseIntEnv(process.env.TISTORY_DEFERRED_MAX_DAYS, 3),
+  // 코드 기본값과 운영값을 같게 둔다 - 갈라지면 맥미니와 클라우드가 다르게 돈다(MANUSCRIPT_IMAGE_GENERATION 전례).
+  publishMode: process.env.TISTORY_PUBLISH_MODE === "publish" ? "publish" : "draft",
 };
 
 /** https://wooahpapa.tistory.com/ -> wooahpapa. 주소가 이상하면 빈 문자열. */
