@@ -23,9 +23,11 @@ type BillingRow = {
   service: string;
   sku: string;
   currency: string;
-  grossCost: number;
-  credits: number;     // 보통 음수
-  netCost: number;
+  grossCost: number;   // 청구 통화 기준
+  credits: number;     // 청구 통화 기준, 보통 음수
+  netCost: number;     // 청구 통화 기준
+  fxRate: number;      // USD -> 청구 통화 환율. 구글이 행마다 같이 준다.
+  netUsd: number;      // netCost / fxRate
 };
 
 const TABLE_PREFIX = "gcp_billing_export_v1_";
@@ -48,7 +50,9 @@ function buildSql(projectId: string, dataset: string, table: string, days: numbe
     "  ifnull(sku.description, '(unknown sku)') as sku,",
     "  ifnull(currency, 'USD') as currency,",
     "  sum(cost) as gross_cost,",
-    "  sum(ifnull((select sum(c.amount) from unnest(credits) c), 0)) as credits",
+    "  sum(ifnull((select sum(c.amount) from unnest(credits) c), 0)) as credits,",
+    // 구글이 행마다 USD->청구통화 환율을 같이 준다. 이걸로 나누면 그날의 정확한 USD가 나온다.
+    "  avg(currency_conversion_rate) as fx_rate",
     `from ${fq}`,
     `where date(usage_start_time, 'Asia/Seoul') >= date_sub(current_date('Asia/Seoul'), interval ${days} day)`,
     "group by 1, 2, 3, 4",
@@ -68,7 +72,9 @@ function buildProbeSql(projectId: string, dataset: string, table: string): strin
     "  count(*) as total_rows,",
     "  format_date('%Y-%m-%d', min(date(usage_start_time, 'Asia/Seoul'))) as first_day,",
     "  format_date('%Y-%m-%d', max(date(usage_start_time, 'Asia/Seoul'))) as last_day,",
-    "  sum(cost) as all_gross_cost",
+    "  sum(cost) as all_gross_cost,",
+    "  any_value(currency) as currency,",
+    "  avg(currency_conversion_rate) as fx_rate",
     `from ${fq}`,
   ].join("\n");
 }
@@ -77,6 +83,10 @@ function toRows(raw: Array<Record<string, string | null>>): BillingRow[] {
   return raw.map((r) => {
     const grossCost = Number(r.gross_cost ?? 0);
     const credits = Number(r.credits ?? 0);
+    const net = (Number.isFinite(grossCost) ? grossCost : 0) + (Number.isFinite(credits) ? credits : 0);
+    const rawFx = Number(r.fx_rate ?? 1);
+    // 환율이 비어 있으면 USD 계정으로 보고 1로 둔다. USD가 아닌데 비어 있으면 아래에서 걸러진다.
+    const fx = Number.isFinite(rawFx) && rawFx > 0 ? rawFx : (String(r.currency ?? "USD") === "USD" ? 1 : 0);
     return {
       usageDate: String(r.usage_date ?? ""),
       service: String(r.service ?? "(unknown service)"),
@@ -84,7 +94,9 @@ function toRows(raw: Array<Record<string, string | null>>): BillingRow[] {
       currency: String(r.currency ?? "USD"),
       grossCost: Number.isFinite(grossCost) ? grossCost : 0,
       credits: Number.isFinite(credits) ? credits : 0,
-      netCost: (Number.isFinite(grossCost) ? grossCost : 0) + (Number.isFinite(credits) ? credits : 0),
+      netCost: net,
+      fxRate: fx,
+      netUsd: fx > 0 ? net / fx : Number.NaN,
     };
   }).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.usageDate));
 }
@@ -133,11 +145,16 @@ async function main(): Promise<void> {
   }
 
   const rows = toRows(result.data);
-  const total = rows.reduce((sum, r) => sum + r.netCost, 0);
   const currencies = Array.from(new Set(rows.map((r) => r.currency)));
-  console.log(`최근 ${days}일: ${rows.length}행, 순비용 합계 ${usd(total)} [통화 ${currencies.join(", ") || "USD"}]`);
+  const localTotal = rows.reduce((sum, r) => sum + r.netCost, 0);
+  const total = rows.reduce((sum, r) => sum + (Number.isFinite(r.netUsd) ? r.netUsd : 0), 0);
+  const label = currencies.join(", ") || "행 없음";
+  const localNote = currencies.length === 1 && currencies[0] !== "USD"
+    ? ` (현지 ${localTotal.toFixed(2)} ${currencies[0]}, 환율 ${(rows[0]?.fxRate ?? 0).toFixed(4)})`
+    : "";
+  console.log(`최근 ${days}일: ${rows.length}행, 순비용 합계 ${usd(total)}${localNote} [통화 ${label}]`);
   for (const r of rows.slice(0, 20)) {
-    console.log(`  ${r.usageDate}  ${usd(r.netCost)}  ${r.service} / ${r.sku}`);
+    console.log(`  ${r.usageDate}  ${usd(r.netUsd)}  ${r.service} / ${r.sku}`);
   }
   if (rows.length > 20) console.log(`  … 외 ${rows.length - 20}행`);
 
@@ -151,7 +168,9 @@ async function main(): Promise<void> {
     const totalRows = Number(d.total_rows ?? 0);
     const allCost = Number(d.all_gross_cost ?? 0);
     console.log(
-      `테이블 전체: ${totalRows}행, 사용일 ${d.first_day ?? "-"} ~ ${d.last_day ?? "-"}, 총 청구액 ${usd(Number.isFinite(allCost) ? allCost : 0)}`
+      `테이블 전체: ${totalRows}행, 사용일 ${d.first_day ?? "-"} ~ ${d.last_day ?? "-"}, ` +
+      `총 청구액 ${(Number.isFinite(allCost) ? allCost : 0).toFixed(4)} ${d.currency ?? "?"}, ` +
+      `환율(USD->현지) ${d.fx_rate ?? "?"}`
     );
     if (totalRows === 0) {
       console.log("→ 테이블이 비어 있습니다. 내보내기를 켠 직후라면 구글이 채울 때까지 하루 정도 더 걸립니다.");
@@ -172,11 +191,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  // api_usage.cost_usd는 이름 그대로 USD 칸이다. 청구 통화가 USD가 아니면(한국 계정은 KRW인 경우가
-  // 있다) 숫자를 그대로 넣는 순간 대시보드가 원화를 달러로 읽어 1,000배 넘게 부풀린다. 막는다.
-  const nonUsd = currencies.filter((c) => c !== "USD");
-  if (nonUsd.length > 0) {
-    console.error(`청구 통화가 ${nonUsd.join(", ")}입니다. cost_usd 칸에 그대로 넣으면 금액이 왜곡되므로 적재를 멈춥니다. 환산 규칙을 정한 뒤 다시 실행하세요.`);
+  // api_usage.cost_usd는 이름 그대로 USD 칸이다. 청구 통화가 USD가 아니어도 구글이 준
+  // currency_conversion_rate로 나누면 정확한 USD가 나오므로 그대로 적재한다. 다만 환율을 못 얻은
+  // 행은 환산이 불가능하고, 현지 통화 금액을 USD 칸에 넣으면 금액이 수천 배로 부풀므로 막는다.
+  const unconvertible = rows.filter((r) => !Number.isFinite(r.netUsd));
+  if (unconvertible.length > 0) {
+    const c = Array.from(new Set(unconvertible.map((r) => r.currency))).join(", ");
+    console.error(`환율을 얻지 못한 행이 ${unconvertible.length}건 있습니다(통화 ${c}). 현지 통화 금액을 cost_usd에 넣으면 금액이 왜곡되므로 적재를 멈춥니다.`);
     process.exit(1);
   }
 
@@ -197,14 +218,16 @@ async function main(): Promise<void> {
     operation: r.sku,
     occurred_at: `${r.usageDate}T00:00:00+09:00`,
     quantity: 1,
-    cost_usd: Number(r.netCost.toFixed(6)),
+    cost_usd: Number(r.netUsd.toFixed(6)),
     cost_source: "reported" as const,
     metadata: {
       source: "bigquery-billing-export",
       table,
       currency: r.currency,
+      fx_rate: Number(r.fxRate.toFixed(6)),
       gross_cost: Number(r.grossCost.toFixed(6)),
       credits: Number(r.credits.toFixed(6)),
+      net_cost_local: Number(r.netCost.toFixed(6)),
     },
   }));
 
