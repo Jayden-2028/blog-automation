@@ -11,8 +11,8 @@ import type { EditApiEnv } from "./editApi.js";
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** src/jobs/publishRequestCli.ts의 CHANNELS와 같아야 한다. */
-const CHANNELS = ["tistory"] as const;
+/** src/jobs/publishRequestCli.ts의 CHANNELS와 같아야 한다. 트랙-채널 적합성은 거기서 본다(이쪽은 job을 모른다). */
+const CHANNELS = ["tistory", "blogspot"] as const;
 
 function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {

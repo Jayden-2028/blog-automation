@@ -25,12 +25,14 @@ import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import { topicTrack } from "./manuscriptManifest.js";
 import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord, ImagePickRecord } from "./manuscriptManifest.js";
 import { DEFAULT_TRACK } from "../../notifications/telegramTracks.js";
+import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 
 /**
  * 페이지 머리말·사이드바 문구. 엔터는 개편 전 문구 그대로다.
- * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 텔레그램의 🟠 티스토리 발행 버튼으로 올리므로 안내 문구가 엔터와 다르다.
- * 발행 진입점은 텔레그램 버튼 하나다(2026-10-07) - 뷰어에는 발행 버튼이 없고 `hint`만 안내한다.
+ * 사회는 발행 채널이 티스토리다(2026-10-06 자동 발행 재개) - 🟠 티스토리 버튼으로 올리므로 안내 문구가 엔터와 다르다.
+ * 사회만 **뷰어에도 버튼이 있다**(2026-11-05 사용자 요청으로 복원 - 2026-10-07에 "진입점은 텔레그램 하나"로 뺐던 것).
+ * 엔터·사용설명서는 그대로 텔레그램 버튼 하나이고 `hint`만 안내한다.
  */
 // pen/penSoft는 강조색(--pen, --pen-soft)이다. 트랙을 한눈에 구분하려고 페이지마다 다르게 둔다(2026-10-05 사용자 요청):
 // 엔터(네이버용) 다크 그린, 사회 네이비. 사용설명서는 기존 오렌지를 유지한다.
@@ -40,11 +42,11 @@ const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: str
     pen: "#1B5E3A", penSoft: "#E4F0E8",
   },
   social: {
-    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 텔레그램의 🟠 티스토리 발행 버튼으로 발행", hint: "발행은 텔레그램의 🟠 티스토리 발행 버튼으로만 됩니다",
+    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 🟠 티스토리 버튼으로 발행", hint: "발행은 아래 🟠 티스토리 버튼 또는 텔레그램 버튼으로 됩니다(같은 큐 - 둘 다 눌러도 한 번만 올라갑니다)",
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
-    title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 텔레그램 승인 후 Blogger 발행", hint: "발행은 텔레그램의 🔵 Blogger 발행 버튼으로만 됩니다",
+    title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 🔵 Blogger 버튼으로 발행", hint: "발행은 아래 🔵 Blogger 버튼 또는 텔레그램 버튼으로 됩니다(같은 경로 - 되돌릴 수 없습니다)",
     pen: "#E8590C", penSoft: "#FDF0E6",
   },
 };
@@ -102,6 +104,136 @@ function escapeHtml(value: string): string {
 }
 
 /** <script type="application/json"> 안에 JSON을 안전하게 넣는다 - "</script" 시퀀스만 깨뜨린다. */
+/**
+ * 뷰어 발행 버튼이 붙는 트랙과 그 채널(2026-11-05). **엔터는 없다** - 네이버는 뷰어에서 복사해
+ * 직접 올리는 채널이라 버튼이 가리킬 곳이 없다. 사회=티스토리, 사용설명서=Blogger.
+ *
+ * 트랙 차이는 전부 "JS 식 네 개"로 모아 둔다 - 아래 세 빌더는 이 식들을 그대로 끼워 넣기만 한다.
+ * 그래서 채널이 하나 더 늘어도 markup·리스너·요청 코드를 다시 쓰지 않는다.
+ */
+type PublishButtonSpec = {
+  /** /api/publish-request의 channel. publishApi.ts·publishRequestCli.ts의 CHANNELS에 있어야 한다. */
+  channel: "tistory" | "blogspot";
+  /** 버튼 element id. 트랙별로 달라 테스트가 "이 트랙에 버튼이 있는가"를 id로 단정한다. */
+  id: string;
+  /** 요청 중 라벨에 쓰는 표식. */
+  mark: string;
+  /** 평상시 버튼 라벨(JS 식). */
+  labelExpr: string;
+  /** 버튼 옆 안내(JS 식). */
+  noteExpr: string;
+  /** confirm 문구(JS 식). */
+  askExpr: string;
+  /** 요청이 받아들여진 뒤의 버튼 라벨(JS 식). */
+  doneExpr: string;
+};
+
+const PUBLISH_BUTTONS: Partial<Record<Track, PublishButtonSpec>> = {
+  // 티스토리는 맥미니 폴러가 올린다(큐). 임시저장 모드(TISTORY_PUBLISH_MODE=draft)면 문구가 전부 바뀐다.
+  social: {
+    channel: "tistory",
+    id: "publish-tistory",
+    mark: "🟠",
+    labelExpr: "TISTORY_DRAFT_ONLY ? '🟠 티스토리 임시저장' : '🟠 티스토리 발행'",
+    noteExpr:
+      "TISTORY_DRAFT_ONLY ? '맥미니가 티스토리에 임시저장하고 글 관리 링크를 텔레그램으로 보냅니다 — 발행은 직접 해주세요' : '맥미니가 티스토리에 올리고 결과를 텔레그램으로 보냅니다'",
+    askExpr:
+      'TISTORY_DRAFT_ONLY ? "이 원고를 티스토리에 임시저장합니다.\\n맥미니가 올린 뒤 글 관리 링크를 텔레그램(사회 봇)으로 보냅니다.\\n발행은 직접 해주세요. 계속할까요?" : "이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 결과를 텔레그램(사회 봇)으로 알립니다. 계속할까요?"',
+    doneExpr: 'TISTORY_DRAFT_ONLY ? "🟠 임시저장 요청됨" : "🟠 발행 요청됨"',
+  },
+  // Blogger는 맥미니를 거치지 않는다 - GitHub Actions가 Blogger API로 그 자리에서 올린다(텔레그램
+  // 🔵 버튼과 같은 경로). 임시저장 모드가 없으므로 문구도 하나뿐이다.
+  kscene: {
+    channel: "blogspot",
+    id: "publish-blogspot",
+    mark: "🔵",
+    labelExpr: "'🔵 Blogger 발행'",
+    noteExpr: "'Korea Plain 블로그에 올리고 주소를 텔레그램으로 보냅니다'",
+    askExpr:
+      '"이 원고를 Blogger(Korea Plain)에 발행합니다.\\n올린 뒤 주소를 텔레그램(사용설명서 봇)으로 보냅니다.\\n되돌릴 수 없습니다. 계속할까요?"',
+    doneExpr: '"🔵 발행 요청됨"',
+  },
+};
+
+/** 발행 버튼 리스너 연결. markup·함수와 같은 이유로 버튼이 있는 트랙 페이지에만 넣는다. */
+function publishWireScript(spec: PublishButtonSpec): string {
+  return `      var pubBtn = document.getElementById("${spec.id}");
+      if (pubBtn) pubBtn.addEventListener("click", function () { submitPublish(topic, pubBtn); });`;
+}
+
+/**
+ * 발행(임시저장) 바 markup. publishScript와 같은 이유로 **버튼이 있는 트랙 페이지에만** 끼운다 -
+ * 다른 트랙 페이지에는 버튼 markup도 들어 있지 않아야 한다.
+ */
+function publishBarScript(spec: PublishButtonSpec): string {
+  return `      // 발행 바 - **툴바 밖 자기 줄에** 둔다(2026-11-05 사용자 요청으로 복원).
+      // 2026-10-07에 "진입점은 텔레그램 하나"로 뺐던 버튼이다 - 그때 서버 쪽 publishApi·워크플로·CLI를
+      // 남겨 둬서 여기만 되살리면 된다. 되돌릴 수 없는 동작이라 복사·수정 버튼 사이에 섞지 않는다.
+      //
+      // **저장 안 된 수정이 있으면 누를 수 없다**: 발행은 DB 원고를 읽으므로, 뷰어에서 고치고 바로 누르면
+      // 옛 글이 올라간다. 저장 요청이 날아가는 중(sentAt)에도 막는다 - 그 사이 올리면 경합이다.
+      var pubBlocked = pendingCount > 0 || !!sentAt;
+      var pubLabel = ${spec.labelExpr};
+      h += '<div class="publish-bar">';
+      h += '<button class="btn-publish" id="${spec.id}"' + (pubBlocked ? ' disabled' : '') + '>' + pubLabel + '</button>';
+      h += '<span class="publish-note' + (pubBlocked ? ' bad' : '') + '">' + (pubBlocked
+        ? '먼저 💾 수정본 저장을 누르고, 저장이 끝난 뒤(1~2분) 새로고침하고 누르세요'
+        : (${spec.noteExpr})) + '</span>';
+      h += '</div>';
+
+`;
+}
+
+/**
+ * 뷰어 발행 요청 스크립트. **버튼이 있는 트랙 페이지에만** 끼운다(2026-11-05) - 엔터 페이지에는
+ * 발행 진입점이 없어야 하고, 코드가 들어 있지 않은 것이 그 사실을 가장 분명히 한다
+ * (testManuscriptTrackPages가 그걸 단정한다).
+ *
+ * 템플릿 리터럴 안에 두지 않는다 - 중첩되면 \\n 같은 이스케이프가 한 겹 더 꼬인다.
+ */
+function publishScript(spec: PublishButtonSpec): string {
+  return `    /**
+     * 뷰어 발행 요청(2026-11-05 복원). **텔레그램 버튼과 같은 경로**로 간다 - 둘 다 눌러도 한 번만
+     * 올라간다. 결과 알림도 텔레그램으로 같이 온다.
+     *
+     * 저장 안 된 수정은 호출부가 버튼으로 막지만 여기서 한 번 더 본다 - 버튼이 활성인 채로 화면이
+     * 오래 떠 있었을 수 있다(수정은 localStorage에 쌓이고 화면은 그대로다).
+     */
+    function submitPublish(topic, btn) {
+      var pending = Object.keys(pendingEdits(topic, loadEdits(topic.jobId) || {})).length;
+      if (pending > 0) { toast("먼저 💾 수정본 저장을 눌러주세요 (" + pending + "곳 미저장)"); return; }
+      if (loadSent(topic.jobId)) { toast("수정본 저장이 끝날 때까지 기다렸다가(1~2분) 새로고침 후 눌러주세요"); return; }
+      if (location.protocol === "file:") { toast("온라인 원고 페이지에서만 요청할 수 있습니다"); return; }
+      var ask = ${spec.askExpr};
+      if (!window.confirm(ask)) return;
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "${spec.mark} 요청 중…";
+      function fail(msg) { btn.disabled = false; btn.textContent = label; toast(msg); }
+      fetch("/api/publish-request", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jobId: topic.jobId, channel: "${spec.channel}" }),
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (res.status === 202) {
+            // 버튼은 **되살리지 않는다** - 다시 누르면 요청이 하나 더 간다. 큐가 중복을 막지만
+            // 임시저장 모드에서는 글이 하나 더 생길 수 있다(새로고침하면 버튼이 돌아온다).
+            btn.textContent = ${spec.doneExpr};
+            toast("요청했습니다 — 결과는 텔레그램으로 옵니다");
+            return;
+          }
+          fail((body && body.error) || ("요청 실패(" + res.status + ")"));
+        });
+      }).catch(function () {
+        fail("요청 실패 — 로그인이 만료됐을 수 있습니다. 새로고침 후 다시 누르세요");
+      });
+    }
+
+`;
+}
+
 function safeJson(data: unknown): string {
   return JSON.stringify(data).replace(/<\/script/gi, "<\\/script");
 }
@@ -137,6 +269,8 @@ export function renderManuscriptPage(
 ): string {
   const track = options.track ?? DEFAULT_TRACK;
   const copy = TRACK_PAGE_COPY[track];
+  // 이 트랙에 뷰어 발행 버튼이 있는가(없으면 markup·함수·리스너를 아예 넣지 않는다).
+  const publishButton = PUBLISH_BUTTONS[track];
   const topics = manifest.topics
     .filter((topic) => topicTrack(topic) === track)
     .sort(
@@ -240,6 +374,18 @@ export function renderManuscriptPage(
   .btn.primary:hover{opacity:.9}
   .btn.active{background:var(--warn);border-color:var(--warn);color:#fff}
   .edited-badge{font-size:12px;color:var(--warn);align-self:center}
+  /* 발행(임시저장) 버튼. **툴바 버튼들과 일부러 다르게** 생겼다(2026-11-05 사용자 요청) - 되돌릴 수 없는
+     동작이라 복사·수정 버튼 사이에서 같은 모양으로 섞이면 잘못 눌린다. 자기 줄을 쓰고, 색은 팔레트의
+     트랙 강조색(--pen)이 아니라 고정 초록이다(트랙마다 달라지면 "그 버튼"으로 기억되지 않는다). */
+  .publish-bar{margin:14px 0 4px;padding:14px 16px;border:1px solid #BFD8C2;border-radius:12px;
+          background:#F1F8F2;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+  .btn-publish{font-size:17px;font-weight:800;letter-spacing:-.2px;padding:14px 26px;border-radius:10px;
+          border:1px solid #1F7A3A;background:#22873F;color:#fff;cursor:pointer;line-height:1.2;
+          box-shadow:0 1px 0 rgba(0,0,0,.06)}
+  .btn-publish:hover:enabled{background:#1C7236}
+  .btn-publish:disabled{background:#C9D6CC;border-color:#C9D6CC;color:#6B726D;cursor:not-allowed;box-shadow:none}
+  .publish-note{font-size:13px;color:#2F5A3A}
+  .publish-note.bad{color:var(--warn);font-weight:700}
   .edit-result{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:9px 13px;
                font-size:12.5px;margin:-8px 0 16px;line-height:1.7}
   .edit-result ul{margin:4px 0 0;padding-left:18px;color:var(--warn)}
@@ -338,6 +484,9 @@ export function renderManuscriptPage(
     // 이 페이지의 트랙. 사회(social)만 🟠 티스토리 발행 버튼이 붙는다(TISTORY_AUTO_PUBLISH_DESIGN.md §5).
     var TRACK = ${safeJson(track)};
     var PUBLISH_HINT = ${safeJson(copy.hint)};
+    // 티스토리가 임시저장까지만 하는지(2026-11-05, TISTORY_PUBLISH_MODE). 버튼 문구·확인창이 이걸 따른다 -
+    // 임시저장만 하는데 "발행"이라고 적으면 거짓말이 된다.
+    var TISTORY_DRAFT_ONLY = ${safeJson(TISTORY_CONFIG.publishMode === "draft")};
     var wrap = document.getElementById("wrap");
     var toastEl = document.getElementById("toast");
 
@@ -941,6 +1090,7 @@ export function renderManuscriptPage(
       });
     }
 
+${publishButton ? publishScript(publishButton) : ""}
     function render(jobId) {
       var topic = findTopic(jobId);
       if (!topic) return;
@@ -1020,6 +1170,7 @@ export function renderManuscriptPage(
       h += '<span class="pub-hint">' + esc(PUBLISH_HINT) + '</span>';
       h += '</div>';
 
+${publishButton ? publishBarScript(publishButton) : ""}
       if (blocks.length > 0) {
         h += '<h2 class="sec">캡션 ' + blocks.length + '줄</h2><table><tbody>';
         blocks.forEach(function (block, i) {
@@ -1161,6 +1312,7 @@ export function renderManuscriptPage(
       var titleEl = wrap.querySelector(".doc-title[data-title]");
       if (titleEl) titleEl.addEventListener("keydown", function (ev) { if (ev.key === "Enter") ev.preventDefault(); });
 
+${publishButton ? publishWireScript(publishButton) : ""}
       var submitBtn = document.getElementById("submit-edits");
       if (submitBtn) submitBtn.addEventListener("click", function () { submitEdits(topic, submitBtn); });
 

@@ -207,8 +207,8 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
     return;
   }
 
-  // 일일 발행 상한(2026-11-01 사용자 승인, 기본 1건/일, KST 자정 기준): 애드센스가 "가치가 별로
-  // 없는 콘텐츠"로 반려했고 하루 2.3건 속보 재가공이 그 원인 쪽이다(publishInterval.ts 머리말).
+  // 일일 발행 상한. **기본값은 0(상한 없음)이다** - 2026-11-05에 폐지했다(publishInterval.ts 머리말).
+  // 판정 자체는 남겨 둔다: `TISTORY_PUBLISH_DAILY_LIMIT`을 주면 그날부터 다시 센다. 걸렸을 때의 동작은
   // 간격 가드와 같이 **미루기**다 - 요청을 그대로 두면 내일 올라간다.
   const daily = await (deps.dailyLimitGate ?? (() => dailyPublishLimitGate("tistory")))();
   if (!daily.allowed) {
@@ -253,7 +253,8 @@ export async function processPending(pending: ArticleJobRow[], state: PollState,
     if (result.reason === "draft_saved") {
       // 의도한 종착지다. 요청은 끝낸 것으로 닫고(재시도 큐에 두지 않는다) 링크를 보낸다.
       // 캡차와 달리 **다음 건으로 계속 간다** - 임시저장은 연달아 막히는 일이 아니다.
-      await deps.finish(job.id, { ok: false, error: result.detail });
+      // status는 failed가 아니라 **draft**다 - failed로 두면 버튼을 다시 눌러 임시저장이 하나 더 생긴다.
+      await deps.finish(job.id, { ok: "draft", error: result.detail });
       console.log(`   📝 ${job.keyword} - 임시저장${result.draftSaved ? "" : " 실패"}(자동 발행 꺼짐)`);
       await deps.notify(job, draftSavedMessage(job, result.draftSaved));
       continue;

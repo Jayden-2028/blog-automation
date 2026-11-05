@@ -293,7 +293,8 @@ async function main(): Promise<void> {
     assert(failedNote.includes("HTTP 403") && failedNote.includes("이미지 수정"), `실패 사유와 대체 수단이 보여야 한다 (${failedNote})`);
     console.log("✅ 브라우저 - 후보 클릭 교체: 채택본 잠금·요청 내용·처리 중 표식·완료/실패 안내");
 
-    // ⑧ 저장은 저장일 뿐이다(2026-10-07) - 뷰어에 발행 버튼이 없고, 확인창·토스트가 "발행 원고에 반영·배포"라 말하지 않으며, 발행 안내가 있다.
+    // ⑧ 저장은 저장일 뿐이다(2026-10-07). 이 페이지는 **엔터 트랙**이라 발행 버튼이 없다 - 2026-11-05에
+    //    사회 트랙에만 버튼을 되살렸고(아래 ⑨), 그 가름이 지켜지는지를 여기서 본다.
     const pubUi = await tab.evaluate(
       "({ pubBtn: !!document.querySelector('#publish-tistory, [id^=publish]'), hint: (document.querySelector('.pub-hint') || {}).textContent || '' })"
     ) as { pubBtn: boolean; hint: string };
@@ -311,6 +312,56 @@ async function main(): Promise<void> {
     await tab.waitForFunction("document.querySelector('.edited-badge') && document.querySelector('.edited-badge').textContent.indexOf('저장 요청') >= 0");
     assert(confirmText.includes("저장합니다") && confirmText.includes("발행되지 않습니다") && confirmText.includes("텔레그램"), `저장 확인창 문구 (${confirmText})`);
     console.log("✅ 브라우저 - 저장은 저장만: 발행 버튼 없음·텔레그램 안내·확인창 문구");
+
+    // ⑨ 사회 트랙 발행(임시저장) 버튼(2026-11-05 사용자 요청). 눈에 띄게 다르고, 누르면 같은 큐로 간다.
+    {
+      const socialHtml = renderManuscriptPage(
+        { topics: [{ ...manifest.topics[0], manuscript: { ...manifest.topics[0].manuscript, track: "social" } }] },
+        new Date(),
+        { track: "social" }
+      );
+      const soc = await browser.newPage();
+      const pubPosted: string[] = [];
+      soc.on("pageerror", (error) => pageErrors.push(`[social] ${String(error)}`));
+      await soc.route("**/*", (route) => {
+        const url = route.request().url();
+        if (url === "https://viewer.test/") return route.fulfill({ body: socialHtml, contentType: "text/html" });
+        if (url === "https://viewer.test/api/publish-request") {
+          pubPosted.push(route.request().postData() ?? "");
+          return route.fulfill({ status: 202, body: JSON.stringify({ ok: true }), contentType: "application/json" });
+        }
+        return route.fulfill({ status: 404, body: "" });
+      });
+      await soc.goto("https://viewer.test/", { waitUntil: "load" });
+
+      const look = (await soc.evaluate(`(() => {
+        const b = document.querySelector("#publish-tistory");
+        if (!b) return { found: false };
+        const cs = getComputedStyle(b), r = b.getBoundingClientRect();
+        const other = document.querySelector(".toolbar .btn");
+        const ocs = getComputedStyle(other), orect = other.getBoundingClientRect();
+        return { found: true, text: b.textContent, disabled: b.disabled, bg: cs.backgroundColor, obg: ocs.backgroundColor,
+                 font: parseFloat(cs.fontSize), ofont: parseFloat(ocs.fontSize), h: r.height, oh: orect.height };
+      })()`)) as { found: boolean; text: string; disabled: boolean; bg: string; obg: string; font: number; ofont: number; h: number; oh: number };
+
+      assert(look.found, "사회 페이지에는 발행 버튼이 있어야 한다");
+      assert(!look.disabled, "저장할 수정이 없으면 누를 수 있어야 한다");
+      assert(look.text.includes("티스토리"), `버튼 문구에 채널이 보여야 한다 (${look.text})`);
+      // "크게, 다른 버튼과 구분되는 색상과 크기"가 요청이었다 - 눈대중이 아니라 실제 치수로 지킨다.
+      assert(look.bg !== look.obg, `발행 버튼 색이 다른 버튼과 달라야 한다 (둘 다 ${look.bg})`);
+      assert(look.font > look.ofont && look.h > look.oh, `발행 버튼이 더 커야 한다 (${look.font}px/${look.h} vs ${look.ofont}px/${look.oh})`);
+
+      let pubConfirm = "";
+      soc.on("dialog", (dialog) => { pubConfirm = dialog.message(); void dialog.accept(); });
+      await soc.click("#publish-tistory");
+      await soc.waitForFunction("document.querySelector('#publish-tistory').textContent.indexOf('요청됨') >= 0");
+      assert(pubConfirm.includes("티스토리"), `확인창이 떠야 한다 (${pubConfirm})`);
+      assert(pubPosted.length === 1, `발행 요청을 한 번 보내야 한다 (${pubPosted.length}회)`);
+      const sent = JSON.parse(pubPosted[0]) as { jobId: string; channel: string };
+      assert(sent.channel === "tistory" && sent.jobId === manifest.topics[0].jobId, `요청 내용 (${pubPosted[0]})`);
+      await soc.close();
+      console.log("✅ 브라우저 - 사회 발행 버튼: 더 크고 다른 색, 확인창, 같은 큐로 1회 요청");
+    }
 
     assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
   } finally {
