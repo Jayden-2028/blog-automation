@@ -52,6 +52,11 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   스킬(`*-blog-writer`)은 쓰지 않는다(클라우드에서 로드되지 않고 맥과 규격이 갈라진다). 대화형으로 원고를
   쓸 때는 프로젝트 스킬 `write-manuscript`를 쓴다. 저장 직전 `enforceWritingRules`가 금지 표현을 코드로
   집행한다.
+- **한국어 윤문(AI 티 제거)은 `anthropic-skills:humanize-korean`을 쓴다**(2026-11-05 사용자 결정).
+  같은 일을 하는 `moai-writer:korean-humanize`는 **쓰지 않는다** - 플러그인은 지우지 않고 사용만
+  멈춘다(9월까지 66회 썼으므로 돌아갈 길은 남겨 둔다). 둘 다 켜 두면 세션마다 고르는 스킬이 갈려
+  문체 기준이 둘로 쪼개진다. 윤문은 **발행 전 사람이 손볼 때** 쓰는 보조 수단이고, 파이프라인이
+  자동으로 거치는 단계가 아니다 - 자동 경로의 문체 기준은 위 `core-rules.md`와 `style/*.md`다.
 - 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/core-rules.md` +
   `writer.md`가 규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
   헤드리스 실행(`claude -p`)도 이 스펙과 `docs/seo-guide.md`를 로드해 따른다. 산출물은 파일이다
