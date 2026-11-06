@@ -560,8 +560,10 @@ export function renderManuscriptPage(
     // 보관함으로 내려받는다. 그 주기를 기다리지 않고, 또 맥이 아닌 기기에서도 이 화면에서 바로
     // 받으려고 붙인 버튼이다.
     //
-    // 낱장으로 받는다(zip으로 묶지 않는다 - 2026-09-29 사용자 결정). 브라우저가 "파일 여러 개를
+    // 이 버튼은 낱장으로 받는다(2026-09-29 사용자 결정). 브라우저가 "파일 여러 개를
     // 다운로드하시겠습니까"를 한 번 묻고, 허용하면 그대로 다운로드 폴더에 떨어진다.
+    // 묶음으로 받는 🗂 버튼은 2026-11-06에 **더한** 것이고, 이 경로를 대체하지 않는다 -
+    // 한 장만 필요할 때가 있고, fetch가 막혔을 때의 ?download= 폴백도 여기에만 있다.
     //
     // 파일명은 manifest의 fileName(보관함·sync:images와 같은 이름)을 쓴다. 본문 순서가 이름 앞의
     // 번호라, 받은 순서 그대로 편집기에 올리면 된다.
@@ -639,6 +641,171 @@ export function renderManuscriptPage(
         toast(failed === 0
           ? "이미지 " + saved + "장을 내려받았습니다"
           : "이미지 " + saved + "장 저장 · " + failed + "장 실패");
+      });
+    }
+
+    // ---- 이미지 묶음(ZIP) 저장(2026-11-06 사용자 요청) ----
+    // 2026-09-29에는 "낱장으로만, zip으로 묶지 않는다"였다. 그 결정을 지우지 않고 **ZIP을 더한다** -
+    // 한 장만 필요할 때는 낱장이 빠르고, 네이버·인물 백과처럼 **복붙으로 올리는 경로**에서는 매번
+    // 전부 받으므로 한 장씩 저장 창을 지나는 일이 반복 작업이었다.
+    //
+    // 왜 브라우저에서 묶는가(Pages Function이 아니라):
+    //  · 뷰어 이미지는 전 트랙이 Supabase Storage 공개 URL 하나뿐이고, 그 응답이
+    //    \`access-control-allow-origin: *\`를 보내므로 브라우저가 바이트를 읽을 수 있다(2026-11-06 확인).
+    //  · Pages Function에는 DB 자격증명이 없다 - Access 토큰 검증과 GitHub dispatch만 한다
+    //    (editApi.ts). 서버에서 묶으려면 Supabase 비밀값을 Pages 환경에 새로 넣거나 클라이언트가
+    //    보낸 URL을 그대로 받아 와야 한다(후자는 임의 주소를 대신 받아 주는 구멍이다).
+    //  · JPEG·PNG는 이미 압축돼 있어 deflate가 거의 줄이지 못한다. 무압축(store) ZIP이면 외부
+    //    스크립트(JSZip 등 100KB대) 없이 아래 코드로 끝나고, file://로 연 페이지에서도 된다.
+
+    var CRC_TABLE = null;
+    function crc32(bytes) {
+      if (!CRC_TABLE) {
+        CRC_TABLE = new Int32Array(256);
+        for (var n = 0; n < 256; n += 1) {
+          var c = n;
+          for (var k = 0; k < 8; k += 1) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+          CRC_TABLE[n] = c;
+        }
+      }
+      var crc = -1;
+      for (var i = 0; i < bytes.length; i += 1) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xFF];
+      return (crc ^ -1) >>> 0;
+    }
+
+    /**
+     * 무압축(store) ZIP 한 덩이. entries는 [{ name, bytes }]다.
+     * ZIP64는 쓰지 않는다 - 한 원고의 이미지는 몇 장이라 4GB·65535개에 닿지 않는다.
+     * 파일명이 한글이라 general purpose flag의 bit 11(UTF-8)을 세운다 - 이 비트가 없으면
+     * 윈도 탐색기가 CP949로 읽어 이름이 깨진다.
+     */
+    function buildZip(entries, at) {
+      var enc = new TextEncoder();
+      var dosTime = ((at.getHours() << 11) | (at.getMinutes() << 5) | (at.getSeconds() >> 1)) & 0xFFFF;
+      var dosDate = (((at.getFullYear() - 1980) << 9) | ((at.getMonth() + 1) << 5) | at.getDate()) & 0xFFFF;
+      var parts = [];
+      var centrals = [];
+      var offset = 0;
+      entries.forEach(function (entry) {
+        var nameBytes = enc.encode(entry.name);
+        var size = entry.bytes.length;
+        var crc = crc32(entry.bytes);
+
+        var local = new Uint8Array(30 + nameBytes.length);
+        var lv = new DataView(local.buffer);
+        lv.setUint32(0, 0x04034b50, true);
+        lv.setUint16(4, 20, true);
+        lv.setUint16(6, 0x0800, true);
+        lv.setUint16(8, 0, true);
+        lv.setUint16(10, dosTime, true);
+        lv.setUint16(12, dosDate, true);
+        lv.setUint32(14, crc, true);
+        lv.setUint32(18, size, true);
+        lv.setUint32(22, size, true);
+        lv.setUint16(26, nameBytes.length, true);
+        local.set(nameBytes, 30);
+        parts.push(local, entry.bytes);
+
+        var central = new Uint8Array(46 + nameBytes.length);
+        var cv = new DataView(central.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint16(4, 20, true);
+        cv.setUint16(6, 20, true);
+        cv.setUint16(8, 0x0800, true);
+        cv.setUint16(10, 0, true);
+        cv.setUint16(12, dosTime, true);
+        cv.setUint16(14, dosDate, true);
+        cv.setUint32(16, crc, true);
+        cv.setUint32(20, size, true);
+        cv.setUint32(24, size, true);
+        cv.setUint16(28, nameBytes.length, true);
+        cv.setUint32(42, offset, true);
+        central.set(nameBytes, 46);
+        centrals.push(central);
+        offset += local.length + size;
+      });
+
+      var centralSize = centrals.reduce(function (sum, c) { return sum + c.length; }, 0);
+      var end = new Uint8Array(22);
+      var ev = new DataView(end.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, entries.length, true);
+      ev.setUint16(10, entries.length, true);
+      ev.setUint32(12, centralSize, true);
+      ev.setUint32(16, offset, true);
+      return new Blob(parts.concat(centrals, [end]), { type: "application/zip" });
+    }
+
+    /** 파일명에 쓸 수 없는 글자를 걷어낸다(윈도 기준이 가장 좁다). 한글은 그대로 둔다. */
+    var BAD_NAME_CHARS = '/\\\\:*?"<>|';
+    function safeName(value) {
+      var out = "";
+      var text = String(value == null ? "" : value);
+      for (var i = 0; i < text.length; i += 1) {
+        var ch = text.charAt(i);
+        if (BAD_NAME_CHARS.indexOf(ch) < 0 && ch.charCodeAt(0) >= 32) out += ch;
+      }
+      return out.replace(/\\s+/g, "-").replace(/-{2,}/g, "-").replace(/^[.-]+/, "").replace(/[.-]+$/, "");
+    }
+
+    /** 어느 원고의 묶음인지 파일명만 봐도 알아야 한다 - 날짜 + 제목. */
+    function zipFileNameFor(topic) {
+      var stem = safeName(topic.title || topic.keyword).slice(0, 60).replace(/[.-]+$/, "");
+      return topic.date + "-" + (stem || "원고") + "-이미지.zip";
+    }
+
+    function extOf(url) {
+      var match = String(url == null ? "" : url).split("?")[0].match(/\\.([a-zA-Z0-9]{2,4})$/);
+      return match ? "." + match[1].toLowerCase() : ".jpg";
+    }
+
+    /**
+     * 그 원고의 이미지를 전부 ZIP 하나로. 낱장 저장(downloadImages)과 **같은 파일명**을 쓴다 -
+     * 보관함·sync:images와 같은 이름이라 받은 순서 그대로 편집기에 올리면 된다.
+     *
+     * 빠지는 장이 있어도 묶음을 포기하지 않고 **몇 장이 왜 빠졌는지 말한다**. 404·CORS로 한 장
+     * 못 받았는데 조용히 넘어가면 편집기에서야 비는 걸 알게 된다. 한 장도 못 받으면 ZIP을 아예
+     * 만들지 않고 낱장 버튼으로 안내한다(낱장은 fetch가 막혀도 \`?download=\` 링크로 한 번 더 간다).
+     */
+    function downloadImagesZip(topic, btn) {
+      var shots = (topic.images || []).filter(function (s) { return s.url; });
+      if (shots.length === 0) { toast("내려받을 이미지가 없습니다"); return; }
+
+      var label = btn.textContent;
+      btn.disabled = true;
+
+      var used = {};
+      var entries = [];
+      var failed = [];
+      var chain = Promise.resolve();
+
+      shots.forEach(function (s, i) {
+        chain = chain.then(function () {
+          btn.textContent = "🗂 묶는 중 " + (i + 1) + "/" + shots.length;
+          var name = uniqueName(used, s.fileName || (i + 1 < 10 ? "0" : "") + (i + 1) + extOf(s.url));
+          return fetch(s.url).then(function (res) {
+            if (!res.ok) throw new Error(String(res.status));
+            return res.arrayBuffer();
+          }).then(function (buf) {
+            entries.push({ name: name, bytes: new Uint8Array(buf) });
+          }).catch(function (error) {
+            failed.push(name);
+            try { console.warn("ZIP 제외: " + name + " - " + (error && error.message ? error.message : error)); } catch (e) {}
+          });
+        });
+      });
+
+      chain.then(function () {
+        btn.disabled = false;
+        btn.textContent = label;
+        if (entries.length === 0) {
+          toast("이미지를 한 장도 받지 못했습니다 - ⬇️ 이미지 낱장으로 받아 보세요");
+          return;
+        }
+        saveBlob(buildZip(entries, new Date()), zipFileNameFor(topic));
+        toast(failed.length === 0
+          ? "이미지 " + entries.length + "장을 ZIP으로 받았습니다"
+          : "ZIP " + entries.length + "장 · " + failed.length + "장 빠짐(" + failed.join(", ") + ")");
       });
     }
 
@@ -1156,7 +1323,12 @@ ${publishButton ? publishScript(publishButton) : ""}
       // 네이버 복사 버튼과 배리에이션 없음 문구는 2026-10-03에 뺐다 - 배리에이션
       // 단계가 09-30에 폐지돼 새 원고는 전부 "없음"으로만 떴다. 네이버 발행은 텔레그램 버튼이 한다.
       if (blocks.length > 0) h += '<button class="btn" id="c-prompt">🖼 이미지 프롬프트 복사(' + blocks.length + '장)</button>';
-      if (madeCount > 0) h += '<button class="btn" id="dl-images">⬇️ 이미지 저장(' + madeCount + '장)</button>';
+      // 이미지 받기 둘(2026-11-06) - 묶음(ZIP)과 낱장. 복붙으로 올리는 경로는 매번 전부 받으므로
+      // ZIP을 앞에 두고, 한 장만 바꿀 때 쓰는 낱장 버튼은 라벨만 구분해 그대로 남긴다.
+      if (madeCount > 0) {
+        h += '<button class="btn" id="dl-zip">🗂 이미지 ZIP(' + madeCount + '장)</button>';
+        h += '<button class="btn" id="dl-images">⬇️ 이미지 낱장(' + madeCount + '장)</button>';
+      }
       h += '<button class="btn" id="edit-toggle">✏️ 수정</button>';
       // 수정은 localStorage에만 남는다 - 💾 저장을 눌러야 DB 원고에 들어간다. 저장은 저장일 뿐 발행하지 않는다(2026-10-07):
       // 발행 진입점은 텔레그램 버튼 하나다. 저장하고 곧바로 발행 버튼을 누르는 경합은 서버가 막는다(viewerEditGuard).
@@ -1275,6 +1447,9 @@ ${publishButton ? publishBarScript(publishButton) : ""}
 
       var dlBtn = document.getElementById("dl-images");
       if (dlBtn) dlBtn.addEventListener("click", function () { downloadImages(topic, dlBtn); });
+
+      var zipBtn = document.getElementById("dl-zip");
+      if (zipBtn) zipBtn.addEventListener("click", function () { downloadImagesZip(topic, zipBtn); });
 
       var editing = false;
       var editBtn = document.getElementById("edit-toggle");
