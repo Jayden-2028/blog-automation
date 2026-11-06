@@ -22,7 +22,8 @@ import { listArticlesByJobId, createArticle } from "../../services/supabase/repo
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { applyUnifiedRevision } from "./applyUnifiedRevision.js";
 import { notifyRevisedArticleReady } from "./notifyRevisedArticleReady.js";
-import { reviseArticleWithFeedback } from "./reviseArticleWithFeedback.js";
+import { describeSupplement, reviseWithSupplementalResearch } from "./reviseWithSupplementalResearch.js";
+import type { SupplementSummary } from "./reviseWithSupplementalResearch.js";
 import type { ArticleJobRow } from "../../types/database.js";
 
 async function main(): Promise<void> {
@@ -52,14 +53,36 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = await reviseArticleWithFeedback({
+  // 2026-11-06: 피드백이 원고·조사 기록에 없는 자료를 요구하면 **그 항목만** 보충 조사해 조사 기록에
+  // 덧붙인 뒤 재작성한다. 요구가 없으면(대부분) 지금까지와 같은 경로로 간다.
+  const { result, supplement } = await reviseWithSupplementalResearch({
+    jobId,
     keyword: job.keyword,
     category: job.category,
-    metadata: job.metadata,
+    metadata: (job.metadata ?? null) as Record<string, unknown> | null,
     originalTitle: baseArticle.title ?? job.keyword,
     originalBody: baseArticle.content,
     feedback,
   });
+
+  // 반영 불가는 실패가 아니다 - 원고를 건드리지 않고 **사유를 그대로** 사용자에게 보여 준다
+  // (2026-11-06 전에는 이 경로가 "모델이 출력 마커 형식을 따르지 않았습니다"로 나갔다).
+  if (result.status === "blocked") {
+    console.error(`⛔ 반영 불가: ${result.reason}`);
+    await notifierForJob(job)
+      .sendMessages([
+        {
+          text:
+            `⛔ <b>수정을 반영하지 못했습니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+            `${escapeTelegramHtml(result.reason)}\n\n` +
+            supplementLines(supplement) +
+            `원고는 그대로 두었습니다. 자료를 알려주시거나 다른 방향으로 다시 요청해 주세요.`,
+        },
+      ])
+      .catch(() => {});
+    process.exitCode = 1;
+    return;
+  }
 
   if (result.status === "failed") {
     console.error(`❌ 실패: ${result.error}`);
@@ -79,6 +102,7 @@ async function main(): Promise<void> {
   console.log(`\n▶ 결과: success (${Math.round(result.durationMs / 1000)}초)`);
   console.log(`   제목: ${result.revised.title}`);
   console.log(`   본문 길이: ${result.revised.body.length}자`);
+  for (const line of describeSupplement(supplement)) console.log(`   ${line}`);
 
   // 통합 흐름(자동 승인된 job)이면 수정본도 곧바로 approved다 - 초안 검수 대기로 되돌리지 않는다.
   const unified = shouldSkipDraftReview(job) && job.status === "approved";
@@ -94,7 +118,7 @@ async function main(): Promise<void> {
 
   // 통합 흐름: 마커 diff로 이미지를 유지/부분 갱신하고 원고 준비를 다시 돌린다(전체 재실행 아님).
   if (unified) {
-    await reviseUnified(job, baseArticle.content, result.revised.body);
+    await reviseUnified(job, baseArticle.content, result.revised.body, supplement);
     return;
   }
 
@@ -102,7 +126,7 @@ async function main(): Promise<void> {
   // 보고 고쳐달라고 한 것이므로, 바로 최종본을 다시 만들어 발행 버튼과 함께 재전송한다
   // (2026-09-19 사용자 요청: "이미 승인된 초안이라도 다시 수정하면 반영해서 최종안을 재전송").
   if (job.metadata?.channelManuscriptsReadyAt) {
-    await rePrepareFinalManuscript(jobId, job.keyword);
+    await rePrepareFinalManuscript(jobId, job.keyword, supplement);
     return;
   }
 
@@ -113,13 +137,13 @@ async function main(): Promise<void> {
   }
 
   console.log("\n▶ Telegram 알림 발송 중...");
-  await notifyRevisedArticleReady(job, newArticle, feedback, telegraphUrl);
+  await notifyRevisedArticleReady(job, newArticle, feedback, telegraphUrl, describeSupplement(supplement));
   console.log("✅ 완료 - Telegram에서 확인해주세요");
 }
 
 
 /** 통합 흐름의 수정 반영. 이미지는 마커 diff에 따라 유지하거나 달라진 자리만 갱신한다(PIPELINE-MERGE §1-c). */
-async function reviseUnified(job: ArticleJobRow, beforeBody: string, afterBody: string): Promise<void> {
+async function reviseUnified(job: ArticleJobRow, beforeBody: string, afterBody: string, supplement: SupplementSummary): Promise<void> {
   const outcome = await applyUnifiedRevision(job, beforeBody, afterBody);
 
   const imageLine =
@@ -133,7 +157,9 @@ async function reviseUnified(job: ArticleJobRow, beforeBody: string, afterBody: 
     .sendMessages([
       {
         text:
-          `🔄 <b>수정을 반영했습니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n${imageLine}\n` +
+          `🔄 <b>수정을 반영했습니다</b>\n${escapeTelegramHtml(job.keyword)}\n\n` +
+          supplementLines(supplement) +
+          `${imageLine}\n` +
           (outcome.dispatched
             ? "완료되면 발행 버튼과 함께 다시 보내드립니다."
             : "⚠️ 원고 준비 발화에 실패했습니다. GitHub Actions의 job-publish-prepare를 수동 실행해 주세요."),
@@ -162,7 +188,7 @@ async function reviseUnified(job: ArticleJobRow, beforeBody: string, afterBody: 
  * 배리에이션 article row는 지우지 않는다 - prepareManuscript가 "기준 원고가 배리에이션보다
  * 새것이면 다시 만든다"로 알아서 판단한다(row를 지우면 발행 이력 추적이 끊긴다).
  */
-async function rePrepareFinalManuscript(jobId: string, keyword: string): Promise<void> {
+async function rePrepareFinalManuscript(jobId: string, keyword: string, supplement: SupplementSummary): Promise<void> {
   await ArticleJobRepository.mergeMetadata(jobId, {
     channelManuscriptsReadyAt: null,
     images: [],
@@ -183,6 +209,7 @@ async function rePrepareFinalManuscript(jobId: string, keyword: string): Promise
       {
         text:
           `🔄 <b>수정을 반영했습니다</b>\n${escapeTelegramHtml(keyword)}\n\n` +
+          supplementLines(supplement) +
           (dispatched
             ? "최종 원고와 이미지를 다시 만들고 있습니다. 완료되면 발행 버튼과 함께 다시 보내드립니다."
             : "최종 원고 재생성 발화에 실패했습니다. 다음 준비 실행에서 자동으로 처리됩니다."),
@@ -191,6 +218,12 @@ async function rePrepareFinalManuscript(jobId: string, keyword: string): Promise
     .catch(() => {});
 
   console.log("✅ 완료 - 최종 원고를 다시 만듭니다(job-publish-prepare).");
+}
+
+/** 보충 조사 결과를 알림 본문에 끼울 블록으로 만든다. 없으면 빈 문자열 - 평시 알림은 그대로다. */
+function supplementLines(supplement: SupplementSummary): string {
+  const lines = describeSupplement(supplement);
+  return lines.length > 0 ? `${lines.map((line) => escapeTelegramHtml(line)).join("\n")}\n\n` : "";
 }
 
 main().catch((error) => {

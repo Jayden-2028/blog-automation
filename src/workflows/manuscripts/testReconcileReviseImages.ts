@@ -109,4 +109,14 @@ const job = (metadata: Record<string, unknown>) =>
   assert(parseRevisionOutput("### TITLE\nT\n### BODY\n본문", "x").title === "T", "기존 파서는 그대로");
   console.log("✅ revise 프롬프트 - 이미지 마커 위치·개수·내용 유지 지시");
 }
+// ---- 보충 조사로 문단이 늘어도 마커가 그대로면 이미지는 유지된다(2026-11-06) ----
+{
+  const before = body(["가", "나"]);
+  // 보충 조사 결과가 들어가 문단이 길어진 본문. 마커 줄은 같은 자리·같은 설명이다.
+  const after = before.replace("본문 1 문단입니다.", "본문 1 문단입니다.\n\n새로 조사한 필모그래피 문단입니다.");
+  const plan = planReviseImages(before, after, current);
+  assert(plan.kind === "keep", "문단만 늘고 마커가 그대로면 이미지를 유지한다(재수집 없음)");
+  console.log("✅ 보충 조사로 문단 추가 - 마커 불변이면 이미지 유지");
+}
+
 console.log("\n✅ testReconcileReviseImages 전체 통과");

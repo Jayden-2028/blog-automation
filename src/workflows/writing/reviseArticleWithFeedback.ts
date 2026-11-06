@@ -1,8 +1,12 @@
 // 검수 단계("✏️ 수정 필요")에서 사용자가 텔레그램 답장으로 보낸 수정 방향을 반영해 작성 단계 원고를
 // 다시 쓴다(2026-09-15 사용자 요청). 이 원고가 곧 최종본이다(2026-09-30 배리에이션 폐지).
 //
-// 헤드리스 경로(claude -p + rules/humanize.md 자체 윤문)를 쓴다. 웹 검색을 주지 않는 이유도 같다: 기존 원고가 감사 기록이고, 새 사실을 끌어오면
-// 추적성이 깨진다(팩트는 기존 원고에서만 가져온다 - 문체·구성·분량만 피드백대로 바꾼다).
+// 헤드리스 경로(claude -p + rules/humanize.md 자체 윤문)를 쓴다. 이 단계에 웹 검색을 주지 않는 이유는
+// 추적성이다 - 어떤 문장이 어디서 왔는지 감사할 수 있어야 한다. 그래서 **사실 출처를 넓히는 방식도
+// "모델이 웹에서 보고 바로 쓴다"가 아니다**: 사실은 기존 원고와 **조사 기록**(researchText =
+// job.metadata.researchFileContent)에서만 가져온다. 조사 기록에 없는 것을 요구하는 수정 요청은
+// 호출부(reviseWithSupplementalResearch)가 **먼저 보충 조사해 기록에 덧붙인 뒤** 여기로 들여보낸다
+// (2026-11-06 - 그때까지는 조사 기록조차 못 봐서 "필모그래피를 늘려 달라"를 거부했다).
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
@@ -19,6 +23,14 @@ export const REVISION_OUTPUT_MARKERS = {
   body: "### BODY",
 } as const;
 
+/**
+ * "이 수정은 할 수 없다"고 말할 자리(2026-11-06). 전에는 출력 형식에 TITLE/BODY뿐이라, 모델이 산문으로
+ * 거부하면 코드가 "마커 형식을 따르지 않았습니다"로 바꿔 내보냈고 **진짜 사유가 에러 꼬리에 잘렸다**
+ * (2026-11-06 실측 - 사용자는 왜 안 됐는지 알 수 없었다). 이제 모델이 이 마커로 사유를 적고,
+ * 그 사유가 그대로 사용자 알림에 간다.
+ */
+export const REVISION_BLOCKED_MARKER = "### CANNOT" as const;
+
 export type RevisedArticle = {
   title: string;
   body: string;
@@ -26,6 +38,8 @@ export type RevisedArticle = {
 
 export type ReviseArticleResult =
   | { status: "success"; revised: RevisedArticle; durationMs: number }
+  /** 모델이 사유를 적고 재작성을 거부했다. 원고는 건드리지 않고 사유를 사용자에게 보여 준다. */
+  | { status: "blocked"; reason: string; durationMs: number }
   | { status: "failed"; error: string };
 
 export type ReviseArticleInput = {
@@ -36,6 +50,13 @@ export type ReviseArticleInput = {
   originalTitle: string;
   /** 기존 기준 원고 본문(마크다운, 해시태그 줄·이미지 마커 포함). */
   originalBody: string;
+  /**
+   * 조사 기록(`job.metadata.researchFileContent`). 원고와 **함께** 사실 출처다(2026-11-06).
+   * 보충 조사를 돈 경우 그 블록이 이미 덧붙여진 상태로 들어온다.
+   */
+  researchText?: string | null;
+  /** 보충 조사에서 못 찾은 항목. 본문에 쓰지 말라고 못박는다(지어내기 방지). */
+  unavailableItems?: ReadonlyArray<{ item: string; reason: string }>;
   /** 사용자가 텔레그램 답장으로 보낸 수정 방향 원문. */
   feedback: string;
   /** 테스트 주입 지점. 기본은 runHeadlessClaude(claude -p). */
@@ -49,6 +70,8 @@ export type ReviseArticleInput = {
 function buildPrompt(input: ReviseArticleInput): string {
   const { keyword, category, originalTitle, originalBody, feedback } = input;
   const M = REVISION_OUTPUT_MARKERS;
+  const researchText = input.researchText?.trim() ? input.researchText.trim() : null;
+  const unavailable = input.unavailableItems ?? [];
 
   return [
     `당신은 이미 쓴 블로그 원고를, 편집자(사람)의 수정 지시에 맞춰 다시 쓴다.`,
@@ -61,12 +84,34 @@ function buildPrompt(input: ReviseArticleInput): string {
     ``,
     `## 절대 규칙 - 사실 보존`,
     `- 기존 원고에 있는 수치·날짜·금액·고유명사·인용·제도명은 편집자가 명시적으로 바꾸라고 지시하지`,
-    `  않는 한 그대로 유지한다. 새로운 사실·수치·날짜를 추가하지 않는다(웹 검색 없음, 기존 원고가`,
-    `  유일한 사실 출처다).`,
+    `  않는 한 그대로 유지한다.`,
+    researchText
+      ? `- **사실 출처는 둘뿐이다 - 아래 "기존 원고"와 "조사 자료".** 둘 중 어디에도 없는 사실·수치·날짜·`
+      : `- **사실 출처는 아래 "기존 원고"뿐이다.** 거기 없는 사실·수치·날짜·`,
+    researchText
+      ? `  작품·인물 관계는 쓰지 않는다. 웹 검색을 쓰지 않고, 기억으로 채우지 않는다.`
+      : `  작품·인물 관계는 쓰지 않는다(웹 검색 없음, 기억으로 채우지 않는다).`,
+    researchText
+      ? `- 조사 자료에 있는 사실은 **편집자가 요구한 범위에서만** 본문으로 끌어온다 - 조사 자료를 다 담으려`
+      : ``,
+    researchText ? `  하지 않는다. 요구받지 않은 항목을 더하면 글의 주제가 흐려진다.` : ``,
+    ...(unavailable.length > 0
+      ? [
+          ``,
+          `## 절대 규칙 - 못 찾은 항목`,
+          `- 아래 항목은 보충 조사에서 근거를 찾지 못했다. **본문에 쓰지 않는다** - 지어내느니 빠뜨린다.`,
+          ...unavailable.map((entry) => `  - ${entry.item} (${entry.reason})`),
+          `- 편집자가 요구한 항목 중 일부만 반영된다. 그래도 **빠진 항목을 본문에 언급하지 않는다**`,
+          `  ("자료가 없어 생략했다" 같은 메타 서술도 쓰지 않는다 - 사용자에게는 별도로 알린다).`,
+        ]
+      : []),
     ``,
     `## 절대 규칙 - 수정 지시 반영`,
     `- 아래 "편집자 피드백"에 적힌 방향을 정확히 반영한다. 피드백이 언급하지 않은 부분(사실,`,
     `  구조, 톤)은 원래 원고를 그대로 유지한다 - 요청받지 않은 부분까지 임의로 고치지 않는다.`,
+    `- **글의 주제를 바꾸지 않는다.** 이 수정은 기존 글에 문단을 더하거나 다듬는 일이다 - 다른 글을`,
+    `  쓰는 일이 아니다. 제목이 가리키는 주제, 소제목의 큰 뼈대, 글의 초점은 편집자가 그것을 바꾸라고`,
+    `  명시했을 때만 바꾼다.`,
     `- **이미지 마커(\`[IMAGE: …]\` 줄)는 편집자가 이미지 수정을 요청하지 않는 한 위치·개수·내용을 그대로 유지한다.**`,
     `  이 원고에는 이미 이미지가 붙어 있고 마커 순번으로 짝지어져 있다 - 마커가 하나라도 움직이면 이미지가 엉뚱한 자리로 간다.`,
     `  문단을 고쳐도 마커 줄은 같은 문단 옆에 같은 설명으로 둔다. 마커를 새로 넣거나 지우거나 옮기는 것은 편집자가 요구했을 때만 한다.`,
@@ -79,11 +124,19 @@ function buildPrompt(input: ReviseArticleInput): string {
     `${M.body}`,
     `(마크다운 본문 전체 - 수정 반영한 최종본. 점검 결과·작업 노트 같은 메타 텍스트를 절대 붙이지 않는다.)`,
     ``,
+    `### 반영할 수 없을 때`,
+    `수정 지시를 위 규칙 안에서 도저히 반영할 수 없으면(예: 요구한 사실이 원고에도 조사 자료에도 없다),`,
+    `원고를 억지로 고치지 말고 아래 마커 하나만 출력한다. 사유는 사용자에게 그대로 전달된다.`,
+    REVISION_BLOCKED_MARKER,
+    `(무엇을 왜 반영할 수 없는지 한두 문장. 사용자가 무엇을 더 알려줘야 하는지 적는다.)`,
+    `일부만 반영할 수 있으면 ${REVISION_BLOCKED_MARKER}를 쓰지 않고, 반영 가능한 만큼만 반영해 본문을 출력한다.`,
+    ``,
     `## 편집자 피드백`,
     feedback,
     ``,
     `## 기존 원고 (키워드: ${keyword} / 제목: ${originalTitle})`,
     originalBody,
+    ...(researchText ? [``, `## 조사 자료 (사실 출처 - 이 글을 쓸 때 쓴 조사 기록)`, researchText] : []),
   ]
     .filter((line) => line !== ``)
     .join("\n");
@@ -105,6 +158,16 @@ export function parseRevisionOutput(raw: string, fallbackTitle: string): Revised
   return { title, body };
 }
 
+/**
+ * 거부 마커가 있으면 사유를 뽑는다. 사유가 비어 있어도 "거부"라는 사실은 살린다 - 마커 누락 에러로
+ * 바꿔 내보내면 사용자가 다시 원인을 알 수 없게 된다.
+ */
+export function parseBlockedReason(raw: string): string | null {
+  if (!raw.includes(REVISION_BLOCKED_MARKER)) return null;
+  const reason = sliceBetween(raw, REVISION_BLOCKED_MARKER, [REVISION_OUTPUT_MARKERS.title, REVISION_OUTPUT_MARKERS.body]);
+  return reason || "모델이 사유를 적지 않고 반영 불가로 끝냈습니다";
+}
+
 export async function reviseArticleWithFeedback(input: ReviseArticleInput): Promise<ReviseArticleResult> {
   const generate =
     input.generate ??
@@ -121,6 +184,12 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
   const result = await generate(buildPrompt(input));
   if (!result.ok) {
     return { status: "failed", error: result.error };
+  }
+
+  // 반영 불가는 실패가 아니라 **사유가 있는 결론**이다. 마커 검사보다 먼저 본다.
+  const blocked = parseBlockedReason(result.output);
+  if (blocked) {
+    return { status: "blocked", reason: blocked, durationMs: Date.now() - startedAt };
   }
 
   // 2026-09-06 실측 - 마커를 안 지킨 대화체 회신을 그대로
