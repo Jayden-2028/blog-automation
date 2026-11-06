@@ -7,6 +7,10 @@
 # CLAUDE_CODE_OAUTH_TOKEN + 플러그인 설치 필요(job-write.yml과 동일).
 #
 # feedback은 workflow_dispatch string input으로 그대로 넘긴다(사용자가 텔레그램에 입력한 원문).
+#
+# 2026-11-06: 피드백이 원고·조사 기록에 없는 자료를 요구하면 이 run 안에서 **그 항목만** 보충 조사한다
+# (reviseWithSupplementalResearch.ts - 판정 1콜 + WebSearch 1콜). 새 secret·변수는 없고, 시간은 아래
+# timeout-minutes(45) 안에 든다: 판정 3분 + 보충 조사 8분 + 재작성 20분. 그래서 상한을 올리지 않았다.
 
 # 2026-09-16: 실행 순서는 GitHub concurrency 큐가 아니라 pipeline_dispatch_queue(Supabase, DB
 # 큐)가 관리한다 - 근거는 job-research.yml 상단 주석 참고(같은 사고, 같은 수정).

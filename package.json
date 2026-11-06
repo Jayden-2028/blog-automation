@@ -181,6 +181,7 @@
     "test:search-performance": "tsx src/workflows/analytics/testSearchPerformance.ts",
     "test:sanitize-body": "tsx src/workflows/writing/testSanitizeArticleBody.ts",
     "test:revise-article": "tsx src/workflows/writing/testReviseArticleWithFeedback.ts",
+    "test:revise-research": "tsx src/workflows/writing/testReviseSupplementalResearch.ts",
     "test:notify-revised-article": "tsx src/workflows/writing/testNotifyRevisedArticleReady.ts",
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
     "test:keyword-exclusion": "tsx src/config/testKeywordExclusionRules.ts",

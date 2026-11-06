@@ -12,7 +12,9 @@ export function buildRevisedHeaderMessage(
   job: ArticleJobRow,
   article: ArticleRow,
   feedback: string,
-  telegraphUrl: string | null
+  telegraphUrl: string | null,
+  /** 보충 조사 결과 줄(2026-11-06). 못 찾은 항목이 여기서 사용자에게 보인다. */
+  supplementNotes: readonly string[] = []
 ): TelegramOutgoingMessage {
   const lines = [
     "✏️ <b>수정된 초안 준비됨</b>",
@@ -21,6 +23,7 @@ export function buildRevisedHeaderMessage(
     `category: ${escapeTelegramHtml(job.category ?? "N/A")}`,
     "",
     `반영한 수정 방향: ${escapeTelegramHtml(feedback)}`,
+    ...(supplementNotes.length > 0 ? ["", ...supplementNotes.map((note) => escapeTelegramHtml(note))] : []),
   ];
 
   if (!telegraphUrl) {
@@ -40,9 +43,10 @@ export async function notifyRevisedArticleReady(
   job: ArticleJobRow,
   article: ArticleRow,
   feedback: string,
-  telegraphUrl: string | null
+  telegraphUrl: string | null,
+  supplementNotes: readonly string[] = []
 ): Promise<void> {
-  const header = buildRevisedHeaderMessage(job, article, feedback, telegraphUrl);
+  const header = buildRevisedHeaderMessage(job, article, feedback, telegraphUrl, supplementNotes);
 
   const messages: TelegramOutgoingMessage[] = telegraphUrl
     ? [header]
