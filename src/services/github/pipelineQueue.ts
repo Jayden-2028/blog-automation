@@ -180,6 +180,20 @@ export async function tryDispatchNext(deps: PipelineQueueDeps = {}): Promise<voi
       .update({ status: "failed", finished_at: now().toISOString(), error: message })
       .eq("id", next.id);
     await db.from("pipeline_lock").update({ is_busy: false, current_queue_id: null, locked_at: null }).eq("id", 1);
+
+    // 2026-11-06: 디스패치 호출 자체가 실패한 경우도 사용자에게 알린다. 2026-11-05 16:10 UTC에 GitHub 500으로
+    // 사용설명서 Go 2건이 죽었는데 이 분기만 알림이 빠져 있어 아무도 몰랐다(11/01 사고와 같은 모양).
+    // **락을 푼 뒤에** 보낸다 - 락을 쥔 채 알림을 기다리다 막히면 파이프라인 전체가 선다.
+    try {
+      await (deps.notifyFailure ?? defaultNotifyQueueFailure)({
+        jobId: (next.job_id as string | null) ?? null,
+        workflowFile: (next.workflow_file as string | null) ?? null,
+        error: message,
+      });
+    } catch (notifyError) {
+      // 기본 구현은 던지지 않지만 주입된 구현은 모른다 - 알림 실패가 호출부로 번지면 안 된다.
+      console.warn(`⚠️ [pipeline-queue] 실패 알림 발송 실패(무시하고 계속): ${(notifyError as Error).message}`);
+    }
   }
 }
 

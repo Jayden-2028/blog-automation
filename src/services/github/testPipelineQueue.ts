@@ -13,6 +13,16 @@ const quietWarn = async <T>(fn: () => Promise<T>): Promise<T> => {
     console.warn = warn;
   }
 };
+/** 디스패치 실패 분기는 console.error를 남긴다 - 테스트 출력만 조용히 한다. */
+const quietError = async <T>(fn: () => Promise<T>): Promise<T> => {
+  const error = console.error;
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.error = error;
+  }
+};
 import type { PipelineDispatchQueueRow, PipelineLockRow, PipelineQueueStatus } from "../../types/database.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -297,6 +307,8 @@ async function main(): Promise<void> {
         if (calls === 1) throw new Error("네트워크 오류");
         dispatched.push(i.workflowFile);
       },
+      // 기본 알림은 실제 텔레그램으로 나간다 - 테스트는 항상 주입한다.
+      notifyFailure: async () => {},
     };
     await enqueueAndMaybeDispatch({ jobId: "job-1", workflowFile: "job-research.yml" }, deps);
     assert(queue[0]!.status === "failed", "디스패치 자체가 실패하면 그 행은 failed로 남아야 한다");
@@ -305,6 +317,67 @@ async function main(): Promise<void> {
     await enqueueAndMaybeDispatch({ jobId: "job-2", workflowFile: "job-research.yml" }, deps);
     assert(dispatched.length === 1, "이전 디스패치 실패로 락이 안 풀렸다면 다음 항목이 진행되지 않는다 - 그러면 안 된다");
     console.log("✅ workflow_dispatch API 실패 -> 해당 행 failed + 락 해제(다음 항목 진행)");
+  }
+
+  // 5-b) 디스패치 호출 실패도 사용자에게 알린다(2026-11-06). 11/05 GitHub 500으로 사용설명서 Go 2건이
+  //      조용히 죽었다. 알림은 정확히 1번, 실제 실패 메시지와 함께, **락이 풀린 뒤**에 가야 한다.
+  {
+    const { db, queue, lock } = makeFakeDb();
+    const notices: QueueFailureNotice[] = [];
+    let lockBusyAtNotify: boolean | null = null;
+    let queueStatusAtNotify: string | null = null;
+    await quietError(() =>
+      enqueueAndMaybeDispatch(
+        { jobId: "kscene-job", workflowFile: "job-research.yml" },
+        {
+          supabaseClient: db,
+          dispatchToGithub: async () => {
+            throw new Error("GitHub workflow_dispatch 실패(job-research.yml): 500 Internal Server Error - ");
+          },
+          notifyFailure: async (n: QueueFailureNotice) => {
+            lockBusyAtNotify = lock.is_busy;
+            queueStatusAtNotify = queue[0]!.status;
+            notices.push(n);
+          },
+        }
+      )
+    );
+    const noticeCount = notices.length;
+    assert(noticeCount === 1, `디스패치 실패는 정확히 한 번 알려야 한다 (실제: ${noticeCount}회)`);
+    assert(notices[0]!.jobId === "kscene-job", "알림에 jobId가 담겨야 한다");
+    assert(notices[0]!.workflowFile === "job-research.yml", "어느 단계인지 담겨야 한다");
+    assert(notices[0]!.error.includes("500 Internal Server Error"), `실제 실패 메시지가 담겨야 한다: ${notices[0]!.error}`);
+    assert(notices[0]!.error === queue[0]!.error, "알림 사유와 큐 행에 적힌 사유가 같아야 한다");
+    assert(lockBusyAtNotify === false, "알림 시점에 락은 이미 풀려 있어야 한다(락을 쥔 채 알림을 기다리면 파이프라인이 선다)");
+    assert(queueStatusAtNotify === "failed", "알림 시점에 큐 행은 이미 failed여야 한다");
+    assert(!lock.is_busy && lock.current_queue_id === null, "알림 뒤에도 락은 풀린 상태여야 한다");
+    console.log("✅ 디스패치 실패 -> 알림 1회(실제 메시지) + 락은 알림보다 먼저 해제");
+  }
+
+  // 5-c) 알림 자체가 던져도 큐는 멈추지 않는다 - 락이 풀리고 다음 항목이 진행된다.
+  {
+    const { db, queue, lock } = makeFakeDb();
+    const dispatched: string[] = [];
+    let calls = 0;
+    const deps = {
+      supabaseClient: db,
+      dispatchToGithub: async (i: { inputs: Record<string, string> }) => {
+        calls += 1;
+        if (calls === 1) throw new Error("boom");
+        dispatched.push(i.inputs.job_id);
+      },
+      notifyFailure: async () => {
+        throw new Error("텔레그램 다운");
+      },
+    };
+    await quietError(async () => {
+      await quietWarn(() => enqueueAndMaybeDispatch({ jobId: "job-a", workflowFile: "job-research.yml" }, deps));
+    });
+    assert(queue[0]!.status === "failed", "알림이 던져도 실패 행은 failed로 남아야 한다");
+    assert(!lock.is_busy, "알림이 던져도 락은 풀려 있어야 한다");
+    await enqueueAndMaybeDispatch({ jobId: "job-b", workflowFile: "job-research.yml" }, deps);
+    assert(dispatched.join(",") === "job-b", "알림 실패 뒤에도 다음 항목이 진행돼야 한다");
+    console.log("✅ 알림이 던져도 큐 배수는 계속된다");
   }
 
   // 6) 오래된(stale) 락은 다음 시도에서 자동 회수된다 - 러너 강제 종료 등으로 markDoneAndDrain이
