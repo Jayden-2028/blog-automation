@@ -34,6 +34,24 @@ const GITHUB_API_BASE_URL = "https://api.github.com";
  */
 export const HEAVY_PIPELINE_WORKFLOWS = ["job-research.yml", "job-write.yml", "job-revise.yml"];
 
+/**
+ * workflow_dispatch POST 재시도 간격(ms) - 최대 4회(1 + 이 길이).
+ *
+ * 2026-11-05 사고: 16:10 UTC에 사용설명서 트랙 Go 2건이 GitHub 500 한 번에 둘 다 죽었다(디스패치부터
+ * 실패까지 2.4초 - 재시도가 없었다). 2026-11-04 GitHub 장애 대응으로 재시도를 넣은 곳은 Cloudflare
+ * Worker의 cron 디스패치뿐이었고, Go 버튼이 타는 이 Node 경로는 빠져 있었다.
+ *
+ * ⚠️ `cloudflare/telegram-relay/src/index.ts`의 `DISPATCH_RETRY_DELAYS_MS`·`isRetryableStatus`와 **같은 값·같은
+ * 판정**이다. 두 벌인 이유: Worker(Cloudflare 런타임)와 Node는 번들이 분리돼 서로 import 할 수 없다. 한쪽을
+ * 바꾸면 다른 쪽도 같이 바꾼다.
+ */
+export const DISPATCH_RETRY_DELAYS_MS = [2_000, 6_000, 12_000];
+
+/** 다시 던져볼 만한 실패인가. 4xx는 토큰·권한·입력 문제라 재시도해도 같은 답이 온다(Worker와 같은 기준). */
+export function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export type DispatchWorkflowInput = {
   /** 워크플로우 파일명(.github/workflows/ 아래), 예: "job-research.yml". */
   workflowFile: string;
@@ -58,6 +76,8 @@ export type DispatchWorkflowInput = {
   avoidEvictionPollIntervalMs?: number;
   /** 테스트 주입용. 기본 전역 fetch. */
   fetchImpl?: typeof fetch;
+  /** 테스트 주입용. 재시도·대기 사이의 기다림. 기본 setTimeout(실제 대기). */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -95,6 +115,7 @@ async function waitForFreeConcurrencySlot(input: DispatchWorkflowInput, reposito
   if (!groupWorkflows || groupWorkflows.length === 0) return;
 
   const fetchImpl = input.fetchImpl ?? fetch;
+  const sleepImpl = input.sleep ?? sleep;
   const maxWaitMs = input.avoidEvictionMaxWaitMs ?? 3 * 60 * 1000;
   const pollIntervalMs = input.avoidEvictionPollIntervalMs ?? 10_000;
   const startedAt = Date.now();
@@ -108,7 +129,7 @@ async function waitForFreeConcurrencySlot(input: DispatchWorkflowInput, reposito
       );
       return;
     }
-    await sleep(pollIntervalMs);
+    await sleepImpl(pollIntervalMs);
     queuedCount = await countQueuedRunsInGroup(groupWorkflows, repository, token, fetchImpl);
   }
 }
@@ -123,22 +144,48 @@ export async function dispatchGithubWorkflow(input: DispatchWorkflowInput): Prom
 
   await waitForFreeConcurrencySlot(input, repository, token);
 
+  const sleepImpl = input.sleep ?? sleep;
   const url = `${GITHUB_API_BASE_URL}/repos/${repository}/actions/workflows/${input.workflowFile}/dispatches`;
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "Content-Type": "application/json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    body: JSON.stringify({ ref: input.ref ?? "main", inputs: input.inputs }),
-  });
+  const attempts = DISPATCH_RETRY_DELAYS_MS.length + 1;
+  let lastError: Error | undefined;
 
-  if (!response.ok) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // 1회차는 전과 같은 문구로 남긴다 - 재시도한 경우만 회차가 보이게(Worker와 같은 결).
+    const label = attempt === 1 ? input.workflowFile : `${input.workflowFile} ${attempt}/${attempts}회차`;
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "Content-Type": "application/json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+        body: JSON.stringify({ ref: input.ref ?? "main", inputs: input.inputs }),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt === attempts) break;
+      console.error(`workflow_dispatch 네트워크 오류(${label}): ${lastError.message}`);
+      await sleepImpl(DISPATCH_RETRY_DELAYS_MS[attempt - 1]);
+      continue;
+    }
+
+    if (response.ok) {
+      if (attempt > 1) console.log(`workflow_dispatch 성공(${label}): HTTP ${response.status}`);
+      return;
+    }
+
     const bodyText = await response.text().catch(() => "");
-    throw new Error(
+    lastError = new Error(
       `GitHub workflow_dispatch 실패(${input.workflowFile}): ${response.status} ${response.statusText} - ${bodyText.slice(0, 300)}`
     );
+    // 4xx는 남은 창을 써도 같은 답이다 - 바로 던져서 사유가 호출부(큐 행·알림)에 남게 한다.
+    if (!isRetryableStatus(response.status) || attempt === attempts) break;
+    console.error(`workflow_dispatch 실패(${label}): ${response.status} ${bodyText.slice(0, 300)}`);
+    await sleepImpl(DISPATCH_RETRY_DELAYS_MS[attempt - 1]);
   }
+
+  throw lastError ?? new Error(`GitHub workflow_dispatch 실패(${input.workflowFile})`);
 }

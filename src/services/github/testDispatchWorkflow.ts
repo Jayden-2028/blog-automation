@@ -1,6 +1,6 @@
 // dispatchGithubWorkflow의 concurrency 취소 회피 로직(waitForFreeConcurrencySlot) 회귀 테스트.
 // 실제 GitHub API는 호출하지 않는다 - fetchImpl을 주입해 응답을 흉내낸다.
-import { dispatchGithubWorkflow } from "./dispatchWorkflow.js";
+import { DISPATCH_RETRY_DELAYS_MS, dispatchGithubWorkflow } from "./dispatchWorkflow.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -16,6 +16,19 @@ function jsonResponse(body: unknown, ok = true, status = 200): Response {
     json: async () => body,
     text: async () => JSON.stringify(body),
   } as unknown as Response;
+}
+
+// 재시도 로그(console.error/log)가 테스트 출력을 어지럽히지 않게 조용히 돌린다.
+async function quietLog<T>(fn: () => Promise<T>): Promise<T> {
+  const { log, error } = console;
+  console.log = () => {};
+  console.error = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
 }
 
 async function main(): Promise<void> {
@@ -177,12 +190,163 @@ async function main(): Promise<void> {
     assert(!threw, "대기 조회 실패는 디스패치 자체를 막으면 안 된다");
   }
 
+  // 7) 5xx가 세 번 나도 네 번째에 성공하면 던지지 않는다. 대기는 2·6·12초(Worker와 같은 간격)이고,
+  //    테스트는 sleep을 주입해 실제로 기다리지 않는다.
+  {
+    const statuses = [500, 502, 503, 204];
+    const sleeps: number[] = [];
+    let dispatchCalls = 0;
+    const fetchImpl = (async () => {
+      const status = statuses[dispatchCalls++];
+      return jsonResponse({ message: "boom" }, status < 400, status);
+    }) as unknown as typeof fetch;
+
+    await quietLog(() =>
+      dispatchGithubWorkflow({
+        workflowFile: "job-research.yml",
+        inputs: { job_id: "g" },
+        token: "t",
+        repository: "owner/repo",
+        fetchImpl,
+        sleep: async (ms) => void sleeps.push(ms),
+      })
+    );
+
+    assert(dispatchCalls === 4, `500 세 번 뒤 네 번째에 성공해야 한다 (실제 호출: ${dispatchCalls}회)`);
+    assert(sleeps.join(",") === "2000,6000,12000", `대기는 2·6·12초여야 한다 (실제: ${sleeps.join(",")})`);
+    assert(DISPATCH_RETRY_DELAYS_MS.join(",") === "2000,6000,12000", "재시도 간격은 Worker와 같아야 한다");
+  }
+
+  // 8) 4xx는 토큰·권한·입력 문제라 재시도 없이 즉시 던진다(사유가 메시지에 남는다).
+  {
+    for (const status of [401, 403, 404, 422]) {
+      let dispatchCalls = 0;
+      const sleeps: number[] = [];
+      const fetchImpl = (async () => {
+        dispatchCalls += 1;
+        return jsonResponse({ message: "nope" }, false, status);
+      }) as unknown as typeof fetch;
+
+      let message = "";
+      try {
+        await dispatchGithubWorkflow({
+          workflowFile: "job-write.yml",
+          inputs: { job_id: "h" },
+          token: "t",
+          repository: "owner/repo",
+          fetchImpl,
+          sleep: async (ms) => void sleeps.push(ms),
+        });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      assert(dispatchCalls === 1, `${status}은 재시도하면 안 된다 (실제 호출: ${dispatchCalls}회)`);
+      assert(sleeps.length === 0, `${status}은 기다리면 안 된다`);
+      assert(message.includes(`${status}`) && message.includes("job-write.yml"), `${status} 사유가 메시지에 남아야 한다: ${message}`);
+    }
+  }
+
+  // 9) 408·429는 재시도 대상이다.
+  {
+    for (const status of [408, 429]) {
+      let dispatchCalls = 0;
+      const fetchImpl = (async () => {
+        dispatchCalls += 1;
+        return dispatchCalls === 1 ? jsonResponse({}, false, status) : jsonResponse({}, true, 204);
+      }) as unknown as typeof fetch;
+      await quietLog(() =>
+        dispatchGithubWorkflow({
+          workflowFile: "job-write.yml",
+          inputs: { job_id: "i" },
+          token: "t",
+          repository: "owner/repo",
+          fetchImpl,
+          sleep: async () => {},
+        })
+      );
+      assert(dispatchCalls === 2, `${status}은 재시도해야 한다 (실제 호출: ${dispatchCalls}회)`);
+    }
+  }
+
+  // 10) 네트워크 오류(fetch가 throw)도 재시도하고, 계속 실패하면 4회에서 마지막 오류를 던진다.
+  {
+    let dispatchCalls = 0;
+    const fetchImpl = (async () => {
+      dispatchCalls += 1;
+      if (dispatchCalls < 3) throw new TypeError("fetch failed");
+      return jsonResponse({}, true, 204);
+    }) as unknown as typeof fetch;
+    await quietLog(() =>
+      dispatchGithubWorkflow({
+        workflowFile: "job-research.yml",
+        inputs: { job_id: "j" },
+        token: "t",
+        repository: "owner/repo",
+        fetchImpl,
+        sleep: async () => {},
+      })
+    );
+    assert(dispatchCalls === 3, `네트워크 오류 두 번 뒤 성공해야 한다 (실제 호출: ${dispatchCalls}회)`);
+
+    let alwaysFailCalls = 0;
+    let message = "";
+    try {
+      await quietLog(() =>
+        dispatchGithubWorkflow({
+          workflowFile: "job-research.yml",
+          inputs: { job_id: "k" },
+          token: "t",
+          repository: "owner/repo",
+          fetchImpl: (async () => {
+            alwaysFailCalls += 1;
+            throw new TypeError("fetch failed");
+          }) as unknown as typeof fetch,
+          sleep: async () => {},
+        })
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    assert(alwaysFailCalls === 4, `계속 실패하면 최대 4회에서 멈춰야 한다 (실제: ${alwaysFailCalls}회)`);
+    assert(message === "fetch failed", `마지막 네트워크 오류를 그대로 던져야 한다: ${message}`);
+  }
+
+  // 11) 5xx가 끝까지 계속되면 4회 시도 뒤 마지막 응답의 상태·본문을 담아 던진다(큐 행 error에 그대로 남는다).
+  {
+    let dispatchCalls = 0;
+    let message = "";
+    try {
+      await quietLog(() =>
+        dispatchGithubWorkflow({
+          workflowFile: "job-research.yml",
+          inputs: { job_id: "l" },
+          token: "t",
+          repository: "owner/repo",
+          fetchImpl: (async () => {
+            dispatchCalls += 1;
+            return jsonResponse({ message: "Server Error" }, false, 500);
+          }) as unknown as typeof fetch,
+          sleep: async () => {},
+        })
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    assert(dispatchCalls === 4, `500이 계속되면 4회 시도해야 한다 (실제: ${dispatchCalls}회)`);
+    assert(message.includes("500") && message.includes("job-research.yml"), `최종 오류에 상태·워크플로우가 있어야 한다: ${message}`);
+  }
+
   console.log("✅ 그룹 미지정 -> 조회 없이 즉시 디스패치");
   console.log("✅ 대기 0건 -> 지연 없이 디스패치");
   console.log("✅ 대기 중 -> 재확인하며 기다렸다가 비면 디스패치");
   console.log("✅ 그룹 밖 워크플로우 대기 -> 무시하고 즉시 디스패치");
   console.log("✅ maxWaitMs 초과 -> 대기 포기하고 디스패치");
   console.log("✅ 대기 조회 실패 -> 디스패치 차단 안 함");
+  console.log("✅ 5xx 세 번 뒤 성공 -> 2·6·12초 대기로 재시도");
+  console.log("✅ 4xx -> 재시도 없이 즉시 실패");
+  console.log("✅ 408·429 -> 재시도");
+  console.log("✅ 네트워크 오류 -> 재시도, 계속되면 4회 뒤 마지막 오류");
+  console.log("✅ 5xx 지속 -> 4회 뒤 상태·본문을 담아 실패");
   console.log("\n✅ dispatchWorkflow 테스트 완료");
 }
 
