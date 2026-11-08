@@ -1,15 +1,15 @@
 // 주간 검색 성과 리포트(속성별 메시지). 기본은 출력만, --notify로 텔레그램 발송.
 //
 //   npm run analytics:weekly-report                    출력만
-//   npm run analytics:weekly-report -- --notify        텔레그램(메인봇) 발송
+//   npm run analytics:weekly-report -- --notify        속성별로 그 채널의 봇에 발송
 //   npm run analytics:weekly-report -- --date=2026-10-05   이 날짜(포함)까지의 7일
 //
 // 기준일은 수집 지연(3일)을 반영한 reportDate()다. 읽기만 한다 - DB에 쓰지 않는다.
 import "dotenv/config";
 
-import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import { loadSearchPerformanceRange } from "../../services/supabase/repositories/searchPerformanceRepository.js";
 import { reportDate } from "./normalizeSearchRows.js";
+import { sendMessagesByTrack } from "./sendByTrack.js";
 import { resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import { buildSiteMessage, buildWeeklyReport } from "./weeklyReport.js";
 
@@ -42,8 +42,10 @@ async function main(): Promise<void> {
     console.log("\n· --notify를 붙이면 텔레그램으로 보냅니다.");
     return;
   }
-  await TelegramNotifier.fromEnv().sendMessages(messages);
-  console.log("\n✅ 텔레그램 발송 완료");
+  // 속성(=채널)마다 그 채널의 봇으로 보낸다. 한 곳이 실패해도 나머지는 계속 보낸다.
+  const result = await sendMessagesByTrack(weeks.map((w, i) => ({ siteUrl: w.site, text: messages[i].text })));
+  console.log(`\n텔레그램 발송 ${result.sent}건 · 실패 ${result.failed}건`);
+  if (result.failed > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {

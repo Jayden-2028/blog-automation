@@ -9,6 +9,7 @@
 #
 # 발화는 Cloudflare Worker 크론(일요일 10:00 KST - 표현식은 `0 1 * * 1`이지만 실제로는 일요일에
 # 깨어난다. 2026-11-02 실측, cloudflare/telegram-relay/src/schedule.ts 주석 참고).
+# 2026-11-08: 리포트는 속성(=채널)마다 그 채널의 봇으로 간다(sendByTrack.ts). 그래서 사회·사용설명서 봇 자격증명도 넘긴다.
 # 상태를 저장하지 않아 언제 돌려도 안전하다.
 #
 # 2026-11-02: 15분 타임아웃에 걸려 점검이 중간에 끊기고 뒤따르는 주간 리포트가 통째로 건너뛰어진
@@ -51,6 +52,10 @@ jobs:
           GSC_SITE_URLS: ${{ vars.GSC_SITE_URLS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
         run: npm run analytics:index-health -- --notify
 
       # 주간 검색 성과 리포트(2026-10-08). 새 Worker cron을 쓰지 않고 주간 색인 점검 경로에 동승한다.
@@ -62,4 +67,8 @@ jobs:
           GSC_SITE_URLS: ${{ vars.GSC_SITE_URLS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
         run: npm run analytics:weekly-report -- --notify

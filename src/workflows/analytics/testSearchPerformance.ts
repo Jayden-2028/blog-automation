@@ -6,7 +6,9 @@ import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyInd
 import { buildSiteMessage, buildWeeklyReport, siteOf } from "./weeklyReport.js";
 import type { PerfRow } from "./weeklyReport.js";
 import { mapGa4Rows } from "../../services/ga4/Ga4Client.js";
-import { belongsToSite, resolveSiteUrls, siteLabel, withTkmAliases } from "./siteUrls.js";
+import { belongsToSite, resolveSiteUrls, siteLabel, trackOfSite, withTkmAliases } from "./siteUrls.js";
+import { sendMessagesByTrack } from "./sendByTrack.js";
+import type { Track } from "../../notifications/telegramTracks.js";
 import type { SearchAnalyticsRow } from "../../services/searchConsole/SearchConsoleClient.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -346,6 +348,69 @@ const POST = "https://whynowissue.blogspot.com/2026/09/blog-post_21.html";
   });
   assert(out.join("") === "ABCDEFG", `입력 순서를 유지해야 한다 (${out.join("")})`);
   console.log("✅ 병렬 점검 - 늦게 끝난 호출이 앞자리를 밀어내지 않는다");
+}
+
+// --- 13. 속성 → 트랙 매핑, 트랙별 봇 발송 -----------------------------------------------------
+{
+  // 세 채널: GSC 속성 문자열·표시 이름(siteLabel)·GA4 라벨 모두 같은 트랙으로.
+  assert(trackOfSite("sc-domain:koreaplain.com") === "kscene", "koreaplain 도메인 속성 → 사용설명서");
+  assert(trackOfSite("https://www.koreaplain.com/") === "kscene" && trackOfSite("koreaplain.com") === "kscene", "URL·표시 이름도 사용설명서");
+  assert(trackOfSite("https://wooahpapa.tistory.com/") === "social" && trackOfSite("wooahpapa.tistory.com") === "social", "티스토리 → 사회");
+  assert(trackOfSite("https://blog.naver.com/whyissuenow") === "entertainment", "네이버 → 엔터(자리만 있다)");
+  assert(trackOfSite("tkm") === "kscene" && trackOfSite("tistory") === "social", "GA4 라벨");
+  // 옛 blogspot 주소(2026-10-28 전환 전 과거 데이터)도 같은 트랙.
+  assert(trackOfSite("https://thekoreamanual.blogspot.com/") === "kscene" && trackOfSite("thekoreamanual.blogspot.com") === "kscene", "옛 blogspot → 사용설명서");
+  // 모르는 속성·읽을 수 없는 값은 null(호출자가 기본 봇 + 경고).
+  assert(trackOfSite("sc-domain:unknown.example") === null && trackOfSite("") === null, "모르는 속성은 null");
+  assert(trackOfSite("https://nottistory.com/") === null && trackOfSite("evil-koreaplain.com") === null, "접미 우연 일치는 제외");
+
+  // 발송 분기 - 발송 함수를 주입한다(실제 텔레그램으로 보내지 않는다).
+  const quiet = { log: () => {}, warn: (m: string) => warns.push(m), error: (m: string) => errors.push(m) } as unknown as Console;
+  const warns: string[] = [];
+  const errors: string[] = [];
+  const sentTo: { track: Track; text: string }[] = [];
+  const send = async (track: Track, messages: { text: string }[]): Promise<void> => {
+    for (const m of messages) sentTo.push({ track, text: m.text });
+  };
+
+  const ok = await sendMessagesByTrack(
+    [
+      { siteUrl: "sc-domain:koreaplain.com", text: "K" },
+      { siteUrl: "https://wooahpapa.tistory.com/", text: "S" },
+    ],
+    send,
+    quiet
+  );
+  assert(ok.sent === 2 && ok.failed === 0, "둘 다 나간다");
+  assert(sentTo.map((x) => `${x.track}:${x.text}`).join("|") === "kscene:K|social:S", `서로 다른 봇으로 간다 (${sentTo.map((x) => x.track)})`);
+  assert(warns.length === 0, "알려진 속성은 경고 없음");
+
+  // 모르는 속성: 버리지 않고 기본 봇(엔터)으로 + "트랙 미상" 경고.
+  sentTo.length = 0;
+  const unknown = await sendMessagesByTrack([{ siteUrl: "sc-domain:new-blog.example", text: "N" }], send, quiet);
+  assert(unknown.sent === 1 && sentTo.map((x) => x.track).join("|") === "entertainment", "모르는 속성은 기본 봇으로");
+  const warnLines = warns.slice();
+  assert(warnLines.length === 1 && warnLines[0].includes("트랙 미상") && warnLines[0].includes("new-blog.example"), "트랙 미상 경고 한 줄");
+
+  // 한쪽 발송이 던져도 다른 쪽은 간다.
+  sentTo.length = 0;
+  const flaky = async (track: Track, messages: { text: string }[]): Promise<void> => {
+    if (track === "kscene") throw new Error("boom");
+    return send(track, messages);
+  };
+  const partial = await sendMessagesByTrack(
+    [
+      { siteUrl: "sc-domain:koreaplain.com", text: "K" },
+      { siteUrl: "https://wooahpapa.tistory.com/", text: "S" },
+    ],
+    flaky,
+    quiet
+  );
+  assert(partial.sent === 1 && partial.failed === 1, "하나 실패·하나 성공");
+  const sentTracks: string[] = sentTo.map((x) => x.track);
+  assert(sentTracks.join("|") === "social", "실패 뒤에도 사회 봇 발송은 계속된다");
+  assert(errors.length === 1 && errors[0].includes("boom"), "실패는 로그에 남는다");
+  console.log("✅ 속성→트랙 매핑·트랙별 봇 발송 - 3채널·옛 blogspot·미상(기본 봇+경고)·부분 실패");
 }
 
 console.log("\n🎉 성과 수집 로직 테스트 통과");
