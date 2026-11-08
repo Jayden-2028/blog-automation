@@ -14,10 +14,10 @@ import "dotenv/config";
 
 import { SearchConsoleClient } from "../../services/searchConsole/SearchConsoleClient.js";
 import type { UrlInspectionResult } from "../../services/searchConsole/SearchConsoleClient.js";
-import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { loadPublishedUrlToJobId } from "../../services/supabase/repositories/searchPerformanceRepository.js";
 import { normalizePageUrl } from "./normalizeSearchRows.js";
+import { sendMessagesByTrack } from "./sendByTrack.js";
 import { belongsToSite, resolveSiteUrls, siteLabel } from "./siteUrls.js";
 import { buildHealthMessage, buildReport, classifyCoverage } from "./classifyIndexHealth.js";
 
@@ -113,8 +113,10 @@ async function main(): Promise<void> {
     console.log("\n· --notify를 붙이면 텔레그램으로 보냅니다.");
     return;
   }
-  await TelegramNotifier.fromEnv().sendMessages(messages);
-  console.log("\n✅ 텔레그램 발송 완료");
+  // 속성(=채널)마다 그 채널의 봇으로 보낸다. 한 곳이 실패해도 나머지는 계속 보낸다.
+  const result = await sendMessagesByTrack(outcomes.map((o) => ({ siteUrl: o.siteUrl, text: o.message })));
+  console.log(`\n텔레그램 발송 ${result.sent}건 · 실패 ${result.failed}건`);
+  if (result.failed > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {

@@ -3,7 +3,8 @@
 // `GSC_SITE_URLS`(콤마 구분)가 있으면 그 목록을 등록 순서대로 쓰고, 없으면 기존 `GSC_SITE_URL`
 // 단일 값으로 폴백한다 - 단일 속성 운영(기존 동작)은 바뀌지 않는다.
 
-import { tkmUrlAliases } from "../../config/publishTargets.js";
+import { isTkmUrl, tkmUrlAliases } from "../../config/publishTargets.js";
+import type { Track } from "../../notifications/telegramTracks.js";
 
 /** env에서 속성 목록을 뽑는다. 공백·빈 항목·중복은 걸러내되 순서는 유지한다. */
 export function resolveSiteUrls(env: { GSC_SITE_URLS?: string; GSC_SITE_URL?: string }): string[] {
@@ -49,4 +50,41 @@ export function withTkmAliases(urlToJobId: Map<string, string>): Map<string, str
     for (const alias of tkmUrlAliases(url)) if (!out.has(alias)) out.set(alias, jobId);
   }
   return out;
+}
+
+/** GA4 속성 라벨(`GA4_PROPERTY_IDS`의 `라벨:숫자ID`에서 앞부분) → 트랙. 새 라벨이 생기면 여기에 한 줄 더한다. */
+const GA4_LABEL_TRACKS: Readonly<Record<string, Track>> = {
+  tkm: "kscene",
+  tistory: "social",
+  naver: "entertainment",
+};
+
+/** 속성 문자열(`sc-domain:x.com`·`https://x.com/`·`x.com`)에서 호스트만. www.는 뗀다. 못 읽으면 null. */
+function hostOfSite(site: string): string | null {
+  let value = site.trim().toLowerCase();
+  if (value.startsWith("sc-domain:")) value = value.slice("sc-domain:".length);
+  try {
+    const host = new URL(value.includes("://") ? value : `https://${value}`).hostname;
+    return host.replace(/^www\./, "") || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 속성(GSC 속성 문자열·`siteLabel` 결과·GA4 라벨)이 어느 트랙의 채널인가. 모르면 null.
+ * 호스트로 판정한다 - 엔터=네이버, 사회=티스토리, 사용설명서=koreaplain.com(+ 옛 blogspot 주소, 2026-10-28 전환).
+ * null을 기본 트랙으로 바꿔 보낼지는 호출자가 정한다(조용히 버리지 않는다 - sendByTrack.ts).
+ * **새 채널·속성이 생기면 이 함수(호스트 규칙)와 위 GA4_LABEL_TRACKS(라벨)를 고친다.**
+ */
+export function trackOfSite(site: string): Track | null {
+  const label = GA4_LABEL_TRACKS[site.trim().toLowerCase()];
+  if (label) return label;
+
+  const host = hostOfSite(site);
+  if (!host) return null;
+  if (isTkmUrl(`https://${host}/`)) return "kscene";
+  if (host === "tistory.com" || host.endsWith(".tistory.com")) return "social";
+  if (host === "naver.com" || host.endsWith(".naver.com")) return "entertainment";
+  return null;
 }
