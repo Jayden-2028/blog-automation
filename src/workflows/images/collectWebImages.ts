@@ -352,7 +352,7 @@ export type CollectWebImagesOptions = {
     fileName: string;
     buffer: Buffer;
     mimeType: string;
-  }) => Promise<{ ok: true; url: string; extension?: string } | { ok: false; error: string }>;
+  }) => Promise<{ ok: true; url: string; extension?: string; width?: number; height?: number } | { ok: false; error: string }>;
 };
 
 /**
@@ -1371,6 +1371,8 @@ export async function collectWebImages(
     // 파이프라인은 러너가 곧 사라지므로 Storage에 올려야 뷰어가 본다. 업로드가 실패하면 채택하지
     // 않는다 - manifest에 URL 없는 항목을 넣으면 뷰어가 "이미지 없음"으로 그릴 뿐이다.
     let storageUrl: string | null = null;
+    // 올라간 바이트의 치수(2026-11-08). 최적화가 줄인 뒤의 값이라 후보 치수(`size`)와 다를 수 있다.
+    let storedSize: { width: number; height: number } | null = null;
     if (options.upload) {
       const uploaded = await options.upload({ index: slot.index, fileName, buffer, mimeType: contentType });
       if (!uploaded.ok) {
@@ -1379,6 +1381,7 @@ export async function collectWebImages(
         return null;
       }
       storageUrl = uploaded.url;
+      if (uploaded.width && uploaded.height) storedSize = { width: uploaded.width, height: uploaded.height };
       // 업로드가 형식을 바꿨으면(AVIF → WebP) 기록의 이름도 맞춘다(2026-10-08). 안 맞추면 맥 보관함이
       // Storage의 WebP 바이트를 `.avif` 이름으로 저장한다.
       if (uploaded.extension && uploaded.extension !== extension) {
@@ -1402,6 +1405,7 @@ export async function collectWebImages(
       caption: rewrittenCaption || slot.description,
       license: chosen.license || "출처 확인 필요",
       storageUrl,
+      storedSize,
     };
   };
 

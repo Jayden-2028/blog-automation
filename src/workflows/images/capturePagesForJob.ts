@@ -46,7 +46,7 @@ export type CapturePagesForJobOptions = {
     index: number;
     buffer: Buffer;
     mimeType: string;
-  }) => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
+  }) => Promise<{ ok: true; url: string; width?: number; height?: number } | { ok: false; error: string }>;
 };
 
 export async function capturePagesForJob(
@@ -132,7 +132,9 @@ export async function capturePagesForJob(
             variant: "capture",
             imageBuffer: shot.buffer,
             mimeType: shot.mimeType,
-          }).then((r) => (r.ok ? ({ ok: true, url: r.url } as const) : ({ ok: false, error: r.error } as const)));
+            // `optimize`는 켜지 않는다 - 캡처는 글자를 읽어야 해서 재압축 대상이 아니다. 다만 치수 상한은
+            // uploadArticleImage가 형식·용량과 무관하게 집행한다(2026-11-08, 2560×1920 캡처가 그대로 발행된 실측).
+          }).then((r) => (r.ok ? ({ ok: true, url: r.url, width: r.width, height: r.height } as const) : ({ ok: false, error: r.error } as const)));
 
       if (!uploaded.ok) {
         failures.push(`[자리 ${imageIndex}] 캡처 업로드 실패: ${uploaded.error}`);
@@ -150,6 +152,7 @@ export async function capturePagesForJob(
         // 남의 화면이다 - 출처를 캡션에 남긴다.
         sourcePage: url,
         license: `출처: ${safeHost(url)}`,
+        ...(uploaded.width && uploaded.height ? { width: uploaded.width, height: uploaded.height } : {}),
       });
     }
   } finally {

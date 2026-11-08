@@ -204,7 +204,7 @@ export async function collectWebImagesForJob(
           optimize: true,
         });
         return uploaded.ok
-          ? { ok: true as const, url: uploaded.url, extension: uploaded.extension }
+          ? { ok: true as const, url: uploaded.url, extension: uploaded.extension, width: uploaded.width, height: uploaded.height }
           : { ok: false as const, error: uploaded.error };
       });
 
@@ -334,6 +334,8 @@ export async function collectWebImagesForJob(
         error: null,
         sourcePage: record.sourcePage,
         license: record.license,
+        // 발행 HTML의 <img width height>에 쓴다(2026-11-08, CLS). 못 읽었으면 넣지 않는다.
+        ...(record.storedSize ? { width: record.storedSize.width, height: record.storedSize.height } : {}),
       }));
 
     // 판정자가 열어 본 후보(2026-10-02). 사용자가 직접 찍어 준 자리는 후보가 없다(검색을 안 한다).

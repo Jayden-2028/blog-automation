@@ -34,6 +34,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { readImageSize } from "./imageDimensions.js";
 import { KSCENE_IMAGES_FILE_LIMIT_WARN } from "../../config/ksceneImages.js";
 import type { KsceneImagesConfig } from "../../config/ksceneImages.js";
 import type { ManuscriptImage } from "../../workflows/manuscripts/manuscriptManifest.js";
@@ -134,13 +135,19 @@ export async function rehostImagesToPages(
 
   // 1) 원본 이미지를 받는다. 하나라도 못 받으면 그 자리는 Supabase URL로 둔다(전체 중단은 아니다 - 받은 것만 옮긴다).
   const failures: string[] = [];
-  const downloaded = new Map<number, { bytes: Uint8Array; path: string }>();
+  const downloaded = new Map<number, { bytes: Uint8Array; path: string; size: { width: number; height: number } | null }>();
   await mapLimit(targets, 4, async (image) => {
     try {
       const fetched = await deps.fetchBytes(image.url as string);
       if (!fetched || fetched.bytes.length === 0) throw new Error("빈 응답");
       const ext = extensionFor(fetched.contentType, image.url as string);
-      downloaded.set(image.index, { bytes: fetched.bytes, path: pagesImagePath(jobId, image.index, fetched.bytes, ext) });
+      // 여기 바이트가 실제로 서비스되는 바이트다 - 치수를 읽어 발행 HTML의 `<img width height>`에 쓴다
+      // (2026-11-08, CLS). 못 읽으면 null이고 그 자리에는 속성을 붙이지 않는다.
+      downloaded.set(image.index, {
+        bytes: fetched.bytes,
+        path: pagesImagePath(jobId, image.index, fetched.bytes, ext),
+        size: readImageSize(Buffer.from(fetched.bytes)),
+      });
     } catch (error) {
       failures.push(`[이미지 ${image.index}] 원본을 받지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -199,7 +206,7 @@ type RoundInput = {
   config: KsceneImagesConfig;
   baseUrl: string;
   projectName: string;
-  downloaded: Map<number, { bytes: Uint8Array; path: string }>;
+  downloaded: Map<number, { bytes: Uint8Array; path: string; size: { width: number; height: number } | null }>;
   newPaths: Set<string>;
   alreadyDone: number;
   failures: string[];
@@ -263,7 +270,11 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
 
     // 5) 서비스 중인지 확인한다. 안 되면 URL을 치환하지 않는다(깨진 이미지를 발행하지 않는다).
     const urlByIndex = new Map<number, string>();
-    for (const [index, entry] of downloaded) urlByIndex.set(index, `${baseUrl}/${entry.path}`);
+    const sizeByIndex = new Map<number, { width: number; height: number } | null>();
+    for (const [index, entry] of downloaded) {
+      urlByIndex.set(index, `${baseUrl}/${entry.path}`);
+      sizeByIndex.set(index, entry.size);
+    }
     const probe = [...urlByIndex.values()][0];
     let live = false;
     for (let attempt = 0; attempt < LIVE_CHECK_ATTEMPTS; attempt += 1) {
@@ -291,7 +302,9 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
 
     const rehostedImages = images.map((image) => {
       const url = urlByIndex.get(image.index);
-      return url ? { ...image, url } : image;
+      if (!url) return image;
+      const size = sizeByIndex.get(image.index);
+      return size ? { ...image, url, width: size.width, height: size.height } : { ...image, url };
     });
     return {
       kind: "done",

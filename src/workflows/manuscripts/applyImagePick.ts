@@ -147,7 +147,7 @@ export type ApplyImagePickDeps = {
     alt: string;
     context: string;
   }) => Promise<{ ok: true; buffer: Buffer; mimeType: string; width: number; height: number } | { ok: false; error: string }>;
-  upload: (input: { jobId: string; index: number; buffer: Buffer; mimeType: string }) => Promise<{ ok: true; url: string; extension?: string } | { ok: false; error: string }>;
+  upload: (input: { jobId: string; index: number; buffer: Buffer; mimeType: string }) => Promise<{ ok: true; url: string; extension?: string; width?: number; height?: number } | { ok: false; error: string }>;
   mergeJobMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   saveTopic: (topic: ManuscriptTopicEntry) => Promise<void>;
   publishPage: (manifest: ManuscriptManifest) => Promise<void>;
@@ -288,6 +288,9 @@ export async function applyImagePick(request: ImagePickRequest, deps: ApplyImage
     license: current?.license && current.provider === "web" && current.sourcePage === candidate.sourcePage ? current.license : "출처 확인 필요",
     fileName: fileNameFor(current?.fileName, request.index, mimeType, uploaded.extension),
     error: null,
+    // 교체된 바이트의 치수로 갈아 끼운다(2026-11-08). 못 읽으면 옛 치수를 남기지 않는다 - 틀린 치수는 없는 것보다 나쁘다.
+    width: uploaded.width ?? null,
+    height: uploaded.height ?? null,
   };
   const nextImages = current ? images.map((image) => (image.index === request.index ? nextImage : image)) : [...images, nextImage].sort((a, b) => a.index - b.index);
   const nextCandidates = movePicked(candidates, request.index, request.candidateNumber);

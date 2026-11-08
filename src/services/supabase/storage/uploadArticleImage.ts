@@ -4,7 +4,8 @@
 
 import { createHash } from "node:crypto";
 
-import { isAvif, optimizeImage } from "../../images/optimizeImage.js";
+import { readImageSize } from "../../images/imageDimensions.js";
+import { MAX_SIDE_PX, isAvif, isOversizeBuffer, optimizeImage } from "../../images/optimizeImage.js";
 import { MIME_BY_FORMAT, sniffImageFormat } from "../../images/sniffImageFormat.js";
 import { supabase } from "../client.js";
 
@@ -31,11 +32,20 @@ export type UploadArticleImageInput = {
 };
 
 /**
+ * 글자가 읽혀야 하는 이미지(캡처·표·인포그래픽)를 **치수 때문에** 줄일 때 쓰는 화질(2026-11-08).
+ * 기본 0.82는 사진용이라 글자가 뭉갠다. 호출부가 `optimize`를 꺼 둔 자리를 치수 상한만으로 건드리는
+ * 것이므로 화질은 최대한 지킨다.
+ */
+export const TEXT_SAFE_QUALITY = 0.92;
+
+/**
  * `extension` - 실제로 올라간 파일의 확장자(2026-10-08). 올리면서 AVIF를 WebP로 바꾸기도 해서 **호출한 쪽이 아는
  * 확장자와 다를 수 있다.** 호출한 쪽은 기록(manifest의 fileName)과 보관함 이름을 이 값에 맞춰야 한다 -
  * 안 맞추면 WebP 바이트가 `.avif` 이름으로 저장된다.
  */
-export type UploadArticleImageResult = { ok: true; url: string; path: string; extension?: string } | { ok: false; error: string };
+export type UploadArticleImageResult =
+  | { ok: true; url: string; path: string; extension?: string; width?: number; height?: number }
+  | { ok: false; error: string };
 
 /**
  * 확장자는 **실제 형식**을 따른다(2026-10-08). 전에는 jpeg·webp 외 전부 `png`로 떨어뜨려, AVIF 바이트가
@@ -70,7 +80,7 @@ function versionOf(buffer: Buffer): string {
  */
 export async function prepareUploadImage(
   input: Pick<UploadArticleImageInput, "imageBuffer" | "mimeType" | "optimize"> & { label?: string }
-): Promise<{ buffer: Buffer; mimeType: string; extension: string }> {
+): Promise<{ buffer: Buffer; mimeType: string; extension: string; width?: number; height?: number; skippedReason?: string }> {
   const label = input.label ?? "";
   let imageBuffer = input.imageBuffer;
   let mimeType = input.mimeType;
@@ -86,21 +96,51 @@ export async function prepareUploadImage(
   // AVIF는 `optimize`를 끈 호출(캡처·표 등)이라도 WebP로 정규화한다 - 형식 정규화가 목적이라 용량과 무관하다.
   // 변환은 best-effort다: 실패하면 AVIF 그대로 **정직한 이름(.avif)**으로 올라간다(extensionFor).
   const normalizeAvif = !input.optimize && isAvif(mimeType);
-  if (input.optimize || normalizeAvif) {
-    const options = typeof input.optimize === "object" ? input.optimize : {};
-    const optimized = await optimizeImage({ buffer: imageBuffer, mimeType, ...options });
+  // **치수 상한도 `optimize`를 끈 호출에 적용한다**(2026-11-08). 페이지 캡처가 `optimize` 없이 올라가
+  // 2560×1920 JPEG이 그대로 발행본에 실렸다(실측: 285KB·344KB, 발행본 중앙값의 3배). 치수를 줄이는 것은
+  // 글자 가독성 예외와 **별개의 일**이라 예외가 치수 상한까지 면제해 주지는 않는다 - 다만 화질은
+  // `TEXT_SAFE_QUALITY`로 올려 글자를 지킨다(호출부가 화질을 지정했으면 그것을 쓴다).
+  const options = typeof input.optimize === "object" ? input.optimize : {};
+  const maxSide = options.maxSide ?? MAX_SIDE_PX;
+  const resizeOversize = !input.optimize && isOversizeBuffer(imageBuffer, maxSide);
+  let skippedReason: string | undefined;
+  if (input.optimize || normalizeAvif || resizeOversize) {
+    const optimized = await optimizeImage({
+      buffer: imageBuffer,
+      mimeType,
+      ...options,
+      ...(resizeOversize && options.quality === undefined ? { quality: TEXT_SAFE_QUALITY } : {}),
+    });
     if (optimized.optimized) {
       console.log(
         `ℹ️ [images] ${label} ${normalizeAvif || isAvif(input.mimeType) ? "AVIF → " : ""}WebP 변환 ` +
-          `${Math.round(optimized.originalBytes / 1024)}KB → ${Math.round(optimized.buffer.length / 1024)}KB`
+          `${Math.round(optimized.originalBytes / 1024)}KB → ${Math.round(optimized.buffer.length / 1024)}KB` +
+          (optimized.width && optimized.height ? ` (${optimized.width}×${optimized.height})` : "")
       );
       imageBuffer = optimized.buffer;
       mimeType = optimized.mimeType;
-    } else if (isAvif(mimeType)) {
-      console.warn(`⚠️ [images] ${label} AVIF를 WebP로 바꾸지 못해 .avif 그대로 올립니다: ${optimized.skippedReason ?? ""}`);
+    } else {
+      skippedReason = optimized.skippedReason;
+      if (isAvif(mimeType)) {
+        console.warn(`⚠️ [images] ${label} AVIF를 WebP로 바꾸지 못해 .avif 그대로 올립니다: ${optimized.skippedReason ?? ""}`);
+      }
+      // **조용히 삼키지 않는다**(2026-11-08): 줄여야 했는데 못 줄였으면 그 사유를 남긴다.
+      if (optimized.oversize) {
+        console.warn(
+          `⚠️ [images] ${label} 긴 변이 상한(${maxSide}px)을 넘는데 줄이지 못했습니다` +
+            `${optimized.width && optimized.height ? `(${optimized.width}×${optimized.height})` : ""}: ${optimized.skippedReason ?? "사유 미상"}`
+        );
+      }
     }
   }
-  return { buffer: imageBuffer, mimeType, extension: extensionFor(mimeType) };
+  const size = readImageSize(imageBuffer);
+  return {
+    buffer: imageBuffer,
+    mimeType,
+    extension: extensionFor(mimeType),
+    ...(size ? { width: size.width, height: size.height } : {}),
+    ...(skippedReason ? { skippedReason } : {}),
+  };
 }
 
 export async function uploadArticleImage(input: UploadArticleImageInput): Promise<UploadArticleImageResult> {
@@ -132,5 +172,11 @@ export async function uploadArticleImage(input: UploadArticleImageInput): Promis
   // 내용 해시를 쿼리로 붙인다. Storage는 이 파라미터를 무시하고 같은 파일을 주지만,
   // 브라우저·CDN에는 **다른 주소**라서 새 이미지를 받는다.
   const url = `${data.publicUrl}?v=${versionOf(imageBuffer)}`;
-  return { ok: true, url, path, extension: prepared.extension };
+  return {
+    ok: true,
+    url,
+    path,
+    extension: prepared.extension,
+    ...(prepared.width && prepared.height ? { width: prepared.width, height: prepared.height } : {}),
+  };
 }

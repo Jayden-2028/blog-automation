@@ -82,7 +82,7 @@ async function main(): Promise<void> {
     upload: async ({ jobId, index, buffer, mimeType }) => {
       const uploaded = await uploadArticleImage({ jobId, index, variant: "web", imageBuffer: buffer, mimeType, optimize: true });
       return uploaded.ok
-        ? { ok: true as const, url: uploaded.url, extension: uploaded.extension }
+        ? { ok: true as const, url: uploaded.url, extension: uploaded.extension, width: uploaded.width, height: uploaded.height }
         : { ok: false as const, error: uploaded.error };
     },
     mergeJobMetadata: async (jobId, patch) => {
