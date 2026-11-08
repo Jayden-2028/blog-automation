@@ -44,11 +44,17 @@ const BLOGSPOT_OPTIONS: PublishRenderOptions = {
  */
 export function convertArticleToHtml(
   markdown: string,
-  options: { semanticHeadings?: boolean; localCallouts?: boolean } = {}
+  options: {
+    semanticHeadings?: boolean;
+    localCallouts?: boolean;
+    /** 이미지 주소 -> 실제 치수. 아는 자리에만 `<img width height>`가 붙는다(2026-11-08, CLS). */
+    imageSizes?: Record<string, { width: number; height: number }>;
+  } = {}
 ): string {
   return renderPublishBlocks(markdown, {
     ...BLOGSPOT_OPTIONS,
     ...(options.semanticHeadings ? { headingTag: "h2" as const } : {}),
     ...(options.localCallouts ? { localCallouts: true } : {}),
+    ...(options.imageSizes ? { imageSizes: options.imageSizes } : {}),
   });
 }

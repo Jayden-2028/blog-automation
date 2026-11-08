@@ -11,6 +11,8 @@ import { renderPublishBlocks, PUBLISH_FONT_PX, SPACER_HTML, isHashtagLine } from
 import type { PublishRenderOptions } from "./renderPublishBlocks.js";
 
 const NAVER: PublishRenderOptions = { boldTag: "b", italicTag: "i", image: "img", linkTarget: false };
+/** Blogspot(사용설명서) 옵션 - 이미지를 figure로 내는 쪽. convertArticleToHtml.ts와 같다. */
+const BLOGSPOT: PublishRenderOptions = { boldTag: "strong", italicTag: "em", image: "figure", linkTarget: true };
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -63,6 +65,30 @@ function main(): void {
   const trailing = renderPublishBlocks("문단 하나입니다.\n\n문단 둘입니다.", NAVER);
   assert(!trailing.endsWith(SPACER_HTML), `끝 빈 줄이 남았다 (${trailing})`);
   console.log("✅ 글 끝에 빈 문단이 남지 않는다");
+
+  // 발행 HTML의 <img width height>(2026-11-08, CLS). **치수를 아는 이미지에만** 붙는다 -
+  // 틀린 치수는 없는 것보다 나쁘다. loading="lazy"·alt는 건드리지 않는다.
+  {
+    const known = "https://img.example/a.webp";
+    const unknown = "https://img.example/b.jpg";
+    const body = `![첫 사진](${known})\n\n![둘째 사진](${unknown})`;
+    const html = renderPublishBlocks(body, { ...BLOGSPOT, imageSizes: { [known]: { width: 1600, height: 1200 } } });
+    assert(
+      html.includes(`<img src="${known}" alt="첫 사진" width="1600" height="1200" loading="lazy">`),
+      `치수를 아는 이미지에 속성이 붙어야 한다 (${html})`
+    );
+    assert(html.includes(`<img src="${unknown}" alt="둘째 사진" loading="lazy">`), `치수를 모르면 속성을 붙이지 않는다 (${html})`);
+    assert(html.split('loading="lazy"').length === 3, "lazy는 그대로 두 장 모두에 남는다");
+
+    // 옵션을 주지 않으면 출력이 예전과 한 글자도 다르지 않다.
+    assert(renderPublishBlocks(body, BLOGSPOT) === renderPublishBlocks(body, { ...BLOGSPOT, imageSizes: {} }), "빈 맵은 무변화");
+    assert(!renderPublishBlocks(body, BLOGSPOT).includes("width="), "옵션 없으면 속성이 없다");
+
+    // 네이버·티스토리(img 모드)는 치수를 줘도 바뀌지 않는다 - 그쪽 본문은 자리 표식만 쓴다.
+    const naver = renderPublishBlocks(body, { ...NAVER, imageSizes: { [known]: { width: 1600, height: 1200 } } });
+    assert(naver === renderPublishBlocks(body, NAVER), "img 모드 출력은 그대로");
+    console.log("✅ 치수를 아는 이미지에만 width/height(figure 모드 한정)");
+  }
 
   console.log("\n✅ 전체 테스트 통과");
 }

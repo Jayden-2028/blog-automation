@@ -271,7 +271,16 @@ export async function publishArticleToBlogspot(
       const source = pending.find((candidate) => candidate.index === image.index)?.url;
       if (source && image.url && image.url !== source) bySource[source] = image.url;
     }
-    imagesForHtml = original.map((image) => (image.url && bySource[image.url] ? { ...image, url: bySource[image.url] } : image));
+    // 치수는 **이번에 복사한 바이트에서 읽은 것**이 가장 정확하다 - 그게 실제로 서비스되는 파일이다.
+    // 이미 옮겨 둔 자리(이번에 복사하지 않은 자리)는 수집 때 기록해 둔 치수를 쓰고, 둘 다 없으면 비운다
+    // (치수를 모르는 이미지에는 <img width height>를 붙이지 않는다).
+    const sizeByIndex = new Map((result?.images ?? []).map((image) => [image.index, { width: image.width, height: image.height }]));
+    imagesForHtml = original.map((image) => {
+      const next = image.url && bySource[image.url] ? { ...image, url: bySource[image.url] } : { ...image };
+      const fresh = sizeByIndex.get(image.index);
+      if (fresh?.width && fresh.height) return { ...next, width: fresh.width, height: fresh.height };
+      return next;
+    });
 
     const hasImages = original.some((image) => image.url);
     const allMapped = hasImages && original.every((image) => !image.url || Boolean(bySource[image.url]));
@@ -298,7 +307,15 @@ export async function publishArticleToBlogspot(
   const buildContentHtml = async (article: ArticleRow, draft: boolean): Promise<string> => {
     const confirmedImages = await resolveImages();
     const bodyWithImages = substituteConfirmedImages(splitTrailingHashtags(article.content ?? "").body, confirmedImages);
+    // 치수를 아는 이미지에만 `<img width height>`를 붙인다(2026-11-08, CLS). `loading="lazy"`는 그대로다 -
+    // lazy + 치수 없음이 레이아웃 시프트의 전형이고, 치수가 들어가면 브라우저가 받기 전에 자리를 잡는다.
+    // 실제 크기는 테마 CSS(`max-width:100%; height:auto`)가 정하므로 반응형은 그대로다(koreaplain 실측 확인).
+    const imageSizes: Record<string, { width: number; height: number }> = {};
+    for (const image of confirmedImages) {
+      if (image.url && image.width && image.height) imageSizes[image.url] = { width: image.width, height: image.height };
+    }
     return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages), {
+      ...(Object.keys(imageSizes).length > 0 ? { imageSizes } : {}),
       semanticHeadings: target.track === "kscene",
       // 로컬 콜아웃 박스(2026-10-30) - 사용설명서 트랙만. 다른 트랙 HTML은 바뀌지 않는다.
       localCallouts: target.track === "kscene",

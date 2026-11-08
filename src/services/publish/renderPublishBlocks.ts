@@ -39,6 +39,17 @@ export type PublishRenderOptions = {
    * `<span class="kp-ko">`로 감싼다. **사용설명서(kscene) 트랙 전용**이고 켜지 않으면 기존 출력과 한 글자도 다르지 않다.
    */
   localCallouts?: boolean;
+  /**
+   * 이미지 주소 -> 실제 치수(2026-11-08, CLS). 있는 주소에만 `<img width height>`를 붙인다 -
+   * **치수를 모르는 이미지에는 넣지 않는다**(틀린 치수는 없는 것보다 나쁘다).
+   *
+   * 치수 속성은 브라우저가 이미지를 내려받기 전에 자리를 잡게 해 줄 뿐이고, 실제 크기는 CSS가 정한다
+   * (`max-width:100%; height:auto`). Korea Plain 테마에 그 규칙이 있는 것을 실측으로 확인했다
+   * (`body.item-view .post-body-container img { height:auto; max-width:100% }`, `.post-body img { max-width:100% }`).
+   * **`figure` 모드(Blogspot)에서만 붙인다** - 네이버·티스토리는 본문 `<img src>`를 쓰지 않고 자리 표식만
+   * 남기므로(convertArticleToNaverHtml / convertArticleToTistoryHtml) 그쪽 출력은 한 글자도 바뀌지 않는다.
+   */
+  imageSizes?: Record<string, { width: number; height: number }>;
 };
 
 export function escapeHtml(text: string): string {
@@ -172,9 +183,11 @@ export function renderPublishBlocks(markdown: string, options: PublishRenderOpti
       const imageMatch = lines[0].match(IMAGE_LINE_PATTERN);
       if (imageMatch) {
         const [, alt, src] = imageMatch;
+        const size = options.image === "figure" ? options.imageSizes?.[src] : undefined;
+        const sizeAttrs = size ? ` width="${size.width}" height="${size.height}"` : "";
         out.push(
           options.image === "figure"
-            ? `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}" loading="lazy">${alt ? `<figcaption style="${BODY_STYLE}">${escapeHtml(alt)}</figcaption>` : ""}</figure>`
+            ? `<figure><img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${sizeAttrs} loading="lazy">${alt ? `<figcaption style="${BODY_STYLE}">${escapeHtml(alt)}</figcaption>` : ""}</figure>`
             : `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}">`
         );
         setSpacers(1); // 규칙 4 - 이미지 아래 한 줄

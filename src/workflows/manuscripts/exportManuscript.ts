@@ -56,6 +56,8 @@ export type WebImageRecord = {
    * Storage에 올리고 이 URL로 뷰어·manifest가 참조한다. 맥에서 보관함으로만 받으면 없다.
    */
   storageUrl?: string | null;
+  /** 올라간 바이트의 픽셀 치수(2026-11-08). 최적화·크롭 뒤의 값이고, 못 읽으면 없다. */
+  storedSize?: { width: number; height: number } | null;
 };
 
 export const WEB_IMAGES_FILE = "web-images.json";

@@ -9,12 +9,34 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { shouldOptimize } from "./optimizeImage.js";
+import { readImageSize } from "./imageDimensions.js";
+import { MAX_SIDE_PX, shouldOptimize } from "./optimizeImage.js";
 import { MIME_BY_FORMAT, sniffImageFormat } from "./sniffImageFormat.js";
 import { extensionFor, prepareUploadImage } from "../supabase/storage/uploadArticleImage.js";
 
 // 실제 AVIF(63KB, 150KB 미만이라 옛 스킵 규칙에 걸리던 크기). AOM 공식 테스트 파일(Link-U fox).
 const AVIF = readFileSync(fileURLToPath(new URL("./fixtures/small.avif", import.meta.url)));
+
+/** 실측과 같은 2560×1920 캡처를 만든다 - 페이지 캡처는 deviceScaleFactor 2라 늘 이 치수다. */
+async function makeCaptureJpeg(width: number, height: number): Promise<Buffer> {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ args: ["--no-sandbox"], executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined });
+  try {
+    const page = await browser.newPage();
+    await page.setContent("<!doctype html><canvas id=c></canvas>");
+    const dataUrl = (await page.evaluate(`(() => {
+      const c = document.getElementById("c"); c.width = ${width}; c.height = ${height};
+      const x = c.getContext("2d");
+      x.fillStyle = "#fff"; x.fillRect(0, 0, ${width}, ${height});
+      x.fillStyle = "#111"; x.font = "48px sans-serif";
+      for (let i = 0; i < 12; i++) x.fillText("Seoul taxi base fare 4,800 won", 60, 120 + i * 80);
+      return c.toDataURL("image/jpeg", 0.88);
+    })()`)) as string;
+    return Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
+  } finally {
+    await browser.close();
+  }
+}
 
 async function main(): Promise<void> {
   // 1) 형식 판별과 확장자 - AVIF가 더 이상 png로 떨어지지 않는다.
@@ -66,6 +88,55 @@ async function main(): Promise<void> {
       else process.env.PLAYWRIGHT_CHROMIUM_PATH = saved;
     }
     console.log("✅ B - 변환 실패 시 안전망: 거짓 .png가 아니라 .avif");
+  }
+
+  // 7) **치수 상한은 `optimize`를 끈 호출에도 걸린다**(2026-11-08). 페이지 캡처가 `optimize` 없이 올라가
+  //    2560×1920 JPEG이 발행본에 그대로 실린 실측 사례다. 글자 가독성 예외는 **재압축 화질**의 예외이지
+  //    치수 상한의 면제가 아니다.
+  {
+    const capture = await makeCaptureJpeg(2560, 1920);
+    assert.deepEqual(readImageSize(capture), { width: 2560, height: 1920 }, "실측과 같은 캡처 치수");
+    const out = await prepareUploadImage({ imageBuffer: capture, mimeType: "image/jpeg", optimize: false, label: "capture" });
+    const size = readImageSize(out.buffer);
+    assert.ok(size, "결과 치수를 읽을 수 있어야 한다");
+    assert.ok(Math.max(size.width, size.height) <= MAX_SIDE_PX, `긴 변이 상한 이하(${size.width}×${size.height})`);
+    assert.deepEqual([out.width, out.height], [size.width, size.height], "치수를 함께 돌려준다(발행 HTML이 쓴다)");
+    assert.ok(out.buffer.length < capture.length, "용량도 줄어든다");
+    console.log(`✅ optimize 꺼진 캡처도 치수 상한 적용: 2560×1920 → ${out.width}×${out.height}`);
+  }
+
+  // 8) 치수 상한 이하인 캡처는 **그대로 둔다** - 글자가 읽혀야 하는 이미지를 괜히 재압축하지 않는다.
+  {
+    const small = await makeCaptureJpeg(1200, 900);
+    const out = await prepareUploadImage({ imageBuffer: small, mimeType: "image/jpeg", optimize: false, label: "capture" });
+    assert.equal(out.buffer, small, "상한 이하면 바이트를 건드리지 않는다(글자 가독성 예외 유지)");
+    assert.equal(out.extension, "jpg");
+    assert.deepEqual([out.width, out.height], [1200, 900], "건드리지 않아도 치수는 알려 준다");
+    console.log("✅ 상한 이하 캡처는 재압축하지 않는다");
+  }
+
+  // 9) 줄여야 했는데 못 줄이면(브라우저 없음) **사유가 기록에 남는다** - 조용히 삼키지 않는다.
+  {
+    const capture = await makeCaptureJpeg(2560, 1920);
+    const saved = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+    process.env.PLAYWRIGHT_CHROMIUM_PATH = "/nonexistent/chromium";
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+    try {
+      const out = await prepareUploadImage({ imageBuffer: capture, mimeType: "image/jpeg", optimize: false, label: "capture" });
+      assert.equal(out.buffer, capture, "못 줄였으면 원본을 올린다(발행을 막지 않는다)");
+      assert.ok(out.skippedReason, "건너뛴 사유를 돌려준다");
+      assert.ok(
+        warnings.some((line) => line.includes("상한") && line.includes("2560×1920")),
+        `경고 로그에 치수와 사유가 남아야 한다: ${JSON.stringify(warnings)}`
+      );
+    } finally {
+      console.warn = warn;
+      if (saved === undefined) delete process.env.PLAYWRIGHT_CHROMIUM_PATH;
+      else process.env.PLAYWRIGHT_CHROMIUM_PATH = saved;
+    }
+    console.log("✅ 못 줄였을 때 사유가 로그에 남는다");
   }
 
   // 6) AVIF가 아닌 이미지는 건드리지 않는다(회귀). JPEG 헤더 + 거짓 png 표기 → 이름만 jpg로 바로잡힌다.

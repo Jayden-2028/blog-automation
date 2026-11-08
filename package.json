@@ -102,6 +102,7 @@
     "test:naver-paste": "tsx src/services/publish/testNaverPasteCheck.ts",
     "test:naver-markers": "tsx src/services/publish/testNaverImageMarkers.ts",
     "test:naver-publish": "tsx src/services/publish/testPublishArticleToNaver.ts",
+    "test:image-dimensions": "tsx src/services/images/testImageDimensions.ts",
     "test:optimize-image": "tsx src/services/images/testOptimizeImage.ts",
     "test:upload-image-format": "tsx src/services/images/testUploadImageFormat.ts",
     "test:html-generic": "tsx src/services/publish/testConvertArticleToHtml.ts",

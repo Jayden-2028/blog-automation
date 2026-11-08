@@ -47,6 +47,13 @@ export type ManuscriptImage = {
   sourcePage?: string | null;
   /** 재사용 근거(예: "공공누리 제1유형", "삼성전자 공식 홈페이지"). */
   license?: string | null;
+  /**
+   * 실제로 올라간 파일의 픽셀 치수(2026-11-08). 발행 HTML의 `<img width height>`에 쓴다 - 치수가 있어야
+   * 브라우저가 이미지를 받기 전에 자리를 잡아 레이아웃 시프트(CLS)가 안 난다. **모르면 비워 둔다**:
+   * 틀린 치수는 없는 것보다 나쁘다. 최적화·크롭을 거친 **최종 바이트** 기준이다.
+   */
+  width?: number | null;
+  height?: number | null;
 };
 
 export type ManuscriptEntry = {

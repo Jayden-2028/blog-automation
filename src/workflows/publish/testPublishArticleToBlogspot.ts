@@ -294,7 +294,21 @@ async function main(): Promise<void> {
     assert(html.includes(pages(1)) && html.includes(pages(2)) && !html.includes("sb.example"), `본문 이미지가 Pages 주소로 치환된다 (${html})`);
     const patch = saved[0] as { rehostedBySource: Record<string, string>; imagesRehostedAt?: string };
     assert(patch.rehostedBySource["https://sb.example/a/1.webp"] === pages(1) && typeof patch.imagesRehostedAt === "string", "원본->Pages 대응과 imagesRehostedAt(전부 옮겼을 때) 기록");
+    assert(!html.includes("width="), "치수를 모르면 <img>에 width/height를 붙이지 않는다");
     console.log("✅ kscene 발행 - 영문 라벨, 이미지 Pages 치환, 복사 기록(imagesRehostedAt)");
+
+    // 복사한 바이트에서 읽은 치수가 발행 HTML의 <img width height>로 들어간다(2026-11-08, CLS).
+    // **치수를 아는 자리에만** 붙는다 - 틀린 치수는 없는 것보다 나쁘다. lazy·alt는 그대로다.
+    saved.length = 0; inserted = null;
+    await run({}, async ({ images }) => ({
+      images: images.map((image) => (image.index === 1 ? { ...image, url: pages(1), width: 1600, height: 1200 } : { ...image, url: pages(image.index) })),
+      rehosted: images.length, complete: true, deployed: true, failures: [],
+    }));
+    const sized = (inserted as unknown as { contentHtml: string }).contentHtml;
+    assert(sized.includes(`src="${pages(1)}"`) && /1-aaaa\.webp"[^>]*width="1600" height="1200" loading="lazy"/.test(sized), `치수를 아는 이미지에 속성이 붙는다 (${sized})`);
+    assert(!/2-aaaa\.webp"[^>]*width=/.test(sized), "치수를 모르는 이미지에는 붙지 않는다");
+    assert(sized.split('loading="lazy"').length === 3, "lazy는 두 장 모두 그대로");
+    console.log("✅ kscene 발행 - 아는 치수만 <img width height>(CLS)");
 
     // 이미 옮긴 이미지는 다시 옮기지 않는다(재발행)
     saved.length = 0; rehostCalls.length = 0; inserted = null;
