@@ -3,6 +3,8 @@
 // 지켜야 할 것: ① 미디어 섹션만 긁는다(추천작 스틸이 섞이면 안 된다)
 // ② **틀린 작품이면 아무것도 안 준다** - 실측에서 `M 리부트`가 헬보이를 물어 왔다
 // ③ 제목 후보는 긴 것부터 ④ 실패는 예외가 아니라 빈 배열
+// ⑤ **검증에 떨어지면 다음 후보로 이어 간다**(2026-11-09) ⑥ 작품명이 키워드 중간·끝에 있어도 닿는다
+// 라이브 Serper·키노라이츠 호출은 없다 - 전부 주입이다.
 import { readFileSync } from "node:fs";
 import {
   cleanKeyword,
@@ -57,7 +59,10 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
 {
   assert(titleMatchesKeyword("연애박사", "연애박사 안판석 감독 유작 추영우 김소현"), "앞머리가 맞으면 통과");
   assert(!titleMatchesKeyword("헬보이", "티빙 오리지널 M 리부트"), "헬보이는 막아야 한다");
-  assert(!titleMatchesKeyword("리부트", "티빙 오리지널 M 리부트"), "'리부트'는 'M 리부트'의 앞머리가 아니다");
+  // 2026-11-09: 앞머리 일치 -> 구간 일치. `리부트`는 단어 경계에 정렬된 구간이라 이제 통과한다(작품명이 키워드
+  // 끝에 오는 경우를 살리려는 대가). 엉뚱한 작품 차단은 위 헬보이처럼 **어느 구간도 아닌 제목**이 맡는다.
+  assert(titleMatchesKeyword("리부트", "티빙 오리지널 M 리부트"), "'리부트'는 단어 경계 구간이다");
+  assert(!titleMatchesKeyword("리부", "티빙 오리지널 M 리부트"), "단어 중간에서 걸리면 안 된다(includes 아님)");
   assert(!titleMatchesKeyword("시리즈M", "티빙 오리지널 M 리부트"), "시리즈M도 아니다");
   assert(titleMatchesKeyword("폭싹 속았수다", "폭싹 속았수다 결말"), "공백 차이는 무시");
   assert(!titleMatchesKeyword("M", "티빙 오리지널 M 리부트"), "한 글자 제목은 못 믿는다");
@@ -126,6 +131,127 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
     ({ ok: false, json: async () => ({}) }) as unknown as Response) as unknown as typeof fetch);
   assert(notOk.length === 0, "비정상 응답도 빈 배열");
   console.log("✅ goto 링크 해제(0크레딧) - 요청 형식·실패 격리");
+}
+
+// 7) 작품명이 키워드 중간·끝에 있어도 후보에 오른다(헤드라인형 키워드, 10/20 이후 작품 원고 11건 중 4건만 성공).
+{
+  const K_END = "연애는 달달 현실은 씁쓸 청춘의 반짝거림 그린 연애박사";
+  const K_MID = "19.5% 닥터X 제쳤다 공개 단 하루만에 넷플릭스 1위";
+  const K_CN = "중드 가금채 줄거리 및 몇부작 편성 정보 첫방";
+  const K_ACTOR = "주상욱 90분 줄거리 보니 묘하게 겹친다 차예련 학폭";
+  const NOISE_EDGE = ["줄거리", "결말", "몇부작", "공개", "첫방", "중드", "넷플릭스", "정보", "편성", "및"];
+
+  assert(workTitleCandidates(K_END).includes("연애박사"), `끝에 있는 작품명: ${workTitleCandidates(K_END).join(" | ")}`);
+  assert(workTitleCandidates(K_MID).includes("닥터X"), `중간에 있는 작품명: ${workTitleCandidates(K_MID).join(" | ")}`);
+  assert(workTitleCandidates(K_CN).includes("가금채"), `중드 접두 뒤 작품명: ${workTitleCandidates(K_CN).join(" | ")}`);
+  assert(workTitleCandidates(K_ACTOR).includes("90분"), `배우명 뒤 작품명: ${workTitleCandidates(K_ACTOR).join(" | ")}`);
+
+  for (const keyword of [K_END, K_MID, K_CN, K_ACTOR, "100일의 거짓말 왜 빠져들 수밖에 없나 쉴 틈", "시한부 1년 남자를 사다"]) {
+    const c = workTitleCandidates(keyword);
+    assert(c.length <= 6, `후보는 6개를 넘지 않는다(${c.length}): ${keyword}`);
+    assert(c[0] === keyword, `키워드 전체가 맨 앞: ${keyword}`);
+    const sizes = c.map((x) => x.split(/\s+/).length);
+    assert(sizes[0] >= sizes[sizes.length - 1], `긴 것 먼저: ${sizes.join(",")}`);
+    assert(sizes.every((size, i) => i === 0 || size <= sizes[i - 1]), `단어 수가 줄어드는 순서: ${sizes.join(",")}`);
+    assert(new Set(c).size === c.length, "중복 없음");
+    // 경계 노이즈는 전체 키워드 후보(c[0])를 뺀 구간에서만 따진다.
+    for (const span of c.slice(1)) {
+      const w = span.split(/\s+/);
+      assert(!NOISE_EDGE.includes(w[0]) && !NOISE_EDGE.includes(w[w.length - 1]), `경계 노이즈 구간: "${span}"`);
+    }
+  }
+  const cn = workTitleCandidates(K_CN);
+  assert(!cn.some((x) => x.startsWith("줄거리") || x.endsWith("줄거리")), "줄거리로 시작·끝나는 구간 없음");
+  // 100일의 거짓말이 거짓말보다 먼저 시도돼야 동명 영화를 먼저 물지 않는다.
+  const lie = workTitleCandidates("100일의 거짓말 왜 빠져들 수밖에 없나 쉴 틈");
+  assert(lie.includes("100일의 거짓말"), "두 단어 작품명이 후보에 있다");
+  assert(!lie.includes("거짓말") || lie.indexOf("100일의 거짓말") < lie.indexOf("거짓말"), "긴 후보가 짧은 후보보다 먼저");
+  assert(workTitleCandidates("M").includes("M"), "후보가 그것뿐이면 한 글자도 쓴다");
+  assert(workTitleCandidates("   ").length === 0, "빈 키워드는 후보 없음");
+  console.log("✅ 후보 생성 - 중간·끝 작품명 포함, 상한 6, 긴 것 먼저, 경계 노이즈 제거");
+}
+
+// 8) 구간 정렬 제목 검증.
+{
+  assert(titleMatchesKeyword("닥터X", "19.5% 닥터X 제쳤다 공개 단 하루만에 넷플릭스 1위"), "중간 단어");
+  assert(titleMatchesKeyword("가금채", "중드 가금채 줄거리 및 몇부작 편성 정보 첫방"), "두 번째 단어");
+  assert(titleMatchesKeyword("연애박사", "연애는 달달 현실은 씁쓸 청춘의 반짝거림 그린 연애박사"), "마지막 단어");
+  assert(titleMatchesKeyword("100일의 거짓말", "100일의 거짓말 왜 빠져들 수밖에 없나 쉴 틈"), "앞머리 일치는 그대로 통과");
+  assert(titleMatchesKeyword("90분", "주상욱 90분 줄거리 보니 묘하게 겹친다 차예련 학폭"), "숫자 포함 제목");
+  assert(titleMatchesKeyword("시한부 1년 남자를 사다", "시한부 1년 남자를 사다"), "키워드 전체가 제목");
+  assert(!titleMatchesKeyword("헬보이", "티빙 오리지널 M 리부트"), "2026-09-24 헬보이 사고 방어선");
+  assert(!titleMatchesKeyword("여친, 빌리겠습니다 3기", "영화 거짓말 4K 무삭제 재개봉 27년 만에 완전판"), "라이브 실측 오매칭 1");
+  assert(!titleMatchesKeyword("감각의 제국", "시한부 1년 남자를 사다"), "라이브 실측 오매칭 2");
+  assert(!titleMatchesKeyword("닥터", "19.5% 닥터X 제쳤다 공개 단 하루만에 넷플릭스 1위"), "단어 중간 일치는 오탐");
+  assert(!titleMatchesKeyword("가", "가 나 다"), "한 글자 제목은 못 믿는다");
+  console.log("✅ 제목 검증 - 구간 일치, 단어 경계, 사고 방어선 유지");
+}
+
+// 9) 재시도(이번 수정의 핵심). 첫 후보가 엉뚱한 작품이어도 뒤 후보로 이어 가 올바른 스틸을 가져온다.
+//    전에는 첫 URL이 틀리면 남은 후보를 시도하지 않고 0장으로 끝났다.
+{
+  const KEYWORD = "시한부 1년 남자를 사다 뒤에 숨은 연애박사"; // 앞 후보 -> 틀린 작품(감각의 제국), 연애박사 -> 맞는 작품
+  const WRONG = "https://m.kinolights.com/season/15784";
+  const RIGHT = "https://m.kinolights.com/season/152343";
+  const finds: string[] = [];
+  const fetched: string[] = [];
+  const stills = await searchKinolightsStills(KEYWORD, {
+    findWorkUrl: async (candidate) => {
+      finds.push(candidate);
+      return candidate === "연애박사" ? RIGHT : WRONG;
+    },
+    fetchPage: async (url) => {
+      fetched.push(url);
+      return url.includes("15784") ? HTML.replace("연애박사 · 미디어", "감각의 제국 · 미디어") : HTML;
+    },
+  });
+  assert(stills.length === 2, `올바른 작품 스틸이 돌아와야 한다(받은 값: ${stills.length}, 호출 ${finds.join(" | ")})`);
+  assert(stills[0].sourcePage.includes("152343"), "맞는 작품의 출처 페이지");
+  assert(fetched.length <= 3, `페이지 받기 3건 이하(${fetched.length})`);
+  assert(fetched.filter((u) => u.includes("15784")).length === 1, "같은 틀린 페이지는 한 번만 받는다");
+  console.log("✅ 재시도 - 틀린 작품 탈락 뒤 다음 후보로 이어서 올바른 스틸 확보");
+}
+
+// 10) 라이브 실측 재현: 검증 탈락 -> 다음 후보. 전부 탈락하면 빈 배열이고 예외가 없다. 받기 상한 3.
+{
+  const KEYWORD = "시한부 1년 남자를 사다";
+  const urls = new Map<string, string>([
+    ["시한부 1년 남자를 사다", "https://m.kinolights.com/season/15784"], // 감각의 제국
+    ["시한부 1년", "https://m.kinolights.com/season/20001"],
+    ["1년 남자를", "https://m.kinolights.com/season/20002"],
+    ["남자를 사다", "https://m.kinolights.com/season/20003"],
+    ["시한부", "https://m.kinolights.com/season/20004"],
+    ["사다", "https://m.kinolights.com/season/20005"],
+  ]);
+  let fetchCalls = 0;
+  let findCalls = 0;
+  const out = await searchKinolightsStills(KEYWORD, {
+    findWorkUrl: async (candidate) => {
+      findCalls += 1;
+      return urls.get(candidate) ?? "https://m.kinolights.com/season/29999";
+    },
+    fetchPage: async () => {
+      fetchCalls += 1;
+      return HTML.replace("연애박사 · 미디어", "감각의 제국 · 미디어");
+    },
+  });
+  assert(out.length === 0, "전부 탈락하면 빈 배열");
+  assert(fetchCalls === 3, `받기 상한 3에서 멈춘다(받기 ${fetchCalls}회, 찾기 ${findCalls}회)`);
+
+  const thrown = await searchKinolightsStills(KEYWORD, {
+    findWorkUrl: async (candidate) => {
+      if (candidate.length % 2 === 0) throw new Error("검색 터짐");
+      return "https://m.kinolights.com/season/1";
+    },
+    fetchPage: async () => {
+      throw new Error("페이지 터짐");
+    },
+  });
+  assert(thrown.length === 0, "찾기·받기가 번갈아 터져도 예외 없이 빈 배열");
+
+  const noPage = await searchKinolightsStills(KEYWORD, { findWorkUrl: async () => "https://example.com/x", fetchPage: async () => HTML });
+  assert(noPage.length === 0, "키노라이츠 주소가 아니면 받지 않고 넘어간다");
+  console.log("✅ 전부 탈락·예외·받기 상한(3)");
 }
 
 console.log("\n🎉 키노라이츠 스틸 테스트 통과");
