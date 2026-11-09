@@ -207,12 +207,12 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
   });
   assert(stills.length === 2, `올바른 작품 스틸이 돌아와야 한다(받은 값: ${stills.length}, 호출 ${finds.join(" | ")})`);
   assert(stills[0].sourcePage.includes("152343"), "맞는 작품의 출처 페이지");
-  assert(fetched.length <= 3, `페이지 받기 3건 이하(${fetched.length})`);
+  assert(fetched.length <= 5, `페이지 받기 5건 이하(${fetched.length})`);
   assert(fetched.filter((u) => u.includes("15784")).length === 1, "같은 틀린 페이지는 한 번만 받는다");
   console.log("✅ 재시도 - 틀린 작품 탈락 뒤 다음 후보로 이어서 올바른 스틸 확보");
 }
 
-// 10) 라이브 실측 재현: 검증 탈락 -> 다음 후보. 전부 탈락하면 빈 배열이고 예외가 없다. 받기 상한 3.
+// 10) 라이브 실측 재현: 검증 탈락 -> 다음 후보. 전부 탈락하면 빈 배열이고 예외가 없다. 받기 상한 5.
 {
   const KEYWORD = "시한부 1년 남자를 사다";
   const urls = new Map<string, string>([
@@ -236,7 +236,7 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
     },
   });
   assert(out.length === 0, "전부 탈락하면 빈 배열");
-  assert(fetchCalls === 3, `받기 상한 3에서 멈춘다(받기 ${fetchCalls}회, 찾기 ${findCalls}회)`);
+  assert(fetchCalls === 5, `받기 상한 5에서 멈춘다(받기 ${fetchCalls}회, 찾기 ${findCalls}회)`);
 
   const thrown = await searchKinolightsStills(KEYWORD, {
     findWorkUrl: async (candidate) => {
@@ -251,7 +251,7 @@ console.log("▶ 키노라이츠 스틸 테스트 시작\n");
 
   const noPage = await searchKinolightsStills(KEYWORD, { findWorkUrl: async () => "https://example.com/x", fetchPage: async () => HTML });
   assert(noPage.length === 0, "키노라이츠 주소가 아니면 받지 않고 넘어간다");
-  console.log("✅ 전부 탈락·예외·받기 상한(3)");
+  console.log("✅ 전부 탈락·예외·받기 상한(5)");
 }
 
 console.log("\n🎉 키노라이츠 스틸 테스트 통과");
