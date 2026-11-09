@@ -15,12 +15,16 @@ import {
 } from "../../services/search/providers/reddit/fetchRedditTitles.js";
 import {
   LOCAL_EDGE_TERMS,
+  MEANING_SATURATED_TERMS,
+  OPERATIONAL_TERMS,
   SATURATED_TOURIST_TERMS,
   SCORE_WEIGHTS,
   attachRedditSupport,
   defaultLocalEdgeFloor,
   hasLocalEdge,
+  hasOperationalEdge,
   isLocalQuestionTitle,
+  isMeaningSaturated,
   isTouristSaturated,
   autocompleteQueriesForSeed,
   buildCandidates,
@@ -52,13 +56,13 @@ async function main(): Promise<void> {
   assert(KSCENE_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
 
   // 체류 실용 축(2026-10-11, §C): 기획⑤ 확정본 100개를 지우지 않고 누적했고, 실용 시드가 들어와 있다.
-  assert(KSCENE_SEEDS.length === 164, `시드 총량 164개(기획⑤ 100 + 실용 17 + 로컬 우위 47, 실제 ${KSCENE_SEEDS.length})`);
+  assert(KSCENE_SEEDS.length === 241, `시드 총량 241개(기획⑤ 100 + 실용 17 + 로컬 우위 47 + 운영 정보 77, 실제 ${KSCENE_SEEDS.length})`);
   const seedsByLabel = new Map<string, number>();
   for (const seed of KSCENE_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
-  assert(seedsByLabel.get("Living in Korea") === 41 && seedsByLabel.get("Travel & Transit") === 35, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
+  assert(seedsByLabel.get("Living in Korea") === 60 && seedsByLabel.get("Travel & Transit") === 53, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
   // 로컬 우위 시드(2026-10-30): 자동완성이 비는 긴 질의는 걸러 라벨마다 개수가 다르다.
-  for (const [label, count] of [["Food & Dining", 30], ["Culture & Etiquette", 31], ["K-Wave Context", 27]] as const) {
-    assert(seedsByLabel.get(label) === count, `${label}는 기획⑤ 확정본 20개 + 로컬 우위 ${count - 20}개(실제 ${seedsByLabel.get(label)})`);
+  for (const [label, count] of [["Food & Dining", 43], ["Culture & Etiquette", 45], ["K-Wave Context", 40]] as const) {
+    assert(seedsByLabel.get(label) === count, `${label}는 기획⑤ 확정본 20개 + 로컬 우위·운영 정보 ${count - 20}개(실제 ${seedsByLabel.get(label)})`);
   }
   for (const practical of ["korea prepaid usim", "korea resident registration move", "korea utility bill payment", "korea garbage bag rules", "korea bus subway transfer", "korea traffic signals"]) {
     assert(KSCENE_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
@@ -190,8 +194,8 @@ async function main(): Promise<void> {
   assert(new Set(day0.map((s) => s.label)).size === KSCENE_LABELS.length, "라벨이 섞인다");
   assert(day0.map((s) => s.query).join() !== day1.map((s) => s.query).join(), "날짜가 바뀌면 시드가 돈다");
   const covered = new Set<string>();
-  for (let d = 0; d < 12; d += 1) pickSeedsForDay(KSCENE_SEEDS, d, 20).forEach((s) => covered.add(s.query));
-  assert(covered.size === KSCENE_SEEDS.length, `12일 안에 전체 시드가 한 바퀴(${covered.size}/${KSCENE_SEEDS.length})`);
+  for (let d = 0; d < 15; d += 1) pickSeedsForDay(KSCENE_SEEDS, d, 20).forEach((s) => covered.add(s.query));
+  assert(covered.size === KSCENE_SEEDS.length, `15일 안에 전체 시드가 한 바퀴(Living 60개 ÷ 하루 4개, ${covered.size}/${KSCENE_SEEDS.length})`);
   assert(autocompleteQueriesForSeed("korea subway", 0)[1] === "korea subway a" && autocompleteQueriesForSeed("x", 27)[1] === "x b", "알파벳 변형");
   console.log("  ✅ 시드 선정(개수·라벨 혼합·회전·한 바퀴)");
 
@@ -357,7 +361,7 @@ async function main(): Promise<void> {
   assert(hasLocalEdge("korean restaurant refills explained") && hasLocalEdge("do koreans tip"), "복수형·korea 접기 매칭");
   assert(hasLocalEdge("koreans how do you handle noise") && hasLocalEdge("is it rude in south korea to stare"), "질문형 구 매칭");
   assert(!hasLocalEdge("korea travel guide") && !hasLocalEdge("how to use the korea bank"), "일반어만으로는 로컬 우위가 아니다");
-  assert(LOCAL_EDGE_TERMS.length === 48 && SATURATED_TOURIST_TERMS.length === 17, "§C-1 용어 전부(로컬 48 · 포화 17)");
+  assert(LOCAL_EDGE_TERMS.length === 48 && SATURATED_TOURIST_TERMS.length === 18, "§C-1 용어 전부(로컬 48 · 포화 18)");
 
   // (b) 포화 -10, 하한 0
   const saturated = mk("korea seoul itinerary 3 days");
@@ -412,7 +416,55 @@ async function main(): Promise<void> {
   assert(overlap.selected.filter((item) => item.score.localEdge > 0).length === 2, "실용 하한과 겹쳐도 로컬 하한 충족");
   const capped = selectTopics([...touristy.slice(0, 2), ...[1, 2, 3, 4].map((n) => mk(`korea ${n} neighbor noise rules`, { label: "Culture & Etiquette", bestPosition: 8 }))], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 4, perLabelCap: 2 });
   assert(capped.selected.filter((item) => item.label === "Culture & Etiquette").length <= 4, "라벨 상한 로직은 유지(하한이 상한을 깨지 않는 단계)");
-  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 164개");
+  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 241개");
+
+  // ---------- 운영 정보 축·의미 포화·제외 규칙 좁히기(2026-11-09, GSC 실측) ----------
+  // 제외 규칙: 1등 글의 주제가 `stock`에 걸려 파이프라인에서 나올 수 없던 사고.
+  assert(!isExcludedTopic("korea stock market trading hours"), "거래시간 질의는 제외되지 않는다(1등 글 주제)");
+  assert(!isExcludedTopic("is korea stock market open today") && !isExcludedTopic("krx holidays korea stock market"), "제도·거래시간·휴장일 질의도 통과");
+  assert(isExcludedTopic("korea stock price chart"), "시세 차트 질의는 여전히 제외");
+  for (const q of ["korea stock price", "samsung stock chart", "korea stock forecast", "kospi stock quote", "samsung share price"]) assert(isExcludedTopic(q), `시세 조회 질의 제외: ${q}`);
+  for (const q of ["korea news today", "kospi price today", "seoul weather today", "korea news", "korea live"]) assert(isExcludedTopic(q), `시의성 질의 제외: ${q}`);
+
+  // 운영 정보 +15 / 의미 포화 -10
+  // 실제 GSC 5+5(2026-11-09 팀장 실측). 수요 위치·관찰 횟수를 같게 두고 질의 문구만 비교한다.
+  const winners = ["korea stock market trading hours", "korea traffic lights", "do you need to press crosswalk button", "does uber eats work in korea", "what taxi app does korea use"];
+  const losers = ["what does unni mean in korean", "korean honorifics", "is tipping customary in korea", "korean dining etiquette", "what is nunchi in korean"];
+  const score = (topic: string) => scoreTopic(mk(topic, { bestPosition: 3, hits: 2 }));
+  for (const topic of winners) assert(hasOperationalEdge(topic) && score(topic).operational === 15, `실측 승자는 운영 정보 축에 걸린다: ${topic}`);
+  for (const topic of losers) assert(!hasOperationalEdge(topic) && score(topic).operational === 0, `실측 패자는 운영 정보 축에 안 걸린다: ${topic}`);
+  // 대소 관계로만 단언한다(가중치를 조정해도 안 깨진다). 최저 승자가 최고 패자보다 높아야 한다 - 역전이 다시 생기면 여기서 깨진다.
+  const winnerScores = winners.map((topic) => score(topic).total);
+  const loserScores = losers.map((topic) => score(topic).total);
+  assert(Math.min(...winnerScores) > Math.max(...loserScores), `최저 승자 > 최고 패자(승자 ${winnerScores.join("/")} · 패자 ${loserScores.join("/")})`);
+  assert(isTouristSaturated("is tipping customary in korea") && !isMeaningSaturated("is tipping customary in korea"), "팁 문화는 관광 포화(의미 포화 아님)");
+  assert(score("does uber eats work in korea").total > score("what does unni mean in korean").total, "같은 질문형인데 우버이츠가 unni 의미보다 높다(전엔 동점)");
+
+  // 의미 포화: 추상 개념만 -10, 구체적 금기는 살린다
+  assert(isMeaningSaturated("what does oppa mean in korean") && isMeaningSaturated("korean honorifics explained") && isMeaningSaturated("korea culture shock tips") && isMeaningSaturated("how to say sorry in korean"), "의미·호칭·추상 개념 판정");
+  assert(!isMeaningSaturated("why you shouldnt write names in red ink") && !isMeaningSaturated("korean superstitions about the number four"), "구체적 금기는 의미 포화가 아니다(superstition 미포함)");
+  assert((MEANING_SATURATED_TERMS as readonly string[]).every((term) => !term.includes("superstition")), "의미 포화 목록에 superstition 없음");
+  assert(score("what does unni mean in korean").meaningSaturation === 10 && score("why you shouldnt write names in red ink").meaningSaturation === 0, "의미 포화 감점 10 / 금기 0");
+  assert(score("korea work etiquette hours").total === Math.max(0, SCORE_WEIGHTS.base + score("korea work etiquette hours").demand + score("korea work etiquette hours").crossSignal + score("korea work etiquette hours").specificity + score("korea work etiquette hours").intent + 15 - 10), "가점 15와 의미 감점 10이 같이 걸리면 +15 -10");
+  const doubleHit = scoreTopic(mk("korea itinerary meaning", { bestPosition: 99 }));
+  assert(doubleHit.saturation === 10 && doubleHit.meaningSaturation === 10 && doubleHit.total === 0, "감점 두 축이 겹쳐도 하한 0");
+  assert(OPERATIONAL_TERMS.length === 33 && MEANING_SATURATED_TERMS.length === 14, "용어 수(운영 31+실측 보강 2 · 의미 14)");
+  assert(SCORE_WEIGHTS.operational === 15 && SCORE_WEIGHTS.meaningSaturation === 10, "새 가중치");
+  const rankedOp = toRankedKeywords([{ ...mk("does uber eats work in korea"), score: score("does uber eats work in korea") }, { ...mk("what does unni mean in korean"), score: score("what does unni mean in korean") }]);
+  assert(rankedOp[0].reason.includes("운영 정보 +15") && rankedOp[1].reason.includes("의미 포화 -10"), "사유에 운영 정보·의미 포화 표기");
+  assert(Object.keys(rankedOp[0].scoreBreakdown).sort().join() === "clickPotential,contentDemand,crossSourceSignal,freshness,newsVelocity,total,trendMomentum", "DB scoreBreakdown 모양 불변(운영 정보 포함)");
+
+  // 시드: 2026-11-09 추가분(기존 164 유지, 라벨 5개 그대로). 새 시드는 각 라벨 배열 끝에 붙어 있어 라벨별 총량으로 본다.
+  const countOf = (label: (typeof KSCENE_LABELS)[number]) => KSCENE_SEEDS.filter((seed) => seed.label === label).length;
+  const oldCounts = { "Travel & Transit": 35, "Food & Dining": 30, "Culture & Etiquette": 31, "Living in Korea": 41, "K-Wave Context": 27 } as const;
+  const addedByLabel = KSCENE_LABELS.map((label) => countOf(label) - oldCounts[label]);
+  const added = addedByLabel.reduce((sum, n) => sum + n, 0);
+  assert(added >= 60 && added <= 80, `신규 시드 60~80개(실제 ${added})`);
+  assert(addedByLabel.every((n) => n >= 10), `신규 시드가 라벨 5개에 고르게 있다(각 10개 이상, 실제 ${addedByLabel.join("/")})`);
+  assert(new Set(KSCENE_SEEDS.map((seed) => seed.query)).size === KSCENE_SEEDS.length, "시드 중복 없음");
+  for (const query of ["korea subway etiquette", "korea ondol", "korean bbq", "korea delivery apps"]) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `기존 시드 유지: ${query}`);
+  for (const query of ["korea stock market hours", "krx holidays", "uber eats korea", "korea traffic light rules"]) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `운영 정보 시드: ${query}`);
+  console.log("  ✅ 제외 규칙 좁히기(stock·today)·운영 정보 +15·의미 포화 -10(superstition 제외)·승자>패자 대소 단언·신규 시드");
 
   console.log("\n✅ testKsceneTopics 통과");
 }
