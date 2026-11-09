@@ -24,6 +24,15 @@
 // 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 ksceneTopics.ts의 LOCAL_EDGE_TERMS / SATURATED_TOURIST_TERMS가
 // 맡는다. 라벨 5개 이름은 그대로다(Blogger 라벨 URL·About·시드 매핑이 묶여 있다).
 //
+// 📌 **2026-11-09 시드 재설계**(운영 1개월 GSC 실측): 노출/일 1~5위가 전부 "최근 바뀌었고 + 정답이 하나로 떨어지고 + 영어 출처가
+// 빈약한" 운영 정보(거래시간·교통 신호·횡단보도 버튼·우버이츠·택시 앱)였고, 의미·호칭·추상 개념(unni·noona·nunchi)과 ARC·팁·식사
+// 예절은 노출이 거의 없었다. 그래서 ① 바뀐 숫자·제도(거래시간·휴장일·요금·한도·최저임금·공휴일) ② 글로벌 서비스가 한국에서 되나
+// ③ 한국에만 있는 장치·제도 ④ 숫자 하나로 끝나는 비용·시간, 네 틀로 **77개를 추가**했다(164 -> 241). 후보 174개(빈 시드는 말을 바꿔
+// 다시 시도한 것 포함)를 자동완성에 넣어(autocompleteQueriesForSeed가 만드는 질의 그대로) **빈 시드 51개를 버렸고**, 사용 가능한
+// 후보가 3건 미만이거나 기존 시드·다른 신규 시드와 겹치는 것, 관광 포화 용어를 품은 것(hanbok rental price)도 뺐다 - 목록은 PR 본문.
+// 기존 시드는 하나도 지우지 않았다. 라벨 5개 이름은 그대로다. 점수 쪽은 ksceneTopics.ts의 OPERATIONAL_TERMS(+15) /
+// MEANING_SATURATED_TERMS(-10)가 맡는다.
+//
 // label은 Blogger 라벨(글 분류)로 쓴다 - CHANNEL-SETUP-2026-10.md B-2의 카테고리 체계와 같다.
 
 export const KSCENE_LABELS = [
@@ -78,6 +87,25 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea parking rules",
     "korea subway etiquette",
     "korea bus stop button",
+    // 2026-11-09 운영 정보 축 - A·B·C·D 틀 - 요금·운행시간·교통법규, 외국 서비스가 한국에서 되는가, 하이패스·따릉이류 장치. 자동완성 실측으로 빈 시드를 버린 것만 남겼다.
+    "korea subway fare",
+    "korea taxi fare",
+    "korea bus fare",
+    "incheon airport taxi fare",
+    "ktx seoul busan price",
+    "korea subway last train",
+    "korea subway hours",
+    "korea traffic light rules",
+    "korea speed camera",
+    "korea rental car license",
+    "tesla charging korea",
+    "google maps korea",
+    "uber korea",
+    "korea korail pass",
+    "korea right turn on red",
+    "korea toll",
+    "korea hi pass",
+    "korea kakao taxi",
   ]),
   ...seeds("Food & Dining", [
     "korean bbq",
@@ -111,6 +139,20 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea solo dining",
     "korea study cafe",
     "korea restaurant hours",
+    // 2026-11-09 운영 정보 축 - B·D 틀 - 배달 앱이 되는가, 영업시간·휴무, 숫자 하나로 끝나는 가격. 자동완성 실측으로 빈 시드를 버린 것만 남겼다.
+    "uber eats korea",
+    "doordash korea",
+    "baemin foreigner",
+    "korea restaurant opening hours",
+    "korea cafe closing time",
+    "korea coupang eats",
+    "korea restaurant reservation",
+    "korea restaurant vat",
+    "korea convenience store hours",
+    "korea soju price",
+    "korea restaurant closed",
+    "korea late night food",
+    "korea chicken price",
   ]),
   ...seeds("Culture & Etiquette", [
     "korean etiquette",
@@ -145,6 +187,21 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea age question",
     "korea ajumma",
     "korea elevator etiquette",
+    // 2026-11-09 운영 정보 축 - A·C 틀 - 공휴일과 휴업, 법이 정한 연령·금지 규칙. 추상 에티켓이 아니라 구체적 금기·행동 규칙만 둔다(MEANING_SATURATED_TERMS 참조). 자동완성 실측으로 빈 시드를 버린 것만 남겼다.
+    "korea public holidays",
+    "korea chuseok closures",
+    "korea childrens day",
+    "korea buddha birthday",
+    "korea smoking ban",
+    "korea smoking age",
+    "korea drinking age",
+    "korea tattoo legal",
+    "korea legal age",
+    "korea drone rules",
+    "korea unlucky number four",
+    "korea chopsticks rules",
+    "korea littering fine",
+    "korea dress code temple",
   ]),
   ...seeds("Living in Korea", [
     "living in korea foreigner",
@@ -191,6 +248,26 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korea delivery box",
     "korea ondol",
     "korea moving day",
+    // 2026-11-09 운영 정보 축 - A·B·C·D 틀 - 거래시간·휴장일, 최저임금·면세 한도, 외국 결제·배송 서비스, 병원 창구·응급실, 월 이용료. 자동완성 실측으로 빈 시드를 버린 것만 남겼다.
+    "korea stock market hours",
+    "krx holidays",
+    "nxt trading hours",
+    "korea minimum wage",
+    "korea duty free limit",
+    "korea jeonse deposit",
+    "korea hospital reception",
+    "apple pay korea",
+    "venmo korea",
+    "wise transfer korea",
+    "amazon delivery korea",
+    "costco korea membership",
+    "airbnb korea legal",
+    "esim korea support",
+    "korea bank hours",
+    "korea post office hours",
+    "korea emergency room",
+    "korea hospital cost",
+    "korea gym fee",
   ]),
   ...seeds("K-Wave Context", [
     "kpop fan culture",
@@ -221,6 +298,20 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
     "korean convenience store",
     "korean rooftop house",
     "korean apartment complex",
+    // 2026-11-09 운영 정보 축 - B·D 틀 - 팬이 실제로 묻는 가격·규칙·가용성(공연 반입 규칙, 앨범값, 스트리밍 서비스). 자동완성 실측으로 빈 시드를 버린 것만 남겼다.
+    "kpop concert ticket price",
+    "kpop store hours",
+    "korea photo booth price",
+    "olive young tax refund",
+    "kpop album price korea",
+    "korea concert bag rules",
+    "kpop merch korea",
+    "korea cinema ticket price",
+    "netflix korea",
+    "korea fan cafe",
+    "korea musical ticket",
+    "korea album shop",
+    "kpop pop up store",
   ]),
 ];
 

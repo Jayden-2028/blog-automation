@@ -34,6 +34,17 @@
 //   topicTokens와 같은 korea/korean 접기·복수형 접기를 쓰되 **불용어는 지우지 않는다**("koreans how do you" 같은
 //   질문형 구가 불용어만으로 이뤄져 있어서) - matchTokens. 구(句)는 연속 토큰 일치다.
 //
+// 📌 **운영 정보 축·의미 포화 감점·제외 규칙 좁히기**(2026-11-09, 운영 1개월 GSC 실측): 총 노출 1,769 중 클릭이 3이라
+//   판단 근거는 발행일로 보정한 **노출/일**뿐이다. 1등은 `korea stock market trading hours`(28.5, 한 사실을 25가지 질의로
+//   묻는다), 이어 교통 신호(21.3)·횡단보도 버튼(14.1)·우버이츠(12.6)·택시 앱(9.8) - 전부 **최근 바뀌었고 + 정답이 하나로
+//   떨어지고 + 영어 출처가 빈약한 운영 정보**다. 반대로 ARC·식사 예절·팁·연금 환급은 30일 가까이 노출 0이고 의미·호칭
+//   설명(unni·noona·mianhae)은 36~99위다. 단 `why you shouldn't write names in red ink`는 60노출 7.0위 - 같은 문화 설명이어도
+//   **구체적 금기·행동 규칙은 되고 추상 개념은 안 된다**. 점검에서 파이프라인이 이 승자를 못 알아보는 세 가지가 나왔다:
+//   ① 1등 주제가 LOW_VALUE_TERMS의 `stock`에 걸려 제외돼 이 파이프라인에서는 애초에 나올 수 없었다, ② 점수가 승자와
+//   패자를 못 가렸다(우버이츠 = unni 의미 = 팁 문화), ③ 로컬 우위가 승자 전원에게 0점이었다. 그래서 제외 규칙을 좁히고,
+//   가점 축 OPERATIONAL_TERMS(+15)와 감점 축 MEANING_SATURATED_TERMS(-10)를 더했다. 양수 가중치 합이 115가 되므로 총점은
+//   100에서 자른다 - 점수 구성은 고정 배점표가 아니라 "큰 쪽이 위로 가는" 순위 신호다.
+//
 // 이 트랙의 선정은 LLM 프롬프트가 아니라 이 파일의 결정 규칙이 전부다 - 기준은 여기 적는다.
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
@@ -132,8 +143,40 @@ export const SATURATED_TOURIST_TERMS = [
   "autumn foliage", "hanbok rental", "palace", "jeju", "busan travel", "travel budget", "layover", "k eta", "michelin",
 ] as const;
 
+/**
+ * 운영 정보: 최근 바뀌었거나 정답이 하나로 떨어지는 질의의 틀(+15, 하나라도 포함). 2026-11-09 GSC 실측 승자 다섯 건이
+ * 전부 여기 걸린다. 네 묶음 - 운영시간·일정 / 가용성 / 규칙·의무 / 금액·수치.
+ * 이 축이 잡는 것은 주제어가 아니라 **질문의 모양**이다("does X work in korea"는 X가 무엇이든 정답이 하나다).
+ */
+export const OPERATIONAL_TERMS = [
+  // 운영시간·일정
+  "hours", "opening time", "closing time", "what time", "open today", "open now", "last train", "holidays", "closed on",
+  // 가용성
+  "work in korea", "available in korea", "accepted in korea", "does korea have", "can i use", "is there uber",
+  "alternative in korea",
+  // 규칙·의무
+  "do you need to", "do i need to", "is it legal", "allowed in korea", "required in korea", "fine for", "penalty", "limit",
+  "rules in korea",
+  // 금액·수치
+  "how much", "how much does", "cost in korea", "fee in korea", "price in korea", "per person",
+  // 실측 보강(2026-11-09): 위 목록만으로는 승자 다섯 중 둘이 안 걸렸다 - "what taxi app does korea use"(가용성: 한국에서 쓰는 것이 무엇인가)와
+  // "korea traffic lights"(규칙: 신호 체계). 둘 다 정답이 하나로 떨어지는 운영 질의라 같은 묶음에 한 구씩 더한다.
+  "does korea use", "traffic light",
+] as const;
+
+/**
+ * 의미 포화: 의미·호칭·추상 개념 설명(-10). 90DayKorean 류가 점령해 10~90위에 머문다(unni·noona·mianhae 36~99위).
+ * **`superstition`은 넣지 않는다** - `why you shouldn't write names in red ink`가 60노출 7.0위로 통했다. 구체적 금기·행동 규칙은 살린다.
+ */
+export const MEANING_SATURATED_TERMS = [
+  "meaning", "what does mean", "oppa", "unni", "unnie", "noona", "hyung", "honorific", "honorifics", "etiquette", "manners",
+  "nunchi", "culture shock", "how to say",
+] as const;
+
 const LOCAL_EDGE_PHRASES = LOCAL_EDGE_TERMS.map(matchTokens);
 const SATURATED_PHRASES = SATURATED_TOURIST_TERMS.map(matchTokens);
+const OPERATIONAL_PHRASES = OPERATIONAL_TERMS.map(matchTokens);
+const MEANING_SATURATED_PHRASES = MEANING_SATURATED_TERMS.map(matchTokens);
 
 /** 후보가 로컬 우위 용어를 품었는가. */
 export function hasLocalEdge(topic: string): boolean {
@@ -147,6 +190,18 @@ export function isTouristSaturated(topic: string): boolean {
   return SATURATED_PHRASES.some((phrase) => containsTokenPhrase(tokens, phrase));
 }
 
+/** 후보가 운영 정보 틀(운영시간·가용성·규칙·금액)을 품었는가. */
+export function hasOperationalEdge(topic: string): boolean {
+  const tokens = matchTokens(topic);
+  return OPERATIONAL_PHRASES.some((phrase) => containsTokenPhrase(tokens, phrase));
+}
+
+/** 후보가 의미·호칭·추상 개념 설명인가(이미 포화). */
+export function isMeaningSaturated(topic: string): boolean {
+  const tokens = matchTokens(topic);
+  return MEANING_SATURATED_PHRASES.some((phrase) => containsTokenPhrase(tokens, phrase));
+}
+
 // ---------- 제외 규칙 ----------
 
 /** 정치·안보·성인·도박·약물 등 이 블로그가 다루지 않는 주제(애드센스 정책 + 정체성). */
@@ -156,10 +211,20 @@ const EXCLUDED_TERMS = [
   "scandal", "suicide", "death", "dies", "murder", "crime", "arrest", "lawsuit",
 ];
 
-/** 글이 될 수 없는 내비게이션·로컬·시의성 질의. */
+/**
+ * 글이 될 수 없는 내비게이션·로컬·시의성 질의.
+ *
+ * **`stock`·`today`를 좁혔다**(2026-11-09). 둘 다 낱말 하나로 걸어 두었더니 우리 1등 글(`korea stock market trading hours`,
+ * 28.5노출/일)의 주제가 이 파이프라인에서 제외로 걸렸다 - 사용자가 키워드를 직접 입력해 만든 글이라 나왔을 뿐, 자동완성 경로로는
+ * 절대 나올 수 없었다. 거르려던 것은 시세 조회("stock price"·차트·전망)와 그날 뉴스("price today"·"weather today")이지
+ * 제도·거래시간·휴장일("is korea stock market open today")이 아니다. 시세 조회 질의만 구로 거르고 나머지는 통과시킨다.
+ * `news`·`live`는 그대로 둔다.
+ */
 const LOW_VALUE_TERMS = [
   "near me", "reddit", "youtube", "tiktok", "instagram", "login", "log in", "pdf", "download", "torrent", "free online",
-  "today", "tonight", "live", "news", "stock", "price chart", "meaning in english", "lyrics", "mp3", "wallpaper", "twitter",
+  "tonight", "live", "news", "news today", "price today", "weather today",
+  "stock price", "stock chart", "stock forecast", "stock quote", "share price",
+  "price chart", "meaning in english", "lyrics", "mp3", "wallpaper", "twitter",
   // 해외 한글학교·한인 문화학교(2026-10-28, A) - "aiea korean culture school"처럼 지명 없이 학교 이름으로 온다.
   "culture school", "heritage school", "saturday school",
 ];
@@ -408,10 +473,17 @@ export type TopicScore = {
   localEdge: number;
   /** 관광 포화 감점(0 또는 10, 양수로 기록하고 total에서 뺀다). 2026-10-30. */
   saturation: number;
+  /** 운영 정보 가산(0 또는 15). 2026-11-09. */
+  operational: number;
+  /** 의미·호칭 포화 감점(0 또는 10, 양수로 기록하고 total에서 뺀다). 2026-11-09. */
+  meaningSaturation: number;
 };
 
-/** 점수 구성(합계 100): 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + 로컬 우위 15. 포화는 -10(하한 0). */
-export const SCORE_WEIGHTS = { base: 5, demand: 35, crossSignal: 15, specificity: 15, intent: 15, localEdge: 15, saturation: 10 } as const;
+/**
+ * 점수 구성: 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + 로컬 우위 15 + 운영 정보 15 = 115, 총점은 100에서 자른다.
+ * 감점은 관광 포화 -10, 의미 포화 -10(하한 0). 로컬 우위와 운영 정보를 함께 가진 후보가 흔하지 않아 자르기로 충분하다.
+ */
+export const SCORE_WEIGHTS = { base: 5, demand: 35, crossSignal: 15, specificity: 15, intent: 15, localEdge: 15, operational: 15, saturation: 10, meaningSaturation: 10 } as const;
 
 // ---------- 레딧 교차 신호(2026-10-28, C) ----------
 
@@ -460,7 +532,8 @@ export function attachRedditSupport(candidates: readonly TopicCandidate[], title
 }
 
 /**
- * 0~100. 기본 5 + 수요(자동완성 위치) 35 + 교차 신호 15 + 구체성 15 + 안내글 의도 15 + 로컬 우위 15, 관광 포화 -10(하한 0).
+ * 0~100. 기본 5 + 수요(자동완성 위치) 35 + 교차 신호 15 + 구체성 15 + 안내글 의도 15 + 로컬 우위 15 + 운영 정보 15(합 115, 100에서 자름),
+ * 관광 포화 -10, 의미 포화 -10(하한 0).
  * 교차 신호 = 자동완성 반복 관찰(0/8/15) + 레딧 질문 뒷받침(1건 5, 2건 이상 10), 합쳐 15가 상한이다(C).
  * 로컬 질문형 레딧 제목이 뒷받침하면 그 후보의 레딧 뒷받침을 2건으로 센다(2026-10-30).
  */
@@ -481,8 +554,14 @@ export function scoreTopic(candidate: TopicCandidate): TopicScore {
   const localEdge = hasLocalEdge(candidate.topic) ? SCORE_WEIGHTS.localEdge : 0;
   const saturation = isTouristSaturated(candidate.topic) ? SCORE_WEIGHTS.saturation : 0;
 
-  const total = Math.max(0, Math.min(100, SCORE_WEIGHTS.base + demand + crossSignal + specificity + intent + localEdge - saturation));
-  return { total, demand, crossSignal, specificity, intent, localEdge, saturation };
+  const operational = hasOperationalEdge(candidate.topic) ? SCORE_WEIGHTS.operational : 0;
+  const meaningSaturation = isMeaningSaturated(candidate.topic) ? SCORE_WEIGHTS.meaningSaturation : 0;
+
+  const total = Math.max(
+    0,
+    Math.min(100, SCORE_WEIGHTS.base + demand + crossSignal + specificity + intent + localEdge + operational - saturation - meaningSaturation)
+  );
+  return { total, demand, crossSignal, specificity, intent, localEdge, saturation, operational, meaningSaturation };
 }
 
 /** 체류 실용 정보 하한의 기본값(2026-10-11, §C). topN=8이면 3건 - 라벨 상한(3)과 같은 크기다. */
@@ -597,14 +676,14 @@ export function toRankedKeywords(selected: readonly (TopicCandidate & { score: T
       contentDemand: item.score.demand,
       freshness: 0,
       crossSourceSignal: item.score.crossSignal,
-      // keyword_rankings.score_breakdown은 6컬럼 고정(migration 없음) - 로컬 우위는 clickPotential에 합산하고 포화 감점은 reason에 남긴다.
-      clickPotential: item.score.intent + item.score.specificity + item.score.localEdge,
+      // keyword_rankings.score_breakdown은 6컬럼 고정(migration 없음) - 로컬 우위·운영 정보는 clickPotential에 합산하고 포화 감점은 reason에 남긴다.
+      clickPotential: item.score.intent + item.score.specificity + item.score.localEdge + item.score.operational,
       total: item.score.total,
     },
     trendDirection: "unknown",
     relatedCount: item.hits,
     sources: (item.redditHits ?? 0) > 0 ? ["google_autocomplete", "reddit"] : ["google_autocomplete"],
     latestPublishedAt: null,
-    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}${item.score.localEdge > 0 ? " · 로컬 우위 +15" : ""}${item.score.saturation > 0 ? " · 관광 포화 -10" : ""}`,
+    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}${item.score.localEdge > 0 ? " · 로컬 우위 +15" : ""}${item.score.operational > 0 ? " · 운영 정보 +15" : ""}${item.score.saturation > 0 ? " · 관광 포화 -10" : ""}${item.score.meaningSaturation > 0 ? " · 의미 포화 -10" : ""}`,
   }));
 }
