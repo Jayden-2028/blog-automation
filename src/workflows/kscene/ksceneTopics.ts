@@ -141,6 +141,9 @@ export const LOCAL_EDGE_TERMS = [
 export const SATURATED_TOURIST_TERMS = [
   "itinerary", "day trip", "things to do", "best places", "top 10", "must try", "must visit", "cherry blossom",
   "autumn foliage", "hanbok rental", "palace", "jeju", "busan travel", "travel budget", "layover", "k eta", "michelin",
+  // 2026-11-09: 팁 문화는 의미 설명이 아니라 모든 여행 가이드가 이미 쓴 주제다. 실측 노출 0(`is tipping customary in korea`,
+  // 2026-10-14 발행, 26일) - 질문형이라 70점으로 승자(거래시간 등)와 같거나 높게 나오던 역전을 막는다.
+  "tipping",
 ] as const;
 
 /**

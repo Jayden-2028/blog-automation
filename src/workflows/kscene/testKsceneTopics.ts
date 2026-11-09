@@ -361,7 +361,7 @@ async function main(): Promise<void> {
   assert(hasLocalEdge("korean restaurant refills explained") && hasLocalEdge("do koreans tip"), "복수형·korea 접기 매칭");
   assert(hasLocalEdge("koreans how do you handle noise") && hasLocalEdge("is it rude in south korea to stare"), "질문형 구 매칭");
   assert(!hasLocalEdge("korea travel guide") && !hasLocalEdge("how to use the korea bank"), "일반어만으로는 로컬 우위가 아니다");
-  assert(LOCAL_EDGE_TERMS.length === 48 && SATURATED_TOURIST_TERMS.length === 17, "§C-1 용어 전부(로컬 48 · 포화 17)");
+  assert(LOCAL_EDGE_TERMS.length === 48 && SATURATED_TOURIST_TERMS.length === 18, "§C-1 용어 전부(로컬 48 · 포화 18)");
 
   // (b) 포화 -10, 하한 0
   const saturated = mk("korea seoul itinerary 3 days");
@@ -416,7 +416,7 @@ async function main(): Promise<void> {
   assert(overlap.selected.filter((item) => item.score.localEdge > 0).length === 2, "실용 하한과 겹쳐도 로컬 하한 충족");
   const capped = selectTopics([...touristy.slice(0, 2), ...[1, 2, 3, 4].map((n) => mk(`korea ${n} neighbor noise rules`, { label: "Culture & Etiquette", bestPosition: 8 }))], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 4, perLabelCap: 2 });
   assert(capped.selected.filter((item) => item.label === "Culture & Etiquette").length <= 4, "라벨 상한 로직은 유지(하한이 상한을 깨지 않는 단계)");
-  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 164개");
+  console.log("  ✅ 로컬 우위 +15·포화 -10(하한 0)·합계 100·레딧 로컬 질문 보정·로컬 하한(후보 없으면 안 채움)·시드 241개");
 
   // ---------- 운영 정보 축·의미 포화·제외 규칙 좁히기(2026-11-09, GSC 실측) ----------
   // 제외 규칙: 1등 글의 주제가 `stock`에 걸려 파이프라인에서 나올 수 없던 사고.
@@ -427,21 +427,18 @@ async function main(): Promise<void> {
   for (const q of ["korea news today", "kospi price today", "seoul weather today", "korea news", "korea live"]) assert(isExcludedTopic(q), `시의성 질의 제외: ${q}`);
 
   // 운영 정보 +15 / 의미 포화 -10
-  const winners = ["korea stock market trading hours", "traffic light rules in korea", "do you need to press crosswalk button", "does uber eats work in korea", "what taxi app does korea use"];
-  const losers = ["what does unni mean in korean", "is tipping customary in korea", "korea alien registration card renewal", "korean dining etiquette rules", "what does noona mean in korean"];
-  const score = (topic: string) => scoreTopic(mk(topic, { bestPosition: 0 }));
+  // 실제 GSC 5+5(2026-11-09 팀장 실측). 수요 위치·관찰 횟수를 같게 두고 질의 문구만 비교한다.
+  const winners = ["korea stock market trading hours", "korea traffic lights", "do you need to press crosswalk button", "does uber eats work in korea", "what taxi app does korea use"];
+  const losers = ["what does unni mean in korean", "korean honorifics", "is tipping customary in korea", "korean dining etiquette", "what is nunchi in korean"];
+  const score = (topic: string) => scoreTopic(mk(topic, { bestPosition: 3, hits: 2 }));
   for (const topic of winners) assert(hasOperationalEdge(topic) && score(topic).operational === 15, `실측 승자는 운영 정보 축에 걸린다: ${topic}`);
-  assert(hasOperationalEdge("korea traffic lights"), "신호 체계 질의(bare 형태)도 걸린다");
   for (const topic of losers) assert(!hasOperationalEdge(topic) && score(topic).operational === 0, `실측 패자는 운영 정보 축에 안 걸린다: ${topic}`);
-  // 대소 관계로만 단언한다(가중치를 조정해도 안 깨진다). 같은 조건(수요 위치·관찰 횟수)에서 비교.
-  const meanOf = (list: string[]) => list.reduce((sum, topic) => sum + score(topic).total, 0) / list.length;
-  assert(meanOf(winners) > meanOf(losers), `승자 평균 점수 > 패자 평균 점수(${meanOf(winners)} vs ${meanOf(losers)})`);
-  // 의미·추상 개념 패자(unni·noona·etiquette)는 모든 승자보다 낮다. 팁 문화는 의도적으로 뺐다: 질문형이라 거래시간(비질문형)과 동점이다(PR 본문).
-  const meaningLosers = losers.filter((topic) => isMeaningSaturated(topic));
-  assert(meaningLosers.length === 3, "의미 포화 패자 3건(unni·noona·etiquette)");
-  assert(Math.min(...winners.map((topic) => score(topic).total)) > Math.max(...meaningLosers.map((topic) => score(topic).total)), "모든 승자 > 의미 포화 패자");
+  // 대소 관계로만 단언한다(가중치를 조정해도 안 깨진다). 최저 승자가 최고 패자보다 높아야 한다 - 역전이 다시 생기면 여기서 깨진다.
+  const winnerScores = winners.map((topic) => score(topic).total);
+  const loserScores = losers.map((topic) => score(topic).total);
+  assert(Math.min(...winnerScores) > Math.max(...loserScores), `최저 승자 > 최고 패자(승자 ${winnerScores.join("/")} · 패자 ${loserScores.join("/")})`);
+  assert(isTouristSaturated("is tipping customary in korea") && !isMeaningSaturated("is tipping customary in korea"), "팁 문화는 관광 포화(의미 포화 아님)");
   assert(score("does uber eats work in korea").total > score("what does unni mean in korean").total, "같은 질문형인데 우버이츠가 unni 의미보다 높다(전엔 동점)");
-  assert(score("does uber eats work in korea").total > score("is tipping customary in korea").total, "우버이츠가 팁 문화보다 높다(전엔 동점)");
 
   // 의미 포화: 추상 개념만 -10, 구체적 금기는 살린다
   assert(isMeaningSaturated("what does oppa mean in korean") && isMeaningSaturated("korean honorifics explained") && isMeaningSaturated("korea culture shock tips") && isMeaningSaturated("how to say sorry in korean"), "의미·호칭·추상 개념 판정");
