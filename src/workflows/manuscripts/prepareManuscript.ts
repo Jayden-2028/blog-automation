@@ -38,6 +38,7 @@ import { inferAcquisition } from "../images/imageEditRequest.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
+import { usesKoreaplainImagePolicy } from "../images/koreaplainImageSources.js";
 import { DEFAULT_TRACK, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { ImagePlan } from "../images/planImageSlots.js";
 import { routeImagePlan } from "../images/routeImagePlan.js";
@@ -123,7 +124,7 @@ export type PrepareManuscriptOptions = {
    */
   buildFallbackPrompts?:
     | false
-    | ((input: { keyword: string; unfilled: UnfilledSlot[] }) => Promise<{
+    | ((input: { keyword: string; unfilled: UnfilledSlot[]; category?: string | null }) => Promise<{
         slots: FallbackImagePrompt[];
         failures: string[];
       }>);
@@ -274,10 +275,17 @@ export async function prepareManuscript(
   });
   const baseGenerateImages =
     options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
+  // koreaplain은 AI로 만든 그림을 일러스트로 표기하고 화질을 low로 고정한다(2026-11-10, generateManuscriptImages의
+  // aiIllustrations). 다른 트랙은 false라 옵션이 실리지 않는다.
+  const koreaplainImages = usesKoreaplainImagePolicy(job.category);
   const generateImages =
-    imagePolicy && options.generateImages === undefined
+    (imagePolicy || koreaplainImages) && options.generateImages === undefined
       ? (input: Parameters<typeof generateManuscriptImages>[0], extra?: Parameters<typeof generateManuscriptImages>[1]) =>
-          generateManuscriptImages(input, { ...extra, config: imagePolicy })
+          generateManuscriptImages(input, {
+            ...extra,
+            ...(imagePolicy ? { config: imagePolicy } : {}),
+            ...(koreaplainImages ? { aiIllustrations: true } : {}),
+          })
       : baseGenerateImages;
   const policyNote = describeImagePolicy({
     source: (job.metadata as Record<string, unknown> | null)?.source,
@@ -451,7 +459,11 @@ export async function prepareManuscript(
   // 캡션 언어를 함께 넘긴다 - 지난 실행에 한글로 기획해 둔 원고(imagePlan 캐시)도 영어본이면
   // 한글 subject가 캡션으로 새지 않는다(2026-10-08).
   const route = plan
-    ? routeImagePlan(plan, content, slotPrompts, translatedVariant ? { captionLanguage: "en" } : {})
+    ? routeImagePlan(plan, content, slotPrompts, {
+        ...(translatedVariant ? { captionLanguage: "en" as const } : {}),
+        // koreaplain은 글자·숫자가 정보인 자리를 AI 인포그래픽으로 그리지 않는다(2026-11-10).
+        ...(koreaplainImages ? { blockInfographic: true } : {}),
+      })
     : null;
   // 자리별 후보(2026-10-02). 지난 실행 것을 이어받는다 - 재수집하지 않은 자리의 후보도 뷰어에 남는다.
   let imageCandidates: Record<string, ImageCandidateRecord[]> = readImageCandidates(
@@ -520,7 +532,7 @@ export async function prepareManuscript(
         suggestion: `사용자 지시: ${userRequirements[String(slot.index)]}`,
         userRequested: true,
       }));
-    const prompts = await buildFallbacks({ keyword: job.keyword, unfilled: unfilledByUser });
+    const prompts = await buildFallbacks({ keyword: job.keyword, unfilled: unfilledByUser, category: job.category ?? null });
     imageFailures.push(...prompts.failures);
     if (prompts.slots.length > 0) {
       const made = await generateImages(
@@ -621,7 +633,7 @@ export async function prepareManuscript(
     // 폴백은 **아무 이미지도 없는 자리**에만 - 지난 실행의 폴백 이미지가 있으면 유료 생성을 반복하지 않는다.
     const stillEmpty = outcome.unfilled.filter((u) => !images.some((i) => i.index === u.index && i.url));
     if (generateImages && buildFallbacks && stillEmpty.length > 0) {
-      const fallback = await buildFallbacks({ keyword: job.keyword, unfilled: stillEmpty });
+      const fallback = await buildFallbacks({ keyword: job.keyword, unfilled: stillEmpty, category: job.category ?? null });
       imageFailures.push(...fallback.failures);
 
       if (fallback.slots.length > 0) {

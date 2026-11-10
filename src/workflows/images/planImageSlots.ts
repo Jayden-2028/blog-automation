@@ -23,6 +23,7 @@ import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import { stripAcquisitionSuffix } from "../manuscripts/parseManuscriptBlocks.js";
 import { imageMakerSpecLines } from "./imageMakerSpec.js";
+import { usesKoreaplainImagePolicy } from "./koreaplainImageSources.js";
 import { isPressUrl } from "./pressDomains.js";
 import { groupShotsAllowed } from "../../config/imageGroupShots.js";
 
@@ -246,6 +247,20 @@ export function buildPlanPrompt(input: PlanImageSlotsInput, spec?: string | null
     "  \"피선거권 상실\" → \"시장직 상실\". 아래 작은 라벨 \"5년간 피선거권 제한\". 위에 적은 글자 외에는 넣지 마.",
     "  흰 배경, 남색·회색 픽토그램, 16:9`",
     "",
+    ...(usesKoreaplainImagePolicy(input.category)
+      ? [
+          "## ⚠️ 이 원고는 영문 블로그(Korea Plain)다 - 아래가 위 규칙과 부딪히면 이쪽이 이긴다(2026-11-10 사용자 결정)",
+          "언론사·상업 사이트의 사진은 쓰지 않는다. `search` 결과는 코드가 **공공·공식 출처(정부·지자체·공공기관, 서울관광재단,",
+          "한국관광공사, 인천공항, 위키미디어·위키백과)** 밖의 후보를 전부 버리고, 빈 자리는 AI 생성으로 넘어간다.",
+          "- **기본은 `ai`다.** 아파트 엘리베이터 안, 지하철 에스컬레이터처럼 **보편적 장면**이면 `ai`로 정하고 `queries[0]`에",
+          "  영어 프롬프트를 쓴다. 특정 사진을 모사하지 않는다(2차적저작물).",
+          "- `search`는 **공공·공식 기관이 낸 사진이 있을 만한 자리**(서울시 정책, 공항 시설, 관광 명소)에만 쓴다.",
+          "- `capture`는 **그 화면 자체가 정보인 자리**(요금표, 운영시간 안내, 공공기관 안내 페이지)에 쓴다. 리서치의 URL만 쓴다.",
+          "- **`infographic`은 쓰지 않는다.** 글자·숫자가 정보인 자리(층수 버튼, 요금표, 운영시간 안내판, 노선도)는 AI가 숫자를",
+          "  틀리게 그린다. `capture`로 돌리거나, 없으면 `queries`를 빈 배열로 두고 `reason`에 \"본문 목록으로 전달\"이라 적는다.",
+          "",
+        ]
+      : []),
     "## 최신성 (`recency`)",
     "- `today` — 오늘 일어난 일(구형·선고·발표·공개)의 당사자 자리. 오늘 찍힌 사진이 가장 좋다",
     "- `recent` — 최근 활동이 맞는 자리(현직 인물의 근황)",
