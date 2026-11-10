@@ -14,6 +14,10 @@
 //   3. 프롬프트·판정  글 하나에 LLM 한 번. 자리마다 영어 생성 프롬프트 또는 SKIP(글자·숫자가 정보인 자리 등).
 //   ---- 여기까지가 dry-run이다. 아래는 --apply에서만 ----
 //   4. 생성·업로드    generateManuscriptImages 경로를 그대로 쓴다(gpt-image-2, quality low, 1536x864, Supabase Storage).
+//   4b. 내용 검증     생성 직후 자리마다 `verifyImage`(그림이 캡션 장면인가·글자·실존 얼굴·해부학). 실패하면 사유를 넣어
+//                     **딱 한 번** 다시 그리고(글 단위 한 번에 묶어), 또 실패하면 그 자리는 원본을 둔다. 전부 실패하면 5~8을 건너뛴다.
+//                     계기(2026-11-10 실측): 결혼식장 축의금 접수대를 요청했는데 장례식장이 나왔다 - 글자 없는 "상황 오류"는
+//                     skip 판정으로 못 거른다.
 //   5. 백업           job.metadata.reimageBackup = { at, images, html, rehostedBySource } - **Pages 배포·본문 패치·메타 갱신보다 먼저**.
 //   6. Pages 복사     rehostImagesToPages. 한 번에 한 글.
 //   7. Blogger 패치   대상 <img>의 src·alt와 figcaption을 바꾼다(`Photo: …` 표기는 남지 않는다). 저장된 본문을 다시 읽어 확인한다.
@@ -22,7 +26,8 @@
 // 왜 직렬인가: Pages 배포는 사이트 전체의 스냅샷이다. 동시에 배포하면 늦게 끝난 쪽이 앞 글의 파일을 못 본 채 덮어 404가
 // 난다(2026-10-15, 2026-10-31 실제로 두 번 터졌다 - rehostImagesToPages.ts 머리말). 글 사이도 같다.
 //
-// 되돌리는 법: reimageBackup.html을 patchPostContent로 다시 쓰고, reimageBackup.images·rehostedBySource를 metadata에 복원한다.
+// 되돌리는 법: `--job=<접두사> --restore [--apply]`(restoreJob). reimageBackup.html을 patchPostContent로 다시 쓰고,
+// reimageBackup.images·rehostedBySource를 metadata에 복원한 뒤 reimageBackup을 지운다(null).
 // 옛 Pages 파일은 manifest가 지우지 않으므로 백업 본문이 가리키는 URL이 그대로 살아 있다. 옛 Supabase 원본은
 // storage-cleanup이 발행 14일 뒤 지울 수 있다(복원 때 그 URL은 쓰지 않는다 - 서비스는 Pages가 한다).
 
@@ -33,7 +38,7 @@ import type { RehostResult } from "../../services/images/rehostImagesToPages.js"
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { generateManuscriptImages } from "./generateManuscriptImages.js";
 import type { GenerateManuscriptImagesOptions } from "./generateManuscriptImages.js";
-import { isAllowedKoreaplainImageSource } from "./koreaplainImageSources.js";
+import { AI_ILLUSTRATION_CREDIT, isAllowedKoreaplainImageSource } from "./koreaplainImageSources.js";
 import { validateAiPrompt } from "./refixImageMarkers.js";
 
 // ---------- 타입 ----------
@@ -57,6 +62,19 @@ export type BloggerResult<T> = ({ ok: true } & T) | { ok: false; error: string }
 
 export type GenerateSlot = { index: number; description: string; prompt: string };
 
+/** 생성한 그림 한 장의 내용 검증 요청. caption은 독자용 캡션(출처·일러스트 표기를 뗀 것), prompt는 생성에 쓴 프롬프트. */
+export type VerifyInput = { index: number; imageUrl: string; caption: string; prompt: string };
+/** 판정이 `ok:false`면 그림이 틀린 것이다(재생성 대상). 검증 자체를 못 돌렸으면(로그인 만료 등) **던진다** - 재생성해도 소용없다. */
+export type VerifyResult = { ok: true } | { ok: false; reason: string };
+
+/** job.metadata.reimageBackup - 교체 직전 상태. */
+export type ReimageBackup = {
+  at: string;
+  images: ManuscriptImage[];
+  html: string;
+  rehostedBySource: Record<string, string>;
+};
+
 export type ReimageDeps = {
   /** 후보 job 목록(최신 순서는 호출자 몫). 선별은 selectReimageJobs가 한 번 더 거른다. */
   listJobs: () => Promise<ReimageJob[]>;
@@ -71,9 +89,13 @@ export type ReimageDeps = {
   askPrompts: (prompt: string) => Promise<BloggerResult<{ output: string }>>;
   /** 생성 + Supabase Storage 업로드. 성공한 자리는 url이 있고 description은 이미 일러스트 캡션이다. */
   generate: (job: ReimageJob, slots: GenerateSlot[]) => Promise<{ images: ManuscriptImage[]; failures: string[] }>;
+  /** 생성 직후 그림이 캡션대로인지 본다(4b). 던지면 "검증 불가"로 보고 재생성 없이 그 자리를 원본으로 둔다. */
+  verifyImage: (input: VerifyInput) => Promise<VerifyResult>;
+  /** 되돌리기용: 이 job의 metadata.reimageBackup 전체(없거나 깨졌으면 null). */
+  loadBackup: (jobId: string) => Promise<ReimageBackup | null>;
   /** Pages 복사(배포). 호출은 글당 한 번이고 항상 직렬이다. */
   rehost: (job: ReimageJob, images: ManuscriptImage[]) => Promise<RehostResult>;
-  /** job.metadata에 얕게 병합한다(ArticleJobRepository.mergeMetadata). */
+  /** job.metadata에 얕게 병합한다(ArticleJobRepository.mergeMetadata). 값이 null이면 그 키를 비운다. */
   saveMetadata: (jobId: string, patch: Record<string, unknown>) => Promise<void>;
   now: () => Date;
   log: (line: string) => void;
@@ -301,6 +323,41 @@ export async function generateReplacementImages(
   );
 }
 
+// ---------- 4b. 내용 검증 ----------
+
+const ILLUSTRATION_TAIL = new RegExp(`[.\\s]*${AI_ILLUSTRATION_CREDIT}\\s*$`, "i");
+
+/** 검증에 넘기는 캡션: 일러스트 표기를 뗀 독자용 문장. */
+export function captionForVerify(description: string): string {
+  return (description ?? "").replace(ILLUSTRATION_TAIL, "").trim();
+}
+
+/**
+ * 재생성 프롬프트: 원 프롬프트 뒤에 실패 사유를 붙여 같은 실수를 반복하지 않게 한다.
+ * 프롬프트는 영어여야 하므로(validateAiPrompt) 사유에서 ASCII 밖 문자는 버린다. `no text`·`16:9`는 다시 못 박는다.
+ */
+export function buildRetryPrompt(prompt: string, reason: string): string {
+  const hint = reason
+    .replace(/[^\x20-\x7E]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "");
+  const rejected = hint ? `The previous attempt was rejected: ${hint}.` : "The previous attempt was rejected for not matching the scene.";
+  return `${prompt.trim().replace(/\s+$/, "")} ${rejected} Do not repeat that mistake; depict exactly the scene described. Keep: no text, no letters, 16:9.`;
+}
+
+type SlotVerdict = { kind: "pass" } | { kind: "wrong"; reason: string } | { kind: "unverifiable"; reason: string };
+
+async function verifySlot(deps: ReimageDeps, image: ManuscriptImage, caption: string, prompt: string): Promise<SlotVerdict> {
+  try {
+    const result = await deps.verifyImage({ index: image.index, imageUrl: image.url as string, caption, prompt });
+    if (result.ok) return { kind: "pass" };
+    return { kind: "wrong", reason: result.reason.replace(/\s+/g, " ").trim() || "사유 없음" };
+  } catch (error) {
+    return { kind: "unverifiable", reason: `검증을 돌리지 못했습니다: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
 // ---------- 글 하나 ----------
 
 export type ReimageOptions = { apply: boolean };
@@ -360,15 +417,59 @@ export async function reimageJob(job: ReimageJob, deps: ReimageDeps, options: Re
   }
   if (slots.length === 0) return outcome;
 
-  // 4) 생성·업로드
+  // 4) 생성·업로드 + 4b) 내용 검증. 검증은 자리마다 **차례로**(직렬) 돌고, 틀린 자리는 글 단위로 한 번에 묶어 한 번만 다시 그린다.
   const generated = await deps.generate(job, slots);
-  const made = generated.images.filter((image) => image.url && !image.error);
+  const made: ManuscriptImage[] = [];
+  const retries: { slot: GenerateSlot; reason: string }[] = [];
   for (const slot of slots) {
-    if (!made.some((image) => image.index === slot.index)) {
-      const failure = generated.images.find((image) => image.index === slot.index)?.error ?? generated.failures.find((f) => f.includes(`[이미지 ${slot.index}`)) ?? "생성 실패";
+    const image = generated.images.find((candidate) => candidate.index === slot.index && candidate.url && !candidate.error);
+    if (!image) {
+      const failure = generated.images.find((candidate) => candidate.index === slot.index)?.error ?? generated.failures.find((f) => f.includes(`[이미지 ${slot.index}`)) ?? "생성 실패";
       outcome.failed.push({ index: slot.index, reason: `생성 실패: ${failure}` });
+      continue;
+    }
+    const verdict = await verifySlot(deps, image, captionForVerify(image.description), slot.prompt);
+    if (verdict.kind === "pass") {
+      log(`   · 자리 ${slot.index} 검증 통과`);
+      made.push(image);
+    } else if (verdict.kind === "unverifiable") {
+      log(`   · 자리 ${slot.index} 검증 불가 → 재생성 없이 원본 유지: ${verdict.reason}`);
+      outcome.failed.push({ index: slot.index, reason: `검증 불가(원본 유지): ${verdict.reason}` });
+    } else {
+      log(`   · 자리 ${slot.index} 검증 실패 → 재생성 1회: ${verdict.reason}`);
+      retries.push({ slot, reason: verdict.reason });
     }
   }
+
+  if (retries.length > 0) {
+    const retrySlots = retries.map(({ slot, reason }) => ({ ...slot, prompt: buildRetryPrompt(slot.prompt, reason) }));
+    let regenerated: Awaited<ReturnType<ReimageDeps["generate"]>> | null = null;
+    let regenError = "";
+    try {
+      regenerated = await deps.generate(job, retrySlots);
+    } catch (error) {
+      regenError = error instanceof Error ? error.message : String(error);
+    }
+    for (const { slot, reason } of retries) {
+      const retrySlot = retrySlots.find((candidate) => candidate.index === slot.index) as GenerateSlot;
+      const image = regenerated?.images.find((candidate) => candidate.index === slot.index && candidate.url && !candidate.error);
+      if (!image) {
+        const failure = regenError || regenerated?.images.find((candidate) => candidate.index === slot.index)?.error || regenerated?.failures.find((f) => f.includes(`[이미지 ${slot.index}`)) || "생성 실패";
+        log(`   · 자리 ${slot.index} 재생성 실패 → 원본 유지: ${failure}`);
+        outcome.failed.push({ index: slot.index, reason: `검증 실패(${reason}) 뒤 재생성도 실패: ${failure}` });
+        continue;
+      }
+      const verdict = await verifySlot(deps, image, captionForVerify(image.description), retrySlot.prompt);
+      if (verdict.kind === "pass") {
+        log(`   · 자리 ${slot.index} 재생성분 검증 통과`);
+        made.push(image);
+      } else {
+        log(`   · 자리 ${slot.index} 검증 최종 실패 → 원본 유지: ${verdict.reason}`);
+        outcome.failed.push({ index: slot.index, reason: `검증 최종 실패(원본 유지) - 1차: ${reason} / 2차: ${verdict.reason}` });
+      }
+    }
+  }
+  made.sort((a, b) => a.index - b.index);
   if (made.length === 0) return outcome;
 
   // 5) 백업: Pages 배포·본문 패치·메타 갱신보다 먼저. 이미 백업이 있으면 첫 백업(원본에 가장 가까운 상태)을 지키고 덮지 않는다.
@@ -488,6 +589,12 @@ export async function runReimage(deps: ReimageDeps, options: RunOptions): Promis
   if (options.jobPrefix) jobs = jobs.filter((job) => job.id.startsWith(options.jobPrefix as string));
   if (options.limit !== null) jobs = jobs.slice(0, options.limit);
 
+  deps.log(
+    options.apply
+      ? "▶ 내용 검증: 켜짐 - 생성 직후 자리마다 확인, 틀리면 1회 재생성, 또 틀리면 원본 유지"
+      : "▶ 내용 검증: 켜짐(dry-run은 생성을 안 하므로 --apply 때 돈다) - 생성 직후 자리마다 확인, 틀리면 1회 재생성, 또 틀리면 원본 유지"
+  );
+
   const outcomes: JobOutcome[] = [];
   for (const job of jobs) {
     deps.log(`── ${job.id.slice(0, 8)} (${job.keyword}) 대상 ${selectReimageTargets(job).length}장`);
@@ -510,4 +617,91 @@ export async function runReimage(deps: ReimageDeps, options: RunOptions): Promis
     failed: outcomes.reduce((n, o) => n + o.failed.length, 0),
     failedJobs: outcomes.filter((o) => o.failed.length > 0 || o.jobError),
   };
+}
+
+// ---------- 되돌리기 (--restore) ----------
+
+export type RestoreOutcome = {
+  jobId: string;
+  keyword: string;
+  /** apply에서 실제로 되돌렸으면 true. dry-run이거나 막혔으면 false. */
+  restored: boolean;
+  /** 되돌리지 못한/안 한 사유. dry-run 정상 종료에서는 null. */
+  jobError: string | null;
+};
+
+export type RestoreOptions = { apply: boolean };
+
+function sameSet(a: Set<string>, b: Set<string>): boolean {
+  return a.size === b.size && [...a].every((value) => b.has(value));
+}
+
+/**
+ * 한 글을 reimageBackup 시점으로 되돌린다. **백업이 없으면 아무것도 하지 않는다.**
+ * 순서: Blogger 본문 복원 -> (저장된 본문 확인) -> metadata 복원 + reimageBackup 비우기 - 마지막 한 번의 저장이라
+ * 중간에 실패하면 백업이 남아 다시 시도할 수 있다. 백업은 글이 백업 시점으로 정확히 돌아간 뒤에만 지운다
+ * (남겨 두면 다음 교체 때 hasBackup=true라 새 백업이 안 찍힌다).
+ */
+export async function restoreJob(job: ReimageJob, deps: ReimageDeps, options: RestoreOptions): Promise<RestoreOutcome> {
+  const { log } = deps;
+  const fail = (jobError: string): RestoreOutcome => ({ jobId: job.id, keyword: job.keyword, restored: false, jobError });
+  if (job.category !== KOREAPLAIN_TRACK) return fail(`koreaplain 트랙이 아닙니다(category=${job.category ?? "null"}) - 건드리지 않습니다`);
+
+  const backup = await deps.loadBackup(job.id);
+  if (!backup || typeof backup.html !== "string" || !backup.html || !Array.isArray(backup.images) || !backup.rehostedBySource || typeof backup.rehostedBySource !== "object") {
+    return fail("백업(reimageBackup)이 없거나 깨져 있습니다 - 되돌리지 않습니다(아무것도 바꾸지 않음)");
+  }
+
+  const path = await deps.findPostPath(job.id);
+  if (!path) return fail("발행 기록(published_url)을 찾지 못했습니다");
+  const postId = await deps.blogger.findPostId(path);
+  if (!postId) return fail(`Blogger에서 글을 찾지 못했습니다(${path})`);
+  const current = await deps.blogger.getContent(postId);
+  if (!current.ok) return fail(`Blogger 본문을 읽지 못했습니다: ${current.error}`);
+
+  const backupSrcs = listFigureSrcs(backup.html);
+  const currentSrcs = listFigureSrcs(current.content);
+  const changed = [...backupSrcs].filter((src) => !currentSrcs.has(src)).length;
+  log(`   · 백업(${backup.at}): 이미지 ${backup.images.length}장 / 본문 figure ${backupSrcs.size}개 - 현재 본문과 다른 figure ${changed}개`);
+  if (!options.apply) {
+    log("   · 미리보기 - 본문·메타를 바꾸지 않았습니다(--apply로 되돌립니다)");
+    return { jobId: job.id, keyword: job.keyword, restored: false, jobError: null };
+  }
+
+  const patched = await deps.blogger.patchContent(postId, backup.html);
+  if (!patched.ok) return fail(`Blogger 패치 실패(본문·메타는 그대로): ${patched.error}`);
+  const stored = await deps.blogger.getContent(postId);
+  if (!stored.ok) {
+    log(`   ⚠️ 패치 뒤 본문을 다시 읽지 못해 반영 확인을 건너뜁니다: ${stored.error}`);
+  } else if (!sameSet(listFigureSrcs(stored.content), backupSrcs)) {
+    return fail("패치 뒤 저장된 본문의 이미지가 백업과 다릅니다(Blogger가 반영하지 않음) - 메타·백업은 그대로 둡니다");
+  }
+
+  try {
+    await deps.saveMetadata(job.id, { images: backup.images, rehostedBySource: backup.rehostedBySource, reimageBackup: null });
+  } catch (error) {
+    return fail(`Blogger 본문은 복원됐지만 메타 복원에 실패했습니다(백업은 남아 있음, 다시 실행하세요): ${error instanceof Error ? error.message : String(error)}`);
+  }
+  log("   · 본문·images·rehostedBySource를 백업 시점으로 복원하고 reimageBackup을 지웠습니다");
+  return { jobId: job.id, keyword: job.keyword, restored: true, jobError: null };
+}
+
+export type RestoreRunOptions = { apply: boolean; jobPrefix: string | null };
+
+/** `--restore`: **접두사가 정확히 한 글을 가리킬 때만** 되돌린다. 접두사 없이는 거부한다(전체를 실수로 되돌리는 일 방지). */
+export async function runRestore(deps: ReimageDeps, options: RestoreRunOptions): Promise<RestoreOutcome> {
+  if (!options.jobPrefix) throw new Error("--restore는 --job=<jobId 접두사>가 있어야 합니다");
+  const prefix = options.jobPrefix;
+  const matches = (await deps.listJobs()).filter((job) => job.category === KOREAPLAIN_TRACK && job.id.startsWith(prefix));
+  if (matches.length === 0) return { jobId: prefix, keyword: "", restored: false, jobError: "접두사와 맞는 koreaplain 글이 없습니다" };
+  if (matches.length > 1) {
+    return { jobId: prefix, keyword: "", restored: false, jobError: `접두사가 ${matches.length}개 글과 맞습니다(${matches.map((job) => job.id.slice(0, 8)).join(", ")}) - 더 길게 쓰세요` };
+  }
+  const job = matches[0];
+  deps.log(`── ${job.id.slice(0, 8)} (${job.keyword}) 되돌리기 ${options.apply ? "" : "(미리보기)"}`.trimEnd());
+  try {
+    return await restoreJob(job, deps, { apply: options.apply });
+  } catch (error) {
+    return { jobId: job.id, keyword: job.keyword, restored: false, jobError: `예외: ${error instanceof Error ? error.message : String(error)}` };
+  }
 }

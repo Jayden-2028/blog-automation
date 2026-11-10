@@ -5,22 +5,29 @@
 //   2. 백업이 본문 패치·Pages 배포보다 **먼저** 저장된다(이벤트 순서).
 // 실행 시 SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY는 더미여야 한다(import 체인이 클라이언트를 만든다 - 호출은 하지 않는다).
 
+import { existsSync, readFileSync } from "node:fs";
 import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 import type { RehostResult } from "../../services/images/rehostImagesToPages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { AI_ILLUSTRATION_CREDIT, toIllustrationCaption } from "./koreaplainImageSources.js";
 import {
   buildReimagePrompt,
+  buildRetryPrompt,
+  captionForVerify,
   generateReplacementImages,
   listFigureSrcs,
   parseReimageDecisions,
   reimageJob,
   runReimage,
+  runRestore,
   selectReimageJobs,
   selectReimageTargets,
   swapFigureImages,
 } from "./reimageKoreaplain.js";
-import type { GenerateSlot, ReimageDeps, ReimageJob } from "./reimageKoreaplain.js";
+import type { GenerateSlot, ReimageBackup, ReimageDeps, ReimageJob, VerifyInput, VerifyResult } from "./reimageKoreaplain.js";
+import { parseArgs } from "./reimageKoreaplainArgs.js";
+import { validateAiPrompt } from "./refixImageMarkers.js";
+import { buildVerifyPrompt, defaultVerifyDeps, parseVerifyVerdict, verifyImageWithClaude } from "./verifyReimagedImage.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -80,6 +87,9 @@ type Env = {
   maxActiveRehost: () => number;
   generateCalls: { jobId: string; slots: GenerateSlot[] }[];
   askCount: () => number;
+  verifyCalls: VerifyInput[];
+  maxActiveVerify: () => number;
+  logs: string[];
 };
 
 function makeEnv(
@@ -88,6 +98,8 @@ function makeEnv(
     /** 자리 번호 -> skip 사유. 나머지는 프롬프트를 낸다. */
     skip?: Record<string, Record<number, string>>;
     failGenerateFor?: string;
+    /** 검증 가짜. 생략하면 전부 통과. n은 이 환경에서 verifyImage가 불린 순번(1부터). */
+    verify?: (input: VerifyInput, n: number) => VerifyResult | Promise<VerifyResult>;
   } = {}
 ): Env {
   const events: string[] = [];
@@ -97,6 +109,10 @@ function makeEnv(
   let active = 0;
   let maxActive = 0;
   let asks = 0;
+  const verifyCalls: VerifyInput[] = [];
+  const logs: string[] = [];
+  let activeVerify = 0;
+  let maxVerify = 0;
   const byId = new Map(jobs.map((job) => [job.id, job]));
   const jobOfPost = (postId: string) => postId.replace("post-", "");
 
@@ -135,7 +151,7 @@ function makeEnv(
           index: slot.index,
           description: toIllustrationCaption(slot.description),
           prompt: slot.prompt,
-          url: `https://sb.test/${job.id}/${slot.index}.webp?v=new`,
+          url: `https://sb.test/${job.id}/${slot.index}.webp?v=${generateCalls.length > 1 ? "retry" : "new"}`,
           provider: "openai",
           fileName: `${slot.index}.webp`,
           error: null,
@@ -143,6 +159,16 @@ function makeEnv(
         failures: [],
       };
     },
+    verifyImage: async (input) => {
+      verifyCalls.push(input);
+      events.push(`verify:${input.imageUrl.split("/")[3]}:${input.index}`);
+      activeVerify += 1;
+      maxVerify = Math.max(maxVerify, activeVerify);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeVerify -= 1;
+      return options.verify ? options.verify(input, verifyCalls.length) : { ok: true };
+    },
+    loadBackup: async (jobId) => (metadata.get(jobId)?.reimageBackup as ReimageBackup | null | undefined) ?? null,
     rehost: async (job, images): Promise<RehostResult> => {
       events.push(`rehost:start:${job.id}`);
       active += 1;
@@ -163,9 +189,11 @@ function makeEnv(
       metadata.set(jobId, { ...(metadata.get(jobId) ?? {}), ...patch });
     },
     now: () => new Date("2026-11-10T12:00:00Z"),
-    log: () => {},
+    log: (line) => {
+      logs.push(line);
+    },
   };
-  return { deps, events, html, metadata, maxActiveRehost: () => maxActive, generateCalls, askCount: () => asks };
+  return { deps, events, html, metadata, maxActiveRehost: () => maxActive, generateCalls, askCount: () => asks, verifyCalls, maxActiveVerify: () => maxVerify, logs };
 }
 
 const WRITE_EVENT = /^(generate|rehost|blogger:patch|db:)/;
@@ -372,6 +400,247 @@ async function main(): Promise<void> {
     assert(swapped.replaced.length === 1 && swapped.missing[0] === "https://a.test/bare.jpg", "figure 밖 <img>는 건드리지 않고 missing으로 보고해야 한다");
     assert(swapped.html.includes("New &lt;b&gt;. Illustration") && !swapped.html.includes("Photo:"), "캡션은 이스케이프해 넣고 옛 표기는 사라져야 한다");
     console.log("✅ 판정 파서·LLM 프롬프트 기준(skip·글자숫자·실존 인물)·HTML 치환 도우미");
+  }
+
+  // 13) 내용 검증: 통과 -> 지금까지와 똑같이 교체. 검증은 백업·배포·패치보다 먼저, 직렬.
+  {
+    const job = makeJob("job-ver00001", [NEWS, "https://m.news1.kr/a"]);
+    const env = makeEnv([job]);
+    const summary = await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    assert(summary.replaced === 2 && summary.failed === 0 && env.generateCalls.length === 1, `검증 통과면 교체 2·실패 0·생성 1회여야 한다(실제: ${summary.replaced}/${summary.failed}/${env.generateCalls.length})`);
+    assert(env.verifyCalls.length === 2, "생성된 자리마다 검증이 한 번씩 불려야 한다");
+    assert(env.verifyCalls.every((call) => /\?v=new$/.test(call.imageUrl) && call.prompt === GOOD_PROMPT), "검증에는 생성된 이미지 URL과 생성 프롬프트가 넘어가야 한다");
+    assert(env.verifyCalls[0].caption === "Scene number 1" && !env.verifyCalls.some((call) => /Photo:|Illustration:/.test(call.caption)), `캡션은 출처·일러스트 표기를 뗀 독자용 문장이어야 한다(실제: ${env.verifyCalls[0].caption})`);
+    const at = (prefix: string) => env.events.findIndex((event) => event.startsWith(prefix));
+    const lastVerify = env.events.map((event, i) => (event.startsWith("verify:") ? i : -1)).filter((i) => i >= 0).pop() as number;
+    assert(lastVerify < at("db:reimageBackup") && lastVerify < at("rehost:start") && lastVerify < at("blogger:patch"), "검증은 백업·Pages 배포·본문 패치보다 먼저 끝나야 한다");
+    assert(at("generate:") < at("verify:"), "검증은 생성 직후다");
+    assert(env.maxActiveVerify() === 1, "검증도 직렬이다(동시에 둘 이상 돌면 안 된다)");
+    assert(env.logs.filter((line) => line.includes("검증 통과")).length === 2, "자리마다 통과 한 줄이 로그에 남아야 한다");
+    assert(captionForVerify("Gift desk. Illustration: AI-generated") === "Gift desk", "일러스트 표기는 검증 캡션에서 빠져야 한다");
+    console.log("✅ 검증 통과: 교체는 그대로, 검증은 생성 직후·백업/배포/패치 전·직렬, 자리마다 로그");
+  }
+
+  // 14) 1회 실패 후 재생성 통과
+  {
+    const job = makeJob("job-ret00001", [NEWS, "https://m.news1.kr/a", "https://blog.example.com/x"]);
+    const FUNERAL = "Shows a funeral hall (black suits, white chrysanthemums); must be a bright wedding hall.";
+    const env = makeEnv([job], { verify: (input, n) => (n === 2 ? { ok: false, reason: FUNERAL } : { ok: true }) });
+    const summary = await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    assert(env.generateCalls.length === 2, `생성은 정확히 2번(처음 + 재생성 1회)이어야 한다(실제: ${env.generateCalls.length})`);
+    assert(env.generateCalls[0].slots.length === 3 && JSON.stringify(env.generateCalls[1].slots.map((slot) => slot.index)) === "[2]", "재생성은 틀린 자리만 묶어 한 번에 불러야 한다");
+    const retryPrompt = env.generateCalls[1].slots[0].prompt;
+    assert(retryPrompt.includes(GOOD_PROMPT) && retryPrompt.includes("previous attempt was rejected") && retryPrompt.includes("funeral hall") && retryPrompt.includes("wedding hall"), `재생성 프롬프트에 원 프롬프트와 실패 사유가 들어가야 한다(실제: ${retryPrompt})`);
+    assert(validateAiPrompt(retryPrompt) === null, "재생성 프롬프트도 규격(영어·no text·비율)을 지켜야 한다");
+    assert(env.verifyCalls.length === 4 && env.verifyCalls[3].imageUrl.endsWith("?v=retry") && env.verifyCalls[3].prompt === retryPrompt, "재생성분도 같은 검증을 받아야 한다(재생성 프롬프트로)");
+    assert(summary.replaced === 3 && summary.failed === 0, `재생성이 통과하면 3장 모두 교체돼야 한다(실제: ${summary.replaced}/${summary.failed})`);
+    const meta = env.metadata.get(job.id) as { images: ManuscriptImage[] };
+    assert((meta.images.find((img) => img.index === 2) as ManuscriptImage).url === `https://sb.test/${job.id}/2.webp?v=retry`, "교체된 자리 2는 재생성분 URL이어야 한다");
+    assert(env.logs.some((line) => line.includes("자리 2 검증 실패 → 재생성 1회") && line.includes("funeral")) && env.logs.some((line) => line.includes("자리 2 재생성분 검증 통과")), "재시도 사유와 재생성 통과가 로그에 남아야 한다");
+    assert(buildRetryPrompt("p, no text, 16:9", "한글만 있는 사유") .includes("rejected for not matching") && validateAiPrompt(buildRetryPrompt("photorealistic photograph, no text, 16:9", "장례식")) === null, "한글뿐인 사유도 영어 프롬프트 규격을 깨지 않아야 한다");
+    console.log("✅ 검증 1회 실패 → 재생성(틀린 자리만 한 번에, 사유 포함) 통과 → 교체");
+  }
+
+  // 15) 2회 실패: 그 자리는 원본 유지 + failed에 사유, 같은 글의 통과한 자리는 정상 교체
+  {
+    const job = makeJob("job-two00001", [NEWS, "https://m.news1.kr/a", "https://blog.example.com/x"]);
+    const before = htmlOf(job);
+    const env = makeEnv([job], {
+      verify: (input) => (input.index === 2 ? { ok: false, reason: input.imageUrl.endsWith("retry") ? "still a funeral" : "shows a funeral" } : { ok: true }),
+    });
+    const summary = await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    assert(env.generateCalls.length === 2, "재생성은 딱 한 번이다(세 번째 생성 금지)");
+    assert(summary.replaced === 2 && summary.failed === 1, `통과한 2장은 교체, 실패 1장이어야 한다(실제: ${summary.replaced}/${summary.failed})`);
+    const outcome = summary.outcomes[0];
+    assert(outcome.failed.length === 1 && outcome.failed[0].index === 2 && outcome.failed[0].reason.includes("shows a funeral") && outcome.failed[0].reason.includes("still a funeral"), `failed에 1차·2차 사유가 남아야 한다(실제: ${JSON.stringify(outcome.failed)})`);
+    const html = env.html.get(job.id) as string;
+    assert(html.includes(pagesOld(job.id, 2)) && html.includes("Scene number 2. Photo: Naver News"), "실패한 자리는 본문의 원본 URL·캡션이 그대로여야 한다");
+    assert(html.includes(pagesNew(job.id, 1)) && html.includes(pagesNew(job.id, 3)), "같은 글의 통과한 자리는 교체돼야 한다");
+    const meta = env.metadata.get(job.id) as { images: ManuscriptImage[]; rehostedBySource: Record<string, string>; reimageBackup: { html: string } };
+    const kept = meta.images.find((img) => img.index === 2) as ManuscriptImage;
+    assert(JSON.stringify(kept) === JSON.stringify(job.images[1]), "실패한 자리의 metadata.images는 한 글자도 안 바뀌어야 한다");
+    assert(meta.rehostedBySource[sbOld(job.id, 2)] === pagesOld(job.id, 2), "실패한 자리의 rehostedBySource 대응도 그대로여야 한다");
+    assert(meta.reimageBackup.html === before, "백업은 교체 전 본문이어야 한다");
+    assert(env.logs.some((line) => line.includes("자리 2 검증 최종 실패") && line.includes("still a funeral")), "최종 실패 사유가 로그에 남아야 한다");
+    console.log("✅ 검증 2회 실패: 그 자리만 원본 유지·failed 사유, 같은 글의 통과분은 교체");
+  }
+
+  // 16) 모든 자리가 실패하면 백업·배포·패치를 한 번도 안 부른다
+  {
+    const job = makeJob("job-all00001", [NEWS, "https://m.news1.kr/a"]);
+    const env = makeEnv([job], { verify: () => ({ ok: false, reason: "wrong scene" }) });
+    const summary = await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    const writes = env.events.filter((event) => /^(rehost|blogger:patch|db:)/.test(event));
+    assert(writes.length === 0, `전부 실패하면 백업·Pages 배포·Blogger 패치·메타 저장이 한 번도 없어야 한다(실제: ${writes.join(", ")})`);
+    assert(summary.replaced === 0 && summary.failed === 2 && env.generateCalls.length === 2, "교체 0·실패 2·생성 2회(처음+재생성)");
+    assert(env.html.get(job.id) === htmlOf(job) && env.metadata.size === 0, "본문·메타 불변");
+    console.log("✅ 전부 검증 실패: 백업·Pages·Blogger·메타 쓰기 0건");
+  }
+
+  // 17) dry-run: verifyImage 호출 0 + 검증 단계 켜짐 한 줄
+  {
+    const job = makeJob("job-dr200001", [NEWS]);
+    const env = makeEnv([job]);
+    await runReimage(env.deps, { apply: false, jobPrefix: null, limit: null });
+    assert(env.verifyCalls.length === 0 && env.generateCalls.length === 0, "dry-run은 생성도 검증도 하지 않는다");
+    assert(env.logs.some((line) => line.includes("내용 검증: 켜짐")), "dry-run 로그에 '검증 단계가 켜져 있다'는 한 줄이 있어야 한다");
+    console.log("✅ dry-run: 검증 호출 0, '내용 검증: 켜짐' 로그");
+  }
+
+  // 18) 검증을 못 돌린 경우(던짐): 재생성 없이 원본 유지
+  {
+    const job = makeJob("job-unv00001", [NEWS, "https://m.news1.kr/a"]);
+    const env = makeEnv([job], {
+      verify: (input) => {
+        if (input.index === 1) throw new Error("claude 로그인 만료");
+        return { ok: true };
+      },
+    });
+    const summary = await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    assert(env.generateCalls.length === 1, "검증 불가는 재생성하지 않는다(돈 낭비)");
+    assert(summary.replaced === 1 && summary.failed === 1 && summary.outcomes[0].failed[0].reason.includes("검증 불가") && summary.outcomes[0].failed[0].reason.includes("로그인 만료"), "검증 불가 사유로 실패에 남고 나머지는 교체돼야 한다");
+    assert((env.html.get(job.id) as string).includes(pagesOld(job.id, 1)), "검증 불가 자리는 원본 유지");
+    console.log("✅ 검증 불가(던짐): 재생성 없이 원본 유지, 나머지 자리는 계속");
+  }
+
+  // 19) 되돌리기: --apply
+  {
+    const job = makeJob("job-rst00001", [NEWS, "https://m.news1.kr/a"]);
+    const before = htmlOf(job);
+    const env = makeEnv([job]);
+    await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    const replacedMeta = env.metadata.get(job.id) as { reimageBackup: ReimageBackup };
+    assert(env.html.get(job.id) !== before && Boolean(replacedMeta.reimageBackup), "되돌리기 전제: 교체돼 있고 백업이 있다");
+    env.events.length = 0;
+
+    const result = await runRestore(env.deps, { apply: true, jobPrefix: "job-rst" });
+    assert(result.restored && result.jobError === null, `되돌리기가 성공해야 한다(실제: ${JSON.stringify(result)})`);
+    assert(env.html.get(job.id) === before, "본문이 백업 html과 정확히 같아야 한다");
+    const meta = env.metadata.get(job.id) as { images: ManuscriptImage[]; rehostedBySource: Record<string, string>; reimageBackup?: unknown };
+    assert(JSON.stringify(meta.images) === JSON.stringify(job.images), "metadata.images가 백업과 정확히 같아야 한다");
+    assert(JSON.stringify(meta.rehostedBySource) === JSON.stringify(job.rehostedBySource), "rehostedBySource가 백업과 정확히 같아야 한다");
+    assert(meta.reimageBackup == null && (await env.deps.loadBackup(job.id)) === null, "되돌린 뒤 reimageBackup은 지워져야 한다(남기면 다음 교체 때 새 백업이 안 찍힌다)");
+    assert(env.events.filter((event) => event.startsWith("blogger:patch")).length === 1 && !env.events.some((event) => /^(generate|rehost|llm|verify)/.test(event)), "되돌리기는 패치 1번과 메타 저장뿐이다(생성·Pages·LLM·검증 없음)");
+    assert(selectReimageTargets({ images: meta.images }).length === 2, "복원 뒤에는 다시 교체 대상이 된다");
+    console.log("✅ --restore --apply: 본문·images·rehostedBySource가 백업과 동일, reimageBackup 삭제, 다른 쓰기 없음");
+  }
+
+  // 20) 되돌리기: --apply 없이(dry-run) = 쓰기 0건
+  {
+    const job = makeJob("job-rd200001", [NEWS]);
+    const env = makeEnv([job]);
+    await runReimage(env.deps, { apply: true, jobPrefix: null, limit: null });
+    const htmlAfter = env.html.get(job.id) as string;
+    const metaAfter = JSON.stringify(env.metadata.get(job.id));
+    env.events.length = 0;
+    const result = await runRestore(env.deps, { apply: false, jobPrefix: "job-rd2" });
+    assert(!result.restored && result.jobError === null, "dry-run 되돌리기는 정상 종료하되 restored=false");
+    assert(env.events.filter((event) => WRITE_EVENT.test(event)).length === 0, "--apply 없는 되돌리기는 쓰기가 0건이어야 한다");
+    assert(env.html.get(job.id) === htmlAfter && JSON.stringify(env.metadata.get(job.id)) === metaAfter, "본문·메타 불변");
+    console.log("✅ --restore (apply 없음): 쓰기 0건, 본문·메타·백업 불변");
+  }
+
+  // 21) 되돌리기: 백업 없음 / 다른 트랙 / 접두사 모호 -> 아무것도 안 한다
+  {
+    const job = makeJob("job-nob00001", [NEWS]);
+    const env = makeEnv([job]);
+    const none = await runRestore(env.deps, { apply: true, jobPrefix: "job-nob" });
+    assert(!none.restored && Boolean(none.jobError) && none.jobError?.includes("백업"), `백업이 없으면 사유를 남기고 끝나야 한다(실제: ${JSON.stringify(none)})`);
+    assert(env.events.filter((event) => WRITE_EVENT.test(event)).length === 0 && env.html.get(job.id) === htmlOf(job), "백업이 없으면 아무것도 쓰지 않는다");
+
+    const ent = makeJob("job-ent00009", [NEWS], "entertainment");
+    const env2 = makeEnv([ent]);
+    env2.metadata.set(ent.id, { reimageBackup: { at: "x", images: [], html: "<p>x</p>", rehostedBySource: {} } });
+    const other = await runRestore(env2.deps, { apply: true, jobPrefix: "job-ent" });
+    assert(!other.restored && env2.events.length === 0, "다른 트랙은 되돌리기 대상이 아니다");
+
+    const a = makeJob("job-amb00001", [NEWS]);
+    const b = makeJob("job-amb00002", [NEWS]);
+    const env3 = makeEnv([a, b]);
+    const ambiguous = await runRestore(env3.deps, { apply: true, jobPrefix: "job-amb" });
+    assert(!ambiguous.restored && Boolean(ambiguous.jobError) && env3.events.length === 0, "접두사가 여러 글과 맞으면 거부해야 한다");
+    console.log("✅ --restore: 백업 없음·다른 트랙·접두사 모호 → 아무것도 하지 않음");
+  }
+
+  // 22) 인자: --restore는 --job 없이 거부, 교체 경로로 가지 않는다
+  {
+    const job = makeJob("job-arg00001", [NEWS]);
+    const env = makeEnv([job]);
+    assert(typeof parseArgs(["--restore"]) === "string" && typeof parseArgs(["--restore", "--apply"]) === "string", "--restore를 --job= 없이 주면 인자 오류여야 한다");
+    assert(typeof parseArgs(["--restore", "--job=job-arg", "--limit=1"]) === "string", "--restore에 --limit은 오류");
+    const ok = parseArgs(["--restore", "--job=JOB-ARG"]);
+    assert(typeof ok !== "string" && ok.restore && !ok.apply && ok.jobPrefix === "job-arg", "--restore --job=…는 dry-run 되돌리기로 읽혀야 한다");
+    const apply = parseArgs(["--job=job-arg", "--restore", "--apply"]);
+    assert(typeof apply !== "string" && apply.restore && apply.apply, "--restore --apply");
+    const plain = parseArgs(["--apply", "--limit=2"]);
+    assert(typeof plain !== "string" && !plain.restore && plain.limit === 2, "기존 인자는 그대로 읽혀야 한다");
+    let threw = false;
+    try {
+      await runRestore(env.deps, { apply: true, jobPrefix: null });
+    } catch {
+      threw = true;
+    }
+    assert(threw && env.events.length === 0 && env.askCount() === 0, "runRestore는 --job 없이는 던지고 아무것도 호출하지 않는다");
+    await runRestore(env.deps, { apply: true, jobPrefix: "job-arg" });
+    assert(env.askCount() === 0 && env.generateCalls.length === 0, "--restore는 교체 경로(LLM·생성)로 가지 않는다");
+    console.log("✅ 인자: --restore는 --job 필수, --limit 불가, 교체 경로로 안 간다");
+  }
+
+  // 23) 실제 검증기: 임시 디렉터리·Read만 허용·정리, 판정 해석
+  {
+    assert(parseVerifyVerdict('좋아요\n{"ok": true}')?.ok === true, "통과 응답을 읽어야 한다");
+    const failVerdict = parseVerifyVerdict('{"ok": false, "reason": "Shows a funeral\\n   hall"}');
+    assert(failVerdict && !failVerdict.ok && failVerdict.reason === "Shows a funeral hall", "실패 응답의 사유를 한 줄로 읽어야 한다");
+    assert(parseVerifyVerdict("글쎄요") === null && parseVerifyVerdict('{"ok":"maybe"}') === null && parseVerifyVerdict("{깨진") === null, "해석할 수 없는 응답은 null(호출자가 던진다)");
+
+    const prompt = buildVerifyPrompt({ fileName: "slot-4.webp", caption: "Cash gift reception desk at a wedding hall entrance", prompt: GOOD_PROMPT });
+    for (const needle of ["slot-4.webp", "Read", "Cash gift reception desk", "장례식장", "흰 국화", "결혼식", "명절", "제사", "지하철", "기차", "글자·숫자", "실존 인물", "로고", "손가락", "애매하면 실패", '{"ok": true}', '"ok": false']) {
+      assert(prompt.includes(needle), `검증 프롬프트에 "${needle}"가 있어야 한다`);
+    }
+
+    const seen: { cwd?: string; tools?: string[]; fileExisted?: boolean; fileBytes?: string; prompt?: string } = {};
+    let removed: string | null = null;
+    const base = defaultVerifyDeps();
+    const deps = {
+      ...base,
+      fetchImage: async () => ({ bytes: new Uint8Array(Buffer.from("fake-webp-bytes")), contentType: "image/webp" }),
+      runClaude: async (options: { prompt: string; allowedTools?: string[]; cwd?: string }) => {
+        seen.cwd = options.cwd;
+        seen.tools = options.allowedTools;
+        seen.prompt = options.prompt;
+        const file = `${options.cwd}/slot-4.webp`;
+        seen.fileExisted = existsSync(file);
+        seen.fileBytes = seen.fileExisted ? readFileSync(file, "utf8") : "";
+        return { ok: true as const, output: '{"ok": false, "reason": "Shows a funeral"}', durationMs: 1 };
+      },
+      removeDir: async (dir: string) => {
+        removed = dir;
+        await base.removeDir(dir);
+      },
+    };
+    const verdict = await verifyImageWithClaude({ index: 4, imageUrl: "https://sb.test/j/4.webp?v=new", caption: "Gift desk", prompt: GOOD_PROMPT }, deps);
+    assert(!verdict.ok && verdict.reason === "Shows a funeral", "판정이 그대로 돌아와야 한다");
+    assert(JSON.stringify(seen.tools) === '["Read"]', "Read 도구만 허용해야 한다");
+    assert(Boolean(seen.cwd) && seen.cwd === removed && seen.cwd !== process.cwd(), "임시 디렉터리를 cwd로 쓰고 그 디렉터리를 지워야 한다");
+    assert(seen.fileExisted === true && seen.fileBytes === "fake-webp-bytes" && seen.prompt?.includes("slot-4.webp"), "판정 시점에 이미지 파일이 임시 디렉터리에 있고 프롬프트가 파일 이름을 가리켜야 한다");
+    assert(!existsSync(seen.cwd as string), "판정 뒤 임시 디렉터리(파일 포함)가 지워져야 한다");
+
+    let dirOnFailure = "";
+    const failing = {
+      ...deps,
+      runClaude: async (options: { cwd?: string }) => {
+        dirOnFailure = options.cwd as string;
+        return { ok: false as const, error: "claude 종료 코드 1", durationMs: 1 };
+      },
+    };
+    let threw = "";
+    try {
+      await verifyImageWithClaude({ index: 4, imageUrl: "https://sb.test/j/4.webp", caption: "x", prompt: GOOD_PROMPT }, failing);
+    } catch (error) {
+      threw = error instanceof Error ? error.message : String(error);
+    }
+    assert(threw.includes("종료 코드 1") && !existsSync(dirOnFailure), "claude 실행이 실패하면 던지고, 그래도 임시 디렉터리는 지워야 한다");
+    console.log("✅ 실제 검증기: 임시 디렉터리 파일 → Read만 허용한 claude, 판정 해석, 실패해도 정리");
   }
 
   console.log("\n✅ 전체 통과");
