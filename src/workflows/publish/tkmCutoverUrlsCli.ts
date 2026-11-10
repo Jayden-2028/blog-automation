@@ -13,7 +13,7 @@
 // 구 주소 자체(Blogger 301 소스)는 그대로 둔다. 역치환 모드는 없다 - 되돌릴 일이 있으면 적용 전 dry-run 표(전후 값)로 복원한다.
 
 import "dotenv/config";
-import { KSCENE_LEGACY_HOSTS, KSCENE_PUBLIC_ORIGIN, normalizeTkmUrl, rewriteTkmLegacyUrls } from "../../config/publishTargets.js";
+import { KOREAPLAIN_LEGACY_HOSTS, KOREAPLAIN_PUBLIC_ORIGIN, normalizeTkmUrl, rewriteTkmLegacyUrls } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { supabase } from "../../services/supabase/client.js";
 import { changedTopLevel, fieldOf, rewriteLegacyUrlsDeep } from "./tkmCutover.js";
@@ -22,7 +22,7 @@ import { TKM_ALL_GUIDES_PATH } from "./tkmPostStructure.js";
 
 type Mode = "dry-run" | "apply" | "verify";
 
-const LEGACY = KSCENE_LEGACY_HOSTS;
+const LEGACY = KOREAPLAIN_LEGACY_HOSTS;
 const legacyLike = (column: string) => LEGACY.map((host) => `${column}.ilike.*${host}*`).join(",");
 
 type PublicationHit = { id: number; articleId: number; status: string; before: string; after: string };
@@ -47,7 +47,7 @@ async function loadPublications(): Promise<PublicationHit[]> {
 
 /** 사용설명서 job: track=kscene이거나 TKM 주소(옛·새)로 발행 기록이 있는 job. */
 async function loadJobs(): Promise<JobHit[]> {
-  const hosts = [new URL(KSCENE_PUBLIC_ORIGIN).host, ...LEGACY];
+  const hosts = [new URL(KOREAPLAIN_PUBLIC_ORIGIN).host, ...LEGACY];
   const { data: pubs, error } = await supabase
     .from("publications")
     .select("article_id")
@@ -104,7 +104,7 @@ function short(url: string): string {
 }
 
 function printTables(pubs: PublicationHit[], jobs: JobHit[], articles: ArticleHit[]): void {
-  console.log(`공개 주소: ${KSCENE_PUBLIC_ORIGIN} · 옛 호스트: ${LEGACY.join(", ")}\n`);
+  console.log(`공개 주소: ${KOREAPLAIN_PUBLIC_ORIGIN} · 옛 호스트: ${LEGACY.join(", ")}\n`);
 
   console.log(`(a) publications.published_url - ${pubs.length}행`);
   console.log("| id | article | status | 지금 | 바뀔 값 |\n|---|---|---|---|---|");
@@ -188,8 +188,8 @@ async function probe(url: string): Promise<Probe> {
 }
 
 async function verify(pubs: PublicationHit[], jobs: JobHit[]): Promise<number> {
-  const urlRe = new RegExp(`${KSCENE_PUBLIC_ORIGIN.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}[^\\s"'<>)]*`, "g");
-  const urls = new Set<string>([`${KSCENE_PUBLIC_ORIGIN}/`, `${KSCENE_PUBLIC_ORIGIN}${TKM_ALL_GUIDES_PATH}`]);
+  const urlRe = new RegExp(`${KOREAPLAIN_PUBLIC_ORIGIN.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}[^\\s"'<>)]*`, "g");
+  const urls = new Set<string>([`${KOREAPLAIN_PUBLIC_ORIGIN}/`, `${KOREAPLAIN_PUBLIC_ORIGIN}${TKM_ALL_GUIDES_PATH}`]);
   for (const pub of pubs) if (pub.status === "published") urls.add(pub.after);
   for (const job of jobs) for (const hit of job.hits) for (const match of hit.after.match(urlRe) ?? []) urls.add(match);
   // 이미 공개 주소로 바뀐 뒤에 돌려도 확인할 수 있게, 공개 주소로 남은 발행 기록도 넣는다.
@@ -197,7 +197,7 @@ async function verify(pubs: PublicationHit[], jobs: JobHit[]): Promise<number> {
     .from("publications")
     .select("published_url")
     .eq("status", "published")
-    .ilike("published_url", `%${new URL(KSCENE_PUBLIC_ORIGIN).host}%`);
+    .ilike("published_url", `%${new URL(KOREAPLAIN_PUBLIC_ORIGIN).host}%`);
   if (error) throw error;
   for (const row of data ?? []) urls.add(row.published_url as string);
 

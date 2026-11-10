@@ -153,7 +153,7 @@ async function main(): Promise<void> {
     console.log("✅ 반려는 영어본 단계에서도 동작");
   }
 
-  console.log("\n✅ testKsceneApproval 통과");
+  console.log("\n✅ testKoreaplainApproval 통과");
 }
 
 main().catch((error) => {

@@ -1272,7 +1272,7 @@ main().catch((error) => {
       const bot = new TelegramBot({
         botToken: "test-token",
         chatId: CHAT_ID,
-        // 블로그스팟 버튼은 엔터·사회 대체 키보드에서 빠졌다(개편2.5 B-2) - 블로그스팟이 버튼인 kscene 트랙으로 검증한다.
+        // 블로그스팟 버튼은 엔터·사회 대체 키보드에서 빠졌다(개편2.5 B-2) - 블로그스팟이 버튼인 koreaplain 트랙으로 검증한다.
         track: "kscene",
         loadJobById: async () => ({ id: JOB, keyword: "이디야 상어점", metadata: { track: "kscene" } }) as never,
         publishToBlogspot: publish as never,

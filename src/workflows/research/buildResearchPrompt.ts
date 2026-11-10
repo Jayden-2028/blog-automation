@@ -8,6 +8,7 @@ import type { PersonSourcePack } from "./personSourcePack.js";
 import type { ArticleJobRow, SourceInsert } from "../../types/database.js";
 import { formatBriefForPrompt } from "../brief/buildKeywordBrief.js";
 import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 export type BuildResearchPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
@@ -38,8 +39,8 @@ export type BuildResearchPromptInput = {
   userSourceUrl?: string | null;
   /**
    * 변환기(텔레그램 링크·주제·긴 글 입력) 출처 job인가(`metadata.source`가 instagram_manual/keyword_input - instagramTrack.ts
-   * isConverterJobSource). 2026-10-29 🌏 국제 트랙: category=kscene인데 keyword·소스가 **한글**일 수 있어 kscene 분기의
-   * "keyword는 영문 질의" 가정을 풀고, 사용자가 보낸 소재를 에버그린 제한 때문에 버리지 않게 한다. kscene이 아니면 무시한다.
+   * isConverterJobSource). 2026-10-29 🌏 국제 트랙: category=kscene인데 keyword·소스가 **한글**일 수 있어 koreaplain 분기의
+   * "keyword는 영문 질의" 가정을 풀고, 사용자가 보낸 소재를 에버그린 제한 때문에 버리지 않게 한다. koreaplain이 아니면 무시한다.
    */
   converterSource?: boolean;
   /**
@@ -106,7 +107,7 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
   const baselineLines = formatBaseline(baselineSources);
 
   // 인물 백과(2026-10-13): 규격이 researcher.md를 **대체**한다(self-contained). brief.type(celebrity) 판정에
-  // 맡기면 기존 프로파일이 골라지므로 kscene처럼 category로 분기한다. 브리프 §4-1 프로파일 오버라이드도 싣지 않는다.
+  // 맡기면 기존 프로파일이 골라지므로 koreaplain처럼 category로 분기한다. 브리프 §4-1 프로파일 오버라이드도 싣지 않는다.
   if (job.category === "person") return buildPersonResearchPrompt(input, baselineLines);
 
   return [
@@ -164,7 +165,7 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
       : []),
     // 사용설명서 트랙(개편3): keyword가 영문 검색 질의이고, 독자는 해외 방문자·거주자다. NAVER baseline은 한국어 질의가
     // 아니라 빈약할 수 있어 공식·1차 영문/한글 자료를 직접 찾도록 못박는다.
-    job.category === "kscene"
+    job.category === KOREAPLAIN_TRACK
       ? "- **이 job은 category=kscene(해외 독자용 한국 사용설명서)다.** keyword는 영문 검색 질의다 - 그 질의의 의도(해외" +
         " 방문자·거주자가 알고 싶은 것)에 답할 자료를 찾는다. 공식·1차 자료(한국관광공사 visitkorea.or.kr, 정부·지자체·" +
         "운영 기관 공식 사이트, 철도·지하철 공식 안내)를 우선하고 영문 페이지와 한글 페이지를 **둘 다** 본다. 요금·운영시간·" +
@@ -175,7 +176,7 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
     // 현지 관행(2026-10-30 로컬 정체성 개정): 집필의 고정 레이어 3개(현지인은 이렇게 합니다 / 외국인이 자주 오해하는 점 /
     // 이 글자를 보게 됩니다)는 §12에 줄이 있을 때만 쓴다 - 조사가 §12를 안 채우면 그 레이어가 영구히 비어 있다.
     // 등급·수치 규칙은 그대로다: 커뮤니티 자료는 관행 서술 전용이고 요금·시간의 근거가 되지 못한다.
-    job.category === "kscene"
+    job.category === KOREAPLAIN_TRACK
       ? "- **현지 관행 조사(researcher.md §4-2 5·6번, §12)**: 공식 자료로 규정·요금·절차를 확정한 뒤, 별도로" +
         " **한국 사람들이 실제로 어떻게 하는지**를 한국어로 찾는다 - (d) 각도: 네이버 카페·커뮤니티(맘카페·입주민 카페·" +
         "직장인 커뮤니티)의 실제 글, 공식 기관의 한글 FAQ·민원 답변, 국내 뉴스의 제도 변경·관행 기사. **한글 질의로**" +
@@ -189,9 +190,9 @@ export function buildResearchPrompt(input: BuildResearchPromptInput): string {
         " 없으면 행 대신 `관행 미확보 - <무엇을 검색했나>`를 적는다. frontmatter에 `local_practice_rows: N`(§12 표의" +
         " 행 수, 미확보면 0)을 추가한다 - 0이어도 조사 실패가 아니고 verdict에 영향을 주지 않는다."
       : null,
-    // 🌏 국제(변환기 → kscene, 2026-10-29): 사용자가 텔레그램으로 보낸 한글 주제·링크·긴 글이 keyword·소스다. 위 "영문 질의"
+    // 🌏 국제(변환기 → koreaplain, 2026-10-29): 사용자가 텔레그램으로 보낸 한글 주제·링크·긴 글이 keyword·소스다. 위 "영문 질의"
     // 가정과 에버그린 제한을 그대로 두면 한글 keyword로 영문 자료를 못 찾거나 사용자가 고른 소재를 버린다.
-    job.category === "kscene" && input.converterSource
+    job.category === KOREAPLAIN_TRACK && input.converterSource
       ? "- **이 job은 변환기(텔레그램 입력) 출처다 - keyword·소스 텍스트가 한글일 수 있다.** 위 '영문 검색 질의' 가정은 이 job에" +
         " 맞지 않는다: keyword를 해외 독자(한국 방문자·거주자)가 알고 싶어 할 관점의 **영문 질의로도 바꿔** 검색하고(예: 한글 주제 →" +
         " \"how to … in korea\" 꼴), 한글 1차 자료와 영문 자료를 **둘 다** 본다. **사용자가 보낸 소재가 곧 주제다** - 시의성 소재여도" +

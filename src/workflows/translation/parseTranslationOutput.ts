@@ -80,7 +80,7 @@ const HANGUL_RE = /[가-힣ㄱ-ㅎㅏ-ㅣ]/g;
 const HEADING_LINE_RE = /^\*\*(.+)\*\*$/;
 
 /**
- * "Words you will see" 레이어의 고정 영문 소제목(2026-10-30 로컬 정체성 개정, kscene-ko-en.md).
+ * "Words you will see" 레이어의 고정 영문 소제목(2026-10-30 로컬 정체성 개정, koreaplain-ko-en.md).
  * 이 블록만은 번역 지침이 **한글을 앞에 그대로 쓰라고** 요구한다("보행자 작동신호기 (pedestrian
  * push-button signal)") - 독자가 간판·앱 버튼에서 그 글자를 찾아야 하기 때문이다. 다른 자리의
  * 규칙(영문 먼저, 한글은 괄호 안)은 그대로다.

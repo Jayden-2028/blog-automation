@@ -7,7 +7,7 @@
 # (그룹이 job_id를 포함하므로 서로 다른 job끼리 대기 1개 한도에 걸려 취소되는 일이 없다).
 #
 # 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, KSCENE_TELEGRAM_BOT_TOKEN, KSCENE_TELEGRAM_CHAT_ID,
-# CLAUDE_CODE_OAUTH_TOKEN. 번역 지침은 prompts/translation/kscene-ko-en.md(기획 세션 ⑤가 교체).
+# CLAUDE_CODE_OAUTH_TOKEN. 번역 지침은 prompts/translation/koreaplain-ko-en.md(기획 세션 ⑤가 교체).
 name: job-translate
 
 on:

@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     console.log("✅ 답장/단어/잡담/다른 chat/깨진 콜백");
   }
 
-  // 5) 🌏 국제 - 버튼·같은 메시지 단어·답장 세 길 모두 수신함에 global로 남는다(맥 폴러가 kscene job으로 만든다).
+  // 5) 🌏 국제 - 버튼·같은 메시지 단어·답장 세 길 모두 수신함에 global로 남는다(맥 폴러가 koreaplain job으로 만든다).
   {
     const h = harness();
     const pick = await handleInstagramUpdate({ update_id: 20, callback_query: { id: "cb", data: buildTrackCallbackData("tg-10", "global"), message: { message_id: 7, chat: { id: 99 } } } }, h.deps);

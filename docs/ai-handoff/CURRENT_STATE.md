@@ -78,8 +78,8 @@
 | `articleReviewChecks.ts` | **`checkSubheadFocus` 신설**(warning) — `A부터 B까지`(까지로 끝 + 양쪽 여러 어절) / `A와·과 B`(양쪽 여러 어절 + 뒤 쉼표 없음 + 대비짝·값병기·의존명사 제외). `runArticleReview`에 연결 |
 
 **되돌리지 않은 것**: 10/16 완화(1인칭 감상·경험칙 전망·후킹 제목), 10/29 §1-12·§3 개정,
-10/30 kscene 로컬 필자, 11/01 style-learn 3건, person 어미 예외(`~거든요`·`~고요`),
-이규한 제목 채택본. **kscene·incident·trend·parenting 구조는 손대지 않았다**(공통 절 §0-1·§0-2는
+10/30 koreaplain 로컬 필자, 11/01 style-learn 3건, person 어미 예외(`~거든요`·`~고요`),
+이규한 제목 채택본. **koreaplain·incident·trend·parenting 구조는 손대지 않았다**(공통 절 §0-1·§0-2는
 전 트랙 적용이지만 트랙별 구조 개편은 person·entertainment만).
 
 ### 코드 집행 범위와 보수성
@@ -248,7 +248,7 @@
 - **왜 여기서만 해로운가**: 재작성의 전제는 "1차 브리프는 제목만 보고 만든 추정"인데, 변환기 주제는
   **사용자가 직접 쓴 문장**이라 고칠 오독이 없다. 재작성 함수는 출처를 몰라 분기할 수도 없었다.
 - **실측**: 10월 조사 351건 **전부** 재작성을 거쳤고("없음" 0건), 변환기 출처 13건은 전부 thin 상태에서 재작성됐다.
-- **기각된 가설**: 네이버 baseline 노이즈(kscene 적합률 31%)는 원인이 아니다. 같은 주제를 수집 유무로 A/B한 결과
+- **기각된 가설**: 네이버 baseline 노이즈(koreaplain 적합률 31%)는 원인이 아니다. 같은 주제를 수집 유무로 A/B한 결과
   둘 다 `verdict=ok`·도시 8곳으로 동등했다(수집 있음 official 15 / 없음 17). 운영 thin은 재현되지 않는다(회차 편차).
 - **수정**: `brief/topicScope.ts` 신설(범위 표지 "전국·N대·지역별·목록·best/top…" + 개수 추출, `droppedScope` 판정),
   `reviseBriefWithResearch`에 `userAuthoredTopic` 추가 - true면 ① 프롬프트 최우선 절 "범위는 사용자가 정했다 - 줄이지 마라"
@@ -263,18 +263,18 @@
 > 개정안 `branding-2026-10/kp-native-identity-2026-10.md`(사용자가 Q1~Q10 전부 권고대로 승인, 10/30)의 **§D·§E·§F + 코드 접점**이
 > 이 블록이다. ①(공개 카피·바이라인·Blogger 화면 §A·§B)과 ③(시드·점수 §C)은 다른 세션이 같은 날 별도 브랜치로 넣는다.
 
-- **무엇**: 사용설명서(kscene) 원고의 화자를 "중립 가이드"에서 **"한국에서 나고 자라 서울에 사는 한국인 필자"**로 바꿨다. 실측 근거는
+- **무엇**: 사용설명서(koreaplain) 원고의 화자를 "중립 가이드"에서 **"한국에서 나고 자라 서울에 사는 한국인 필자"**로 바꿨다. 실측 근거는
   최근 발행 10편에서 "로컬이 아니면 못 쓰는 문장"이 **0/10편**이었고, 그게 우연이 아니라 규격 7곳이 정확히 그렇게 시킨 결과였다는 것이다.
 - **1인칭은 전면 허용이 아니다**(지어내기 방지가 설계의 중심이다). 세 가지만 허용한다 — ① 관행 서술("한국 사람들은 보통 ~합니다")
   ② 화자의 일반 습관("저도 이렇게 합니다", **원고당 2문장 이하**) ③ 외국인 오해 지적. **①③은 자료조사 §12에 근거 줄이 있을 때만**이고
   ②도 그 관행이 §12에 있어야 한다. 날짜·장소가 든 일화("지난주 강남에서 택시를 탔는데")와 "저희 집·저희 동네"는 **금지 + 검수 경고**다.
   사실 규칙(`core-rules.md` §1 - 수치·날짜·기관명은 research에서만)은 한 줄도 손대지 않았다.
-- **고정 레이어 3개**(`kscene.md` 「고정 레이어 3개」): `**현지인은 이렇게 합니다**` / `**외국인이 자주 오해하는 점**` /
-  `**이 글자를 보게 됩니다**`. **§12에 줄이 없으면 그 레이어를 뺀다**(칸 채우기 금지). 소제목 상한은 이 셋을 포함해 **kscene 한정 2~9개**
+- **고정 레이어 3개**(`koreaplain.md` 「고정 레이어 3개」): `**현지인은 이렇게 합니다**` / `**외국인이 자주 오해하는 점**` /
+  `**이 글자를 보게 됩니다**`. **§12에 줄이 없으면 그 레이어를 뺀다**(칸 채우기 금지). 소제목 상한은 이 셋을 포함해 **koreaplain 한정 2~9개**
   (`core-rules.md` §4·§5에 person과 나란히 예외를 적었다 - **상한을 검사하는 코드는 없다.** 2~7은 프롬프트 규칙뿐이라 코드 변경이 없었다).
 - **흐름 8단계**(기존 7단계 + 레이어 ①)와 **마무리 개정**: `kscene`도 요약 문장을 쓰지 않는다 - **로컬 필자의 한마디 1~2문장**이다
   (`core-rules.md` §3의 "`kscene`은 요약 한두 문장" → "로컬 필자의 한마디"). 10/29 엔터·person 감흥 마무리와 §1-12는 그대로다.
-- **번역 지침**(`prompts/translation/kscene-ko-en.md`): "Korea Plain has no 'I'" 조항을 **제거**하고 "a Korean local explaining Korea to
+- **번역 지침**(`prompts/translation/koreaplain-ko-en.md`): "Korea Plain has no 'I'" 조항을 **제거**하고 "a Korean local explaining Korea to
   a friend from abroad" + "Preserve every sentence where the writer speaks as a local"로 교체했다. Tone guards의 일반화 금지는
   **"Practice, not psychology"**로 바꿨다 - 사람들이 *무엇을 하는지*는 살리고 *무엇을 믿는지/어떤 사람인지*로 바꾸는 것만 막는다.
   세 레이어 소제목은 **고정 영문**(`Local note: what Koreans actually do` / `Common misreading` / `Words you will see`)이다.
@@ -283,15 +283,15 @@
   (구분 관행/규정 vs 관행/오해/표기 · 내용 · 범위 · 근거 URL · 등급 · 확인일)에 남기고 **§2(확인된 사실)·§6(수치)에 섞지 않는다** -
   이 자료는 `community`/`news` 등급 그대로이고 **수치·요금·시간의 근거가 되지 못한다**. frontmatter `local_practice_rows: N`.
 - **코드 변경 6곳**:
-  - `buildWritingPrompt.ts` kscene 분기: "(개인 경험 지어내기 금지…)" → "(일화 지어내기 금지, 관행 서술은 research §12 근거가 있을
+  - `buildWritingPrompt.ts` koreaplain 분기: "(개인 경험 지어내기 금지…)" → "(일화 지어내기 금지, 관행 서술은 research §12 근거가 있을
     때만, 한국인 독자 전제 표현 금지)". 10/29 변환기 분기(`isConverterJobSource`)는 그대로 공존한다.
-  - `buildResearchPrompt.ts` kscene 분기: 현지 관행 (d)·(e) 각도 + §12 표 형식 + `local_practice_rows` 지시를 덧붙였다.
+  - `buildResearchPrompt.ts` koreaplain 분기: 현지 관행 (d)·(e) 각도 + §12 표 형식 + `local_practice_rows` 지시를 덧붙였다.
   - `parseResearchFile.ts`: `localPracticeRows` 추가(frontmatter 우선, 없으면 §12 표를 센다 - **기존 조사 파일은 0으로 안전 통과**).
-  - `summarizeResearchForReview.ts`: kscene에서 0행이면 검수 카드에 `📍 로컬 재료 0` 한 줄. **verdict에는 영향이 없다**(관행이 없는
+  - `summarizeResearchForReview.ts`: koreaplain에서 0행이면 검수 카드에 `📍 로컬 재료 0` 한 줄. **verdict에는 영향이 없다**(관행이 없는
     주제도 있다). 트랙 판정은 `job.category`를 먼저 쓴다(파일 frontmatter `topic`은 주제 이름일 수 있다).
-  - `bannedPatterns.ts` + `articleReviewChecks.ts` `checkVoice`: kscene **전용** 경고 2종(`저희 집/동네` · 날짜+장소+체험 동사 일화).
-    **1인칭 자체를 잡는 패턴은 코드에 원래 없었다** - 그래서 "저도 이렇게 합니다"를 위한 kscene 예외는 필요하지 않았다.
-  - `renderPublishBlocks.ts` + `convertArticleToHtml.ts` + `publishArticleToBlogspot.ts`: `localCallouts` 옵션(kscene 트랙만).
+  - `bannedPatterns.ts` + `articleReviewChecks.ts` `checkVoice`: koreaplain **전용** 경고 2종(`저희 집/동네` · 날짜+장소+체험 동사 일화).
+    **1인칭 자체를 잡는 패턴은 코드에 원래 없었다** - 그래서 "저도 이렇게 합니다"를 위한 koreaplain 예외는 필요하지 않았다.
+  - `renderPublishBlocks.ts` + `convertArticleToHtml.ts` + `publishArticleToBlogspot.ts`: `localCallouts` 옵션(koreaplain 트랙만).
     세 고정 영문 소제목과 그 문단을 `<div class="kp-local|kp-misread|kp-words" data-kp-label="…">`로 감싸고, `kp-words` 안의 한글을
     `<span class="kp-ko">`로 감싼다. **소제목 텍스트는 박스 안에 넣지 않는다** - §B-4 CSS의 `::before`가 제목을 그린다.
 - **번역 검증 버그를 하나 고쳤다**: `parseTranslationOutput.strayHangulCount`는 **괄호 안** 한글만 면제했는데 §E-4는 "Words you will
@@ -300,9 +300,9 @@
 - **다른 세션에 남은 의존**: §B-4 CSS(`.kp-local::before` 등)가 Blogger 테마에 들어가기 전까지는 콜아웃 박스에 **제목이 보이지 않는다**
   (배경·좌측 선만 보인다). CSS는 `data-kp-label`과 짝이고, 변환기가 제목을 안 내보내므로 §B-4의 `::before` 규칙을 **그대로** 넣어야 한다.
 - **검증**: `test:spec-files`(로컬 레이어 3개의 3자 계약 - 한글 소제목 = 고정 영문 소제목 = 콜아웃 클래스)·`test:article-review`
-  (kscene 화자 경고 + 다른 6트랙 불변)·`test:translation`(Words 레이어 면제)·`test:parse-research`·`test:summarize-research`·
+  (koreaplain 화자 경고 + 다른 6트랙 불변)·`test:translation`(Words 레이어 면제)·`test:parse-research`·`test:summarize-research`·
   `test:html-generic`(옵션 꺼짐 = 기존 출력)·`test:writing-prompt`·`test:research-prompt`·`test:enforce-rules`·`test:naver-html`·
-  `test:tistory-html`·`test:publish-blocks`·`test:tkm-structure` + 29개 회귀 테스트 + `npm run build` 통과. 최근 kscene job의
+  `test:tistory-html`·`test:publish-blocks`·`test:tkm-structure` + 29개 회귀 테스트 + `npm run build` 통과. 최근 koreaplain job의
   research·초안이 로컬에 없어(클라우드 실행) §12가 든 조사 파일을 손으로 만들어 조사·집필 프롬프트 조립과 발행 HTML까지 확인했다
   (LLM 호출·발송·DB 쓰기 없음). **`test:article-prompt`는 main에서도 같은 이유로 실패한다**(해시태그 10개 가정이 10/12 "5개 이하"
   개정 뒤 남은 낡은 단정 - 이 작업과 무관하고 손대지 않았다).
@@ -339,7 +339,7 @@
 
 - **무엇**: 정체성 개정안(`branding-2026-10/kp-native-identity-2026-10.md`) §C, 사용자 승인 Q7. 사이트 43편의 86%가 외국인 저자 블로그가
   이미 포화시킨 주제라, 주제 선정에 "한국인만 쓸 수 있는 주제" 축을 넣었다. 라벨 5개 이름은 그대로(§C-4).
-- **점수식**(`ksceneTopics.ts` `scoreTopic`): 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + **로컬 우위 15** = 100, **관광 포화 −10**(하한 0).
+- **점수식**(`koreaplainTopics.ts` `scoreTopic`): 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + **로컬 우위 15** = 100, **관광 포화 −10**(하한 0).
   `LOCAL_EDGE_TERMS`(48)·`SATURATED_TOURIST_TERMS`(17, korea·seoul 제외)는 `matchTokens`(korea/korean·복수형 접기, **불용어는 유지** -
   "koreans how do you" 같은 질문형 구가 불용어뿐이라) 기준 연속 토큰 일치. `TopicScore`에 `localEdge`·`saturation` 추가.
   **DB `keyword_rankings.score_breakdown`은 6컬럼 고정(migration 없음)이라 모양을 안 바꿨다** - 로컬 우위는 `clickPotential`에 합산,
@@ -348,30 +348,30 @@
   redditHits를 2로 센다(`redditLocalQuestion`, 교차 신호 상한 15 그대로).
 - **선정**: `localEdgeFloor`(topN=8이면 2, `defaultLocalEdgeFloor`) - 실용 하한과 겹쳐도 되고 라벨 상한(3)은 지킨다. 후보가 없으면 안 채운다.
 - **시드**: 117 → **164**(개정안 50개 중 자동완성이 비는 긴 질의 37개를 2~3단어로 줄여 실측 통과분 47개만 추가, 기존 삭제·변경 없음, 중복 0). 머리 주석에 "2026-10-30 로컬 우위 축".
-- **로그**: `ksceneTopicJob.ts`의 ▶ 줄과 collection 로그에 "로컬 우위 N건 · 포화 감점 N건"(결과 `localEdgeCount`·`saturatedCount`).
+- **로그**: `koreaplainTopicJob.ts`의 ▶ 줄과 collection 로그에 "로컬 우위 N건 · 포화 감점 N건"(결과 `localEdgeCount`·`saturatedCount`).
 - **테스트**: `npm run test:kscene-topics`에 로컬 우위 +15·포화 −10/하한 0·합계 100·레딧 보정·로컬 하한 케이스 추가(10/28 해외 지명·정규화 테스트 불변,
   시드 총량 단언만 164로 갱신).
 
-## 2026-10-29 — 변환기 🌏 국제 트랙(kscene 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
+## 2026-10-29 — 변환기 🌏 국제 트랙(koreaplain 라우팅) (브랜치 `feat/input-global-track`, PR 대기)
 
 - **무엇**: 텔레그램 링크 변환기(종합 키워드 입력 툴)에 여섯 번째 트랙 **🌏 국제**를 추가했다(사용자 지시 "국제를 누르면 블로그스팟용
-  영문 원고"). 새 트랙·새 봇이 아니라 **사용설명서(kscene) 트랙 재사용**이다 - `instagramTrack.ts`의 내부 이름만 `global`이고 job은
+  영문 원고"). 새 트랙·새 봇이 아니라 **사용설명서(koreaplain) 트랙 재사용**이다 - `instagramTrack.ts`의 내부 이름만 `global`이고 job은
   `category="kscene"` + `metadata.track="kscene"`으로 만들어져 kscene-topic Go 버튼 job과 같은 길을 탄다.
 - **쓰는 법 3가지**(기존 5트랙과 동일): ① 링크·주제와 **같은 메시지**에 단어 - "국제 https://instagram.com/p/…", "남산 케이블카 타는 법 국제"
   (앞·뒤 토큰만, `국제|글로벌|영문|영어|블로그스팟|blogspot|global|kscene`) ② 접수 답장의 **🌏 국제 버튼**(6개 버튼이 2행 3+3) ③ 버튼 대신
   "국제"/"영문"이라고 **답장**(또는 단어만 전송). 접수 문구·다시 묻는 문구·직접 입력 ack에 "국제"가 들어갔다.
 - **job 모양**: `inputJobFields`/`createInstagramJob` → `category: "kscene"`, `metadata: { source: "keyword_input" | "instagram_manual",
-  track: "kscene", inputTopic/sourceText/sourceUrl 또는 instagramUrl/instagramCaption/… }`. kscene Go job과 다른 점은 `seed_query=null`
-  (Blogger 라벨은 `KSCENE_DEFAULT_LABEL`로 폴백 - `publishArticleToBlogspot.ts` `resolveBloggerTarget`)과 `metadata.kind` 없음(kind는
-  discovery_runs 전용 - kscene 흐름 코드는 `trackOfJob`·`category`만 본다, grep 확인). `selected_via="manual"`, `source_run_id`는 자리채우기.
+  track: "kscene", inputTopic/sourceText/sourceUrl 또는 instagramUrl/instagramCaption/… }`. koreaplain Go job과 다른 점은 `seed_query=null`
+  (Blogger 라벨은 `KOREAPLAIN_DEFAULT_LABEL`로 폴백 - `publishArticleToBlogspot.ts` `resolveBloggerTarget`)과 `metadata.kind` 없음(kind는
+  discovery_runs 전용 - koreaplain 흐름 코드는 `trackOfJob`·`category`만 본다, grep 확인). `selected_via="manual"`, `source_run_id`는 자리채우기.
 - **흐름(코드 근거)**: 맥 폴러 `instagramCapturePollJob.ts` → `processPendingCaptures.ts`(텍스트는 `createInputJob`, 인스타 링크는 캡처 후
   `createInstagramJob`) → `triggerResearch.ts`(`GITHUB_TOKEN` 있으면 `pipeline_dispatch_queue`→`job-research.yml`, 없으면 맥 로컬
-  `job:research`) → `runArticleJob.ts` research(kscene 분기 + 변환기 보강) → `job-write.yml` write(`buildWritingPrompt` kscene 분기 +
-  `style/kscene.md`) → `pipelineGate.shouldSkipDraftReview=false`(kscene) → `notifyArticleReady` "✅ 한글 승인 → 영어본"(kscene 봇,
+  `job:research`) → `runArticleJob.ts` research(koreaplain 분기 + 변환기 보강) → `job-write.yml` write(`buildWritingPrompt` koreaplain 분기 +
+  `style/koreaplain.md`) → `pipelineGate.shouldSkipDraftReview=false`(koreaplain) → `notifyArticleReady` "✅ 한글 승인 → 영어본"(koreaplain 봇,
   `trackOfJob`) → `TelegramBot` confirm → `ksceneStage=translating` → `job-translate.yml`/`runTranslateJob.ts`(trackOfJob=kscene 검사) →
   자동 승인 → 이미지 포함 영어본 통합 알림(🔵 Blogger, `isManualPublishOnly=false`) → `publishArticleToBlogspot.ts`(`KSCENE_BLOGGER_BLOG_ID`).
   트랙별 분기가 있는 곳(폴러·알림·게이트·문체·발행)은 전부 `metadata.track`/`category`를 보므로 변환기 출처라서 갈라지는 지점은 없다.
-- **한글 입력 처리**: kscene 조사 분기(`buildResearchPrompt.ts`)는 "keyword는 영문 검색 질의"를 가정했다. `metadata.source`가 변환기
+- **한글 입력 처리**: koreaplain 조사 분기(`buildResearchPrompt.ts`)는 "keyword는 영문 검색 질의"를 가정했다. `metadata.source`가 변환기
   (`isConverterJobSource`: instagram_manual/keyword_input)이면 `converterSource=true`로 보강 줄을 덧붙인다 - keyword·소스가 한글일 수 있으니
   해외 독자 관점의 **영문 질의로도 바꿔** 찾고 한글·영문 자료를 둘 다 보며, **사용자가 보낸 소재가 주제**이므로 에버그린 제한으로 소재를
   버리지 않는다(사실 확인은 규격대로). 집필 프롬프트(`buildWritingPrompt.ts`)에도 같은 조건으로 "keyword가 한글 주제다" 한 줄. 변환기 소스
@@ -381,8 +381,8 @@
   `test:pipeline-gate`·`test:manual-publish-only`·`test:telegram-tracks`·`test:notify-article`·`test:ig-capture-queue`·
   `test:instagram-capture-bot`·`npm run build` 통과. 실제 텔레그램 발송·DB 쓰기·발행은 하지 않았다.
 - **남은 실운영 확인**: ① 맥미니 prod pull 뒤 폴러가 새 코드로 돈다(launchd 변경 없음 - 폴러는 매 실행마다 tsx로 소스를 읽는다).
-  ② 첫 국제 job에서 kscene 봇으로 한글 초안 알림이 오는지, 한글 keyword로 조사가 영문 자료까지 찾는지, Blogger 라벨 기본값이 적절한지
-  (라벨을 고르게 하려면 별도 결정). ③ 변환기 job은 `seed_query`가 없어 `KSCENE_LABEL_BY_SEED` 라벨이 안 붙는다 - 기본 라벨로 갈지 사람이 정한다.
+  ② 첫 국제 job에서 koreaplain 봇으로 한글 초안 알림이 오는지, 한글 keyword로 조사가 영문 자료까지 찾는지, Blogger 라벨 기본값이 적절한지
+  (라벨을 고르게 하려면 별도 결정). ③ 변환기 job은 `seed_query`가 없어 `KOREAPLAIN_LABEL_BY_SEED` 라벨이 안 붙는다 - 기본 라벨로 갈지 사람이 정한다.
 
 ## 2026-10-29 — 엔터 문체 개정(경위 서술 제거·감흥 마무리) (브랜치 `style/ent-attitude-ending`, PR 대기)
 
@@ -395,7 +395,7 @@
   됐다). 규격에는 보도 경위 금지(§4-2)만 있고 "경위·한정·부인·계산" 문형 금지가 없었다. ②는 `core-rules.md` §3("요약 한두 문장 +
   진술문")·`article-structure.md`의 마지막 단계 이름 '요약'·`person.md` §10("배역을 한 문장에 나란히")이 직접 원인. 검수·revise
   단계는 한정 문구를 요구하지 않는다(확인).
-- **변경**: `core-rules.md` §1-12(경위·한정·계산 서술, X/O)·§3(엔터·person 마무리 = 감흥 2~3문장, 요약 금지; incident·kscene·
+- **변경**: `core-rules.md` §1-12(경위·한정·계산 서술, X/O)·§3(엔터·person 마무리 = 감흥 2~3문장, 요약 금지; incident·koreaplain·
   trend·parenting은 각 파일대로)·§6 점검 2항목·§7. `facts-and-hedging.md` §4-3(사용자 사례 4건 X/O 표 + research 요약·불일치 줄은
   감사 기록). `entertainment.md` 6번·사실 태도·참고 요약, `person.md` §10(배역 재나열 X, 화자 평가 O), `article-structure.md`
   단계명 '요약'→'마무리'(엔터·인물은 '마무리(감흥)'), `voice.md` §5, `humanize.md` 결말 공식(기대 표현 자체는 허용), `writer.md`
@@ -447,7 +447,7 @@
 - **구조 백필 `--rewrite-host`**(`tkm-structure-backfill.yml` 입력 `rewrite_host`): 본문 옛 절대 URL 교체 + 기존 JSON-LD는 `--jsonld` 없이도 새 주소로 재생성(없이 돌리면 걷히던 문제 회피) +
   고정 페이지 옛 주소 교체. dry-run run 40559255124: 40편 변경, 주소 교체 359, 글자 불일치 0, 남은 옛 주소 0, All Guides `https://www.koreaplain.com/p/all-guides.html`,
   고정 페이지 Privacy Policy 1개. Blogger API는 이미 www.koreaplain.com 주소를 돌려준다.
-- 번역 프롬프트(`kscene-ko-en.md`)·kscene 문체 매체 주소 교체. 테스트: `test:tkm-cutover` 신설, `test:search-performance`·`test:bing` 보강.
+- 번역 프롬프트(`koreaplain-ko-en.md`)·koreaplain 문체 매체 주소 교체. 테스트: `test:tkm-cutover` 신설, `test:search-performance`·`test:bing` 보강.
 - **팀장 실행 순서**(10/28 전부 실행 완료, 위 상태 참조): ① GSC 새 속성 추가·서비스 계정 권한(UI) → ② `gh variable set GSC_SITE_URLS --body "sc-domain:koreaplain.com,https://wooahpapa.tistory.com/"`
   → ③ `npm run tkm:cutover-urls -- --apply`(prod) → ④ `gh workflow run tkm-structure-backfill.yml --ref main -f apply=true -f rewrite_host=true` → ⑤ Bing에 `https://www.koreaplain.com/` 추가(UI)
   → ⑥ `npm run bing:submit -- --site=https://www.koreaplain.com/ --urls <40편+허브>`. ③④는 HTTPS 발급 확인 뒤(`tkm:cutover-urls -- --verify` 전부 ✅).
@@ -465,7 +465,7 @@
   "About Korea Plain"·태그라인·"(formerly The Korea Manual)". 변환 전후가 이름 치환뿐인지 문자 단위로 검증(`checkNameOnlyChange`). `BloggerClient.listPages({ fetchBodies })`·`getPage` 추가.
 - JSON-LD는 이제 비ASCII를 `\uXXXX`로 쓴다(`jsonLdForScript`) - Blogger가 script 안 "—"·"–"·"₩"를 `&#8212;` 같은 엔티티로 바꿔 구조화 데이터에 그대로 남던 문제(리브랜딩 1편 적용 때 발견, 기존 8곳도 함께 해소).
 - 식별자는 그대로: `TKM_*`, `tkm*.ts`, `tkm-*` 클래스, `KSCENE_*`, 트랙 키 `kscene`, `@KoreanManualBot`, 이미지 호스트 `korea-manual-images-2026.pages.dev`.
-- 테스트: `test:tkm-rebrand`(신규) + tkm-structure·publish-blogspot·publish-blocks·translation·kscene-approval·kscene-topics·manuscript-track-pages·related-posts·search-performance, `npm run build`.
+- 테스트: `test:tkm-rebrand`(신규) + tkm-structure·publish-blogspot·publish-blocks·translation·koreaplain-approval·kscene-topics·manuscript-track-pages·related-posts·search-performance, `npm run build`.
 
 ## 2026-10-28 — 티스토리 기존 글 내부 링크 소급 백필 CLI (브랜치 `feat/tistory-backfill-links`)
 
@@ -547,7 +547,7 @@
 
 **상태: 코드 main 병합·push 완료. GitHub 시크릿 등록 전까지 자동 제출은 꺼져 있다(조용히 건너뜀).**
 
-- **동작**: kscene 글이 **공개 발행**되면(신규 공개·초안→공개 전환. 기존 글 본문 갱신·초안은 제외) `finalizeTkmPost`(All Guides 재생성) 뒤에
+- **동작**: koreaplain 글이 **공개 발행**되면(신규 공개·초안→공개 전환. 기존 글 본문 갱신·초안은 제외) `finalizeTkmPost`(All Guides 재생성) 뒤에
   `[글 URL, All Guides URL]`를 **한 번의 SubmitUrlBatch**로 Bing에 제출한다(`publishArticleToBlogspot.ts`의 `submitToBing`).
   결과는 `job.metadata.bingSubmit = {at, urls, ok, error?, skipped?}`(기존 `saveJobMetadata` 경로). 어떤 실패·예외도 발행을 바꾸지 않는다.
 - **클라이언트**: `src/services/bing/BingWebmasterClient.ts` - `submitUrls(siteUrl, urls)` / `getQuota(siteUrl)`, fetch 주입, 던지지 않고 결과 객체.
@@ -569,8 +569,8 @@
   본문 TKM 내부 링크 0(영어본은 `prepareManuscript`의 배리에이션 재사용 경로라 `appendRelatedPosts`를 안 탄다),
   robots.txt `Disallow: /search`(Blogger 기본)라 홈 "Older posts"·라벨·아카이브 다음 페이지가 크롤 불가 - 홈·월 아카이브는
   최신 12~14편까지만 링크한다. h2 0개(소제목이 `<p><strong>`), 글 페이지 `<meta name=description>` 없음, JSON-LD 0.
-- **신규 kscene 발행(자동, `publishArticleToBlogspot.ts` → `tkmPostStructure.ts`·`tkmSite.ts`)**:
-  ① 소제목 `<h2>` - 번역 프롬프트는 그대로 두고 변환기 옵션(`convertArticleToHtml(.., {semanticHeadings})`, kscene만)으로 바꿨다
+- **신규 koreaplain 발행(자동, `publishArticleToBlogspot.ts` → `tkmPostStructure.ts`·`tkmSite.ts`)**:
+  ① 소제목 `<h2>` - 번역 프롬프트는 그대로 두고 변환기 옵션(`convertArticleToHtml(.., {semanticHeadings})`, koreaplain만)으로 바꿨다
   (번역 계약 검증·영어본 diff가 마크다운 기준이라). ② "Related Guides" 블록 - 비슷한 글 3(제목 토큰+라벨) + **이전 글**(체인) +
   **All Guides**(허브), References 앞, `div.tkm-related`로 멱등. ③ 공개 직후 **All Guides 페이지 재생성**(`/p/all-guides.html`,
   pages.patch, 없으면 생성 - 페이지 ID는 저장하지 않고 경로로 찾는다, 새 .env 키 없음) + BlogPosting JSON-LD를 넣어 본문 patch.
@@ -687,12 +687,12 @@
 **상태: main 배포 완료(6df333c)·실운영 확인 완료(2026-10-13 오늘자 키워드·원고로 사용자 확인, 문제 없음).** 사용자 결정: 한글 원고 → 승인 → **이미지가 포함된 영어본** → 승인 → 발행. 영어본 단독 알림(Telegraph 영어본 + 한글 대역 요약 + ✅/✏️/🗑)을 뺐다.
 
 - **새 흐름(게이트 켜짐=기본)**: 한글 ✅(그대로) → `job-translate`가 영어본 생성·저장 → **자동 승인**(`autoApproveDraft`: `autoApprovedAt`·`englishApprovedAt` 기록, job·영어 article `approved`) + `job-publish-prepare` 발화 → 이미지 붙은 영어본의 **통합 알림**(링크 / ✏️ 수정·🗑 반려 / 이미지 수정·내려받기 / 🔵 Blogger 발행 + 검수 요약). 발행은 사람 버튼 그대로.
-- **게이트**: 파이프라인 통합과 같은 `PIPELINE_SKIP_DRAFT_REVIEW`(`false`면 옛 영어본 재승인 흐름 복귀). `shouldSkipEnglishReview`(kscene 전용, `pipelineGate.ts`). `shouldSkipDraftReview`는 kscene에서 계속 false(한글 승인 유지). `job-translate.yml`에 게이트 변수·`GITHUB_TOKEN`·`actions: write` 추가.
+- **게이트**: 파이프라인 통합과 같은 `PIPELINE_SKIP_DRAFT_REVIEW`(`false`면 옛 영어본 재승인 흐름 복귀). `shouldSkipEnglishReview`(koreaplain 전용, `pipelineGate.ts`). `shouldSkipDraftReview`는 koreaplain에서 계속 false(한글 승인 유지). `job-translate.yml`에 게이트 변수·`GITHUB_TOKEN`·`actions: write` 추가.
 - **영어본 ✏️ 수정**(승인 뒤): 통합 알림의 ✏️ → 답장 → `job-translate`가 직전 영어본을 수정 방향으로 다시 쓴다(한글 재작성 아님) → `applyUnifiedRevision`이 영어본 이미지 마커 diff로 이미지를 유지·부분 갱신 → 원고 준비 재실행 → 통합 알림 재발송. 번역 중 들어온 ✏️ 답장은 막고, 수정 실패는 `translation_failed`(approved에서 죽는 ✅ 버튼)가 아니라 `english_review`를 유지하며 안내만 보낸다.
-- **🗑 반려**는 파이프라인 통합과 동일(7일 뒤 storage-cleanup). `buildReadyKeyboard`가 kscene에도 수정/반려 줄을 붙인다(자동 승인 job만).
-- 테스트: `test:translation`(통합·승인 후 수정·게이트 꺼짐 복귀 추가), `test:pipeline-gate`, `test:notify-manuscripts-ready`(kscene 줄 순서) 통과. 실왕복은 사용자가 오늘자 키워드·원고로 확인(문제 없음). 게이트 false 복귀 검증은 생략.
+- **🗑 반려**는 파이프라인 통합과 동일(7일 뒤 storage-cleanup). `buildReadyKeyboard`가 koreaplain에도 수정/반려 줄을 붙인다(자동 승인 job만).
+- 테스트: `test:translation`(통합·승인 후 수정·게이트 꺼짐 복귀 추가), `test:pipeline-gate`, `test:notify-manuscripts-ready`(koreaplain 줄 순서) 통과. 실왕복은 사용자가 오늘자 키워드·원고로 확인(문제 없음). 게이트 false 복귀 검증은 생략.
 
-## 2026-10-11 — 키워드 개편: 엔터 18시 1회화 + 19시 핫이슈 스타 신설 + kscene 실용 축 (브랜치 `feat/keyword-refresh`, 워크트리 `keyword-refresh/`, 지시서 `KEYWORD-REFRESH-2026-10.md`)
+## 2026-10-11 — 키워드 개편: 엔터 18시 1회화 + 19시 핫이슈 스타 신설 + koreaplain 실용 축 (브랜치 `feat/keyword-refresh`, 워크트리 `keyword-refresh/`, 지시서 `KEYWORD-REFRESH-2026-10.md`)
 
 **상태: 구현·테스트 완료, push·Worker 배포·실발송 승인 대기.** 베이스: main 526948f. 스케줄 요약표는 `CLAUDE.md` "키워드 수집·알림 스케줄".
 
@@ -720,7 +720,7 @@
     안 하면 19시 이후 `npm run notify:keywords`(runId 생략) 재발송이 랭킹 없는 run을 집어 조용히 `no_data`로 끝난다.
   - 실측 dry-run(10-11, 발송·기록 없음): 재료 120건(랭킹 10 + 트렌드 110), 인물 5명 + 배경 정상 생성. **5명 전원이
     18시 알림과 겹쳤다** - 지시서가 예상한 상황이고 표기로 처리되지만, 알림의 실제 효용은 사용자 확인 필요(§B 완료 판정).
-- **§C kscene 체류 실용 축**: 시드 **100 → 117**(기존 100개 삭제 없이 누적) - Living in Korea 20→32(USIM·본인인증·
+- **§C koreaplain 체류 실용 축**: 시드 **100 → 117**(기존 100개 삭제 없이 누적) - Living in Korea 20→32(USIM·본인인증·
   전입신고·ARC 갱신·종량제·음식물쓰레기·공과금·인터넷 설치·당근·모바일뱅킹·병원 예약·건강보험 납부),
   Travel & Transit 20→25(환승·카드 충전·신호·무단횡단·출퇴근). 라벨별 **하루 배분은 그대로 균등**(라벨마다 4개씩
   번갈아 뽑는다 - pool이 큰 라벨만 한 바퀴가 길어진다: Living 8일 / Travel 7일 / 나머지 5일, 전체 12일).
@@ -730,14 +730,14 @@
     범용 의도어는 넣지 않았다(문화 주제까지 실용으로 세면 하한이 의미를 잃는다). News in Context 제외는 유지.
   - **이 트랙의 주제 선정에는 LLM 프롬프트가 없다**(순수 결정 규칙) - 지시서의 "선정 프롬프트에 명시"는 코드 규칙 +
     주석으로 이행했다. 기획⑤ 문서는 뒤엎지 않고 `branding-2026-10/kscene-seeds.md` 끝에 "2026-10-11 실용 축 확장"
-    추기를 붙였다. 번역 지침(`kscene-ko-en.md`)은 건드리지 않았다.
+    추기를 붙였다. 번역 지침(`koreaplain-ko-en.md`)은 건드리지 않았다.
 - **검증**: `test:relay-schedule`(0·4 폐지·10 신설·toml 대조·시각 수 4) · `test:watchdog`(폐지 회차 거짓 경보 없음,
   핫스타 kind 미혼입) · `test:hot-star`(신규 - 파싱·중복 표기·5명 미만·LLM 실패·재료 0·트렌드 실패·저장 실패·dry-run·
   인용부호 회귀) · `test:kscene-topics`(시드 117 분포·실용 하한 3건·후보 부족·라벨 상한 유지) · `test:keywords` ·
   `test:daily-query-pool` · `test:notification`(실자격증명 읽기 왕복 - 최신 run 선택 회귀 확인) · `npm run build` 통과.
   `test:notification`은 더미 Supabase에서는 main에서도 `fetch failed`다(실DB 필요 - 내 변경 무관).
 - **남은 것(승인 필요)**: ① push·main 병합 ② **Worker 배포**(cron 변경 반영 - 배포 전까지 09·13시가 계속 울리고
-  19시 핫스타는 안 돈다) ③ 핫스타 실발송 1회(§B 완료 판정) ④ kscene 21시 수집에서 실용 키워드 혼합 확인(§C 완료 판정).
+  19시 핫스타는 안 돈다) ③ 핫스타 실발송 1회(§B 완료 판정) ④ koreaplain 21시 수집에서 실용 키워드 혼합 확인(§C 완료 판정).
 - **2026-10-12 반영 완료**: 사용자가 ①②③을 승인했다. **main 병합 완료**(`526948f` -> `69a81b2`, fast-forward) +
   **Worker 재배포 완료**(버전 `99b9519a-9568-442f-affc-18db1fb51f44`). 배포 출력에 cron 4개가 모두 등록됐다:
   `0 9,10,11,12 * * *` · `30 0 * * *` · `0 1 * * 1` · `0 18 * * 6`. **이 시점부터 09·13시 엔터 알림은 오지 않고
@@ -751,7 +751,7 @@
 - **남은 판정(10-12 19:00 KST 이후)**: ③ 배포가 끝났으므로 **19시 cron이 첫 핫스타 알림을 자동으로 보낸다** - 별도
   수동 dispatch가 필요 없다. 볼 것: (a) 텔레그램 엔터봇에 "🌟 오늘의 핫이슈 스타"가 왔는가 (b) 버튼이 없는가
   (c) 18시 알림과의 겹침이 몇 명인가(전원 겹치면 알림의 실제 효용을 다시 판단한다 - 10-11 dry-run에서는 5/5였다).
-  ④ 21시 kscene 수집에서 실용 키워드가 섞여 나오는가(§C 완료 판정). 핫스타가 조용히 실패하면 watchdog이 잡지
+  ④ 21시 koreaplain 수집에서 실용 키워드가 섞여 나오는가(§C 완료 판정). 핫스타가 조용히 실패하면 watchdog이 잡지
   않으므로(미포함 확정) 첫날은 사람이 본다.
 
 ## 2026-10-09 — Supabase egress 초과 전면 차단 + TKM 이미지 rehost 미작동 발견·수정 (메인 세션)
@@ -762,7 +762,7 @@
   **블로그스팟 두 블로그(whynowissue + The Korea Manual)의 Storage 핫링크 이미지 전부 깨짐**. 네이버·티스토리 글은 발행 시
   플랫폼 업로드라 무사. 관리 API는 살아 있어 MCP execute_sql·데일리 데스크 대시보드는 정상. 해제 = 결제 주기 리셋 또는
   Pro 업그레이드(사용자 결정 대기 — Usage 화면 확인 후 결정하기로).
-- **발견: 개편3 'kscene 발행 시 Pages 이미지 복사'가 한 번도 작동한 적 없음.** `korea-manual-images-2026` Pages 프로젝트가
+- **발견: 개편3 'koreaplain 발행 시 Pages 이미지 복사'가 한 번도 작동한 적 없음.** `korea-manual-images-2026` Pages 프로젝트가
   생성만 되고 첫 배포가 없어 **404가 아니라 522**를 반환 → rehost가 manifest 읽기 실패로 매번 중단·Supabase URL 폴백
   (10-08 run 37730209173 로그 실증). TKM 발행 전글이 Supabase 핫링크 상태 = egress 소비 + 이번 차단에 노출.
 - **수정(이 세션)**: ① 빈 manifest 부트스트랩 배포 완료(manifest.json 200 확인) ② `rehostImagesToPages`: manifest 읽기
@@ -796,8 +796,8 @@
 
 - **AVIF 수집 정규화 브랜치(3805560)와 `fix/exclude-sports`(10-07 스포츠 키워드 제외 2커밋, 병합 누락분)를 검증 후 main 병합·push**(abd107b). 이미지 형식·키워드 제외·빌드 테스트 통과 확인.
 - **맥미니 prod pull → abd107b**(폴러는 launchd가 60초마다 스크립트를 새로 실행하므로 pull만으로 반영 - 재시작 불필요).
-- **기획⑤ 확정본 반영**(branding-2026-10/): `prompts/translation/kscene-ko-en.md` 통째 교체 + `ksceneSeeds.ts` 시드 60→100개(라벨당 20, News in Context 제외 확정). 다음 kscene 주제 수집(21:00)부터 적용.
-- Worker 배포 최신 확인(마지막 배포 10-06 05:21Z > 마지막 Worker 커밋 7abc153) - kscene 12UTC·storage-cleanup cron(토 18UTC)·C-1 전부 라이브. storage-cleanup 첫 cron 실행은 10-12(일) 03:00 KST dry-run.
+- **기획⑤ 확정본 반영**(branding-2026-10/): `prompts/translation/koreaplain-ko-en.md` 통째 교체 + `koreaplainSeeds.ts` 시드 60→100개(라벨당 20, News in Context 제외 확정). 다음 koreaplain 주제 수집(21:00)부터 적용.
+- Worker 배포 최신 확인(마지막 배포 10-06 05:21Z > 마지막 Worker 커밋 7abc153) - koreaplain 12UTC·storage-cleanup cron(토 18UTC)·C-1 전부 라이브. storage-cleanup 첫 cron 실행은 10-12(일) 03:00 KST dry-run.
 - 13:00 엔터 키워드 notify 실패(10-08): GitHub 러너의 일시 네트워크 장애 1회(fetch failed, 재시도 로직 없음). 데이터는 저장돼 있었고 `npm run notify:keywords`로 재발송 완료. 개선 메모: notify 일시 장애 재시도(§⑤.9 알림부), image-pick 정상 가드 거부가 빨간 run으로 남는 문제.
 
 ## 2026-10-08 — 이미지 AVIF를 수집·업로드에서 정규화 (`IMAGE_AVIF_PIPELINE_HANDOFF.md` 처리 완료)
@@ -814,7 +814,7 @@ WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`�
 **상태: main 병합·push 완료·운영 중(2026-10-09). 게이트 변수 미설정 = 통합 흐름 켜짐. 실왕복 §7: ①알림 1회·②✏️ 수정 반영·③🗑 반려(cleanup dry-run에서 7일 미경과로 유지) 확인, ④게이트 false 복귀는 사용자 결정으로 생략(단위 테스트만).** 후속: 통합 알림 버튼 순서를 `링크 / 수정·반려 / 이미지 수정·내려받기 / 발행`으로 변경(`6a3c33d`), `job-publish-prepare` Chromium 설치 단계에 `timeout-minutes: 8`(러너에서 30분+ 멈춘 적 있음, `942b42c`). 베이스: `origin/main` 3e738c8(뷰어-개선 머지 확인 후 시작).
 
 - **흐름**: 키워드 Go → 자료조사 ✍️ → write → **자동 승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화** → 이미지 반영 원고 → **통합 알림 한 번**(📄 페이지 / 🖼 이미지 수정 / ⬇️ 내려받기 / 트랙별 발행 / **✏️ 수정 요청 / 🗑 반려**). 초안 알림(Telegraph 미리보기 + ✅/✏️/🗑)은 폐지 - `telegraph` 서비스는 호출만 뺐다(`runWritingStage`가 게이트 켜짐이면 건너뜀).
-- **게이트 `PIPELINE_SKIP_DRAFT_REVIEW`**(`config/pipelineGate.ts`): 미설정·빈 값 = **켜짐**, `false/0/off/no` = 옛 2단계 흐름. 배선: `job-write.yml`·`job-revise.yml`(repo variable). **사용설명서(kscene)는 게이트와 무관하게 옛 흐름**(한글 ✅→영어본→영어 ✅는 개편3 지시서가 통합 흐름에 맞춰 재설계 - 지시서 §5). `review` 상태로 대기 중인 옛 job은 옛 ✅/✏️/🗑으로 소진(마이그레이션 없음). 통합 알림의 버튼·검수 요약은 환경변수가 아니라 `autoApprovedAt` 유무로 정한다(게이트를 중간에 바꿔도 job마다 지나온 흐름의 알림).
+- **게이트 `PIPELINE_SKIP_DRAFT_REVIEW`**(`config/pipelineGate.ts`): 미설정·빈 값 = **켜짐**, `false/0/off/no` = 옛 2단계 흐름. 배선: `job-write.yml`·`job-revise.yml`(repo variable). **사용설명서(koreaplain)는 게이트와 무관하게 옛 흐름**(한글 ✅→영어본→영어 ✅는 개편3 지시서가 통합 흐름에 맞춰 재설계 - 지시서 §5). `review` 상태로 대기 중인 옛 job은 옛 ✅/✏️/🗑으로 소진(마이그레이션 없음). 통합 알림의 버튼·검수 요약은 환경변수가 아니라 `autoApprovedAt` 유무로 정한다(게이트를 중간에 바꿔도 job마다 지나온 흐름의 알림).
 - **write 마무리**: `finishWrite.ts`(성공/실패/건너뜀/게이트 분기, CLI는 얇은 껍데기). `autoApproveDraft.ts`가 ✅ 콜백과 같은 전이(메타 → job approved → article approved → prepare 발화)를 수행. 의학 주제는 `requiresMedicalReview`를 **내리지 않고** 통합 알림에 ⚕️ 경고 + 검수(팩트·법률·광고) 요약 3건을 옮겼다(초안 단계가 사라져 볼 곳이 없어지므로). 준비 발화 실패 시 승인은 유지하고 사람에게 수동 실행 안내(자동 재시도 없음 원칙).
 - **버튼 콜백**: 옛 `review:edit` / `review:discard` 재사용. 🗑 = `rejected` + `rejectedAt/rejectedVia/rejectedAtStatus` 기록 + 뷰어 manifest 행 삭제(`removeManifestTopic`) + `manuscripts-refresh.yml` 발화. **발행됐거나 발행 중(큐 requested/done·publications 비실패)이면 반려 거부**. 반려된 원고의 ✏️·발행 콜백은 거부. 준비 도중 반려하면 `prepareApprovedManuscripts`가 뷰어·알림에서 제외. ✏️ 답장 매칭은 `findByEditRequestMessageId(track)`(approved 포함) 그대로.
 - **키보드 복원(중요)**: Cloudflare 릴레이는 **어떤 버튼이든 누르는 순간 키보드 전체를 "⏳ 처리 중…" 하나로 덮어쓴다**. 그래서 키보드 구성을 `buildReadyKeyboard` 한 곳에 모아 알림 생성과 복원이 같이 쓴다 - ✏️ 뒤에는 발행 버튼 포함 전체를 되살리고(수정 요청됨 표시), 🗑 뒤에는 "반려됨" 한 버튼으로 닫고, 반려 거부 뒤에는 원상 복원. 발행/이미지 버튼 처리 뒤 재구성에도 ✏️/🗑 줄을 붙인다.
@@ -832,7 +832,7 @@ WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`�
 - **§2 저장은 저장만**: 확인창·토스트·배지·결과 문구를 "저장"으로(버튼도 `💾 수정본 저장`). 뷰어 🟠 발행 버튼·`submitPublish` 제거, 트랙별 "발행은 텔레그램의 … 버튼으로만" 안내(`copy.hint`). `publishApi`/`publish-request.yml`/`publishRequestCli`는 코드만 유지. **가드**: `viewerEditGuard.ts` - `viewerEditPendingAt`(반영 접수)·`imagePickPendingAt`(교체 접수)이 완료 기록보다 늦으면 진행 중. 네이버·티스토리 폴러 목록과 텔레그램 발행 콜백(naver/tistory/blogspot)이 건너뛰고/거부, 10분 넘으면 stale → `staleEditReport.ts`가 경고 알림 + 표식 해제 후 진행. 접수 후 아무것도 못 쓰고 실패하면 표식을 바로 푼다.
 - **§1 제목 편집**: 키 `title` - 뷰어(`.doc-title` 수정 모드 편집·한 줄·안내)·`editApi.KEY_RE`·`VIEWER_EDIT_KEY_RE`·`applyViewerEdits`(manifest 제목과 대조, 비움·200자 초과 건너뜀)·`applyViewerEditRequest`(`updateArticleTitle` → final article 행, manifest 동기화). slug·검색설명·폴더명은 그대로, 이미 발행된 글엔 소급 안 됨(뷰어 안내).
 - **검증**: `test:viewer-image-pick`(신규)·`test:viewer-image-pick-api`(신규)·`test:viewer-edits`·`test:viewer-edit-api`·`test:viewer-layout`(Chromium)·`test:manuscript-track-pages`·`test:viewer-copy`·`test:viewer-publish-api`·`test:naver-queue`·`test:tistory-queue`·`test:tistory-poll`, 텔레그램 콜백 가드(격리 실행)·`tsc` 통과. `test:telegram-bot` 전체는 **main에서도** Supabase 자격증명이 없으면 이미지 수정 답장 구간에서 네트워크 오류로 멈춘다(내 변경과 무관).
-- **남은 것(승인 필요)**: push·배포, `image-pick.yml`은 Pages Function 배포(wrangler)와 같이 나가야 동작, 완료 기준 §5-3 **실측 1건**(후보 클릭 → 1~2분 내 슬롯 교체, 원고 준비 재실행 없음), 완료 기준 §5-1·2·4의 실서비스 확인. `image-pick.yml`은 러너에 Chromium·Claude CLI를 깔아 건당 1~2분이 걸린다(긴 세로 후보 자르기용 - 드문 경로라 느리면 조건부 설치로 줄일 수 있다). 개편3(kscene)과 `renderManuscriptPage.ts`가 겹치므로 **개편3 시작 전 병합 권장**.
+- **남은 것(승인 필요)**: push·배포, `image-pick.yml`은 Pages Function 배포(wrangler)와 같이 나가야 동작, 완료 기준 §5-3 **실측 1건**(후보 클릭 → 1~2분 내 슬롯 교체, 원고 준비 재실행 없음), 완료 기준 §5-1·2·4의 실서비스 확인. `image-pick.yml`은 러너에 Chromium·Claude CLI를 깔아 건당 1~2분이 걸린다(긴 세로 후보 자르기용 - 드문 경로라 느리면 조건부 설치로 줄일 수 있다). 개편3(koreaplain)과 `renderManuscriptPage.ts`가 겹치므로 **개편3 시작 전 병합 권장**.
 
 ## 2026-10-06 — Serper 재가동·계측 (브랜치 `feat/serper-revival`, 워크트리 `serper-revival/`, 지시서 `SERPER-REVIVAL-2026-10.md`)
 
@@ -850,13 +850,13 @@ WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`�
 
 ## 2026-10-06 — 개편3 사용설명서 트랙(The Korea Manual) 구현 (브랜치 `feat/restructure-3-kscene-track`)
 
-**상태: main 병합·Worker 재배포(10-06)·웹훅·Pages 설정 완료, 첫 발행 2026-10-07(Korean Gift Giving Etiquette).** 상세·체크리스트는 `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`.
+**상태: main 병합·Worker 재배포(10-06)·웹훅·Pages 설정 완료, 첫 발행 2026-10-07(Korean Gift Giving Etiquette).** 상세·체크리스트는 `docs/ai-handoff/RESTRUCTURE_3_KOREAPLAIN_TRACK.md`.
 
-- 21:00 KST 주제 제안(`kscene-topic.yml`): 영문 자동완성 + 기본 시드 60개, 기발행·기제안 중복 제거, 사용설명서 봇 Go/Pass. Worker 12 UTC 슬롯이 **watchdog과 함께** 깨운다(GitHub cron 폐지). watchdog은 kscene을 전날분 기준으로 본다.
+- 21:00 KST 주제 제안(`kscene-topic.yml`): 영문 자동완성 + 기본 시드 60개, 기발행·기제안 중복 제거, 사용설명서 봇 Go/Pass. Worker 12 UTC 슬롯이 **watchdog과 함께** 깨운다(GitHub cron 폐지). watchdog은 koreaplain을 전날분 기준으로 본다.
 - 한→영 승인(2026-10-12부터 영어본 단독 재승인 폐지): 한글 ✅ → `job-translate`(영어본, 마커·링크·한글 잔존 검증) → 자동 승인 → 이미지 포함 영어본 통합 알림 → 🔵 Blogger 발행(게이트 꺼짐이면 옛 영어본 재승인). 상태는 `metadata.ksceneStage`.
 - Blogger 발행 타깃 분기(`KSCENE_BLOGGER_BLOG_ID`, 비면 발행 안 함) + 영문 라벨 + 발행 시 이미지를 공개 Cloudflare Pages로 복사·URL 치환(설정 없으면 Supabase 링크로 발행). 옮긴 글은 storage-cleanup 대상.
-- 번역 지침(`prompts/translation/kscene-ko-en.md`)과 시드(`ksceneSeeds.ts`)는 **2026-10-08 기획⑤ 확정본으로 교체 완료**(시드 100개, News in Context 라벨 제외 확정).
-- 알려진 한계: `docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md` "알려 둔 한계".
+- 번역 지침(`prompts/translation/koreaplain-ko-en.md`)과 시드(`koreaplainSeeds.ts`)는 **2026-10-08 기획⑤ 확정본으로 교체 완료**(시드 100개, News in Context 라벨 제외 확정).
+- 알려진 한계: `docs/ai-handoff/RESTRUCTURE_3_KOREAPLAIN_TRACK.md` "알려 둔 한계".
 
 ## 2026-10-06 — 개편2.5 안정화 구현 (브랜치 `feat/restructure-2.5-stabilization`, 지시서 `RESTRUCTURE-2.5-STABILIZATION.md`)
 
@@ -866,7 +866,7 @@ WebP로 변환하며, 변환이 실패해도 거짓 `.png`가 아니라 `.avif`�
 - **A-2** 인스타 버튼 선택은 큐 항목이 `needs_track`일 때만 적용(`applyTrackPick`). 이미 처리된 링크는 무시하고 "이미 처리된 링크입니다" 안내. 글자 답으로 트랙이 정해질 때 클라우드가 보낸 버튼 메시지를 지우는 건 하지 않았다(클라우드는 맥 큐 상태를 모른다) - 상태 가드만으로 수용.
 - **A-3** 수정·이미지 수정 답장 매칭에 트랙 조건 추가(`pickJobForTrack`): 봇의 트랙과 job의 `metadata.track`(없으면 엔터)이 같을 때만 매칭. 저장 레코드 변경 없음.
 - **B-1** 로그아웃(deferred) 상태 재확인 간격 30분(`TISTORY_DEFERRED_RECHECK_MINUTES`, `lastCheckedAt`). `setup:tistory`가 폴러 락(`logs/.tistory-poll.lock`)을 잡는다 - 폴러가 도는 중이면 시작하지 않고, setup 중에는 폴러가 건너뛴다.
-- **B-2** 원본 키보드를 잃었을 때 대체 키보드는 트랙별(엔터=네이버, 사회=티스토리, 블로그스팟 제외). 티스토리 예약 라벨 🟠. 서버 측 트랙-채널 검증: 텔레그램 콜백·`publishRequestCli`(뷰어 경로)에서 사회→네이버/블로그스팟, 엔터→티스토리 거부. 엔터의 블로그스팟 콜백은 버튼만 없고 처리는 남아 있다(kscene이 쓴다).
+- **B-2** 원본 키보드를 잃었을 때 대체 키보드는 트랙별(엔터=네이버, 사회=티스토리, 블로그스팟 제외). 티스토리 예약 라벨 🟠. 서버 측 트랙-채널 검증: 텔레그램 콜백·`publishRequestCli`(뷰어 경로)에서 사회→네이버/블로그스팟, 엔터→티스토리 거부. 엔터의 블로그스팟 콜백은 버튼만 없고 처리는 남아 있다(koreaplain이 쓴다).
 - **C-1** 릴레이 Worker가 인스타 경로에서 `caption`도 받는다(사진+캡션 링크). **Worker 재배포 필요.**
 - **C-2** `IG_INBOX_MODE` 기본값을 inbox(웹훅)로 뒤집음. 폴링은 `IG_INBOX_MODE=false` 명시 옵트인. 맥미니 실기기는 이미 `true`라 동작 변화 없음.
 - **C-3** `doctor.sh`: `TISTORY_PROFILE_DIR`를 `.env`에서 읽음, `IG_INBOX_MODE`·`SOCIAL_TELEGRAM_*`·`TISTORY_ENABLED` 점검 추가. `install-launchd.sh` 머리말 6종.
@@ -889,7 +889,7 @@ TISTORY_*, SOCIAL_*)까지 실측 확인. 발견된 결함과 정리 과제는 *
 - `mergeMetadata`(ArticleJobRepository)는 read-merge-write라 원자적이지 않다. 폴러 2종 + Actions 동시 쓰기 때 키 유실
   가능. 원자화(RPC)는 migration 승인이 필요해 보류.
 - 맥 폴러·watchdog 알림은 트랙 무관하게 메인봇으로 간다(같은 개인 채팅이라 수신은 됨).
-- watchdog은 GitHub cron(12 UTC)인데 10/5에 발화를 건너뛰었다. 개편3에서 Worker 12 UTC 슬롯(21:00 KST, kscene과
+- watchdog은 GitHub cron(12 UTC)인데 10/5에 발화를 건너뛰었다. 개편3에서 Worker 12 UTC 슬롯(21:00 KST, koreaplain과
   동시)으로 이전 예정.
 - **Supabase Storage 511MB/1GB(51%)**, 10월 페이스 일 ~28MB면 2~3주 내 한도. 개편2.5의 storage-cleanup(발행 14일
   경과 이미지 정리, dry-run 기본)으로 대응.

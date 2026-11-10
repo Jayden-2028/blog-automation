@@ -36,7 +36,7 @@ export type PublishRenderOptions = {
   /**
    * 로컬 콜아웃 박스(2026-10-30, Korea Plain 로컬 정체성 개정). 켜면 세 고정 영문 소제목과 그 다음 블록을
    * `<div class="kp-local|kp-misread|kp-words">`로 감싸고, "Words you will see" 안의 한글을
-   * `<span class="kp-ko">`로 감싼다. **사용설명서(kscene) 트랙 전용**이고 켜지 않으면 기존 출력과 한 글자도 다르지 않다.
+   * `<span class="kp-ko">`로 감싼다. **사용설명서(koreaplain) 트랙 전용**이고 켜지 않으면 기존 출력과 한 글자도 다르지 않다.
    */
   localCallouts?: boolean;
   /**
@@ -123,7 +123,7 @@ function renderLines(lines: string[], options: PublishRenderOptions): string {
 
 /**
  * 로컬 콜아웃 레이어(2026-10-30). 키는 **번역 지침이 고정 번역을 요구하는 영문 소제목**이고
- * (`prompts/translation/kscene-ko-en.md` 「Local layers — fixed English headings」), 값은 Blogger 테마 CSS의
+ * (`prompts/translation/koreaplain-ko-en.md` 「Local layers — fixed English headings」), 값은 Blogger 테마 CSS의
  * 클래스다(개정안 §B-4). 소제목 문자열이 바뀌면 박스가 조용히 사라지므로 번역 지침과 이 표를 **같이** 바꾼다.
  *
  * 소제목 텍스트는 박스 안에 넣지 않는다 - §B-4 CSS가 `.kp-local::before` 등으로 제목을 그린다. 텍스트 자체는
@@ -207,7 +207,7 @@ export function renderPublishBlocks(markdown: string, options: PublishRenderOpti
 
     const headingMatch = lines[0].match(HEADING_LINE_RE);
 
-    // 로컬 콜아웃(2026-10-30, kscene 전용): 세 고정 영문 소제목이면 그 소제목과 본문을 div로 감싼다.
+    // 로컬 콜아웃(2026-10-30, koreaplain 전용): 세 고정 영문 소제목이면 그 소제목과 본문을 div로 감싼다.
     // 규격은 "소제목 다음 줄에 바로 문단"(output-format §6)이라 보통 같은 블록이지만, 빈 줄이 하나
     // 끼면 다음 블록에 있다 - 그 경우 **소제목도 아니고 이미지·해시태그도 아닌** 다음 블록 하나만 끌어온다.
     const calloutClass = options.localCallouts && headingMatch ? LOCAL_CALLOUT_CLASSES.get(headingMatch[1].trim()) : undefined;

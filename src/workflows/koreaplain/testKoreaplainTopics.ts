@@ -1,8 +1,8 @@
 // 사용설명서 주제 수집 테스트 - 네트워크·DB 없음(전부 주입).
-import { KSCENE_LABEL_BY_SEED, KSCENE_LABELS, KSCENE_SEEDS } from "../../config/ksceneSeeds.js";
+import { KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, KOREAPLAIN_SEEDS } from "../../config/koreaplainSeeds.js";
 import { buildAutocompleteUrl, parseAutocompleteResponse } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import {
-  KSCENE_SUBREDDITS,
+  KOREAPLAIN_SUBREDDITS,
   REDDIT_USER_AGENT,
   RedditBlockedError,
   buildRedditNewUrl,
@@ -41,8 +41,8 @@ import {
   selectTopics,
   toRankedKeywords,
   topicSimilarity,
-} from "./ksceneTopics.js";
-import { dayIndexOf, redditQueryForSeed, runKsceneTopicCollection } from "./runKsceneTopicCollection.js";
+} from "./koreaplainTopics.js";
+import { dayIndexOf, redditQueryForSeed, runKoreaplainTopicCollection } from "./runKoreaplainTopicCollection.js";
 
 function assert(c: unknown, m: string): asserts c {
   if (!c) throw new Error(`❌ ${m}`);
@@ -50,22 +50,22 @@ function assert(c: unknown, m: string): asserts c {
 
 async function main(): Promise<void> {
   // 시드 구성
-  assert(KSCENE_SEEDS.length >= 50, "기본 시드는 50개 이상");
-  assert(KSCENE_LABELS.every((label) => KSCENE_SEEDS.some((seed) => seed.label === label)), "모든 라벨에 시드가 있다");
-  assert(new Set(KSCENE_SEEDS.map((s) => s.query)).size === KSCENE_SEEDS.length, "시드 중복 없음");
-  assert(KSCENE_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
+  assert(KOREAPLAIN_SEEDS.length >= 50, "기본 시드는 50개 이상");
+  assert(KOREAPLAIN_LABELS.every((label) => KOREAPLAIN_SEEDS.some((seed) => seed.label === label)), "모든 라벨에 시드가 있다");
+  assert(new Set(KOREAPLAIN_SEEDS.map((s) => s.query)).size === KOREAPLAIN_SEEDS.length, "시드 중복 없음");
+  assert(KOREAPLAIN_LABEL_BY_SEED["korean bbq"] === "Food & Dining", "시드 -> 라벨");
 
   // 체류 실용 축(2026-10-11, §C): 기획⑤ 확정본 100개를 지우지 않고 누적했고, 실용 시드가 들어와 있다.
-  assert(KSCENE_SEEDS.length === 241, `시드 총량 241개(기획⑤ 100 + 실용 17 + 로컬 우위 47 + 운영 정보 77, 실제 ${KSCENE_SEEDS.length})`);
+  assert(KOREAPLAIN_SEEDS.length === 241, `시드 총량 241개(기획⑤ 100 + 실용 17 + 로컬 우위 47 + 운영 정보 77, 실제 ${KOREAPLAIN_SEEDS.length})`);
   const seedsByLabel = new Map<string, number>();
-  for (const seed of KSCENE_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
+  for (const seed of KOREAPLAIN_SEEDS) seedsByLabel.set(seed.label, (seedsByLabel.get(seed.label) ?? 0) + 1);
   assert(seedsByLabel.get("Living in Korea") === 60 && seedsByLabel.get("Travel & Transit") === 53, `라벨별 시드 수: ${JSON.stringify([...seedsByLabel])}`);
   // 로컬 우위 시드(2026-10-30): 자동완성이 비는 긴 질의는 걸러 라벨마다 개수가 다르다.
   for (const [label, count] of [["Food & Dining", 43], ["Culture & Etiquette", 45], ["K-Wave Context", 40]] as const) {
     assert(seedsByLabel.get(label) === count, `${label}는 기획⑤ 확정본 20개 + 로컬 우위·운영 정보 ${count - 20}개(실제 ${seedsByLabel.get(label)})`);
   }
   for (const practical of ["korea prepaid usim", "korea resident registration move", "korea utility bill payment", "korea garbage bag rules", "korea bus subway transfer", "korea traffic signals"]) {
-    assert(KSCENE_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
+    assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === practical), `실용 시드가 있어야 한다: ${practical}`);
   }
   // 실용 시드에서 나오는 주제가 제외 규칙(정치·성인·저가치)에 걸리지 않아야 한다 - 걸리면 시드가 헛돈다.
   for (const topic of ["korea prepaid usim activation guide", "korea resident registration move report", "how to pay korea utility bill online", "jaywalking rules in korea"]) {
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     assert(!isOverseasLocalTopic(ok) && !isExcludedTopic(ok), `한국 주제·비교는 살린다: ${ok}`);
   }
   // 시드 자체가 지명 규칙에 걸리면 그 시드는 헛돈다.
-  for (const seed of KSCENE_SEEDS) assert(!isOverseasLocalTopic(seed.query), `시드가 해외 지명 규칙에 걸리면 안 된다: ${seed.query}`);
+  for (const seed of KOREAPLAIN_SEEDS) assert(!isOverseasLocalTopic(seed.query), `시드가 해외 지명 규칙에 걸리면 안 된다: ${seed.query}`);
   console.log(`  ✅ 해외 지명 노이즈 제외(실측 ${overseasNoise.length}건) · 한국 지명·비교 주제 유지(${domesticOrComparison.length}건)`);
 
   // 변형 질의 결과는 안내 의도어가 있어야 후보가 된다(목록 밖 작은 도시를 받는 2차 그물).
@@ -155,10 +155,10 @@ async function main(): Promise<void> {
   console.log(`  ✅ korea/korean 정규화(phone ${phonePair.toFixed(2)} 중복 · t money ${tmoneyPair.toFixed(2)} 비중복 · seoul 별개)`);
 
   // ---------- C. 레딧 교차 신호(2026-10-28) ----------
-  assert(buildRedditNewUrl(KSCENE_SUBREDDITS).startsWith("https://www.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "레딧 묶음 new URL");
+  assert(buildRedditNewUrl(KOREAPLAIN_SUBREDDITS).startsWith("https://www.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "레딧 묶음 new URL");
   assert(buildRedditNewUrl(["koreatravel"], 100, "rss").startsWith("https://www.reddit.com/r/koreatravel/new.rss?limit=100"), "레딧 RSS new URL");
   assert(JSON.stringify(parseRedditAtom('<feed><title>newest</title><entry><title>Do taxis charge for luggage?</title></entry><entry><title>Renting &amp; goshiwon &#39;tips&#39;</title></entry><entry><link/></entry></feed>')) === '["Do taxis charge for luggage?","Renting & goshiwon \'tips\'"]', "Atom 제목 파싱(피드 제목 제외·엔티티 복원)");
-  const searchUrl = buildRedditSearchUrl(KSCENE_SUBREDDITS, "phone plan");
+  const searchUrl = buildRedditSearchUrl(KOREAPLAIN_SUBREDDITS, "phone plan");
   assert(searchUrl.includes("/search.json?") && searchUrl.includes("q=phone+plan") && searchUrl.includes("restrict_sr=1") && searchUrl.includes("sort=new"), "레딧 검색 URL");
   assert(!/mozilla|chrome|safari/i.test(REDDIT_USER_AGENT) && REDDIT_USER_AGENT.startsWith("blog-automation-kscene/"), "User-Agent는 위장하지 않는다");
   assert(JSON.stringify(parseRedditListing({ data: { children: [{ data: { title: " Q about ARC " } }, { data: {} }, null] } })) === '["Q about ARC"]', "레딧 Listing 파싱");
@@ -181,21 +181,21 @@ async function main(): Promise<void> {
   // OAuth(app-only) 경로(2026-10-28 저녁): 자격증명이 둘 다 있을 때만 켜지고, URL은 호스트만 바뀐다.
   assert(redditCredentialsFromEnv({}) === null && redditCredentialsFromEnv({ REDDIT_CLIENT_ID: "id" }) === null, "자격증명이 하나라도 없으면 공개 경로");
   assert(JSON.stringify(redditCredentialsFromEnv({ REDDIT_CLIENT_ID: " id ", REDDIT_CLIENT_SECRET: "sec" })) === '{"clientId":"id","clientSecret":"sec"}', "자격증명 trim");
-  assert(toOauthUrl(buildRedditNewUrl(KSCENE_SUBREDDITS)).startsWith("https://oauth.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "OAuth 호스트로 교체");
+  assert(toOauthUrl(buildRedditNewUrl(KOREAPLAIN_SUBREDDITS)).startsWith("https://oauth.reddit.com/r/koreatravel+Living_in_Korea+living_in_korea_now/new.json?"), "OAuth 호스트로 교체");
   assert(toOauthUrl("https://example.com/x") === "https://example.com/x", "레딧 밖 주소는 그대로");
   const tokenReq = buildTokenRequest({ clientId: "id", clientSecret: "sec" });
   assert(tokenReq.headers.Authorization === `Basic ${Buffer.from("id:sec").toString("base64")}` && tokenReq.body === "grant_type=client_credentials" && tokenReq.headers["User-Agent"].startsWith("blog-automation-kscene/"), "토큰 요청 모양");
   console.log("  ✅ 레딧 OAuth 경로(자격증명 판정·호스트 교체·토큰 요청)");
 
   // 시드 선정: 개수·라벨 혼합·날짜로 회전
-  const day0 = pickSeedsForDay(KSCENE_SEEDS, 0, 20);
-  const day1 = pickSeedsForDay(KSCENE_SEEDS, 1, 20);
+  const day0 = pickSeedsForDay(KOREAPLAIN_SEEDS, 0, 20);
+  const day1 = pickSeedsForDay(KOREAPLAIN_SEEDS, 1, 20);
   assert(day0.length === 20 && new Set(day0.map((s) => s.query)).size === 20, "20개, 중복 없음");
-  assert(new Set(day0.map((s) => s.label)).size === KSCENE_LABELS.length, "라벨이 섞인다");
+  assert(new Set(day0.map((s) => s.label)).size === KOREAPLAIN_LABELS.length, "라벨이 섞인다");
   assert(day0.map((s) => s.query).join() !== day1.map((s) => s.query).join(), "날짜가 바뀌면 시드가 돈다");
   const covered = new Set<string>();
-  for (let d = 0; d < 15; d += 1) pickSeedsForDay(KSCENE_SEEDS, d, 20).forEach((s) => covered.add(s.query));
-  assert(covered.size === KSCENE_SEEDS.length, `15일 안에 전체 시드가 한 바퀴(Living 60개 ÷ 하루 4개, ${covered.size}/${KSCENE_SEEDS.length})`);
+  for (let d = 0; d < 15; d += 1) pickSeedsForDay(KOREAPLAIN_SEEDS, d, 20).forEach((s) => covered.add(s.query));
+  assert(covered.size === KOREAPLAIN_SEEDS.length, `15일 안에 전체 시드가 한 바퀴(Living 60개 ÷ 하루 4개, ${covered.size}/${KOREAPLAIN_SEEDS.length})`);
   assert(autocompleteQueriesForSeed("korea subway", 0)[1] === "korea subway a" && autocompleteQueriesForSeed("x", 27)[1] === "x b", "알파벳 변형");
   console.log("  ✅ 시드 선정(개수·라벨 혼합·회전·한 바퀴)");
 
@@ -267,7 +267,7 @@ async function main(): Promise<void> {
 
   // 전체 실행(주입): 저장·알림 호출 계약
   const calls: string[] = [];
-  const dry = await runKsceneTopicCollection({
+  const dry = await runKoreaplainTopicCollection({
     now: new Date("2026-10-07T12:00:00Z"),
     delayMs: 0,
     seedsPerRun: 4,
@@ -278,7 +278,7 @@ async function main(): Promise<void> {
   });
   assert(dry.status === "dry_run" && dry.topics.length > 0 && dry.trendSeeds.length === 2, `dry-run(급상승 한국 관련어만 시드로: ${dry.trendSeeds.join("|")})`);
 
-  const full = await runKsceneTopicCollection({
+  const full = await runKoreaplainTopicCollection({
     now: new Date("2026-10-07T12:00:00Z"),
     delayMs: 0,
     seedsPerRun: 4,
@@ -305,9 +305,9 @@ async function main(): Promise<void> {
   assert(full.status === "notified" && full.runId === 77, "일부 실패(시드·트렌드·기발행 조회)가 있어도 알림까지 간다");
   assert(calls[0].startsWith("save:google_autocomplete:kscene_topic:") && calls[1] === "notify:kscene:77:true", `저장 -> 사용설명서 봇 알림 (${calls.join(" / ")})`);
 
-  const none = await runKsceneTopicCollection({ now: new Date(), delayMs: 0, seedsPerRun: 2, fetchSuggestions: async () => [], fetchTrendTerms: async () => [], loadExistingTopics: async () => [], log: () => {} });
+  const none = await runKoreaplainTopicCollection({ now: new Date(), delayMs: 0, seedsPerRun: 2, fetchSuggestions: async () => [], fetchTrendTerms: async () => [], loadExistingTopics: async () => [], log: () => {} });
   assert(none.status === "no_candidates" && none.runId === null, "후보 0이면 no_candidates(저장·알림 없음)");
-  const saveFail = await runKsceneTopicCollection({
+  const saveFail = await runKoreaplainTopicCollection({
     now: new Date(), delayMs: 0, seedsPerRun: 2, fetchTrendTerms: async () => [], loadExistingTopics: async () => [], log: () => {},
     fetchSuggestions: async (q) => [`${q} complete guide here`],
     save: async () => ({ runId: null, persisted: false, error: "x" }),
@@ -320,17 +320,17 @@ async function main(): Promise<void> {
     fetchTrendTerms: async () => [], loadExistingTopics: async () => [],
     fetchSuggestions: async (q: string) => [`${q} guide for first time visitors`],
   };
-  const redditOff = await runKsceneTopicCollection({ ...redditBase, redditEnabled: false, fetchRedditTitles: async (url) => { redditUrls.push(url); return []; } });
+  const redditOff = await runKoreaplainTopicCollection({ ...redditBase, redditEnabled: false, fetchRedditTitles: async (url) => { redditUrls.push(url); return []; } });
   assert(redditOff.reddit.status === "disabled" && redditUrls.length === 0, "레딧 꺼짐이면 호출 없음");
-  const redditOn = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: { clientId: "id", clientSecret: "sec" }, fetchRedditTitles: async (url) => { redditUrls.push(url); return ["Any guide for first time visitors?"]; } });
+  const redditOn = await runKoreaplainTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: { clientId: "id", clientSecret: "sec" }, fetchRedditTitles: async (url) => { redditUrls.push(url); return ["Any guide for first time visitors?"]; } });
   assert(redditOn.status === "dry_run" && redditOn.reddit.status === "ok" && redditOn.reddit.requests === redditUrls.length && redditUrls[0].includes("/new.json") && redditUrls.some((u) => u.includes("/search.json")), `레딧 OAuth 모드(${redditOn.reddit.requests}회)`);
   const rssUrls: string[] = [];
-  const redditRss = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: null, fetchRedditTitles: async (url) => { rssUrls.push(url); return []; } });
+  const redditRss = await runKoreaplainTopicCollection({ ...redditBase, redditEnabled: true, redditCredentials: null, fetchRedditTitles: async (url) => { rssUrls.push(url); return []; } });
   assert(redditRss.reddit.requests === 3 && rssUrls.every((u) => u.includes("/new.rss?")) && rssUrls[0].includes("/r/koreatravel/"), `레딧 RSS 모드는 서브레딧별 new.rss 3회(${rssUrls.length})`);
   let blockedCalls = 0;
-  const redditBlocked = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { blockedCalls += 1; throw new RedditBlockedError(429); } });
+  const redditBlocked = await runKoreaplainTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { blockedCalls += 1; throw new RedditBlockedError(429); } });
   assert(redditBlocked.status === "dry_run" && redditBlocked.reddit.status === "blocked" && blockedCalls === 1 && redditBlocked.topics.length > 0, "429면 레딧만 건너뛰고 제안은 나간다");
-  const redditFailed = await runKsceneTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { throw new Error("ECONNRESET"); } });
+  const redditFailed = await runKoreaplainTopicCollection({ ...redditBase, redditEnabled: true, fetchRedditTitles: async () => { throw new Error("ECONNRESET"); } });
   assert(redditFailed.status === "dry_run" && redditFailed.reddit.status === "failed", "레딧 전부 실패도 비치명적");
   console.log("  ✅ 레딧 스위치·OAuth/RSS 모드·차단·실패(비치명적)");
 
@@ -338,7 +338,7 @@ async function main(): Promise<void> {
   console.log("  ✅ 전체 실행 계약(부분 실패 허용·저장→알림·후보0·저장실패)");
 
   // ---------- 로컬 우위 축(2026-10-30, §C) ----------
-  const mk = (topic: string, over: Partial<{ label: (typeof KSCENE_LABELS)[number]; hits: number; bestPosition: number; redditHits: number; redditLocalQuestion: boolean }> = {}) => ({
+  const mk = (topic: string, over: Partial<{ label: (typeof KOREAPLAIN_LABELS)[number]; hits: number; bestPosition: number; redditHits: number; redditLocalQuestion: boolean }> = {}) => ({
     topic, seed: "x", label: over.label ?? ("Culture & Etiquette" as const), hits: over.hits ?? 1, bestPosition: over.bestPosition ?? 3,
     ...(over.redditHits !== undefined ? { redditHits: over.redditHits } : {}),
     ...(over.redditLocalQuestion ? { redditLocalQuestion: true } : {}),
@@ -346,9 +346,9 @@ async function main(): Promise<void> {
 
   // 새 시드 47개(개정안 50개 중 자동완성이 비는 긴 질의를 2~3단어로 줄여 실측 통과분만), 기존 117개 유지
   const newSeedQueries = ["priority seat korea", "korea restaurant call button", "korea apartment noise", "korea hospital department", "korean office culture"];
-  for (const query of newSeedQueries) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `로컬 우위 시드가 있어야 한다: ${query}`);
-  assert(KSCENE_LABEL_BY_SEED["korea dong office"] === "Living in Korea" && KSCENE_LABEL_BY_SEED["korean side dish refill"] === "Food & Dining", "새 시드의 라벨 매핑");
-  assert(KSCENE_SEEDS.slice(0, 117).some((seed) => seed.query === "korea subway") && KSCENE_SEEDS.some((seed) => seed.query === "korean bbq"), "기존 시드 유지");
+  for (const query of newSeedQueries) assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === query), `로컬 우위 시드가 있어야 한다: ${query}`);
+  assert(KOREAPLAIN_LABEL_BY_SEED["korea dong office"] === "Living in Korea" && KOREAPLAIN_LABEL_BY_SEED["korean side dish refill"] === "Food & Dining", "새 시드의 라벨 매핑");
+  assert(KOREAPLAIN_SEEDS.slice(0, 117).some((seed) => seed.query === "korea subway") && KOREAPLAIN_SEEDS.some((seed) => seed.query === "korean bbq"), "기존 시드 유지");
 
   // (a) 로컬 우위 +15
   const plain = mk("korea apartment recycling info");
@@ -401,7 +401,7 @@ async function main(): Promise<void> {
   // (e) 로컬 우위 하한
   assert(defaultLocalEdgeFloor(8) === 2 && defaultLocalEdgeFloor(1) === 1, "기본 하한: topN=8이면 2");
   const touristy = ["korea travel guide first time", "korea best food guide", "korea cafe tour guide", "korea shopping guide tips", "korea palace visit guide", "korea nightlife guide tips", "korea hiking trails guide", "korea tea house guide"]
-    .map((topic, i) => mk(topic, { label: KSCENE_LABELS[i % 5], bestPosition: 0, hits: 3 }));
+    .map((topic, i) => mk(topic, { label: KOREAPLAIN_LABELS[i % 5], bestPosition: 0, hits: 3 }));
   const localOnes = [mk("korea restaurant call button etiquette", { label: "Food & Dining", bestPosition: 8 }), mk("korea gu office vs dong office", { label: "Living in Korea", bestPosition: 8 })];
   const withLocalFloor = selectTopics([...touristy, ...localOnes], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 2 });
   assert(withLocalFloor.selected.filter((item) => item.score.localEdge > 0).length === 2, "로컬 우위 하한이 점수가 낮은 로컬 후보를 끌어올린다");
@@ -455,18 +455,18 @@ async function main(): Promise<void> {
   assert(Object.keys(rankedOp[0].scoreBreakdown).sort().join() === "clickPotential,contentDemand,crossSourceSignal,freshness,newsVelocity,total,trendMomentum", "DB scoreBreakdown 모양 불변(운영 정보 포함)");
 
   // 시드: 2026-11-09 추가분(기존 164 유지, 라벨 5개 그대로). 새 시드는 각 라벨 배열 끝에 붙어 있어 라벨별 총량으로 본다.
-  const countOf = (label: (typeof KSCENE_LABELS)[number]) => KSCENE_SEEDS.filter((seed) => seed.label === label).length;
+  const countOf = (label: (typeof KOREAPLAIN_LABELS)[number]) => KOREAPLAIN_SEEDS.filter((seed) => seed.label === label).length;
   const oldCounts = { "Travel & Transit": 35, "Food & Dining": 30, "Culture & Etiquette": 31, "Living in Korea": 41, "K-Wave Context": 27 } as const;
-  const addedByLabel = KSCENE_LABELS.map((label) => countOf(label) - oldCounts[label]);
+  const addedByLabel = KOREAPLAIN_LABELS.map((label) => countOf(label) - oldCounts[label]);
   const added = addedByLabel.reduce((sum, n) => sum + n, 0);
   assert(added >= 60 && added <= 80, `신규 시드 60~80개(실제 ${added})`);
   assert(addedByLabel.every((n) => n >= 10), `신규 시드가 라벨 5개에 고르게 있다(각 10개 이상, 실제 ${addedByLabel.join("/")})`);
-  assert(new Set(KSCENE_SEEDS.map((seed) => seed.query)).size === KSCENE_SEEDS.length, "시드 중복 없음");
-  for (const query of ["korea subway etiquette", "korea ondol", "korean bbq", "korea delivery apps"]) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `기존 시드 유지: ${query}`);
-  for (const query of ["korea stock market hours", "krx holidays", "uber eats korea", "korea traffic light rules"]) assert(KSCENE_SEEDS.some((seed) => seed.query === query), `운영 정보 시드: ${query}`);
+  assert(new Set(KOREAPLAIN_SEEDS.map((seed) => seed.query)).size === KOREAPLAIN_SEEDS.length, "시드 중복 없음");
+  for (const query of ["korea subway etiquette", "korea ondol", "korean bbq", "korea delivery apps"]) assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === query), `기존 시드 유지: ${query}`);
+  for (const query of ["korea stock market hours", "krx holidays", "uber eats korea", "korea traffic light rules"]) assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === query), `운영 정보 시드: ${query}`);
   console.log("  ✅ 제외 규칙 좁히기(stock·today)·운영 정보 +15·의미 포화 -10(superstition 제외)·승자>패자 대소 단언·신규 시드");
 
-  console.log("\n✅ testKsceneTopics 통과");
+  console.log("\n✅ testKoreaplainTopics 통과");
 }
 
 main().catch((error) => {

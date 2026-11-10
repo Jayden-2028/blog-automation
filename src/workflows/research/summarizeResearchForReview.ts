@@ -7,6 +7,7 @@
 
 import { parseResearchFile } from "./parseResearchFile.js";
 import type { ParsedResearchFile, ResearchVerdict } from "./parseResearchFile.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 const VERDICT_LINE: Record<ResearchVerdict, string> = {
   ok: "✅ 근거 충분 (verdict: ok)",
@@ -33,8 +34,8 @@ export function buildResearchSummary(parsed: ParsedResearchFile, category?: stri
   // 3개(현지인은 이렇게 합니다 / 외국인이 자주 오해하는 점 / 이 글자를 보게 됩니다)를 못 쓴다.
   // **verdict에는 영향을 주지 않는다** - 관행이 없는 주제도 있어 사람이 보고 판단할 한 줄일 뿐이다.
   // 트랙 판정은 job.category를 먼저 쓴다 - 파일 frontmatter의 `topic`은 조사 에이전트가 주제 이름
-  // ("영유아 수면")으로 쓰기도 해서 kscene 판정에 혼자 기대면 조용히 안 뜬다.
-  if ((category ?? parsed.topic) === "kscene" && parsed.localPracticeRows === 0) {
+  // ("영유아 수면")으로 쓰기도 해서 koreaplain 판정에 혼자 기대면 조용히 안 뜬다.
+  if ((category ?? parsed.topic) === KOREAPLAIN_TRACK && parsed.localPracticeRows === 0) {
     lines.push("📍 로컬 재료 0 (§12 현지 관행 미확보) - 현지인 관행·오해 레이어 없이 씁니다");
   }
 

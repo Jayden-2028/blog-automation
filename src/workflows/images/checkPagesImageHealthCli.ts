@@ -15,7 +15,7 @@
 //   npm run images:health -- --limit=20   최근 20편만
 import "dotenv/config";
 
-import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
+import { loadKoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import { TelegramNotifier } from "../../notifications/TelegramNotifier.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
 import { supabase } from "../../services/supabase/client.js";
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   const limit = Number.isFinite(limitArg) && limitArg > 0 ? limitArg : DEFAULT_LIMIT;
 
   // enabled면 둘 다 채워져 있지만 타입은 그걸 모른다 - 같이 좁혀 둔다.
-  const { projectName, baseUrl, enabled } = loadKsceneImagesConfig();
+  const { projectName, baseUrl, enabled } = loadKoreaplainImagesConfig();
   if (!enabled || !projectName || !baseUrl) {
     console.error("❌ 이미지 호스팅 설정이 비어 있습니다 - KSCENE_IMAGES_PAGES_PROJECT·CLOUDFLARE_* 를 확인하세요");
     process.exitCode = 1;

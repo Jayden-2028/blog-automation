@@ -1,4 +1,4 @@
-// 발행 이미지를 공개 Cloudflare Pages 프로젝트로 복사한다(개편3 §4.3-4). 설정은 config/ksceneImages.ts 머리말.
+// 발행 이미지를 공개 Cloudflare Pages 프로젝트로 복사한다(개편3 §4.3-4). 설정은 config/koreaplainImages.ts 머리말.
 //
 // ⚠️ **Pages 배포는 사이트 전체의 스냅샷이다** - 오늘 이미지만 담아 배포하면 어제까지의 이미지가 사라진다. 그래서:
 //   1) 사이트에 둔 `manifest.json`(파일 목록)을 읽어 이전 파일을 전부 내려받아 스테이징 디렉터리를 **재구성**하고
@@ -35,8 +35,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { readImageSize } from "./imageDimensions.js";
-import { KSCENE_IMAGES_FILE_LIMIT_WARN } from "../../config/ksceneImages.js";
-import type { KsceneImagesConfig } from "../../config/ksceneImages.js";
+import { KSCENE_IMAGES_FILE_LIMIT_WARN } from "../../config/koreaplainImages.js";
+import type { KoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import type { ManuscriptImage } from "../../workflows/manuscripts/manuscriptManifest.js";
 
 export type FetchedBytes = { bytes: Uint8Array; contentType: string | null };
@@ -45,12 +45,12 @@ export type RehostDeps = {
   /** URL의 바이트를 받는다. 실패는 던진다. 404는 `null`(manifest 최초 부재 구분용). */
   fetchBytes: (url: string) => Promise<FetchedBytes | null>;
   /** Pages 프로젝트의 배포 횟수(미배포 프로젝트 판별용). 실패는 던진다. */
-  countDeployments: (config: KsceneImagesConfig) => Promise<number>;
+  countDeployments: (config: KoreaplainImagesConfig) => Promise<number>;
   /**
    * 지금 **진행 중인** 배포 수(락). 0이면 배포해도 안전하다. 실패는 던진다 - 호출자가 "확인 불가"로
    * 보고 그냥 진행한다(락을 못 잡아 발행을 막는 것보다 사후 검증에 맡기는 쪽이 낫다).
    */
-  countActiveDeployments: (config: KsceneImagesConfig) => Promise<number>;
+  countActiveDeployments: (config: KoreaplainImagesConfig) => Promise<number>;
   /** `wrangler pages deploy <dir> ...` 실행. */
   runWrangler: (args: string[], env: NodeJS.ProcessEnv) => Promise<void>;
   /** 새 URL이 실제로 서비스되는지 확인한다(배포 직후 전파 대기). */
@@ -117,7 +117,7 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
 }
 
 export async function rehostImagesToPages(
-  input: { jobId: string; images: readonly ManuscriptImage[]; config: KsceneImagesConfig },
+  input: { jobId: string; images: readonly ManuscriptImage[]; config: KoreaplainImagesConfig },
   deps: RehostDeps
 ): Promise<RehostResult> {
   const { jobId, images, config } = input;
@@ -188,7 +188,7 @@ export async function rehostImagesToPages(
  * 발행을 막는 것보다 사후 검증에 맡기는 쪽이 낫다. 확인 자체가 실패해도 같다(0건으로 본다).
  */
 async function waitForDeploymentsToDrain(
-  config: KsceneImagesConfig,
+  config: KoreaplainImagesConfig,
   deps: RehostDeps,
   onWait?: (active: number) => void
 ): Promise<void> {
@@ -203,7 +203,7 @@ async function waitForDeploymentsToDrain(
 type RoundInput = {
   jobId: string;
   images: readonly ManuscriptImage[];
-  config: KsceneImagesConfig;
+  config: KoreaplainImagesConfig;
   baseUrl: string;
   projectName: string;
   downloaded: Map<number, { bytes: Uint8Array; path: string; size: { width: number; height: number } | null }>;
@@ -326,7 +326,7 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
 
 // ---------- 기본 구현(네트워크·wrangler·파일시스템) ----------
 
-async function defaultCountDeployments(config: KsceneImagesConfig): Promise<number> {
+async function defaultCountDeployments(config: KoreaplainImagesConfig): Promise<number> {
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/pages/projects/${config.projectName}/deployments?per_page=1`,
     { headers: { Authorization: `Bearer ${config.apiToken}` }, signal: AbortSignal.timeout(15_000) }
@@ -337,7 +337,7 @@ async function defaultCountDeployments(config: KsceneImagesConfig): Promise<numb
 }
 
 /** 진행 중인 배포 수. latest_stage.status가 끝난 상태(success·failure·skipped·canceled)가 아니면 진행 중으로 본다. */
-async function defaultCountActiveDeployments(config: KsceneImagesConfig): Promise<number> {
+async function defaultCountActiveDeployments(config: KoreaplainImagesConfig): Promise<number> {
   const response = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/pages/projects/${config.projectName}/deployments?per_page=10`,
     { headers: { Authorization: `Bearer ${config.apiToken}` }, signal: AbortSignal.timeout(15_000) }

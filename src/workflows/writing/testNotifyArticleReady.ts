@@ -262,14 +262,14 @@ try {
 
 // --- 사용설명서 트랙(2026-10-06, 개편3): 한글 초고 승인은 영어본 생성으로 이어진다는 걸 승인 전에 알린다 ---------------
 {
-  const ksceneJob = makeJob({ category: "kscene", metadata: { track: "kscene" } });
-  const header = buildHeaderMessage(makeResult({ job: ksceneJob, telegraphUrl: "https://telegra.ph/x" }));
+  const koreaplainJob = makeJob({ category: "kscene", metadata: { track: "kscene" } });
+  const header = buildHeaderMessage(makeResult({ job: koreaplainJob, telegraphUrl: "https://telegra.ph/x" }));
   const buttons = (header.replyMarkup?.inline_keyboard ?? []).flat();
   if (!header.text.includes("한글 초고") || !header.text.includes("영어본")) throw new Error(`❌ 한글 초고·영어본 안내가 있어야 한다: ${header.text}`);
-  if (!buttons.some((b) => b.text.includes("한글 승인") && b.callback_data === `review:confirm:${ksceneJob.id}`)) {
+  if (!buttons.some((b) => b.text.includes("한글 승인") && b.callback_data === `review:confirm:${koreaplainJob.id}`)) {
     throw new Error("❌ 승인 버튼은 '한글 승인 → 영어본'이고 콜백은 공통 review:confirm이어야 한다");
   }
-  const fallback = buildReviewDecisionMessage(ksceneJob.id, "kscene");
+  const fallback = buildReviewDecisionMessage(koreaplainJob.id, "kscene");
   if (!fallback.replyMarkup?.inline_keyboard[0][0].text.includes("한글 승인")) throw new Error("❌ Telegraph 폴백 결정 메시지도 같은 라벨이어야 한다");
 
   // 엔터·사회는 그대로

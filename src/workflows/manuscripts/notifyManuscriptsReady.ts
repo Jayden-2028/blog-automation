@@ -22,6 +22,7 @@ import { isAutoApproved } from "../../config/pipelineGate.js";
 import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { ArticleJobRow } from "../../types/database.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 /**
  * 통합 알림의 **수정 요청 / 반려** 버튼 줄(PIPELINE-MERGE-2026-10.md §1-b). 초안 승인 단계가 없어진 대신 이 알림이
@@ -100,7 +101,7 @@ export function buildReadyKeyboard(
       track === "social"
         // 버튼 문구는 모드를 따른다(2026-11-05) - 임시저장 모드에서 "발행"이라고 적으면 거짓말이 된다.
         ? { text: TISTORY_CONFIG.publishMode === "draft" ? "🟠 티스토리 임시저장" : "🟠 티스토리 발행", callback_data: buildPublishDecisionCallbackData(jobId, "tistory") }
-        : track === "kscene"
+        : track === KOREAPLAIN_TRACK
           ? { text: "🔵 Blogger 발행", callback_data: buildPublishDecisionCallbackData(jobId, "blogspot") }
           : // 엔터는 네이버 발행만 한다(RESTRUCTURE-PLAN-2026-10.md §2.5 - Blogspot 버튼은 2026-10-05에 뺐다).
             { text: "🟢 네이버 발행", callback_data: buildPublishDecisionCallbackData(jobId, "naver") };
@@ -171,7 +172,7 @@ function buildSocialReadyMessage(
  * 사용설명서 트랙(개편3): **영어본**이 최종 원고다(한글 승인 -> 영어본 생성 -> 영어본 재승인을 거쳤다). 🔵 Blogger 발행 버튼만 붙는다 -
  * Korea Plain(K-Scene blogId)로 **공개 발행**되고, 그 순간 발행 이미지가 공개 이미지 서버(Pages)로 옮겨진다.
  */
-function buildKsceneReadyMessage(
+function buildKoreaplainReadyMessage(
   result: JobManuscriptsResult,
   outcome: Extract<JobManuscriptsResult["result"], { status: "success" }>,
   pagesUrl: string | null
@@ -227,7 +228,7 @@ export function buildManuscriptReadyMessage(
   // 트랙은 job이 정한다(metadata.track). 사회 트랙은 🟠 티스토리 발행 버튼만 붙는 별도 알림이다(네이버·블로그스팟 버튼 없음).
   const track: Track = trackOfJob(job);
   if (track === "social") return buildSocialReadyMessage(result, outcome, pagesUrl);
-  if (track === "kscene") return buildKsceneReadyMessage(result, outcome, pagesUrl);
+  if (track === KOREAPLAIN_TRACK) return buildKoreaplainReadyMessage(result, outcome, pagesUrl);
 
   const imageCount = outcome.topic.manuscript.images.filter((i) => i.url).length;
   // 빈 자리 수를 함께 알린다(2026-10-01). 전까지는 "이미지 N장"만 보여서, 자리 6개 중 2개가 빈

@@ -147,18 +147,18 @@ try {
   if (without.includes("원본 자료")) throw new Error("❌ 원본 자료가 없는데 블록이 붙었습니다");
   console.log("✅ 인스타 원본 자료 - 주입, 없으면 생략");
 
-  // 사용설명서(kscene) 분기 + 🌏 국제(변환기 출처, 2026-10-29) 보강
-  const ksceneBase = { job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene" }, baselineSources: [] as SourceInsert[], outputPath: "/tmp/r.md", today: "2026-10-29" };
-  const ksceneGo = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, keyword: "how to ride namsan cable car" } });
-  assert(ksceneGo.includes("category=kscene(해외 독자용 한국 사용설명서)") && ksceneGo.includes("keyword는 영문 검색 질의다"), "kscene 분기");
-  assert(!ksceneGo.includes("한글일 수 있다"), "Go 버튼 job(변환기 아님)에는 보강 줄이 없다");
-  const ksceneConverter = buildResearchPrompt({ ...ksceneBase, converterSource: true, userSourceText: "케이블카 안내문" });
+  // 사용설명서(koreaplain) 분기 + 🌏 국제(변환기 출처, 2026-10-29) 보강
+  const koreaplainBase = { job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene" }, baselineSources: [] as SourceInsert[], outputPath: "/tmp/r.md", today: "2026-10-29" };
+  const koreaplainGo = buildResearchPrompt({ ...koreaplainBase, job: { ...koreaplainBase.job, keyword: "how to ride namsan cable car" } });
+  assert(koreaplainGo.includes("category=kscene(해외 독자용 한국 사용설명서)") && koreaplainGo.includes("keyword는 영문 검색 질의다"), "koreaplain 분기");
+  assert(!koreaplainGo.includes("한글일 수 있다"), "Go 버튼 job(변환기 아님)에는 보강 줄이 없다");
+  const koreaplainConverter = buildResearchPrompt({ ...koreaplainBase, converterSource: true, userSourceText: "케이블카 안내문" });
   for (const needle of ["keyword·소스 텍스트가 한글일 수 있다", "영문 질의로도 바꿔", "사용자가 보낸 소재가 곧 주제다", "에버그린 제한 때문에 소재를 버리거나", "사용자 제공 소스 텍스트", "케이블카 안내문"]) {
-    assert(ksceneConverter.includes(needle), `국제(변환기) 보강: ${needle}`);
+    assert(koreaplainConverter.includes(needle), `국제(변환기) 보강: ${needle}`);
   }
-  assert(ksceneConverter.includes("category=kscene(해외 독자용 한국 사용설명서)"), "기존 kscene 분기는 유지된 채 보강만 덧붙는다");
-  const nonKsceneConverter = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, category: "incident" }, converterSource: true });
-  assert(!nonKsceneConverter.includes("한글일 수 있다"), "kscene이 아니면 converterSource는 무시");
+  assert(koreaplainConverter.includes("category=kscene(해외 독자용 한국 사용설명서)"), "기존 koreaplain 분기는 유지된 채 보강만 덧붙는다");
+  const nonKoreaplainConverter = buildResearchPrompt({ ...koreaplainBase, job: { ...koreaplainBase.job, category: "incident" }, converterSource: true });
+  assert(!nonKoreaplainConverter.includes("한글일 수 있다"), "koreaplain이 아니면 converterSource는 무시");
   // 현지 관행 조사(2026-10-30 로컬 정체성 개정 §F) - 집필 레이어 3개의 유일한 재료다.
   for (const needle of [
     "현지 관행 조사",
@@ -169,10 +169,10 @@ try {
     "수치·요금·시간의 근거로는 쓰지 않는다",
     "관행 미확보",
   ]) {
-    assert(ksceneGo.includes(needle), `현지 관행 지시: ${needle}`);
+    assert(koreaplainGo.includes(needle), `현지 관행 지시: ${needle}`);
   }
-  assert(ksceneConverter.includes("현지 관행 조사"), "변환기 job에도 현지 관행 지시가 붙는다");
-  const nonKscene = buildResearchPrompt({ ...ksceneBase, job: { ...ksceneBase.job, category: "incident" } });
-  assert(!nonKscene.includes("현지 관행 조사") && !nonKscene.includes("local_practice_rows"), "kscene이 아니면 현지 관행 지시가 없다");
-  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 입력 보강 + 현지 관행 §12");
+  assert(koreaplainConverter.includes("현지 관행 조사"), "변환기 job에도 현지 관행 지시가 붙는다");
+  const nonKoreaplain = buildResearchPrompt({ ...koreaplainBase, job: { ...koreaplainBase.job, category: "incident" } });
+  assert(!nonKoreaplain.includes("현지 관행 조사") && !nonKoreaplain.includes("local_practice_rows"), "koreaplain이 아니면 현지 관행 지시가 없다");
+  console.log("✅ koreaplain 분기 + 🌏 국제(변환기) 한글 입력 보강 + 현지 관행 §12");
 }

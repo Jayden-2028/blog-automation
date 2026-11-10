@@ -1,3 +1,4 @@
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 // 원고에서 금지된 표현 패턴 모음(단일 출처). 검수 경고(articleReviewChecks)와 저장 직전 자동 교정
 // (enforceWritingRules)이 같은 패턴을 쓴다 - 규칙은 prompts/writing/core-rules.md.
 // 전역(g) 정규식이라 .test() 호출 전에 lastIndex를 0으로 되돌려야 한다.
@@ -133,21 +134,21 @@ export function kstYear(now: Date = new Date()): number {
 export const COMMENT_INVITE_PATTERN =
   /여러분(?:은|도|의)?[^.!?\n]{0,30}(?:생각|의견|경험)[^.!?\n]{0,20}\?|댓글(?:로|에)?\s*(?:남겨|공유|알려|달아)|의견(?:을)?\s*(?:남겨|들려)\s*주/g;
 
-// ---------- kscene(사용설명서) 로컬 화자 (2026-10-30) ----------
+// ---------- koreaplain(사용설명서) 로컬 화자 (2026-10-30) ----------
 //
-// 로컬 정체성 개정으로 kscene의 1인칭이 열렸다(style/kscene.md 「화자」): 관행 서술("한국 사람들은 보통")과
+// 로컬 정체성 개정으로 koreaplain의 1인칭이 열렸다(style/koreaplain.md 「화자」): 관행 서술("한국 사람들은 보통")과
 // 화자의 일반 습관("저도 이렇게 합니다") 2문장까지. **그래서 지어내기 위험이 1인칭 자체가 아니라 두 모양으로
 // 좁혀졌다** - (1) 위치가 드러나는 "저희 집·저희 동네" (2) 날짜·장소가 든 일화("지난주 강남에서").
-// 둘 다 research §12로 뒷받침할 수 없는 사적 사실이라, kscene에서만 검수 경고로 잡는다.
+// 둘 다 research §12로 뒷받침할 수 없는 사적 사실이라, koreaplain에서만 검수 경고로 잡는다.
 //
 // 보수적으로 잡는다: 허용된 "저도/저는 ~합니다"는 건드리지 않고, 아래 두 패턴만 본다.
 
-/** "저희 집/저희 동네/저희 아파트…" - 거주지 정보. kscene 화자 절이 명시적으로 금지한 표현. */
-export const KSCENE_PRIVATE_PLACE_PATTERN =
+/** "저희 집/저희 동네/저희 아파트…" - 거주지 정보. koreaplain 화자 절이 명시적으로 금지한 표현. */
+export const KOREAPLAIN_PRIVATE_PLACE_PATTERN =
   /저희\s*(?:집|동네|아파트|단지|가족|동|구|지역|회사|학교|차)/g;
 
 /**
- * 날짜·때 + 장소가 든 1인칭 일화. kscene.md 「화자」가 든 금지 예가 바로 "지난주 강남에서 택시를 탔는데"다.
+ * 날짜·때 + 장소가 든 1인칭 일화. koreaplain.md 「화자」가 든 금지 예가 바로 "지난주 강남에서 택시를 탔는데"다.
  *
  * 세 조건 중 **때 + 장소는 필수**이고, 세 번째로 아래 둘 중 하나가 있어야 한다:
  *  (A) 명시적 1인칭(저/제가) - "지난주 강남에서 저는 택시를 탔습니다"
@@ -158,15 +159,15 @@ export const KSCENE_PRIVATE_PLACE_PATTERN =
  * (올랐 - 목록 밖)는 통과하고, "지난해 부산에서 열린 행사"(열린 - 목록 밖)도 통과한다. 자동 교정이 아니라
  * **검수 경고**라서 넓히기보다 좁게 두고 규격 문서로 보완한다.
  */
-export const KSCENE_DATED_ANECDOTE_PATTERN =
+export const KOREAPLAIN_DATED_ANECDOTE_PATTERN =
   /(?=[^.!?\n]*(?:지난\s*(?:주|달|해|주말|금요일|토요일|일요일|월요일|화요일|수요일|목요일)|어제|그제|엊그제|며칠\s*전|얼마\s*전|작년|재작년|지난번))(?=[^.!?\n]*[가-힣A-Za-z0-9]+에서)(?=[^.!?\n]*(?:(?:^|[\s(])(?:저|제)(?:는|가|도|를|의)?\s|[아어해여]\s*봤|탔|들렀|시켰))[^.!?\n]+/gm;
 
-/** kscene에서만 경고하는 화자 규칙. category가 kscene이 아니면 빈 배열을 돌려준다. */
-export function findKsceneSpeakerViolations(text: string, category?: string | null): string[] {
-  if (category !== "kscene") return [];
+/** koreaplain에서만 경고하는 화자 규칙. category가 koreaplain이 아니면 빈 배열을 돌려준다. */
+export function findKoreaplainSpeakerViolations(text: string, category?: string | null): string[] {
+  if (category !== KOREAPLAIN_TRACK) return [];
   const masked = maskQuotedSpans(text);
   const found: string[] = [];
-  for (const pattern of [KSCENE_PRIVATE_PLACE_PATTERN, KSCENE_DATED_ANECDOTE_PATTERN]) {
+  for (const pattern of [KOREAPLAIN_PRIVATE_PLACE_PATTERN, KOREAPLAIN_DATED_ANECDOTE_PATTERN]) {
     pattern.lastIndex = 0;
     for (const m of masked.matchAll(pattern)) found.push(m[0].trim());
   }

@@ -42,7 +42,7 @@ curl -s https://thekoreamanual.blogspot.com/ | grep -o "<title>[^<]*</title>\|na
 
 - **사용자에게 보이는 문자열 교체**: 발행 JSON-LD(`buildJsonLdHtml` - author·publisher 이름 Korea Plain, publisher에 slogan·description 추가),
   All Guides 문구(`buildAllGuidesHtml`), 텔레그램 통합 알림 안내(`notifyManuscriptsReady.ts`), 원고 뷰어 제목(`renderManuscriptPage.ts`),
-  발행 실패 메시지(`publishArticleToBlogspot.ts`), 번역 프롬프트(`prompts/translation/kscene-ko-en.md` - 매체 소개에 태그라인 + "옛 이름을 쓰지 말 것").
+  발행 실패 메시지(`publishArticleToBlogspot.ts`), 번역 프롬프트(`prompts/translation/koreaplain-ko-en.md` - 매체 소개에 태그라인 + "옛 이름을 쓰지 말 것").
 - 주석·워크플로 설명·`.env.example`·style 규격의 "The Korea Manual" → "Korea Plain".
 - **바꾸지 않은 것**(운영 영향): 식별자·파일명(`tkmSite.ts`, `TKM_*`, `tkm-related`/`tkm-jsonld` 클래스), 환경변수·시크릿(`KSCENE_*`), 트랙 키 `kscene`,
   텔레그램 봇 사용자명 `@KoreanManualBot`, 호스트 `thekoreamanual.blogspot.com`, 페이지 슬러그 `/p/about-korea-manual.html`,
@@ -81,7 +81,7 @@ curl -s https://thekoreamanual.blogspot.com/ | grep -o "<title>[^<]*</title>\|na
 GA4 스트림 URL, 번역 프롬프트의 주소 문구, `publishTargets.ts` 주석·테스트 픽스처의 blogspot URL, `publications` URL 정규화,
 고정 페이지의 자기 주소 언급, 월요일 색인 점검)은 하나도 건드리지 않았다.** 호스트·슬러그·이미지 호스트도 그대로다.
 §3-11(B안 리브랜딩 항목: 블로그 제목·설명, 번역 프롬프트 브랜드명, 시드 자기 언급, 글 본문 문구)이 이번 작업이다 - 시드
-(`ksceneSeeds.ts`)에는 주석 한 줄 말고 자기 언급이 없었다.
+(`koreaplainSeeds.ts`)에는 주석 한 줄 말고 자기 언급이 없었다.
 
 ## 5. 의도적으로 남긴 "The Korea Manual"
 

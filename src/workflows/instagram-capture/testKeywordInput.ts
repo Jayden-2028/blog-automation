@@ -293,22 +293,22 @@ console.log("✅ 처리: 직접 입력 → createInput(캡처 없음) / 실패 �
   const job = { category: fields.category, metadata: fields.metadata };
   // 알림 봇·뷰어·발행 채널: 사용설명서
   assert.equal(trackOfJob(job), "kscene");
-  // 한글 초안 승인은 남고(게이트 무관) 영어본 단독 재승인만 생략 - kscene Go job과 동일
+  // 한글 초안 승인은 남고(게이트 무관) 영어본 단독 재승인만 생략 - koreaplain Go job과 동일
   assert.equal(shouldSkipDraftReview(job, {}), false);
   assert.equal(shouldSkipEnglishReview(job, {}), true);
   assert.equal(buildReviewDecisionButtons("11111111-1111-4111-8111-111111111111", trackOfJob(job))[0].text, "✅ 한글 승인 → 영어본");
-  // 문체: kscene.md + voice.md(입력 툴 living/tech의 incident 전환과 무관)
+  // 문체: koreaplain.md + voice.md(입력 툴 living/tech의 incident 전환과 무관)
   assert.equal(specCategoryOf(job), "kscene");
-  assert.equal(pickStyleFile(specCategoryOf(job)), "prompts/writing/style/kscene.md");
+  assert.equal(pickStyleFile(specCategoryOf(job)), "prompts/writing/style/koreaplain.md");
   assert.ok(writingSpecFiles(specCategoryOf(job)).some((f) => f.path.endsWith("style/voice.md")));
   // 발행: Blogger 버튼이 붙는다(뷰어 복붙 전용이 아니다)
   assert.equal(isManualPublishOnly(job), false, "국제는 🔵 Blogger 발행 버튼 유지");
-  // 집필 프롬프트: kscene 분기 + 변환기(한글 keyword) 보강 한 줄
+  // 집필 프롬프트: koreaplain 분기 + 변환기(한글 keyword) 보강 한 줄
   const wp = buildWritingPrompt({ ...jobBase, job: { keyword: "남산 케이블카 타는 법", headline: null, ...job } as never });
-  assert.ok(wp.includes("style/kscene.md") && wp.includes("category=kscene(사용설명서)") && wp.includes("keyword가 한글 주제다"), "kscene 집필 분기 + 변환기 보강");
+  assert.ok(wp.includes("style/koreaplain.md") && wp.includes("category=kscene(사용설명서)") && wp.includes("keyword가 한글 주제다"), "koreaplain 집필 분기 + 변환기 보강");
   const goWp = buildWritingPrompt({ ...jobBase, job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene", metadata: { track: "kscene" } } as never });
   assert.ok(goWp.includes("category=kscene(사용설명서)") && !goWp.includes("keyword가 한글 주제다"), "kscene-topic Go job은 보강 줄 없음(불변)");
-  // 조사 프롬프트: kscene 분기 그대로 + 변환기 출처면 한글 입력·소재 보존 보강, 소스 텍스트·원본 게시물 절도 함께 실린다
+  // 조사 프롬프트: koreaplain 분기 그대로 + 변환기 출처면 한글 입력·소재 보존 보강, 소스 텍스트·원본 게시물 절도 함께 실린다
   const rp = buildResearchPrompt({ job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene" }, baselineSources: [], outputPath: "/o.md", today: "2026-10-29", converterSource: true, userSourceText: "붙여넣은 글", sourceContext: "캡션:\n케이블카 야경" });
   for (const needle of ["category=kscene(해외 독자용 한국 사용설명서)", "keyword·소스 텍스트가 한글일 수 있다", "영문 질의로도 바꿔", "사용자가 보낸 소재가 곧 주제다", "사용자 제공 소스 텍스트", "붙여넣은 글", "원본 자료", "케이블카 야경"]) {
     assert.ok(rp.includes(needle), `조사 프롬프트 국제 보강: ${needle}`);
@@ -334,6 +334,6 @@ console.log("✅ 처리: 직접 입력 → createInput(캡처 없음) / 실패 �
   assert.equal(inputJobFields(baseEntry({ track: "person", userTopic: "t" })).metadata.track, undefined);
   assert.equal(inputJobFields(baseEntry({ track: "social", userTopic: "t" })).metadata.track, "social");
 }
-console.log("✅ 🌏 국제: category=kscene·track=kscene → kscene 봇·한글 승인 버튼·kscene.md·Blogger 발행·조사/집필 보강 / Go job·타 트랙 불변");
+console.log("✅ 🌏 국제: category=kscene·track=kscene → koreaplain 봇·한글 승인 버튼·koreaplain.md·Blogger 발행·조사/집필 보강 / Go job·타 트랙 불변");
 
 console.log("\n✅ testKeywordInput(A부) 전체 통과");

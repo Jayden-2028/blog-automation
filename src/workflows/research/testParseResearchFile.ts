@@ -85,7 +85,7 @@ function main(): void {
   assert(inlineComment.verdict === "ok", `verdict 인라인 주석 무시 (실제: ${inlineComment.verdict})`);
   console.log("✅ verdict 인라인 주석(# ...) 무시하고 값만 파싱");
 
-  // §12 현지 관행(2026-10-30, kscene 로컬 정체성 개정). frontmatter 키가 있으면 그 값, 없으면 표를 센다.
+  // §12 현지 관행(2026-10-30, koreaplain 로컬 정체성 개정). frontmatter 키가 있으면 그 값, 없으면 표를 센다.
   const withRows = parseResearchFile(
     "---\nkeyword: korea food waste\ntopic: kscene\nlocal_practice_rows: 3\nverdict: ok\n---\n## 1. 요약\n내용"
   );

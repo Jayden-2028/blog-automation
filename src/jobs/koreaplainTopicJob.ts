@@ -8,14 +8,14 @@ import "dotenv/config";
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
 import type { SchedulerJob } from "../scheduler/Scheduler.js";
-import { runKsceneTopicCollection } from "../workflows/kscene/runKsceneTopicCollection.js";
+import { runKoreaplainTopicCollection } from "../workflows/koreaplain/runKoreaplainTopicCollection.js";
 
 const dryRun = process.argv.includes("--dry-run");
 
 const job: SchedulerJob = {
   name: "kscene-topic",
   execute: async () => {
-    const result = await runKsceneTopicCollection({ dryRun });
+    const result = await runKoreaplainTopicCollection({ dryRun });
 
     console.log(`\n▶ 시드 ${result.seedsUsed.length}개 · 제안 ${result.suggestionCount}건 · 후보 ${result.candidateCount}건 · 중복 제외 ${result.droppedAsDuplicate}건 · 로컬 우위 ${result.localEdgeCount}건 · 포화 감점 ${result.saturatedCount}건`);
     if (result.trendSeeds.length > 0) console.log(`   급상승 시드: ${result.trendSeeds.join(", ")}`);

@@ -49,7 +49,7 @@
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
 
-import { KSCENE_DEFAULT_LABEL, KSCENE_LABEL_BY_SEED, KSCENE_LABELS, type KsceneLabel, type KsceneSeed } from "../../config/ksceneSeeds.js";
+import { KOREAPLAIN_DEFAULT_LABEL, KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, type KoreaplainLabel, type KoreaplainSeed } from "../../config/koreaplainSeeds.js";
 import type { RankedKeyword } from "../../types/keywordScoring.js";
 
 const STOPWORDS = new Set([
@@ -260,7 +260,7 @@ const PRACTICAL_TERMS = [
 ] as const;
 
 /** 이 후보가 체류 실용 정보인가. 라벨 또는 문구로 판정한다. */
-export function isPracticalTopic(topic: string, label: KsceneLabel): boolean {
+export function isPracticalTopic(topic: string, label: KoreaplainLabel): boolean {
   if (label === "Living in Korea") return true;
   const normalized = normalizeTopic(topic);
   return PRACTICAL_TERMS.some((term) => containsTerm(normalized, term));
@@ -344,13 +344,13 @@ export function hasUsableShape(topic: string): boolean {
  * 오늘 돌릴 시드를 고른다. 날짜(일 단위 정수)로 시작점을 돌려 전체 시드가 며칠 안에 한 바퀴 돈다.
  * 라벨이 섞이도록 라벨별로 번갈아 뽑는다.
  */
-export function pickSeedsForDay(seeds: readonly KsceneSeed[], dayIndex: number, count: number): KsceneSeed[] {
-  const byLabel = new Map<KsceneLabel, KsceneSeed[]>();
+export function pickSeedsForDay(seeds: readonly KoreaplainSeed[], dayIndex: number, count: number): KoreaplainSeed[] {
+  const byLabel = new Map<KoreaplainLabel, KoreaplainSeed[]>();
   for (const seed of seeds) byLabel.set(seed.label, [...(byLabel.get(seed.label) ?? []), seed]);
-  const labels = KSCENE_LABELS.filter((label) => byLabel.has(label));
+  const labels = KOREAPLAIN_LABELS.filter((label) => byLabel.has(label));
   if (labels.length === 0) return [];
 
-  const picked: KsceneSeed[] = [];
+  const picked: KoreaplainSeed[] = [];
   let round = 0;
   while (picked.length < Math.min(count, seeds.length)) {
     for (const label of labels) {
@@ -398,7 +398,7 @@ export type SuggestionObservation = {
 export type TopicCandidate = {
   topic: string;
   seed: string;
-  label: KsceneLabel;
+  label: KoreaplainLabel;
   /** 이 주제가 관찰된 횟수(시드·변형 질의를 가로질러). */
   hits: number;
   /** 관찰된 가장 앞선 위치. */
@@ -438,7 +438,7 @@ function sharesSeedToken(suggestion: string, seed: string): boolean {
   return topicTokens(suggestion).some((token) => seedTokens.has(token));
 }
 
-export function buildCandidates(observations: readonly SuggestionObservation[], labelBySeed: Readonly<Record<string, KsceneLabel>> = KSCENE_LABEL_BY_SEED): TopicCandidate[] {
+export function buildCandidates(observations: readonly SuggestionObservation[], labelBySeed: Readonly<Record<string, KoreaplainLabel>> = KOREAPLAIN_LABEL_BY_SEED): TopicCandidate[] {
   const byKey = new Map<string, TopicCandidate>();
 
   for (const obs of observations) {
@@ -454,7 +454,7 @@ export function buildCandidates(observations: readonly SuggestionObservation[], 
       byKey.set(topic, {
         topic,
         seed: obs.seed,
-        label: labelBySeed[obs.seed] ?? KSCENE_DEFAULT_LABEL,
+        label: labelBySeed[obs.seed] ?? KOREAPLAIN_DEFAULT_LABEL,
         hits: 1,
         bestPosition: obs.position,
       });
@@ -620,7 +620,7 @@ export function selectTopics(
 
   const cap = options.perLabelCap ?? Math.max(2, Math.ceil(options.topN / 3));
   const floor = options.practicalFloor ?? defaultPracticalFloor(options.topN);
-  const perLabel = new Map<KsceneLabel, number>();
+  const perLabel = new Map<KoreaplainLabel, number>();
   const selected: typeof kept = [];
 
   const take = (candidate: (typeof kept)[number]): void => {
@@ -669,7 +669,7 @@ export function toRankedKeywords(selected: readonly (TopicCandidate & { score: T
     rank: index + 1,
     keyword: item.topic,
     headline: item.topic,
-    // seedQuery = 이 주제를 낳은 시드 문구. 발행 시 Blogger 라벨을 KSCENE_LABEL_BY_SEED[seedQuery]로 정한다.
+    // seedQuery = 이 주제를 낳은 시드 문구. 발행 시 Blogger 라벨을 KOREAPLAIN_LABEL_BY_SEED[seedQuery]로 정한다.
     seedQuery: item.seed,
     category: "kscene",
     totalScore: item.score.total,

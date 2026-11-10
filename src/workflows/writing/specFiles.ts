@@ -1,3 +1,4 @@
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 // 원고를 쓰는 모든 경로가 읽을 규격 파일 목록의 **유일한 출처**(2026-09-30).
 //
 // 왜: 집필(buildWritingPrompt)·수정 재작성(reviseArticleWithFeedback)이 각자 파일 목록을 하드코딩하다
@@ -26,7 +27,7 @@ export function pickStyleFile(category: string | null): string {
   // incident(사건·사고)는 반드시 맨 앞이다. 다른 카테고리로 폴백되면 사망 사건에 개인 블로거 톤이 적용된다.
   if (category === "incident") return "prompts/writing/style/incident.md";
   // 사용설명서 트랙(개편3): 해외 독자 대상 에버그린 안내. 한글 초고를 쓰고 승인 뒤 영어로 번역된다.
-  if (category === "kscene") return "prompts/writing/style/kscene.md";
+  if (category === KOREAPLAIN_TRACK) return "prompts/writing/style/koreaplain.md";
   // 인물 백과(2026-10-13): incident 뒤에 둔다 - 수사·재판 키워드가 person job으로 들어와도 incident 라우팅이 이긴다.
   if (category === "person") return "prompts/writing/style/person.md";
   if (category === "parenting") return "prompts/writing/style/parenting.md";

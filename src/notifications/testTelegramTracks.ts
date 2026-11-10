@@ -7,7 +7,7 @@ function assert(condition: unknown, message: string): asserts condition {
 
 // 1) parseTrack
 assert(parseTrack("social") === "social", "social 파싱");
-assert(parseTrack("kscene") === "kscene", "kscene 파싱");
+assert(parseTrack("kscene") === "kscene", "koreaplain 파싱");
 assert(parseTrack("blog") === null && parseTrack(undefined) === null && parseTrack(3) === null, "모르는 값은 null");
 console.log("✅ parseTrack");
 

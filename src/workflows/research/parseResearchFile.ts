@@ -34,8 +34,8 @@ export type ParsedResearchFile = {
   /** §10 전체 출처 목록 표. */
   sourceTable: ResearchSourceRow[];
   /**
-   * §12 현지 관행 표의 행 수(kscene 전용, 2026-10-30). frontmatter `local_practice_rows`가 있으면 그 값을,
-   * 없으면 §12 표를 세어 쓴다. kscene이 아닌 조사에는 §12가 없어 0이다 - **verdict에 영향을 주지 않는다**
+   * §12 현지 관행 표의 행 수(koreaplain 전용, 2026-10-30). frontmatter `local_practice_rows`가 있으면 그 값을,
+   * 없으면 §12 표를 세어 쓴다. koreaplain이 아닌 조사에는 §12가 없어 0이다 - **verdict에 영향을 주지 않는다**
    * (관행이 없는 주제도 있다). 검수 카드가 "로컬 재료 0"을 표시하는 데만 쓴다.
    */
   localPracticeRows: number;

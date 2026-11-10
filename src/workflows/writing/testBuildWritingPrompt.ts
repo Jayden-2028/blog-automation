@@ -160,23 +160,23 @@ try {
   }
   console.log("✅ 기획 브리프 주입 - 소제목 뼈대·커버리지 frontmatter 지시");
 
-  // 사용설명서(kscene) 분기 + 🌏 국제(변환기 출처, 2026-10-29)
-  const ksceneBase = { researchFilePath: "/tmp/r.md", draftFilePath: "/tmp/d.md", isMedical: false, today: "2026-10-29" };
-  const ksceneGo = buildWritingPrompt({ ...ksceneBase, job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene", metadata: { track: "kscene" } } as never });
-  assert(ksceneGo.includes("style/kscene.md") && ksceneGo.includes("category=kscene(사용설명서)") && !ksceneGo.includes("keyword가 한글 주제다"), "kscene Go job: kscene.md + 분기, 보강 없음");
-  const ksceneConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene", metadata: { source: "keyword_input", track: "kscene" } } as never });
-  assert(ksceneConverter.includes("style/kscene.md") && ksceneConverter.includes("category=kscene(사용설명서)") && ksceneConverter.includes("keyword가 한글 주제다"), "국제(변환기) job: kscene.md + 한글 keyword 보강");
-  const igConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "남산 케이블카", headline: null, category: "kscene", metadata: { source: "instagram_manual", track: "kscene" } } as never });
+  // 사용설명서(koreaplain) 분기 + 🌏 국제(변환기 출처, 2026-10-29)
+  const koreaplainBase = { researchFilePath: "/tmp/r.md", draftFilePath: "/tmp/d.md", isMedical: false, today: "2026-10-29" };
+  const koreaplainGo = buildWritingPrompt({ ...koreaplainBase, job: { keyword: "how to ride namsan cable car", headline: null, category: "kscene", metadata: { track: "kscene" } } as never });
+  assert(koreaplainGo.includes("style/koreaplain.md") && koreaplainGo.includes("category=kscene(사용설명서)") && !koreaplainGo.includes("keyword가 한글 주제다"), "koreaplain Go job: koreaplain.md + 분기, 보강 없음");
+  const koreaplainConverter = buildWritingPrompt({ ...koreaplainBase, job: { keyword: "남산 케이블카 타는 법", headline: null, category: "kscene", metadata: { source: "keyword_input", track: "kscene" } } as never });
+  assert(koreaplainConverter.includes("style/koreaplain.md") && koreaplainConverter.includes("category=kscene(사용설명서)") && koreaplainConverter.includes("keyword가 한글 주제다"), "국제(변환기) job: koreaplain.md + 한글 keyword 보강");
+  const igConverter = buildWritingPrompt({ ...koreaplainBase, job: { keyword: "남산 케이블카", headline: null, category: "kscene", metadata: { source: "instagram_manual", track: "kscene" } } as never });
   assert(igConverter.includes("keyword가 한글 주제다"), "인스타 링크 출처도 변환기 보강");
-  const entConverter = buildWritingPrompt({ ...ksceneBase, job: { keyword: "k", headline: null, category: "entertainment", metadata: { source: "keyword_input" } } as never });
+  const entConverter = buildWritingPrompt({ ...koreaplainBase, job: { keyword: "k", headline: null, category: "entertainment", metadata: { source: "keyword_input" } } as never });
   assert(!entConverter.includes("kscene") && !entConverter.includes("keyword가 한글 주제다"), "다른 카테고리의 변환기 job은 무영향");
   // 로컬 정체성 개정(2026-10-30): 1인칭 전면 금지 문구가 허용 범위 + §12 근거 요구로 바뀌었다.
-  assert(ksceneGo.includes("일화 지어내기 금지"), "kscene 분기: 일화 지어내기 금지 문구");
-  assert(ksceneGo.includes("research §12 근거가 있을 때만"), "kscene 분기: 관행 서술의 §12 근거 요구");
-  assert(ksceneGo.includes("한국인 독자 전제 표현 금지"), "kscene 분기: 한국인 독자 전제 금지 유지");
-  assert(!ksceneGo.includes("개인 경험 지어내기 금지"), "옛 '개인 경험 지어내기 금지' 문구는 남지 않는다");
-  assert(ksceneGo.includes("고정 레이어 3개") && ksceneGo.includes("'마무리'"), "kscene 분기: 새 절(고정 레이어·마무리) 참조");
+  assert(koreaplainGo.includes("일화 지어내기 금지"), "koreaplain 분기: 일화 지어내기 금지 문구");
+  assert(koreaplainGo.includes("research §12 근거가 있을 때만"), "koreaplain 분기: 관행 서술의 §12 근거 요구");
+  assert(koreaplainGo.includes("한국인 독자 전제 표현 금지"), "koreaplain 분기: 한국인 독자 전제 금지 유지");
+  assert(!koreaplainGo.includes("개인 경험 지어내기 금지"), "옛 '개인 경험 지어내기 금지' 문구는 남지 않는다");
+  assert(koreaplainGo.includes("고정 레이어 3개") && koreaplainGo.includes("'마무리'"), "koreaplain 분기: 새 절(고정 레이어·마무리) 참조");
   // 10/29 변환기 분기는 그대로 살아 있다.
-  assert(ksceneConverter.includes("일화 지어내기 금지") && ksceneConverter.includes("keyword가 한글 주제다"), "변환기 job에도 두 분기가 함께 붙는다");
-  console.log("✅ kscene 분기 + 🌏 국제(변환기) 한글 keyword 보강 + 로컬 화자 문구");
+  assert(koreaplainConverter.includes("일화 지어내기 금지") && koreaplainConverter.includes("keyword가 한글 주제다"), "변환기 job에도 두 분기가 함께 붙는다");
+  console.log("✅ koreaplain 분기 + 🌏 국제(변환기) 한글 keyword 보강 + 로컬 화자 문구");
 }

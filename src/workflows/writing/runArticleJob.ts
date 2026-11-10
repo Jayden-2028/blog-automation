@@ -186,7 +186,7 @@ type DefaultResearcherInput = {
   userSourceText?: string | null;
   /** 그 소스 텍스트의 출처 URL(`metadata.sourceUrl`). 아니면 null. */
   userSourceUrl?: string | null;
-  /** 변환기 출처 job(`metadata.source` instagram_manual/keyword_input, 2026-10-29 🌏 국제). kscene 분기만 쓴다. */
+  /** 변환기 출처 job(`metadata.source` instagram_manual/keyword_input, 2026-10-29 🌏 국제). koreaplain 분기만 쓴다. */
   converterSource?: boolean;
   /** 재조사일 때 직전에 모자랐던 점(2026-10-02). 아니면 null. */
   retryHint?: string | null;
@@ -506,7 +506,7 @@ async function runResearchStageInner(
 
   const sourceContext = buildInstagramSourceContext(job.metadata as Record<string, unknown> | null);
   const { userSourceText, userSourceUrl } = readUserSource(job.metadata as Record<string, unknown> | null);
-  // 🌏 국제(변환기 → kscene): 조사 프롬프트의 kscene 분기가 "한글 입력일 수 있다"로 바뀐다. 다른 카테고리는 무영향.
+  // 🌏 국제(변환기 → koreaplain): 조사 프롬프트의 koreaplain 분기가 "한글 입력일 수 있다"로 바뀐다. 다른 카테고리는 무영향.
   const converterSource = isConverterJobSource(job.metadata);
   const rawBackground = (job.metadata as Record<string, unknown> | null)?.personBackground;
   const personBackground = typeof rawBackground === "string" && rawBackground.trim() ? rawBackground.trim() : null;

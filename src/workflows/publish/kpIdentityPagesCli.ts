@@ -10,7 +10,7 @@
 // 적용 뒤 getPage로 다시 읽어 반영을 확인한다. DB는 읽지도 쓰지도 않는다.
 
 import { appendFileSync } from "node:fs";
-import { KSCENE_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
+import { KOREAPLAIN_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
 import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
 import { KP_IDENTITY_PAGES, diffLines, pageLines } from "./kpIdentityPages.js";
 
@@ -33,8 +33,8 @@ function pathOf(url: string): string {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (!KSCENE_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
-  const client = new BloggerClient({ blogId: KSCENE_BLOGGER_BLOG_ID });
+  if (!KOREAPLAIN_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
+  const client = new BloggerClient({ blogId: KOREAPLAIN_BLOGGER_BLOG_ID });
 
   const listed = await client.listPages({ fetchBodies: true });
   if (!listed.ok) throw new Error(listed.error);

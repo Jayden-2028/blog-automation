@@ -10,7 +10,7 @@
 // 프로젝트 이름은 **연 단위로 갈 수 있다**(`kscene-images-2026` -> `kscene-images-2027`). Pages 배포당 파일 한도가 2만 개라
 // 글 ~3,300건 분량이 차면 환경변수만 바꿔 새 프로젝트로 넘어간다. 기존 글의 URL은 프로젝트별 도메인이라 영향이 없다.
 
-export type KsceneImagesConfig = {
+export type KoreaplainImagesConfig = {
   enabled: boolean;
   projectName: string | undefined;
   accountId: string | undefined;
@@ -19,7 +19,8 @@ export type KsceneImagesConfig = {
   baseUrl: string | undefined;
 };
 
-export function loadKsceneImagesConfig(env: Record<string, string | undefined> = process.env): KsceneImagesConfig {
+export function loadKoreaplainImagesConfig(env: Record<string, string | undefined> = process.env): KoreaplainImagesConfig {
+  // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   const projectName = env.KSCENE_IMAGES_PAGES_PROJECT?.trim() || undefined;
   const accountId = env.CLOUDFLARE_ACCOUNT_ID || undefined;
   const apiToken = env.CLOUDFLARE_API_TOKEN || undefined;

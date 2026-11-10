@@ -169,8 +169,8 @@ main().catch((error) => {
 // --- 사용설명서 트랙(2026-10-06, 개편3): 영어본 -> 🔵 Blogger 발행 버튼만, kscene.html 딥링크 -------------------------------
 {
   const JOB = "254bfe0b-1234-4abc-8def-0123456789ab";
-  const ksceneJob = { ...job(JOB), category: "kscene", metadata: { track: "kscene" } } as ArticleJobRow;
-  const base = successResult(ksceneJob);
+  const koreaplainJob = { ...job(JOB), category: "kscene", metadata: { track: "kscene" } } as ArticleJobRow;
+  const base = successResult(koreaplainJob);
   if (base.result.status !== "success") throw new Error("❌ 테스트 준비 실패");
   const result: JobManuscriptsResult = {
     ...base,
@@ -242,7 +242,7 @@ main().catch((error) => {
   if (!ks.text.includes("검수 1건") || !ks.text.includes("근거 확인 필요")) throw new Error("❌ 사용설명서 통합 알림에도 검수 요약이 있어야 한다");
   // 한글 승인 뒤 수동 승인(옛 영어 재승인 흐름, 게이트 꺼짐)으로 올라온 사용설명서 job은 옛 알림 그대로다.
   const ksLegacy = buildManuscriptReadyMessage(successResult(job(JOB, { track: "kscene" })), "https://pages.example.dev");
-  if (rowsOf(ksLegacy).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 영어본 수동 승인 kscene job에는 수정·반려 줄이 없어야 한다");
+  if (rowsOf(ksLegacy).flat().some((b) => b.callback_data?.startsWith("review:"))) throw new Error("❌ 영어본 수동 승인 koreaplain job에는 수정·반려 줄이 없어야 한다");
 
   // 옛 초안 알림이 보여주던 의학 경고·검수 결과가 통합 알림으로 옮겨 온다(초안 단계가 없어졌으므로).
   const noted = buildManuscriptReadyMessage(

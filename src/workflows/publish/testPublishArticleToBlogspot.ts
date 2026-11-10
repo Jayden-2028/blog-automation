@@ -240,9 +240,9 @@ async function main(): Promise<void> {
     console.log("✅ 일일 상한의 \"오늘\" - 한국시간 자정 기준");
   }
 
-  // ---- 사용설명서(kscene) 트랙(개편3): 블로그 ID·라벨·이미지 복사 ----
+  // ---- 사용설명서(koreaplain) 트랙(개편3): 블로그 ID·라벨·이미지 복사 ----
   {
-    const ksceneJob = (metadata: Record<string, unknown> = {}) =>
+    const koreaplainJob = (metadata: Record<string, unknown> = {}) =>
       job({ category: "kscene", seed_query: "korean bbq", metadata: { track: "kscene", ...metadata } });
     const enBody = "Intro.\n\n[IMAGE: Grilling meat — 웹 검색]\n\nBody text.";
     const imgs = [
@@ -252,20 +252,20 @@ async function main(): Promise<void> {
     const enArticles = [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette", content: `${enBody}\n\n[IMAGE: Side dishes — AI 생성]` })];
 
     // 대상 해석(순수)
-    const t1 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(ksceneJob(), "506709987398630214");
+    const t1 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(koreaplainJob(), "506709987398630214");
     assert(t1.track === "kscene" && t1.blogId === "506709987398630214" && t1.label === "Food & Dining", `사용설명서는 K-Scene blogId와 시드 라벨 (${JSON.stringify(t1)})`);
     const t2 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "living" }), "506709987398630214");
     assert(t2.track === "entertainment" && t2.blogId === BLOGGER_CONFIG.blogId && t2.label === "생활정보", "엔터·사회 job은 기존 blogId·한글 라벨 그대로");
-    const t3 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(ksceneJob(), undefined);
+    const t3 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(koreaplainJob(), undefined);
     assert(t3.blogId === undefined, "blogId가 없으면 undefined(whynowissue로 폴백하지 않는다)");
     const t4 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "예전 시드", metadata: { track: "kscene" } }), "1");
     assert(t4.label === "Living in Korea", "시드를 모르는 옛 job은 기본 라벨");
-    console.log("✅ kscene 대상 해석 - K-Scene blogId·영문 라벨, 다른 트랙은 불변, 폴백 없음");
+    console.log("✅ koreaplain 대상 해석 - K-Scene blogId·영문 라벨, 다른 트랙은 불변, 폴백 없음");
 
     // blogId 미설정이면 발행 호출 없이 disabled
     let called = 0;
     const noId = await publishArticleToBlogspot("job-1", {
-      ...baseDeps, loadJob: async () => ksceneJob(), loadArticles: async () => enArticles, ksceneBlogId: undefined,
+      ...baseDeps, loadJob: async () => koreaplainJob(), loadArticles: async () => enArticles, koreaplainBlogId: undefined,
       insertPost: async () => { called += 1; return baseDeps.insertPost(); },
     });
     assert(noId.ok === false && noId.reason === "disabled" && noId.detail.includes("KSCENE_BLOGGER_BLOG_ID") && called === 0, "KSCENE_BLOGGER_BLOG_ID 없으면 발행하지 않는다");
@@ -276,8 +276,8 @@ async function main(): Promise<void> {
     const rehostCalls: number[] = [];
     const run = (metadata: Record<string, unknown>, rehost: NonNullable<Parameters<typeof publishArticleToBlogspot>[1]>["rehostImages"]) =>
       publishArticleToBlogspot("job-1", {
-        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: false,
-        loadJob: async () => ksceneJob({ images: imgs, ...metadata }),
+        ...baseDeps, koreaplainBlogId: "506709987398630214", asDraft: false, tkmSite: false,
+        loadJob: async () => koreaplainJob({ images: imgs, ...metadata }),
         loadArticles: async () => enArticles,
         insertPost: async (input) => { inserted = input; return { ok: true as const, postId: "p", url: "https://thekoreamanual.blogspot.com/p.html", isDraft: false }; },
         rehostImages: rehost,
@@ -288,14 +288,14 @@ async function main(): Promise<void> {
       rehostCalls.push(...images.map((image) => image.index));
       return { images: images.map((image) => ({ ...image, url: pages(image.index) })), rehosted: images.length, complete: true, deployed: true, failures: [] };
     });
-    assert(done.ok === true && inserted !== null, `kscene 발행 성공 (${JSON.stringify(done)})`);
+    assert(done.ok === true && inserted !== null, `koreaplain 발행 성공 (${JSON.stringify(done)})`);
     const html = (inserted as unknown as { contentHtml: string; labels?: string[] }).contentHtml;
     assert((inserted as unknown as { labels?: string[] }).labels?.join() === "Food & Dining", "영문 라벨");
     assert(html.includes(pages(1)) && html.includes(pages(2)) && !html.includes("sb.example"), `본문 이미지가 Pages 주소로 치환된다 (${html})`);
     const patch = saved[0] as { rehostedBySource: Record<string, string>; imagesRehostedAt?: string };
     assert(patch.rehostedBySource["https://sb.example/a/1.webp"] === pages(1) && typeof patch.imagesRehostedAt === "string", "원본->Pages 대응과 imagesRehostedAt(전부 옮겼을 때) 기록");
     assert(!html.includes("width="), "치수를 모르면 <img>에 width/height를 붙이지 않는다");
-    console.log("✅ kscene 발행 - 영문 라벨, 이미지 Pages 치환, 복사 기록(imagesRehostedAt)");
+    console.log("✅ koreaplain 발행 - 영문 라벨, 이미지 Pages 치환, 복사 기록(imagesRehostedAt)");
 
     // 복사한 바이트에서 읽은 치수가 발행 HTML의 <img width height>로 들어간다(2026-11-08, CLS).
     // **치수를 아는 자리에만** 붙는다 - 틀린 치수는 없는 것보다 나쁘다. lazy·alt는 그대로다.
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
     assert(sized.includes(`src="${pages(1)}"`) && /1-aaaa\.webp"[^>]*width="1600" height="1200" loading="lazy"/.test(sized), `치수를 아는 이미지에 속성이 붙는다 (${sized})`);
     assert(!/2-aaaa\.webp"[^>]*width=/.test(sized), "치수를 모르는 이미지에는 붙지 않는다");
     assert(sized.split('loading="lazy"').length === 3, "lazy는 두 장 모두 그대로");
-    console.log("✅ kscene 발행 - 아는 치수만 <img width height>(CLS)");
+    console.log("✅ koreaplain 발행 - 아는 치수만 <img width height>(CLS)");
 
     // 이미 옮긴 이미지는 다시 옮기지 않는다(재발행)
     saved.length = 0; rehostCalls.length = 0; inserted = null;
@@ -374,14 +374,14 @@ async function main(): Promise<void> {
     let tkmInserted = "";
     const tkmBody = "Intro paragraph about Korean BBQ.\n\n**How to Order**\nPoint at the menu.\n\n**References**\n- [Visit Korea](https://english.visitkorea.or.kr)";
     const tkmRun = await publishArticleToBlogspot("job-1", {
-      ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
-      loadJob: async () => ksceneJob({ channelMeta: { blogspot: { searchDescription: "How to order Korean BBQ.", slug: null, tags: [] } } }),
+      ...baseDeps, koreaplainBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+      loadJob: async () => koreaplainJob({ channelMeta: { blogspot: { searchDescription: "How to order Korean BBQ.", slug: null, tags: [] } } }),
       loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
       insertPost: async (input) => { tkmInserted = input.contentHtml; return { ok: true as const, postId: "p9", url: `${site}/2026/10/korean-bbq-etiquette.html`, isDraft: false }; },
       rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
       saveJobMetadata: async () => {},
     });
-    assert(tkmRun.ok === true, `kscene 구조 보강 발행 성공 (${JSON.stringify(tkmRun)})`);
+    assert(tkmRun.ok === true, `koreaplain 구조 보강 발행 성공 (${JSON.stringify(tkmRun)})`);
     assert((tkmInserted.match(/<h2\b/g) ?? []).length >= 3 && !tkmInserted.includes("<strong>How to Order</strong>"), `소제목이 h2로 나간다 (${tkmInserted})`);
     assert(tkmInserted.indexOf("tkm-related") > 0 && tkmInserted.indexOf("tkm-related") < tkmInserted.indexOf(">References<"), "Related 블록은 References 앞");
     assert(tkmInserted.includes(`Previous guide: <a href="${site}/2026/10/korea-taxi-app.html">`), "이전 글 = 지금 가장 최신 글(체인)");
@@ -394,8 +394,8 @@ async function main(): Promise<void> {
     // 두 번째 발행: 페이지가 이미 있으니 insert 없이 patch, 본문에 처음부터 All Guides 링크
     postPatches.length = 0;
     await publishArticleToBlogspot("job-1", {
-      ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
-      loadJob: async () => ksceneJob(),
+      ...baseDeps, koreaplainBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+      loadJob: async () => koreaplainJob(),
       loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
       insertPost: async (input) => { tkmInserted = input.contentHtml; return { ok: true as const, postId: "p10", url: `${site}/2026/10/next.html`, isDraft: false }; },
       rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
@@ -403,7 +403,7 @@ async function main(): Promise<void> {
     });
     assert(pagesStore.length === 1 && tkmInserted.includes(`${site}/p/all-guides.html`), "페이지는 하나만 유지(멱등), 새 글엔 처음부터 허브 링크");
     assert(postPatches.length === 1 && postPatches[0].includes("application/ld+json") && (postPatches[0].match(/tkm-related/g) ?? []).length === 1, "발행 뒤 patch는 JSON-LD를 붙이는 한 번, Related 블록은 하나");
-    console.log("✅ kscene 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성, JSON-LD");
+    console.log("✅ koreaplain 구조 보강 - h2, Related(비슷한 글·이전 글·All Guides), All Guides 생성·재생성, JSON-LD");
 
     // ---- Bing URL 제출(2026-10-27): [글 URL, All Guides URL] 한 번, 실패해도 발행은 success, 결과는 job.metadata.bingSubmit ----
     const bingRun = async (
@@ -413,8 +413,8 @@ async function main(): Promise<void> {
       const calls: { siteUrl: string; urls: string[] }[] = [];
       const saved: Record<string, unknown>[] = [];
       const result = await publishArticleToBlogspot("job-1", {
-        ...baseDeps, ksceneBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
-        loadJob: async () => ksceneJob(),
+        ...baseDeps, koreaplainBlogId: "506709987398630214", asDraft: false, tkmSite: fakeSite,
+        loadJob: async () => koreaplainJob(),
         loadArticles: async () => [article(), article({ id: 2, platform: "blogspot", title: "Korean BBQ Etiquette at the Table", content: tkmBody })],
         insertPost: async () => ({ ok: true as const, postId: "p11", url: `${site}/2026/10/bing.html`, isDraft: false }),
         rehostImages: async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: [] }),
@@ -446,8 +446,8 @@ async function main(): Promise<void> {
     const bingDraft = await bingRun(async () => ({ ok: true, submitted: 2 }), { asDraft: true, insertPost: async () => ({ ok: true as const, postId: "p12", url: `${site}/draft`, isDraft: true }) });
     assert(bingDraft.calls.length === 0, "초안은 제출하지 않는다");
 
-    const bingOtherTrack = await bingRun(async () => ({ ok: true, submitted: 2 }), { loadJob: async () => job(), ksceneBlogId: undefined });
-    assert(bingOtherTrack.calls.length === 0, "kscene이 아닌 트랙은 제출하지 않는다");
+    const bingOtherTrack = await bingRun(async () => ({ ok: true, submitted: 2 }), { loadJob: async () => job(), koreaplainBlogId: undefined });
+    assert(bingOtherTrack.calls.length === 0, "koreaplain이 아닌 트랙은 제출하지 않는다");
     console.log("✅ Bing 제출 - 글+All Guides 1배치, 실패·예외·키 없음에도 발행 success, 초안·다른 트랙은 제외");
   }
 

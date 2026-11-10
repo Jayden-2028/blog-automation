@@ -21,9 +21,9 @@
 //    변환 전에 substituteConfirmedImages로 마커를 실제 `![설명](url)`로 바꿔 넣는다. A/B 비교로
 //    후보가 2장이라 아직 사람이 고르지 않았으면(또는 전부 실패했으면) 마커를 그대로 둔다.
 
-import { KSCENE_DEFAULT_LABEL, KSCENE_LABEL_BY_SEED } from "../../config/ksceneSeeds.js";
-import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
-import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KSCENE_BLOGGER_BLOG_ID, normalizeTkmUrl } from "../../config/publishTargets.js";
+import { KOREAPLAIN_DEFAULT_LABEL, KOREAPLAIN_LABEL_BY_SEED } from "../../config/koreaplainSeeds.js";
+import { loadKoreaplainImagesConfig } from "../../config/koreaplainImages.js";
+import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KOREAPLAIN_BLOGGER_BLOG_ID, normalizeTkmUrl } from "../../config/publishTargets.js";
 import { trackOfJob } from "../../notifications/telegramTracks.js";
 import { defaultRehostDeps, rehostImagesToPages } from "../../services/images/rehostImagesToPages.js";
 import type { RehostResult } from "../../services/images/rehostImagesToPages.js";
@@ -59,6 +59,7 @@ import type { BingSubmitResult } from "../../services/bing/BingWebmasterClient.j
 import { TKM_ALL_GUIDES_PATH } from "./tkmPostStructure.js";
 import { bloggerTkmSiteDeps, finalizeTkmPost, loadTkmSiteContext } from "./tkmSite.js";
 import type { TkmSiteDeps } from "./tkmSite.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 export const BLOGSPOT_PLATFORM = "blogspot";
 
@@ -117,7 +118,7 @@ export type PublishArticleToBlogspotOptions = {
   /** enabled override (테스트). 생략하면 BLOGGER_CONFIG.enabled. */
   enabled?: boolean;
   /** 테스트 주입: 사용설명서 blogId override. 생략하면 KSCENE_BLOGGER_BLOG_ID. */
-  ksceneBlogId?: string | undefined;
+  koreaplainBlogId?: string | undefined;
   /**
    * 테스트 주입: 사용설명서 발행 이미지를 Pages로 복사한다. 기본은 rehostImagesToPages(설정이 없으면 건너뛴다).
    * 반환의 images는 url이 치환된 목록이고, complete가 true여야 job에 `imagesRehostedAt`이 남는다.
@@ -149,15 +150,15 @@ export type BingSubmitRecord = {
 /** 어느 블로그·라벨로 올릴지. 사용설명서 트랙은 K-Scene blogId와 영문 라벨, 그 밖은 기존(BLOGGER_BLOG_ID·한글 라벨). */
 export function resolveBloggerTarget(
   job: Pick<ArticleJobRow, "category" | "seed_query" | "metadata">,
-  ksceneBlogId: string | undefined = KSCENE_BLOGGER_BLOG_ID
+  koreaplainBlogId: string | undefined = KOREAPLAIN_BLOGGER_BLOG_ID
 ): { track: ReturnType<typeof trackOfJob>; blogId: string | undefined; label: string | undefined } {
   const track = trackOfJob(job);
-  if (track === "kscene") {
+  if (track === KOREAPLAIN_TRACK) {
     return {
       track,
-      blogId: ksceneBlogId,
-      // 라벨은 글을 낳은 시드가 정한다(ksceneSeeds.ts) - 시드가 바뀐 옛 job은 기본 라벨.
-      label: KSCENE_LABEL_BY_SEED[job.seed_query ?? ""] ?? KSCENE_DEFAULT_LABEL,
+      blogId: koreaplainBlogId,
+      // 라벨은 글을 낳은 시드가 정한다(koreaplainSeeds.ts) - 시드가 바뀐 옛 job은 기본 라벨.
+      label: KOREAPLAIN_LABEL_BY_SEED[job.seed_query ?? ""] ?? KOREAPLAIN_DEFAULT_LABEL,
     };
   }
   return { track, blogId: BLOGGER_CONFIG.blogId, label: job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined };
@@ -222,8 +223,8 @@ export async function publishArticleToBlogspot(
     return { ok: false, reason: "job_not_approved", detail: `job 상태가 approved가 아닙니다 (현재: ${job.status})` };
   }
 
-  target = resolveBloggerTarget(job, "ksceneBlogId" in options ? options.ksceneBlogId : KSCENE_BLOGGER_BLOG_ID);
-  if (target.track === "kscene" && !target.blogId) {
+  target = resolveBloggerTarget(job, "koreaplainBlogId" in options ? options.koreaplainBlogId : KOREAPLAIN_BLOGGER_BLOG_ID);
+  if (target.track === KOREAPLAIN_TRACK && !target.blogId) {
     // BLOGGER_BLOG_ID로 폴백하지 않는다 - 영어 글이 whynowissue(한국어 블로그)에 올라간다.
     return { ok: false, reason: "disabled", detail: "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 Korea Plain 블로그 ID가 있어야 발행합니다" };
   }
@@ -247,13 +248,13 @@ export async function publishArticleToBlogspot(
   const resolveImages = async (): Promise<ManuscriptImage[]> => {
     if (imagesForHtml) return imagesForHtml;
     const original = readJobManuscriptImages(job);
-    if (target.track !== "kscene") return (imagesForHtml = original);
+    if (target.track !== KOREAPLAIN_TRACK) return (imagesForHtml = original);
 
     const saved = (job.metadata?.rehostedBySource ?? {}) as Record<string, string>;
     const pending = original.filter((image) => image.url && !saved[image.url]);
     const rehost =
       options.rehostImages ??
-      ((input) => rehostImagesToPages({ ...input, config: loadKsceneImagesConfig() }, defaultRehostDeps()));
+      ((input) => rehostImagesToPages({ ...input, config: loadKoreaplainImagesConfig() }, defaultRehostDeps()));
     const saveJobMetadata = options.saveJobMetadata ?? ((id, patch) => ArticleJobRepository.mergeMetadata(id, patch));
 
     let result: RehostResult | null = null;
@@ -316,16 +317,16 @@ export async function publishArticleToBlogspot(
     }
     return convertArticleToHtml(draft ? bodyWithImages : manuscriptBodyWithoutImages(bodyWithImages), {
       ...(Object.keys(imageSizes).length > 0 ? { imageSizes } : {}),
-      semanticHeadings: target.track === "kscene",
+      semanticHeadings: target.track === KOREAPLAIN_TRACK,
       // 로컬 콜아웃 박스(2026-10-30) - 사용설명서 트랙만. 다른 트랙 HTML은 바뀌지 않는다.
-      localCallouts: target.track === "kscene",
+      localCallouts: target.track === KOREAPLAIN_TRACK,
     });
   };
 
   // 사용설명서: 본문에 Related 블록을 넣고(발행 전), 공개 뒤에는 All Guides 재생성 + 본문 마무리(finalizeTkmPost)를 한다.
   // 초안에는 넣지 않는다 - 초안은 공개 주소가 없고 버튼 경로는 공개 발행이다.
   const tkmSite: TkmSiteDeps | null =
-    target.track !== "kscene" || options.tkmSite === false ? null : options.tkmSite ?? bloggerTkmSiteDeps(client());
+    target.track !== KOREAPLAIN_TRACK || options.tkmSite === false ? null : options.tkmSite ?? bloggerTkmSiteDeps(client());
   const withTkmRelated = async (html: string, self: { url: string | null; title: string; published: string | null }): Promise<string> => {
     if (!tkmSite) return html;
     const site = await loadTkmSiteContext(tkmSite);
@@ -347,7 +348,7 @@ export async function publishArticleToBlogspot(
   // 사용설명서 글이 새로 공개되면 [글 URL, All Guides URL]을 한 번에 Bing에 제출하고 결과를 job.metadata.bingSubmit에 남긴다.
   // 어떤 실패도 던지지 않는다 - 글은 이미 공개됐다.
   const submitToBing = async (postUrl: string, allGuidesUrl: string | null): Promise<void> => {
-    if (target.track !== "kscene" || options.bing === false || !postUrl) return;
+    if (target.track !== KOREAPLAIN_TRACK || options.bing === false || !postUrl) return;
     try {
       const siteUrl = resolveBingSiteUrl(postUrl);
       if (!siteUrl) return;
