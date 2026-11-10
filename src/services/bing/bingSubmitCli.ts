@@ -9,7 +9,7 @@
 // 키는 BING_WEBMASTER_API_KEY(.env). 없으면 아무것도 보내지 않고 안내만 출력한다. 키 값은 출력하지 않는다.
 
 import "dotenv/config";
-import { KSCENE_PUBLIC_ORIGIN, normalizeTkmUrl } from "../../config/publishTargets.js";
+import { KOREAPLAIN_PUBLIC_ORIGIN, normalizeTkmUrl } from "../../config/publishTargets.js";
 import { TKM_ALL_GUIDES_PATH } from "../../workflows/publish/tkmPostStructure.js";
 import { BingWebmasterClient, resolveBingSiteUrl } from "./BingWebmasterClient.js";
 
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   let urls = (option(argv, "urls") ?? "").split(",").map((url) => normalizeTkmUrl(url.trim())).filter(Boolean);
   if (jobId) urls = await urlsOfJob(jobId);
 
-  const siteUrl = resolveBingSiteUrl(urls[0] ?? KSCENE_PUBLIC_ORIGIN, option(argv, "site") ?? process.env.BING_SITE_URL);
+  const siteUrl = resolveBingSiteUrl(urls[0] ?? KOREAPLAIN_PUBLIC_ORIGIN, option(argv, "site") ?? process.env.BING_SITE_URL);
   if (!siteUrl) {
     console.error("siteUrl을 알 수 없습니다. --urls/--job-id를 주거나 --site= 또는 BING_SITE_URL을 설정하세요.");
     process.exit(1);

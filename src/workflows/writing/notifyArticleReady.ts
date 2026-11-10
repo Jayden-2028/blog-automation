@@ -32,6 +32,7 @@ import { formatReviewLines } from "../review/runArticleReview.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 import type { ArticleRow } from "../../types/database.js";
 import type { RunWritingStageResult } from "./runArticleJob.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 // runWritingStage 결과를 받는다(runArticleJob 전체가 아니다) - job:write는 이제 runWritingStage를
 // 직접 호출한다(조사 단계는 job:research로 분리됐고, 이미 저장된 근거가 있으면 재사용한다).
@@ -41,11 +42,11 @@ export function buildHeaderMessage(result: RunArticleJobSuccess): TelegramOutgoi
   const { job, article } = result;
 
   // 사용설명서 트랙(개편3): 이 승인은 **한글 초고 승인**이고, 누르면 영어본을 만들어 한 번 더 승인받는다.
-  const isKscene = trackOfJob(job) === "kscene";
+  const isKoreaplain = trackOfJob(job) === KOREAPLAIN_TRACK;
   const lines = result.requiresMedicalReview
     ? ["⚕️ <b>의학 주제 — 원고와 출처를 직접 확인해주세요</b>"]
-    : [isKscene ? "📝 <b>한글 초고 준비됨 (사용설명서)</b>" : "📝 <b>원고 초안 준비됨</b>"];
-  if (isKscene) lines.push("승인하면 영어본을 만들어 한글 대역 요약과 함께 한 번 더 확인받습니다.");
+    : [isKoreaplain ? "📝 <b>한글 초고 준비됨 (사용설명서)</b>" : "📝 <b>원고 초안 준비됨</b>"];
+  if (isKoreaplain) lines.push("승인하면 영어본을 만들어 한글 대역 요약과 함께 한 번 더 확인받습니다.");
 
   // 2026-08-28 사용자 피드백으로 제목/카테고리만 남겼다: 키워드는 제목과 거의 겹치고, 근거
   // 건수와 작성 소요 시간은 이 시점에 사람이 내릴 결정(승인/수정/반려)에 쓰이지 않는다.
@@ -103,7 +104,7 @@ export function buildArticleBodyMessages(article: ArticleRow): TelegramOutgoingM
 export function buildReviewDecisionButtons(jobId: string, track?: Track): TelegramInlineKeyboardButton[] {
   return [
     // 사용설명서는 한글 승인이 최종이 아니다 - 누르면 영어본 생성으로 넘어간다(TelegramBot.handleArticleReviewCallback).
-    { text: track === "kscene" ? "✅ 한글 승인 → 영어본" : "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
+    { text: track === KOREAPLAIN_TRACK ? "✅ 한글 승인 → 영어본" : "✅ 승인", callback_data: buildArticleReviewCallbackData("confirm", jobId) },
     { text: "✏️ 수정 필요", callback_data: buildArticleReviewCallbackData("edit", jobId) },
     { text: "🗑 반려", callback_data: buildArticleReviewCallbackData("discard", jobId) },
   ];

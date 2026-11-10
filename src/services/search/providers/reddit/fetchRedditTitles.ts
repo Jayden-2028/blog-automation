@@ -21,7 +21,7 @@ export const REDDIT_PUBLIC_MIN_DELAY_MS = 61_000;
 export type RedditFeedFormat = "json" | "rss";
 
 /** 한국 체류·여행 질문이 올라오는 서브레딧(2026-10 외부 조사: 약 19만·13만·1만 명). */
-export const KSCENE_SUBREDDITS = ["koreatravel", "Living_in_Korea", "living_in_korea_now"] as const;
+export const KOREAPLAIN_SUBREDDITS = ["koreatravel", "Living_in_Korea", "living_in_korea_now"] as const;
 
 /** 설명적인 User-Agent. 브라우저처럼 꾸미지 않는다. */
 export const REDDIT_USER_AGENT = "blog-automation-kscene/1.0 (+https://www.koreaplain.com)";

@@ -164,7 +164,7 @@ Worker 로그는 토큰 권한이 없어 볼 수 없다. 자정 전이면 재발
 - **person 트랙 심층 규격 검증**(PR #41·#46·#47·#48). 다음 인물 원고가 대표작 6~8개 · 4,000~6,000자 ·
   캐릭터 네 항목을 지키는지 발행본으로 확인한다. 아직 수동 복붙 발행이고 파일럿 3/5다.
 - **style-learn 주간 보고서 PR 검수.** 일요일 10시에 돌고, 보고서 PR은 팀장이 검수한다.
-- **kscene 시드 소진** 임박.
+- **koreaplain 시드 소진** 임박.
 - **조회수 대시보드**(3채널 일일 조회수 패널) — 측정 데이터가 쌓이고 개편 1차가 끝나면 사용자에게 제안.
 - **Blogger 정책 점검 4건**(이미지 저작권·개인정보·미성년자·의료 게이트) — 사용자가 전부 보류. 포스팅이
   쌓이면 저작권부터.
@@ -224,7 +224,7 @@ Worker 로그는 토큰 권한이 없어 볼 수 없다. 자정 전이면 재발
 - `CLAUDE.md` — 프로젝트 규칙. 승인 경계와 원고 규격이 여기 있다
 - `AGENTS.md` — 하위 작업자(Codex/하위 세션) 규칙과 완료 보고 형식
 - `docs/ai-handoff/TISTORY-DIRECTION-2026-11.md` — 티스토리 트랙 방향(4060·정치 포함·공분 신호)
-- Korea Plain 필자 정체성 — `prompts/writing/style/kscene.md`의 "화자" 절(2026-10-30 개정)과
+- Korea Plain 필자 정체성 — `prompts/writing/style/koreaplain.md`의 "화자" 절(2026-10-30 개정)과
   `docs/ai-handoff/KOREA_PLAIN_REBRAND_2026-10.md`. ⚠️ 메모리 `koreaplain-native-identity.md`가
   기준 문서를 `kp-native-identity-2026-10.md`라고 적고 있는데 **그 파일은 저장소에 없다.** 찾지 말고
   위 두 곳을 본다

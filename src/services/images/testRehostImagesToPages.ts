@@ -2,7 +2,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
+import { loadKoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import type { ManuscriptImage } from "../../workflows/manuscripts/manuscriptManifest.js";
 import { defaultRehostDeps, pagesImagePath, rehostImagesToPages } from "./rehostImagesToPages.js";
 import type { RehostDeps } from "./rehostImagesToPages.js";
@@ -12,7 +12,7 @@ function assert(c: unknown, m: string): asserts c {
 }
 
 const BASE = "https://kscene-images-2026.pages.dev";
-const CONFIG = loadKsceneImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "kscene-images-2026", CLOUDFLARE_ACCOUNT_ID: "acc", CLOUDFLARE_API_TOKEN: "tok" });
+const CONFIG = loadKoreaplainImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "kscene-images-2026", CLOUDFLARE_ACCOUNT_ID: "acc", CLOUDFLARE_API_TOKEN: "tok" });
 const JOB = "abcdef12-0000-4000-8000-000000000000";
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 const image = (index: number, url: string | null): ManuscriptImage =>
@@ -108,15 +108,15 @@ function makeWorld(initialSite: Site = new Map(), sources: Record<string, string
 }
 
 async function main(): Promise<void> {
-  assert(!loadKsceneImagesConfig({}).enabled && !loadKsceneImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "p" }).enabled, "프로젝트·계정·토큰이 다 있어야 enabled");
+  assert(!loadKoreaplainImagesConfig({}).enabled && !loadKoreaplainImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "p" }).enabled, "프로젝트·계정·토큰이 다 있어야 enabled");
   assert(CONFIG.enabled && CONFIG.baseUrl === BASE, "baseUrl 기본값은 <project>.pages.dev");
-  assert(loadKsceneImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "p", CLOUDFLARE_ACCOUNT_ID: "a", CLOUDFLARE_API_TOKEN: "t", KSCENE_IMAGES_BASE_URL: "https://img.example.com/" }).baseUrl === "https://img.example.com", "커스텀 도메인은 끝 슬래시를 뗀다");
+  assert(loadKoreaplainImagesConfig({ KSCENE_IMAGES_PAGES_PROJECT: "p", CLOUDFLARE_ACCOUNT_ID: "a", CLOUDFLARE_API_TOKEN: "t", KSCENE_IMAGES_BASE_URL: "https://img.example.com/" }).baseUrl === "https://img.example.com", "커스텀 도메인은 끝 슬래시를 뗀다");
   console.log("  ✅ 설정");
 
   // 미설정 -> 그대로 통과(발행을 막지 않는다)
   {
     const { deps, world } = makeWorld();
-    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/x/1.webp")], config: loadKsceneImagesConfig({}) }, deps);
+    const result = await rehostImagesToPages({ jobId: JOB, images: [image(1, "https://supabase/x/1.webp")], config: loadKoreaplainImagesConfig({}) }, deps);
     assert(!result.complete && result.images[0].url === "https://supabase/x/1.webp" && world.deploys.length === 0 && result.failures[0].includes("미설정"), "미설정이면 Supabase URL 그대로, 배포 없음");
     console.log("  ✅ 미설정 -> 통과");
   }

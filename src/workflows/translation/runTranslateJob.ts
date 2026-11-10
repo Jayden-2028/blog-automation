@@ -25,12 +25,13 @@ import { describeError } from "../../services/describeError.js";
 import { createArticleForJob, listArticlesByJobId } from "../../services/supabase/repositories/articleRepository.js";
 import { publishArticleToTelegraph } from "../../services/telegraph/telegraphClient.js";
 import { splitTrailingHashtags } from "../manuscripts/articleContentParts.js";
-import { ksceneStageOf } from "./ksceneStage.js";
+import { koreaplainStageOf } from "./koreaplainStage.js";
 import { buildTranslationPrompt } from "./buildTranslationPrompt.js";
 import { buildEnglishReviewMarkdown, notifyEnglishReview, notifyTranslationFailed } from "./notifyEnglishReview.js";
 import { parseTranslationOutput, validateTranslation } from "./parseTranslationOutput.js";
 import type { ParsedTranslation } from "./parseTranslationOutput.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 /** 번역은 도구 없이 텍스트만 변환하지만 원고가 길어 넉넉히 잡는다. */
 export const TRANSLATE_TIMEOUT_MS = 15 * 60 * 1000;
@@ -40,8 +41,8 @@ export const MAX_TRANSLATE_ATTEMPTS = 2;
 /** 영어 원고를 담는 article의 platform 값. pickFinalArticle의 LEGACY_BLOGSPOT_PLATFORM과 같다. */
 export const ENGLISH_ARTICLE_PLATFORM = "blogspot";
 
-export { ksceneStageOf } from "./ksceneStage.js";
-export type { KsceneStage } from "./ksceneStage.js";
+export { koreaplainStageOf } from "./koreaplainStage.js";
+export type { KoreaplainStage } from "./koreaplainStage.js";
 
 export type RunTranslateJobOptions = {
   /** 영어본 재승인 단계의 "수정 필요" 답장. 있으면 직전 영어본을 이 방향으로 다시 쓴다. */
@@ -110,14 +111,14 @@ export async function runTranslateJob(jobId: string, options: RunTranslateJobOpt
 
   const job = await loadJob(jobId);
   if (!job) return { status: "skipped", reason: `job을 찾을 수 없습니다: ${jobId}` };
-  if (trackOfJob(job) !== "kscene") return { status: "skipped", reason: "사용설명서(kscene) 트랙 job이 아닙니다" };
+  if (trackOfJob(job) !== KOREAPLAIN_TRACK) return { status: "skipped", reason: "사용설명서(koreaplain) 트랙 job이 아닙니다" };
   // 통합 흐름: 영어본이 자동 승인(approved)된 뒤의 수정 요청도 받는다(영어본 수정 -> 이미지 마커 diff -> 다시 발행 알림).
   const unifiedRevision = job.status === "approved" && isAutoApproved(job);
   if (job.status !== "review" && !unifiedRevision) return { status: "skipped", reason: `검수 단계가 아닙니다 (상태: ${job.status})` };
   // 최초 번역이 끝나면 영어 재승인을 건너뛰고 곧바로 승인으로 잇는가.
   const skipEnglishReview = unifiedRevision || shouldSkipEnglishReview(job, env);
 
-  const stage = ksceneStageOf(job);
+  const stage = koreaplainStageOf(job);
   const feedback = options.feedback?.trim() || null;
   // 한글 승인 뒤(translating) 또는 재번역(수정 요청 english_review / 실패 재시도 translation_failed)만 허용한다.
   if (stage === null) return { status: "skipped", reason: "한글 원고 승인 전입니다" };

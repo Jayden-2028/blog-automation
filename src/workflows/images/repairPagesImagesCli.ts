@@ -1,4 +1,4 @@
-// 사용설명서(kscene) 발행 이미지가 Pages에서 사라졌을 때 Supabase 원본으로 되살린다.
+// 사용설명서(koreaplain) 발행 이미지가 Pages에서 사라졌을 때 Supabase 원본으로 되살린다.
 //
 // 왜 되살아나는가: Pages 경로가 내용 해시(`<jobId8>/<index>-<sha8>.<ext>`)라 **같은 바이트면 같은 경로**가 나온다.
 // 그래서 재배포만 하면 발행본(Blogger)이 가리키는 URL이 그대로 살아난다 - **본문은 건드리지 않는다.**
@@ -13,7 +13,7 @@
 
 import "dotenv/config";
 
-import { loadKsceneImagesConfig } from "../../config/ksceneImages.js";
+import { loadKoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { defaultRehostDeps, rehostImagesToPages } from "../../services/images/rehostImagesToPages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
@@ -39,7 +39,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const config = loadKsceneImagesConfig(projectArg ? { ...process.env, KSCENE_IMAGES_PAGES_PROJECT: projectArg } : process.env);
+  // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
+  const config = loadKoreaplainImagesConfig(projectArg ? { ...process.env, KSCENE_IMAGES_PAGES_PROJECT: projectArg } : process.env);
   if (!config.enabled) {
     console.error("❌ 이미지 호스팅 설정이 비어 있습니다 - KSCENE_IMAGES_PAGES_PROJECT·CLOUDFLARE_* 를 확인하세요");
     process.exitCode = 1;

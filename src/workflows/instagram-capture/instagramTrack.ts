@@ -20,9 +20,9 @@ import type { InstagramQueueEntry } from "./types.js";
 // 쓰고, 발행 버튼 없이 뷰어 복붙. 알림 봇·뷰어는 **사회**다(trackOfJob이 living/tech를 social로 해석 - 2026-10-19 사용자 결정).
 // person(2026-10-19 추가)은 인물 백과 트랙 그대로다: category=person만 주면 소스팩 폴러(job:person-pack)·person 리서처·
 // 메인봇 알림·엔터 뷰어·복붙 발행이 핫스타 ✍️ 인물글 버튼과 동일하게 흐른다(metadata.track 없음 = 엔터).
-// global(🌏 국제, 2026-10-29 사용자 지시 "국제를 누르면 블로그스팟용 영문 원고")은 **사용설명서(kscene) 트랙 재사용**이다:
+// global(🌏 국제, 2026-10-29 사용자 지시 "국제를 누르면 블로그스팟용 영문 원고")은 **사용설명서(koreaplain) 트랙 재사용**이다:
 // 새 트랙·새 봇 없이 category="kscene" + metadata.track="kscene"으로 job을 만들면 kscene-topic Go 버튼이 만든 job과 같은
-// 길(한글 초안 → kscene 봇 "✅ 한글 승인 → 영어본" → job-translate → Blogspot 🔵 발행)을 탄다. 내부 이름만 global이다.
+// 길(한글 초안 → koreaplain 봇 "✅ 한글 승인 → 영어본" → job-translate → Blogspot 🔵 발행)을 탄다. 내부 이름만 global이다.
 export type InstagramTrack = "entertainment" | "social" | "living" | "tech" | "person" | "global";
 
 /** 변환기(종합 키워드 입력 툴)가 만든 job의 metadata.source 값. 조사 프롬프트가 "한글 입력일 수 있다"를 판단하는 근거다. */
@@ -46,13 +46,13 @@ export function isInputOnlyTrack(track: unknown): track is "living" | "tech" {
 export function jobMetadataForTrack(track: InstagramTrack | undefined): Record<string, unknown> {
   if (isInputOnlyTrack(track)) return { track };
   if (track === "person") return {}; // 인물 백과 선례: metadata.track 없음(엔터 기본), category=person이 전부를 가른다.
-  if (track === "global") return trackJobMetadata("kscene"); // 국제 = 사용설명서 봇·뷰어·Blogspot(telegramTracks의 kscene Go와 같은 모양).
+  if (track === "global") return trackJobMetadata("kscene"); // 국제 = 사용설명서 봇·뷰어·Blogspot(telegramTracks의 koreaplain Go와 같은 모양).
   return trackJobMetadata(track ?? "entertainment");
 }
 
 /**
- * 트랙이 정하는 article_jobs.category. 일상=living(기존 카테고리 재사용), 테크=tech, 인물=person, 국제=kscene(문체 kscene.md·
- * 조사 kscene 분기·Blogger 라벨 판정이 category를 본다). 그 외는 null(호출자가 쓰던 값 유지).
+ * 트랙이 정하는 article_jobs.category. 일상=living(기존 카테고리 재사용), 테크=tech, 인물=person, 국제=kscene(문체 koreaplain.md·
+ * 조사 koreaplain 분기·Blogger 라벨 판정이 category를 본다). 그 외는 null(호출자가 쓰던 값 유지).
  */
 export function categoryForTrack(track: InstagramTrack | undefined): "living" | "tech" | "person" | "kscene" | null {
   return track === "living" ? "living" : track === "tech" ? "tech" : track === "person" ? "person" : track === "global" ? "kscene" : null;

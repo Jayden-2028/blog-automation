@@ -16,7 +16,7 @@
 // 적용한 글은 job.metadata.tkmStructure에 언제·무엇을 남긴다(발행 기록 publications의 URL로 job을 찾는다).
 
 import { appendFileSync } from "node:fs";
-import { KSCENE_BLOGGER_BLOG_ID, KSCENE_LEGACY_HOSTS, KSCENE_PUBLIC_ORIGIN, rewriteTkmLegacyUrls } from "../../config/publishTargets.js";
+import { KOREAPLAIN_BLOGGER_BLOG_ID, KOREAPLAIN_LEGACY_HOSTS, KOREAPLAIN_PUBLIC_ORIGIN, rewriteTkmLegacyUrls } from "../../config/publishTargets.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
 import type { BloggerListedPost } from "../../services/publish/blogger/BloggerClient.js";
@@ -49,7 +49,7 @@ function parseArgs(argv: string[]): Args {
 type JobRef = { jobId: string; searchDescription: string | null };
 
 /** 이 블로그의 호스트들(공개 주소 + 옛 blogspot). 발행 기록이 어느 쪽 주소로 남아 있든 찾는다. */
-const TKM_HOSTS = [new URL(KSCENE_PUBLIC_ORIGIN).host, ...KSCENE_LEGACY_HOSTS];
+const TKM_HOSTS = [new URL(KOREAPLAIN_PUBLIC_ORIGIN).host, ...KOREAPLAIN_LEGACY_HOSTS];
 
 /** 공개 URL -> job·영어 검색 설명(읽기 전용). publications에 이 블로그 주소로 남은 발행 기록만 본다. */
 async function loadJobRefs(): Promise<Map<string, JobRef>> {
@@ -104,8 +104,8 @@ function countH2(html: string): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (!KSCENE_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
-  const client = new BloggerClient({ blogId: KSCENE_BLOGGER_BLOG_ID });
+  if (!KOREAPLAIN_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
+  const client = new BloggerClient({ blogId: KOREAPLAIN_BLOGGER_BLOG_ID });
   const site = bloggerTkmSiteDeps(client);
 
   const listed = await client.listLivePosts({ fetchBodies: true });
@@ -210,7 +210,7 @@ async function main(): Promise<void> {
           relatedLinks: result.relatedLinks,
           jsonLd: withJsonLd ? kept.jsonLd : false,
           allGuidesUrl: page.url,
-          ...(args.rewriteHost ? { hostRewrittenTo: KSCENE_PUBLIC_ORIGIN, hostRewrites: rewritten.count } : {}),
+          ...(args.rewriteHost ? { hostRewrittenTo: KOREAPLAIN_PUBLIC_ORIGIN, hostRewrites: rewritten.count } : {}),
         },
       }).catch((error) => failures.push(`${row.path} - 갱신 기록 실패: ${error instanceof Error ? error.message : String(error)}`));
     } else {
@@ -226,7 +226,7 @@ async function main(): Promise<void> {
       `| ${row.path} | ${row.h2Before}→${row.h2After} | ${row.upgraded} | ${row.links} | ${row.jsonLd ? "Y" : "-"} | ${row.hostRewrites} | ${row.legacyLeft} | ${row.changed ? "Y" : "-"} | ${row.textOk ? "OK" : "DIFF"} | ${row.status} |`
   );
   const totals = [
-    `모드: ${args.apply ? "apply" : "dry-run"}${args.only ? ` (only=${args.only})` : ""}${args.jsonld ? " + jsonld" : ""}${args.rewriteHost ? ` + rewrite-host(→ ${KSCENE_PUBLIC_ORIGIN})` : ""}`,
+    `모드: ${args.apply ? "apply" : "dry-run"}${args.only ? ` (only=${args.only})` : ""}${args.jsonld ? " + jsonld" : ""}${args.rewriteHost ? ` + rewrite-host(→ ${KOREAPLAIN_PUBLIC_ORIGIN})` : ""}`,
     `대상 ${rows.length}편 · 변경 ${rows.filter((row) => row.changed).length} · 글자 불일치 ${rows.filter((row) => !row.textOk).length}`,
     `h2 변환 합계 ${rows.reduce((sum, row) => sum + row.upgraded, 0)} · 링크 합계 ${rows.reduce((sum, row) => sum + row.links, 0)} · 최소 h2 ${Math.min(...rows.map((row) => row.h2After))} · 최소 링크 ${Math.min(...rows.map((row) => row.links))}`,
     `All Guides: ${page.action} ${page.url ?? ""}`,

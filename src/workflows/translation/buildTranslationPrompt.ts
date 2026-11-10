@@ -1,7 +1,7 @@
 // 한→영 번역 프롬프트 조립(개편3 §4.3-2).
 //
 // 두 층이다:
-//   1) 번역·현지화 **지침**(문체·로마자 표기·독자 가정) - `prompts/translation/kscene-ko-en.md`. 기획 세션(⑤)이 설계한
+//   1) 번역·현지화 **지침**(문체·로마자 표기·독자 가정) - `prompts/translation/koreaplain-ko-en.md`. 기획 세션(⑤)이 설계한
 //      본문으로 통째로 교체할 수 있다. 코드는 이 파일의 내용만 읽어 넣는다.
 //   2) **계약**(출력 구분자·이미지 마커 보존·링크 보존·한글 대역 요약) - 이 파일이 덧붙인다. 지침을 교체해도 파이프라인이
 //      기대하는 형식은 깨지지 않는다(parseTranslationOutput.ts가 같은 계약을 검증한다).
@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
 
 /** 번역·현지화 지침 파일(저장소 루트 기준). 교체 지점이다. */
-export const TRANSLATION_GUIDE_PATH = "prompts/translation/kscene-ko-en.md";
+export const TRANSLATION_GUIDE_PATH = "prompts/translation/koreaplain-ko-en.md";
 
 export type BuildTranslationPromptInput = {
   keyword: string;

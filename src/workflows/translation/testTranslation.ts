@@ -2,7 +2,7 @@
 import { buildTranslationPrompt } from "./buildTranslationPrompt.js";
 import { buildEnglishReviewMessages, buildTranslationFailedMessage } from "./notifyEnglishReview.js";
 import { imageMarkerDescriptions, parseTranslationOutput, splitSections, strayHangulCount, validateTranslation } from "./parseTranslationOutput.js";
-import { ksceneStageOf, runTranslateJob } from "./runTranslateJob.js";
+import { koreaplainStageOf, runTranslateJob } from "./runTranslateJob.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
 
 function assert(c: unknown, m: string): asserts c {
@@ -244,11 +244,11 @@ async function main(): Promise<void> {
   const skip = async (job: ArticleJobRow | null, feedback?: string) =>
     runTranslateJob(JOB_ID, { ...harness(job ?? makeJob(), [output(EN_BODY)]).options, loadJob: async () => job, feedback });
   assert((await skip(null)).status === "skipped", "job 없음");
-  assert((await skip(makeJob({}, { track: "social" }))).status === "skipped", "kscene 트랙이 아니면 건너뜀");
+  assert((await skip(makeJob({}, { track: "social" }))).status === "skipped", "koreaplain 트랙이 아니면 건너뜀");
   assert((await skip(makeJob({ status: "approved" }))).status === "skipped", "이미 승인된 job은 건너뜀(승인 후 번역으로 덮지 않는다)");
   assert((await skip(makeJob({}, { ksceneStage: undefined }))).status === "skipped", "한글 승인 전(stage 없음)은 건너뜀");
   assert((await skip(makeJob({}, { ksceneStage: "english_review" }))).status === "skipped", "수정 요청 없이 영어본을 다시 만들지 않는다");
-  assert(ksceneStageOf(makeJob({}, { ksceneStage: "english_review" })) === "english_review" && ksceneStageOf(makeJob({}, { ksceneStage: "x" })) === null, "stage 읽기");
+  assert(koreaplainStageOf(makeJob({}, { ksceneStage: "english_review" })) === "english_review" && koreaplainStageOf(makeJob({}, { ksceneStage: "x" })) === null, "stage 읽기");
   console.log("  ✅ 건너뜀 조건");
 
   // ---- 수정 요청 재번역 ----

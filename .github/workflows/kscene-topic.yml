@@ -1,3 +1,4 @@
+# 파일 이름은 옛 코드명 그대로다(Worker가 파일 이름으로 깨운다 - schedule.ts·wrangler.toml과 묶여 있다).
 # 사용설명서 트랙(Korea Plain) 주제 제안. KST 21:00에 Worker cron(UTC 12시 슬롯, watchdog과 동시)이 깨운다(개편3 §4.2).
 # 구글 영문 자동완성으로 에버그린 주제를 뽑아 사용설명서 봇(@KoreanManualBot)에 Go/Pass로 보낸다.
 # 트리거는 workflow_dispatch뿐이다 - schedule은 쓰지 않는다(다른 수집 워크플로와 같은 이유, social-issue-keyword.yml 메모).

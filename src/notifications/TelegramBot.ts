@@ -56,11 +56,12 @@ import { ACQUISITION_LABEL } from "../workflows/images/imageEditRequest.js";
 import { publishArticleToBlogspot } from "../workflows/publish/publishArticleToBlogspot.js";
 import type { PublishArticleToBlogspotResult } from "../workflows/publish/publishArticleToBlogspot.js";
 import { WRITE_TIMEOUT_MS } from "../workflows/writing/runArticleJob.js";
-import { isTranslationInProgress, ksceneStageOf } from "../workflows/translation/ksceneStage.js";
+import { isTranslationInProgress, koreaplainStageOf } from "../workflows/translation/koreaplainStage.js";
 import type { CreateArticleJobResult } from "../repositories/ArticleJobRepository.js";
 import type { ArticleReviewAction } from "./articleReviewCallbackData.js";
 import type { ResearchDecisionAction } from "./researchDecisionCallbackData.js";
 import type { ArticleJobRow, ArticleJobStatus, ArticleRow, ArticleStatus, KeywordRankingRow } from "../types/database.js";
+import { KOREAPLAIN_TRACK } from "../config/koreaplainTrack.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 
@@ -879,9 +880,9 @@ export class TelegramBot {
     // 사용설명서 트랙(개편3): 한글 원고 ✅는 **최종 승인이 아니다** - 영어본을 만들어 한 번 더 승인받는다
     // (RESTRUCTURE-PLAN-2026-10.md §4.3 "한글 승인 -> 영어본 생성 -> 영어본+한글 대역 요약 재승인 -> 발행").
     // 영어본 단계(english_review)의 ✅만 아래 공통 승인 경로를 탄다.
-    const isKscene = trackOfJob(job) === "kscene";
-    const ksceneStage = ksceneStageOf(job);
-    if (parsed.action === "confirm" && isKscene && ksceneStage !== "english_review") {
+    const isKoreaplain = trackOfJob(job) === KOREAPLAIN_TRACK;
+    const ksceneStage = koreaplainStageOf(job);
+    if (parsed.action === "confirm" && isKoreaplain && ksceneStage !== "english_review") {
       if (isTranslationInProgress(job)) {
         return {
           outcome: { status: "already_reviewed", action: "confirm", job },
@@ -919,7 +920,7 @@ export class TelegramBot {
     await this.mergeJobMetadata(job.id, {
       reviewDecision: "confirmed",
       reviewedAt: timestamp,
-      ...(isKscene ? { englishApprovedAt: timestamp } : {}),
+      ...(isKoreaplain ? { englishApprovedAt: timestamp } : {}),
       ...(wasMedical
         ? { requiresMedicalReview: false, medicalReviewDecision: "confirmed", medicalReviewedAt: timestamp }
         : {}),
@@ -940,7 +941,7 @@ export class TelegramBot {
 
     return {
       outcome: { status: "reviewed", action: "confirm", job: updated },
-      message: isKscene
+      message: isKoreaplain
         ? `✅ <b>영어본 승인됨</b>\n${escapeTelegramHtml(job.keyword)}\n\n이미지를 준비한 뒤 🔵 Blogger 발행 버튼을 보내드립니다.`
         : `✅ <b>승인됨</b>\n${escapeTelegramHtml(job.keyword)}` +
           (wasMedical ? "\n의학 정보 교차확인도 함께 완료됐습니다." : ""),
@@ -979,14 +980,14 @@ export class TelegramBot {
 
     // 사용설명서 트랙의 영어본 재승인 단계에서 온 수정 요청은 **한글 원고를 다시 쓰지 않고** 영어본만 다시 만든다
     // (사실의 기준은 한글 원고 그대로). 한글 검수 단계의 수정 요청은 기존처럼 재작성(job:revise)이다.
-    if (trackOfJob(job) === "kscene" && isAutoApproved(job) && ksceneStageOf(job) === "translating") {
+    if (trackOfJob(job) === KOREAPLAIN_TRACK && isAutoApproved(job) && koreaplainStageOf(job) === "translating") {
       // 통합 흐름에서 영어본 수정이 이미 돌고 있다 - 한글 재작성(job:revise)으로 새지 않게 막는다.
       return {
         outcome: { status: "ignored", reason: "no_matching_job" },
         message: `⏳ 영어본을 수정하는 중입니다.\n${escapeTelegramHtml(job.keyword)}\n\n완료된 뒤 새 알림에서 다시 요청해 주세요.`,
       };
     }
-    if (trackOfJob(job) === "kscene" && ksceneStageOf(job) === "english_review") {
+    if (trackOfJob(job) === KOREAPLAIN_TRACK && koreaplainStageOf(job) === "english_review") {
       // 영어본 재생성이 실패해도 "다시 만들기"가 이 수정 방향을 잃지 않게 남겨 둔다(성공하면 번역 단계가 지운다).
       await this.mergeJobMetadata(job.id, { translationFeedback: feedback });
       this.triggerTranslation(job.id, feedback);

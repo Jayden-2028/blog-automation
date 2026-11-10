@@ -13,7 +13,7 @@
 // 바꿀 게 없는 글·페이지는 건너뛴다(멱등). DB는 읽지도 쓰지도 않는다.
 
 import { appendFileSync } from "node:fs";
-import { KSCENE_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
+import { KOREAPLAIN_BLOGGER_BLOG_ID } from "../../config/publishTargets.js";
 import { BloggerClient } from "../../services/publish/blogger/BloggerClient.js";
 import { TKM_BRAND_NAME } from "./tkmPostStructure.js";
 import { countFormerName, rebrandTkmHtml } from "./tkmRebrand.js";
@@ -51,8 +51,8 @@ function storedJsonLdNames(html: string): string[] {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  if (!KSCENE_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
-  const client = new BloggerClient({ blogId: KSCENE_BLOGGER_BLOG_ID });
+  if (!KOREAPLAIN_BLOGGER_BLOG_ID) throw new Error("KSCENE_BLOGGER_BLOG_ID가 없습니다");
+  const client = new BloggerClient({ blogId: KOREAPLAIN_BLOGGER_BLOG_ID });
 
   const items: Item[] = [];
   if (args.target !== "pages") {

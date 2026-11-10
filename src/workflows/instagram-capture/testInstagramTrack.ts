@@ -45,14 +45,14 @@ const amb = resolveTrackReply([a, b], { text: "엔터", replyToMessageId: null }
 assert(amb.status === "ambiguous" && amb.candidates.length === 2, "여럿인데 대상 불명이면 ambiguous(다시 묻는다)");
 console.log("✅ 답 붙이기 - 단일/답장 대상/모호");
 
-// 5) 🌏 국제(2026-10-29) - 사용설명서(kscene) 재사용. 새 트랙·새 봇 없음.
+// 5) 🌏 국제(2026-10-29) - 사용설명서(koreaplain) 재사용. 새 트랙·새 봇 없음.
 for (const w of ["국제", "글로벌", "영문", "영어", "블로그스팟", "blogspot", "global", "GLOBAL", "kscene", " 국제. "]) {
   assert(trackFromWord(w) === "global", `국제 단어: ${w}`);
 }
 assert(trackFromWord("국제결혼") === null && trackFromWord("영어회화") === null && trackFromWord("국제 정세") === null, "합성어·구는 트랙 단어가 아니다");
 assert(JSON.stringify(splitTrackWord("국제 https://www.instagram.com/p/X/ 캡션")) === JSON.stringify({ track: "global", caption: "https://www.instagram.com/p/X/ 캡션" }), "링크와 같은 메시지의 국제");
 assert(JSON.stringify(splitTrackWord("남산 케이블카 타는 법 국제")) === JSON.stringify({ track: "global", caption: "남산 케이블카 타는 법" }), "뒤 토큰 국제");
-assert(TRACK_LABEL.global === "🌏 국제" && isInstagramTrack("global") && !isInstagramTrack("kscene"), "라벨·트랙 판정(kscene은 내부 트랙 이름이 아니라 job 모양)");
+assert(TRACK_LABEL.global === "🌏 국제" && isInstagramTrack("global") && !isInstagramTrack("kscene"), "라벨·트랙 판정(koreaplain은 내부 트랙 이름이 아니라 job 모양)");
 assert(categoryForTrack("global") === "kscene", "국제 → category=kscene");
 assert(JSON.stringify(jobMetadataForTrack("global")) === JSON.stringify({ track: "kscene" }), "국제 → metadata.track=kscene");
 assert(JSON.stringify(jobMetadataForTrack("global")) === JSON.stringify(trackJobMetadata("kscene")), "kscene-topic Go 버튼(trackJobMetadata)과 같은 모양");

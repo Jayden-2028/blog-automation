@@ -61,9 +61,9 @@ function main(): void {
   assert(!noClaims.text.includes("확인되지 않은 통설"), "통설이 없으면 블록도 없어야 한다");
   console.log("✅ 통설 없음 -> 경고 블록 생략");
 
-  // 로컬 재료 0(2026-10-30) - kscene에서 §12가 비면 검수 카드에 한 줄 띄운다. verdict는 그대로다.
-  const ksceneEmpty = "---\nkeyword: korea food waste\ntopic: kscene\nlocal_practice_rows: 0\nverdict: ok\n---\n## 1. 요약\n절차 확인됨.";
-  const warned = summarizeResearchFile(ksceneEmpty, "kscene");
+  // 로컬 재료 0(2026-10-30) - koreaplain에서 §12가 비면 검수 카드에 한 줄 띄운다. verdict는 그대로다.
+  const koreaplainEmpty = "---\nkeyword: korea food waste\ntopic: kscene\nlocal_practice_rows: 0\nverdict: ok\n---\n## 1. 요약\n절차 확인됨.";
+  const warned = summarizeResearchFile(koreaplainEmpty, "kscene");
   assert(warned.text.includes("로컬 재료 0"), `로컬 재료 0 줄 없음 (${warned.text})`);
   assert(warned.verdict === "ok", "로컬 재료 0이 verdict를 바꾸면 안 된다");
 
@@ -77,8 +77,8 @@ function main(): void {
   const otherTrack = summarizeResearchFile("---\nkeyword: k\ntopic: 영유아 수면\nverdict: ok\n---\n## 1. 요약\n내용", "parenting");
   assert(!otherTrack.text.includes("로컬 재료 0"), "다른 트랙에 로컬 재료 경고가 떴다");
   // category를 안 넘기면 frontmatter topic으로 판정한다(폴백).
-  assert(summarizeResearchFile(ksceneEmpty).text.includes("로컬 재료 0"), "topic 폴백 판정 실패");
-  console.log("✅ kscene 로컬 재료 0 표시(verdict 불변 · 다른 트랙 불변)");
+  assert(summarizeResearchFile(koreaplainEmpty).text.includes("로컬 재료 0"), "topic 폴백 판정 실패");
+  console.log("✅ koreaplain 로컬 재료 0 표시(verdict 불변 · 다른 트랙 불변)");
 
   console.log("\n✅ summarizeResearchFile 테스트 완료");
 }

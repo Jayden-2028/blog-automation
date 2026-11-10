@@ -14,7 +14,7 @@ name: keyword-collection-watchdog
 
 # 2026-10-06 개편3: GitHub 네이티브 schedule을 걷어냈다(10/5 미발화 전력 - 다른 수집 워크플로와 같은 이유).
 # 이제 Cloudflare Worker의 12 UTC(21:00 KST) 슬롯이 kscene-topic.yml과 함께 이 워크플로를 workflow_dispatch로
-# 깨운다(cloudflare/telegram-relay/src/schedule.ts). 같은 시각에 도는 kscene 수집 결과는 기다리지 않고
+# 깨운다(cloudflare/telegram-relay/src/schedule.ts). 같은 시각에 도는 koreaplain 수집 결과는 기다리지 않고
 # **전날** 수집을 확인한다(src/jobs/watchdogJob.ts WATCHED_JOBS의 dayOffset).
 # 수집일은 KST 05:00에 바뀐다(collectionDayString) - 발화가 몇 시간 밀려도 같은 수집일로 본다.
 on:

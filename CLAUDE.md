@@ -78,7 +78,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다** -
     `BLOGGER_BLOG_ID`로 폴백하지 않는다). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
     자동 승인 → 이미지가 포함된 영어본 → 통합 알림(발행/수정/반려)**이고(2026-10-12부터 영어본 단독 재승인 폐지, 게이트 꺼짐이면 옛 영어본 재승인 ✅ 복귀), 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
-    (`docs/ai-handoff/RESTRUCTURE_3_KSCENE_TRACK.md`).
+    (`docs/ai-handoff/RESTRUCTURE_3_KOREAPLAIN_TRACK.md`).
   - 티스토리(`wooahpapa.tistory.com` - "핫이슈 설명서", 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
     Playwright(TinyMCE)로 **임시저장**한다(2026-11-05부터 - 아래 `TISTORY_PUBLISH_MODE`). 로그인 풀림은
@@ -123,7 +123,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   승인(`metadata.autoApprovedAt`) + `job-publish-prepare` 즉시 발화 → 이미지 반영 원고 → 통합 알림 한 번(발행/수정/반려)**이다.
   옛 "원고 완료 알림(Telegraph 미리보기 + ✅/✏️/🗑)"은 폐지했다(Telegraph 서비스는 호출만 뺐다). 게이트
   **`PIPELINE_SKIP_DRAFT_REVIEW`**(미설정·빈 값 = 켜짐, `false`면 옛 2단계 흐름 복귀 - 승인 없이 바꾸지 않는다. 워크플로 repo
-  variable, `job-write.yml`·`job-revise.yml`). 사용설명서(kscene) 트랙은 **한글 초안 ✅는 남기고**(게이트 무관) 그 뒤 영어본 단독 재승인만 같은 게이트로 뺀다(2026-10-12): 한글 ✅ → 영어본 → 자동 승인(`autoApprovedAt`) → 이미지 포함 영어본의 통합 알림. 영어본 ✏️ 수정은 `job-translate`가 영어본만 다시 만들고 이미지는 마커 diff로 유지한다(`job-translate.yml`도 같은 게이트 변수).
+  variable, `job-write.yml`·`job-revise.yml`). 사용설명서(koreaplain) 트랙은 **한글 초안 ✅는 남기고**(게이트 무관) 그 뒤 영어본 단독 재승인만 같은 게이트로 뺀다(2026-10-12): 한글 ✅ → 영어본 → 자동 승인(`autoApprovedAt`) → 이미지 포함 영어본의 통합 알림. 영어본 ✏️ 수정은 `job-translate`가 영어본만 다시 만들고 이미지는 마커 diff로 유지한다(`job-translate.yml`도 같은 게이트 변수).
   `review` 상태로 남은 옛 job은 옛 ✅/✏️/🗑으로 소진한다. 게이트·구흐름 제거는 1~2주 안정 확인 뒤 별도 커밋.
 - **원고 준비**: write가 끝나면 자동 승인되어(옛 흐름에서는 텔레그램 초안 ✅ 뒤에) `prepareApprovedManuscripts()`가 작성 단계 원고
   (platform=null article)를 **그대로 최종 원고로** 삼아 `manuscripts/<날짜>/<주제>.md`에 저장하고,
@@ -302,10 +302,10 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
     장치는 남아 있다: `TISTORY_PUBLISH_DAILY_LIMIT=1`이면 되살아난다(KST 자정 기준, 기본값 0=상한 없음).
     대신 **하루 1회 발행본을 읽어 DB에 적립한다**(`npm run tistory:inventory`, analytics-search.yml 동승) -
     무엇이 언제 올라갔는지는 거기서 본다. **최소 발행 간격 5분 가드는 그대로다**(캡차·저품질 패턴 방어).
-- **사용설명서(kscene) 주제 선정은 체류 실용 정보를 문화 소개와 동등하게 우선한다**(§C). 시드는 117개
+- **사용설명서(koreaplain) 주제 선정은 체류 실용 정보를 문화 소개와 동등하게 우선한다**(§C). 시드는 117개
   (기획⑤ 확정본 100 + 실용 17, Living in Korea 32 / Travel & Transit 25 / 나머지 20)이고, 선정에
   라벨 상한과 짝이 되는 **실용 하한**(`practicalFloor`, topN=8이면 3건)이 있다. 실용 후보가 적은 날은
-  있는 만큼만 뽑는다. 이 트랙의 주제 선정에는 LLM 프롬프트가 없다 - 기준은 `ksceneTopics.ts`의 규칙이다.
+  있는 만큼만 뽑는다. 이 트랙의 주제 선정에는 LLM 프롬프트가 없다 - 기준은 `koreaplainTopics.ts`의 규칙이다.
 
 ## 측정·분석 운영 규칙 (2026-10-08)
 

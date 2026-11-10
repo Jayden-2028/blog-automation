@@ -11,7 +11,7 @@ Blogger API v3에는 테마 편집·레이아웃 위젯·글별 검색 설명 �
 |---|---|
 | 소제목 `<h2>` | 38편 전부 h2 6~10개(옛 굵은 소제목 265개 변환). 신규 글은 변환기가 h2로 낸다 |
 | 내부 링크 | 글마다 "Related Guides" 블록 - 비슷한 글 3 + 이전 글 1 + All Guides 1(가장 오래된 1편은 4개) |
-| All Guides 허브 | https://thekoreamanual.blogspot.com/p/all-guides.html - 라벨별·최신순·발행일, 38편. **kscene 공개 발행 직후 자동 재생성** |
+| All Guides 허브 | https://thekoreamanual.blogspot.com/p/all-guides.html - 라벨별·최신순·발행일, 38편. **koreaplain 공개 발행 직후 자동 재생성** |
 | JSON-LD | **본문 `<script type="application/ld+json">`(BlogPosting)를 Blogger가 보존한다** - 1편 실험 후 38편 적용, 38/38 공개 페이지에서 확인. 테마 쪽 JSON-LD 패치는 **필요 없다** |
 | "관련 글" 위젯 | 본문 블록으로 대체돼 **필요 없다** |
 

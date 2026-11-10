@@ -1,8 +1,8 @@
-# 한→영 번역·현지화 지침 — Korea Plain (kscene)
+# 한→영 번역·현지화 지침 — Korea Plain (koreaplain)
 
 > 매체명: **Korea Plain**(태그라인 "Korea, in plain English", 2026-10-28 리브랜딩 - 구 이름 The Korea Manual).
 
-> ✅ **기획 세션(⑤) 확정본** (2026-10-06). `prompts/translation/kscene-ko-en.md`를 이 파일로 통째로 교체한다.
+> ✅ **기획 세션(⑤) 확정본** (2026-10-06). `prompts/translation/koreaplain-ko-en.md`를 이 파일로 통째로 교체한다.
 > 코드(`workflows/translation/buildTranslationPrompt.ts`)는 이 파일을 "번역 지침" 블록으로 읽어 넣고,
 > 출력 형식·마커 보존·검증 계약은 **코드가 따로 덧붙인다** — 이 파일에는 문체·현지화 규칙만 둔다.
 > 출력 구분자나 마커 규칙을 여기에 쓰지 않는다.

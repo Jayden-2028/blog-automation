@@ -96,8 +96,8 @@ export function evaluateWatchdog(
  * 단계이고 알림 전용이라, 안 돌아도 운영 산출물이 비지 않는다. kind가 달라 엔터 저녁 판정에 섞이지도 않는다.
  * 대신 조용히 실패하면 아무도 모른다는 점이 남는다 - 실험이 끝나 상시 운영으로 올릴 때 여기에 추가한다.
  *
- * 2026-10-06 개편3: 사용설명서(kscene_topic, 21시)를 추가했다. watchdog이 Worker 12 UTC 슬롯에서 kscene 수집과
- * **같은 시각에** 깨어나므로 오늘 수집일의 kscene run은 아직 없다 - `dayOffset: -1`로 **전날 수집일 이후**의
+ * 2026-10-06 개편3: 사용설명서(kscene_topic, 21시)를 추가했다. watchdog이 Worker 12 UTC 슬롯에서 koreaplain 수집과
+ * **같은 시각에** 깨어나므로 오늘 수집일의 koreaplain run은 아직 없다 - `dayOffset: -1`로 **전날 수집일 이후**의
  * 완료 run을 요구한다(하루 늦게 잡히는 대신 거짓 경보가 없다). 도입 첫날은 전날 run이 없어 한 번 경보가 날 수
  * 있다(알려진 한계).
  *

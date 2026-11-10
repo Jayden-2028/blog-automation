@@ -2,7 +2,7 @@
 //
 // 시의성 소스(실검·뉴스)가 아니라 해외 독자의 **검색 수요**에서 에버그린 주제를 뽑는다. 시드를 구글 영문
 // 자동완성에 넣어 롱테일 질의("how to use t-money card in korea")를 얻고, 그중 아직 쓰지 않은 것을 21:00에
-// 제안한다(workflows/kscene/runKsceneTopicCollection.ts).
+// 제안한다(workflows/koreaplain/runKoreaplainTopicCollection.ts).
 //
 // ✅ 기획 세션(⑤) **확정본 100개**(라벨당 20, 2026-10-08 반영 - 임시본 60개 전량 유지 + 40개 추가,
 // `branding-2026-10/kscene-seeds.md` 스냅샷). 추가 후보가 생기면 그 문서가 아니라 이 배열에 직접 누적한다.
@@ -21,7 +21,7 @@
 // 📌 **2026-10-30 로컬 우위 축**(branding-2026-10/kp-native-identity-2026-10.md §C-3): 사이트 43편의 86%가 외국인
 // 저자 블로그가 이미 포화시킨 주제라, 한국인은 알지만 외국인 가이드가 잘 못 쓰는 질의를 **47개 추가**했다(117 -> 164).
 // 개정안의 4~5단어 질의 50개는 자동완성이 37개나 비어서(롱테일이 너무 길다) 2~3단어로 줄여 실측으로 걸러 남겼다.
-// 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 ksceneTopics.ts의 LOCAL_EDGE_TERMS / SATURATED_TOURIST_TERMS가
+// 기존 시드는 하나도 지우지 않았다. 점수 쪽 가산·감점은 koreaplainTopics.ts의 LOCAL_EDGE_TERMS / SATURATED_TOURIST_TERMS가
 // 맡는다. 라벨 5개 이름은 그대로다(Blogger 라벨 URL·About·시드 매핑이 묶여 있다).
 //
 // 📌 **2026-11-09 시드 재설계**(운영 1개월 GSC 실측): 노출/일 1~5위가 전부 "최근 바뀌었고 + 정답이 하나로 떨어지고 + 영어 출처가
@@ -30,25 +30,25 @@
 // ③ 한국에만 있는 장치·제도 ④ 숫자 하나로 끝나는 비용·시간, 네 틀로 **77개를 추가**했다(164 -> 241). 후보 174개(빈 시드는 말을 바꿔
 // 다시 시도한 것 포함)를 자동완성에 넣어(autocompleteQueriesForSeed가 만드는 질의 그대로) **빈 시드 51개를 버렸고**, 사용 가능한
 // 후보가 3건 미만이거나 기존 시드·다른 신규 시드와 겹치는 것, 관광 포화 용어를 품은 것(hanbok rental price)도 뺐다 - 목록은 PR 본문.
-// 기존 시드는 하나도 지우지 않았다. 라벨 5개 이름은 그대로다. 점수 쪽은 ksceneTopics.ts의 OPERATIONAL_TERMS(+15) /
+// 기존 시드는 하나도 지우지 않았다. 라벨 5개 이름은 그대로다. 점수 쪽은 koreaplainTopics.ts의 OPERATIONAL_TERMS(+15) /
 // MEANING_SATURATED_TERMS(-10)가 맡는다.
 //
 // label은 Blogger 라벨(글 분류)로 쓴다 - CHANNEL-SETUP-2026-10.md B-2의 카테고리 체계와 같다.
 
-export const KSCENE_LABELS = [
+export const KOREAPLAIN_LABELS = [
   "Travel & Transit",
   "Food & Dining",
   "Culture & Etiquette",
   "Living in Korea",
   "K-Wave Context",
 ] as const;
-export type KsceneLabel = (typeof KSCENE_LABELS)[number];
+export type KoreaplainLabel = (typeof KOREAPLAIN_LABELS)[number];
 
-export type KsceneSeed = { query: string; label: KsceneLabel };
+export type KoreaplainSeed = { query: string; label: KoreaplainLabel };
 
-const seeds = (label: KsceneLabel, queries: readonly string[]): KsceneSeed[] => queries.map((query) => ({ query, label }));
+const seeds = (label: KoreaplainLabel, queries: readonly string[]): KoreaplainSeed[] => queries.map((query) => ({ query, label }));
 
-export const KSCENE_SEEDS: readonly KsceneSeed[] = [
+export const KOREAPLAIN_SEEDS: readonly KoreaplainSeed[] = [
   ...seeds("Travel & Transit", [
     "korea subway",
     "t-money card",
@@ -316,19 +316,20 @@ export const KSCENE_SEEDS: readonly KsceneSeed[] = [
 ];
 
 /** 시드 문구 -> 라벨. 자동완성 결과가 어느 시드에서 나왔는지로 글 라벨을 정한다. */
-export const KSCENE_LABEL_BY_SEED: Readonly<Record<string, KsceneLabel>> = Object.fromEntries(
-  KSCENE_SEEDS.map((seed) => [seed.query, seed.label])
+export const KOREAPLAIN_LABEL_BY_SEED: Readonly<Record<string, KoreaplainLabel>> = Object.fromEntries(
+  KOREAPLAIN_SEEDS.map((seed) => [seed.query, seed.label])
 );
 
 /** 라벨을 못 찾을 때(시드가 바뀐 옛 job 등)의 기본 라벨. */
-export const KSCENE_DEFAULT_LABEL: KsceneLabel = "Living in Korea";
+export const KOREAPLAIN_DEFAULT_LABEL: KoreaplainLabel = "Living in Korea";
 
 function intEnv(value: string | undefined, fallback: number): number {
   const parsed = value === undefined ? NaN : Number.parseInt(value, 10);
   return Number.isNaN(parsed) || parsed <= 0 ? fallback : parsed;
 }
 
-export const KSCENE_TOPIC_CONFIG = {
+export const KOREAPLAIN_TOPIC_CONFIG = {
+  // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   /** 한 번에 자동완성을 돌릴 시드 수. 날짜로 돌려 가며 고른다(전체가 며칠 안에 한 바퀴). */
   seedsPerRun: intEnv(process.env.KSCENE_SEEDS_PER_RUN, 20),
   /** 알림으로 제안할 주제 수(§4.2: 5~10건). */
@@ -339,8 +340,9 @@ export const KSCENE_TOPIC_CONFIG = {
   duplicateSimilarity: 0.6,
   /** 이미 제안했던 주제를 다시 제안하지 않는 기간(일). */
   proposalMemoryDays: 60,
+  // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   /**
-   * 레딧 보조 관찰(2026-10-28, ksceneTopics.ts 상단 C). 기본 꺼짐 - `KSCENE_REDDIT_ENABLED=true`일 때만 호출한다.
+   * 레딧 보조 관찰(2026-10-28, koreaplainTopics.ts 상단 C). 기본 꺼짐 - `KSCENE_REDDIT_ENABLED=true`일 때만 호출한다.
    * 레딧은 후보를 만들지 않고 자동완성 후보의 교차 신호로만 쓴다.
    */
   redditEnabled: process.env.KSCENE_REDDIT_ENABLED?.trim().toLowerCase() === "true",

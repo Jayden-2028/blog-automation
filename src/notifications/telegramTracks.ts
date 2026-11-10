@@ -1,6 +1,6 @@
 // 멀티봇 공통 레이어(RESTRUCTURE-PLAN-2026-10.md §3.1). 트랙(track) 하나가 텔레그램 봇 하나에 대응한다.
 // 파이프라인(수집→알림→research→write→승인)은 트랙과 무관하게 하나를 공유하고, "어느 봇으로 말하는가"만
-// 여기서 정한다. 사용설명서 트랙(kscene, 개편3)도 이 표에 이미 들어 있다 - 봇 C는 토큰·채팅 ID만 채우면 된다.
+// 여기서 정한다. 사용설명서 트랙(koreaplain, 개편3)도 이 표에 이미 들어 있다 - 봇 C는 토큰·채팅 ID만 채우면 된다.
 //
 // 트랙을 따라다니는 방법 두 가지:
 //   · 수신: Worker가 webhook 경로(/webhook/<track>)로 봇을 구분해 dispatch payload에 `track`을 싣는다.
@@ -22,6 +22,7 @@ type TrackEnvKeys = { botToken: string; chatId: string };
 export const TRACK_ENV_KEYS: Readonly<Record<Track, TrackEnvKeys>> = {
   entertainment: { botToken: "TELEGRAM_BOT_TOKEN", chatId: "TELEGRAM_CHAT_ID" },
   social: { botToken: "SOCIAL_TELEGRAM_BOT_TOKEN", chatId: "SOCIAL_TELEGRAM_CHAT_ID" },
+  // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   kscene: { botToken: "KSCENE_TELEGRAM_BOT_TOKEN", chatId: "KSCENE_TELEGRAM_CHAT_ID" },
 };
 
@@ -63,7 +64,7 @@ export type PublishChannel = "blogspot" | "naver" | "tistory";
 
 /**
  * 트랙별 발행 채널(개편2.5 B-2). 엔터=네이버, 사회=티스토리. Blogspot은 엔터·사회에서 쓰지 않는다
- * (콜백 처리 코드는 남아 있고 kscene 트랙의 K-Scene 블로그가 쓴다 - 개편3).
+ * (콜백 처리 코드는 남아 있고 koreaplain 트랙의 K-Scene 블로그가 쓴다 - 개편3).
  */
 export const TRACK_PUBLISH_CHANNELS: Readonly<Record<Track, readonly PublishChannel[]>> = {
   entertainment: ["naver"],

@@ -1,5 +1,5 @@
 // Korea Plain 맞춤 도메인 전환(2026-10-28) 순수 함수 테스트(네트워크·DB 없음). npm run test:tkm-cutover
-import { KSCENE_PUBLIC_ORIGIN, isTkmUrl, normalizeTkmUrl, rewriteTkmLegacyUrls, tkmUrlAliases } from "../../config/publishTargets.js";
+import { KOREAPLAIN_PUBLIC_ORIGIN, isTkmUrl, normalizeTkmUrl, rewriteTkmLegacyUrls, tkmUrlAliases } from "../../config/publishTargets.js";
 import { changedTopLevel, fieldOf, rewriteLegacyUrlsDeep } from "./tkmCutover.js";
 import { applyTkmStructure, buildAllGuidesHtml, buildJsonLdHtml, normalizePostUrl, pickTkmRelated, sameVisibleText } from "./tkmPostStructure.js";
 import type { TkmPost } from "./tkmPostStructure.js";
@@ -13,7 +13,7 @@ const OLD = "https://thekoreamanual.blogspot.com";
 
 // 1) 기본값·호스트 교체
 {
-  assert(KSCENE_PUBLIC_ORIGIN === NEW, `기본 공개 주소 (${KSCENE_PUBLIC_ORIGIN})`);
+  assert(KOREAPLAIN_PUBLIC_ORIGIN === NEW, `기본 공개 주소 (${KOREAPLAIN_PUBLIC_ORIGIN})`);
   assert(normalizeTkmUrl(`${OLD}/2026/10/a.html?m=1#x`) === `${NEW}/2026/10/a.html?m=1#x`, "경로·쿼리·해시 보존");
   assert(normalizeTkmUrl("http://thekoreamanual.blogspot.com/p/about.html") === `${NEW}/p/about.html`, "http 옛 주소도");
   assert(normalizeTkmUrl("http://www.koreaplain.com/x.html") === `${NEW}/x.html`, "http 새 주소는 https로");

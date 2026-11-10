@@ -328,7 +328,7 @@ async function main(): Promise<void> {
     let queueStatusAtNotify: string | null = null;
     await quietError(() =>
       enqueueAndMaybeDispatch(
-        { jobId: "kscene-job", workflowFile: "job-research.yml" },
+        { jobId: "koreaplain-job", workflowFile: "job-research.yml" },
         {
           supabaseClient: db,
           dispatchToGithub: async () => {
@@ -344,7 +344,7 @@ async function main(): Promise<void> {
     );
     const noticeCount = notices.length;
     assert(noticeCount === 1, `디스패치 실패는 정확히 한 번 알려야 한다 (실제: ${noticeCount}회)`);
-    assert(notices[0]!.jobId === "kscene-job", "알림에 jobId가 담겨야 한다");
+    assert(notices[0]!.jobId === "koreaplain-job", "알림에 jobId가 담겨야 한다");
     assert(notices[0]!.workflowFile === "job-research.yml", "어느 단계인지 담겨야 한다");
     assert(notices[0]!.error.includes("500 Internal Server Error"), `실제 실패 메시지가 담겨야 한다: ${notices[0]!.error}`);
     assert(notices[0]!.error === queue[0]!.error, "알림 사유와 큐 행에 적힌 사유가 같아야 한다");

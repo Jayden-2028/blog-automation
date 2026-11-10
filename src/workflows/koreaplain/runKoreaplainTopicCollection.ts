@@ -8,16 +8,16 @@
 // 실패로 끝낸다(watchdog이 전날분 run을 확인하므로 조용히 completed로 남기지 않는다).
 
 import {
-  KSCENE_LABEL_BY_SEED,
-  KSCENE_SEEDS,
-  KSCENE_TOPIC_CONFIG,
-  type KsceneLabel,
-  type KsceneSeed,
-} from "../../config/ksceneSeeds.js";
+  KOREAPLAIN_LABEL_BY_SEED,
+  KOREAPLAIN_SEEDS,
+  KOREAPLAIN_TOPIC_CONFIG,
+  type KoreaplainLabel,
+  type KoreaplainSeed,
+} from "../../config/koreaplainSeeds.js";
 import { fetchAutocompleteSuggestions } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
 import {
-  KSCENE_SUBREDDITS,
+  KOREAPLAIN_SUBREDDITS,
   RedditBlockedError,
   buildRedditNewUrl,
   buildRedditSearchUrl,
@@ -37,19 +37,20 @@ import {
   selectTopics,
   toRankedKeywords,
   type SuggestionObservation,
-} from "./ksceneTopics.js";
+} from "./koreaplainTopics.js";
 import type { SendKeywordNotificationResult } from "../../types/keywordNotification.js";
+import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
-export const KSCENE_JOB_KIND = "kscene_topic";
+export const KOREAPLAIN_JOB_KIND = "kscene_topic";
 
 /** 한국·K-컨텍스트 급상승어를 K-Wave Context 시드로 쓴다(영문 US 트렌드 RSS). */
 const TREND_KOREA_PATTERN = /\b(korea|korean|seoul|k-?pop|k-?drama|bts|blackpink|stray kids|newjeans|squid game|hallyu|kimchi|hanbok)\b/i;
 const MAX_TREND_SEEDS = 3;
 
-export type RunKsceneTopicCollectionOptions = {
+export type RunKoreaplainTopicCollectionOptions = {
   /** 오늘 날짜(일 단위 시드 회전 기준). 테스트 주입. */
   now?: Date;
-  seeds?: readonly KsceneSeed[];
+  seeds?: readonly KoreaplainSeed[];
   seedsPerRun?: number;
   topicsPerRun?: number;
   /** 요청 사이 대기(ms). 테스트에서는 0. */
@@ -57,11 +58,11 @@ export type RunKsceneTopicCollectionOptions = {
   dryRun?: boolean;
   /** 자동완성 조회. 테스트 주입. */
   fetchSuggestions?: (query: string) => Promise<string[]>;
-  /** 레딧 보조 관찰을 돌릴지. 생략하면 KSCENE_TOPIC_CONFIG.redditEnabled(KSCENE_REDDIT_ENABLED, 기본 꺼짐). */
+  /** 레딧 보조 관찰을 돌릴지. 생략하면 KOREAPLAIN_TOPIC_CONFIG.redditEnabled(KSCENE_REDDIT_ENABLED, 기본 꺼짐). */
   redditEnabled?: boolean;
   /** 레딧 URL 하나의 제목 목록. 테스트 주입. 403·429는 RedditBlockedError로 던진다. */
   fetchRedditTitles?: (url: string) => Promise<string[]>;
-  /** 레딧 요청 사이 대기(ms). 생략하면 KSCENE_TOPIC_CONFIG.redditDelayMs. 공개 RSS 모드에서는 61초 하한을 강제한다. */
+  /** 레딧 요청 사이 대기(ms). 생략하면 KOREAPLAIN_TOPIC_CONFIG.redditDelayMs. 공개 RSS 모드에서는 61초 하한을 강제한다. */
   redditDelayMs?: number;
   /** 레딧 OAuth 자격증명. 생략하면 env(REDDIT_CLIENT_ID/SECRET). null이면 공개 RSS 모드. 테스트 주입. */
   redditCredentials?: RedditCredentials | null;
@@ -75,7 +76,7 @@ export type RunKsceneTopicCollectionOptions = {
   log?: (line: string) => void;
 };
 
-export type RunKsceneTopicCollectionResult = {
+export type RunKoreaplainTopicCollectionResult = {
   status: "notified" | "dry_run" | "no_candidates" | "save_failed" | "notify_failed";
   runId: number | null;
   seedsUsed: string[];
@@ -124,15 +125,15 @@ async function defaultLoadExistingTopics(): Promise<string[]> {
   const topics: string[] = [];
   const jobs = await ArticleJobRepository.listRecent(500);
   for (const job of jobs) {
-    if (trackOfJob(job) === "kscene" && job.status !== "rejected") topics.push(job.keyword);
+    if (trackOfJob(job) === KOREAPLAIN_TRACK && job.status !== "rejected") topics.push(job.keyword);
   }
 
-  const cutoff = Date.now() - KSCENE_TOPIC_CONFIG.proposalMemoryDays * 24 * 60 * 60 * 1000;
-  // 하루 run이 4건(엔터 1·핫스타 1·사회 1·kscene 1, 2026-10-11 개편)이라 제안 기억 기간(60일)을 덮으려면
+  const cutoff = Date.now() - KOREAPLAIN_TOPIC_CONFIG.proposalMemoryDays * 24 * 60 * 60 * 1000;
+  // 하루 run이 4건(엔터 1·핫스타 1·사회 1·koreaplain 1, 2026-10-11 개편)이라 제안 기억 기간(60일)을 덮으려면
   // 240건 넘게 읽어야 한다(전에는 하루 5건 = 300건).
   const runs = await listRecentDiscoveryRuns(400);
   for (const run of runs) {
-    if (run.metadata?.kind !== KSCENE_JOB_KIND || Date.parse(run.started_at) < cutoff) continue;
+    if (run.metadata?.kind !== KOREAPLAIN_JOB_KIND || Date.parse(run.started_at) < cutoff) continue;
     const rankings = await listKeywordRankingsByRunId(run.id);
     topics.push(...rankings.map((row) => row.keyword));
   }
@@ -160,11 +161,11 @@ async function collectRedditTitles(
 ): Promise<{ titles: string[]; summary: RedditCollectionSummary }> {
   // OAuth(분당 100회): 묶음 new.json 1회 + 시드별 search.json. 공개 RSS(분당 1회): 서브레딧별 new.rss 3회만 -
   // 시드별 검색까지 하면 한 실행이 20분을 넘는다. 최근 글 300건 제목에 후보 토큰이 있는지로 뒷받침을 센다.
-  const urls = mode === "oauth" ? [buildRedditNewUrl(KSCENE_SUBREDDITS)] : KSCENE_SUBREDDITS.map((sub) => buildRedditNewUrl([sub], 100, "rss"));
+  const urls = mode === "oauth" ? [buildRedditNewUrl(KOREAPLAIN_SUBREDDITS)] : KOREAPLAIN_SUBREDDITS.map((sub) => buildRedditNewUrl([sub], 100, "rss"));
   if (mode === "oauth") {
     for (const seed of seedQueries) {
       const query = redditQueryForSeed(seed);
-      if (query) urls.push(buildRedditSearchUrl(KSCENE_SUBREDDITS, query));
+      if (query) urls.push(buildRedditSearchUrl(KOREAPLAIN_SUBREDDITS, query));
     }
   }
 
@@ -191,13 +192,13 @@ async function collectRedditTitles(
   return { titles: [...titles], summary: { status, requests, titleCount: titles.size, ...(status === "failed" ? { error: lastError } : {}) } };
 }
 
-export async function runKsceneTopicCollection(
-  options: RunKsceneTopicCollectionOptions = {}
-): Promise<RunKsceneTopicCollectionResult> {
+export async function runKoreaplainTopicCollection(
+  options: RunKoreaplainTopicCollectionOptions = {}
+): Promise<RunKoreaplainTopicCollectionResult> {
   const now = options.now ?? new Date();
   const dayIndex = dayIndexOf(now);
   const log = options.log ?? ((line: string) => console.log(line));
-  const delayMs = options.delayMs ?? KSCENE_TOPIC_CONFIG.requestDelayMs;
+  const delayMs = options.delayMs ?? KOREAPLAIN_TOPIC_CONFIG.requestDelayMs;
   const fetchSuggestions = options.fetchSuggestions ?? ((query: string) => fetchAutocompleteSuggestions(query));
   const fetchTrendTerms =
     options.fetchTrendTerms ??
@@ -207,8 +208,8 @@ export async function runKsceneTopicCollection(
   const notify = options.notify ?? sendKeywordNotification;
 
   // 1) 시드 선정 + (선택) 급상승 한국 관련어를 K-Wave Context 시드로 보강
-  const baseSeeds = pickSeedsForDay(options.seeds ?? KSCENE_SEEDS, dayIndex, options.seedsPerRun ?? KSCENE_TOPIC_CONFIG.seedsPerRun);
-  const labelBySeed: Record<string, KsceneLabel> = { ...KSCENE_LABEL_BY_SEED };
+  const baseSeeds = pickSeedsForDay(options.seeds ?? KOREAPLAIN_SEEDS, dayIndex, options.seedsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.seedsPerRun);
+  const labelBySeed: Record<string, KoreaplainLabel> = { ...KOREAPLAIN_LABEL_BY_SEED };
   for (const seed of options.seeds ?? []) labelBySeed[seed.query] = seed.label;
 
   const trendSeeds: string[] = [];
@@ -250,8 +251,8 @@ export async function runKsceneTopicCollection(
   let redditTitles: string[] = [];
   const redditCredentials = options.redditCredentials === undefined ? redditCredentialsFromEnv() : options.redditCredentials;
   const redditMode = redditCredentials ? "oauth" : "rss";
-  if (options.redditEnabled ?? KSCENE_TOPIC_CONFIG.redditEnabled) {
-    const requestedDelay = options.redditDelayMs ?? KSCENE_TOPIC_CONFIG.redditDelayMs;
+  if (options.redditEnabled ?? KOREAPLAIN_TOPIC_CONFIG.redditEnabled) {
+    const requestedDelay = options.redditDelayMs ?? KOREAPLAIN_TOPIC_CONFIG.redditDelayMs;
     // 테스트(0ms 주입)는 그대로, 실운영 RSS 모드는 61초 하한.
     const redditDelay = redditMode === "rss" && options.redditDelayMs === undefined ? Math.max(requestedDelay, REDDIT_PUBLIC_MIN_DELAY_MS) : requestedDelay;
     const collected = await collectRedditTitles(
@@ -277,9 +278,9 @@ export async function runKsceneTopicCollection(
     log(`⚠️ 기발행·기제안 주제 조회 실패(중복 제거 생략): ${error instanceof Error ? error.message : String(error)}`);
   }
   const { selected, droppedAsDuplicate } = selectTopics(candidates, {
-    topN: options.topicsPerRun ?? KSCENE_TOPIC_CONFIG.topicsPerRun,
+    topN: options.topicsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.topicsPerRun,
     existingTopics: existing,
-    similarity: KSCENE_TOPIC_CONFIG.duplicateSimilarity,
+    similarity: KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity,
   });
 
   const base = {
@@ -314,7 +315,7 @@ export async function runKsceneTopicCollection(
     startedAt: now,
     seedQueries,
     source: "google_autocomplete",
-    metadata: { kind: KSCENE_JOB_KIND, track: "kscene", reddit },
+    metadata: { kind: KOREAPLAIN_JOB_KIND, track: "kscene", reddit },
     candidatesCount: candidates.length,
     clustersCount: selected.length,
     errorCount: failedSeeds.length,
