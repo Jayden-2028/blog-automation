@@ -21,6 +21,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
+import { toIllustrationCaption } from "./koreaplainImageSources.js";
 
 /** 동시에 생성할 자리 수(2026-09-21). 유료 API라 상한을 둔다. */
 const IMAGE_CONCURRENCY = 3;
@@ -58,6 +59,19 @@ export type GenerateManuscriptImagesOptions = {
    * 한 벌 더 만들면 둘이 갈라진다(이번 세션에만 같은 실수를 세 번 했다). 입력만 얹고 경로는 공유한다.
    */
   fallbackSlots?: { index: number; description: string; prompt: string; acquisition?: "ai" | "infographic" }[];
+  /**
+   * koreaplain 트랙(2026-11-10): 만든 그림은 사진이 아니라 **일러스트로 표기**하고, 화질은 `low`로 고정하며,
+   * `infographic` 자리는 만들지 않는다.
+   *
+   *  - 캡션: `Photo: …`를 붙이지 않고 `Illustration: AI-generated`로 끝낸다(사진이 아닌 것을 사진처럼
+   *    표기하면 독자를 오인시킨다).
+   *  - 화질: 중화질($0.0323)은 9배 비싼데 정확도가 오르지 않았다(팀장 세션 실측 - 층수 버튼이 `low`에서는
+   *    5가 두 번 나왔고 `medium`에서는 숫자가 아예 사라졌다). 그래서 위로 열어 두지 않는다.
+   *  - 인포그래픽 제외: 글자·숫자가 정보인 자리를 AI가 틀리게 그리기 때문이다. 그런 자리는 페이지 캡처나
+   *    본문 목록으로 돌린다(rules/images.md §8-4).
+   * 다른 트랙은 이 옵션을 넘기지 않아 동작이 그대로다.
+   */
+  aiIllustrations?: boolean;
 };
 
 export type GenerateManuscriptImagesResult = {
@@ -140,7 +154,22 @@ export async function generateManuscriptImages(
       index: slot.index,
     });
   }
+  if (options.aiIllustrations) {
+    const dropped = aiSlots.filter(({ block }) => block.acquisition === "infographic");
+    for (const { index } of dropped) {
+      failures.push(`[이미지 ${index}] 글자·숫자가 정보인 자리는 AI로 그리지 않아 비워 둡니다(AI가 숫자를 틀리게 그린다).`);
+    }
+    if (dropped.length > 0) {
+      for (let i = aiSlots.length - 1; i >= 0; i -= 1) {
+        if (aiSlots[i].block.acquisition === "infographic") aiSlots.splice(i, 1);
+      }
+    }
+  }
   aiSlots.sort((a, b) => a.index - b.index);
+
+  /** 발행 캡션이 되는 글. koreaplain이면 사진 표기 대신 일러스트 표기로 바꾼다. */
+  const captionOf = (description: string): string =>
+    options.aiIllustrations ? toIllustrationCaption(description) : description;
 
   const targets = aiSlots.slice(0, config.maxPerArticle);
   if (aiSlots.length > targets.length) {
@@ -156,7 +185,7 @@ export async function generateManuscriptImages(
       failures.push(`[이미지 ${index}] 프롬프트를 찾지 못해 건너뜁니다(마커 수와 imagePrompts 길이 불일치).`);
       slotImages.push({
         index,
-        description: block.description,
+        description: captionOf(block.description),
         prompt: null,
         url: null,
         provider: null,
@@ -170,7 +199,11 @@ export async function generateManuscriptImages(
       // 순차 호출이다. 병렬로 돌리면 같은 API 키에 동시 요청이 몰려 rate limit에 걸리고,
       // 어차피 GH Actions의 heavy-pipeline 큐가 실행을 하나로 직렬화하고 있어 얻을 게 없다.
       // 인포그래픽은 **글자가 읽혀야** 쓸모가 있다. 사진 자리와 같은 화질로 뽑으면 라벨이 뭉개진다.
-      const quality = block.acquisition === "infographic" ? config.infographicQuality : undefined;
+      const quality = options.aiIllustrations
+        ? ("low" as const)
+        : block.acquisition === "infographic"
+          ? config.infographicQuality
+          : undefined;
       const result: GenerateImageResult = await generate({ prompt: block.prompt, quality }, provider);
       const variant = providers.length > 1 ? provider : undefined;
       const stem = fileStem(index, block.description);
@@ -192,7 +225,7 @@ export async function generateManuscriptImages(
         failures.push(`[이미지 ${index}/${provider}] 생성 실패: ${result.error}`);
         slotImages.push({
           index,
-          description: block.description,
+          description: captionOf(block.description),
           prompt: block.prompt,
           url: null,
           provider,
@@ -221,7 +254,7 @@ export async function generateManuscriptImages(
         failures.push(`[이미지 ${index}/${provider}] 업로드 실패: ${uploaded.error}`);
         slotImages.push({
           index,
-          description: block.description,
+          description: captionOf(block.description),
           prompt: block.prompt,
           url: null,
           provider,
@@ -233,7 +266,7 @@ export async function generateManuscriptImages(
 
       slotImages.push({
         index,
-        description: block.description,
+        description: captionOf(block.description),
         prompt: block.prompt,
         url: uploaded.url,
         provider,

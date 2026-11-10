@@ -27,6 +27,7 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 import { validateAiPrompt } from "./refixImageMarkers.js";
 import type { UnfilledSlot } from "./collectWebImages.js";
+import { usesKoreaplainImagePolicy } from "./koreaplainImageSources.js";
 
 export const FALLBACK_PROMPT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -81,7 +82,7 @@ export function mentionsKeywordEntity(description: string, keyword: string): boo
   return extractKeywordEntityTokens(keyword).some((token) => description.includes(token));
 }
 
-export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): string {
+export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[], category?: string | null): string {
   const lines = [
     "블로그 원고의 이미지 자리 몇 개를 웹에서 찾으려다 실패했다. 그 자리를 **AI 이미지 생성으로**",
     "대신 채우려 한다. 자리마다 이미지 생성 프롬프트를 하나씩 써라.",
@@ -135,6 +136,21 @@ export function buildFallbackPrompt(keyword: string, unfilled: UnfilledSlot[]): 
     "  (실측: 그렇게 만든 이미지가 문단과 전혀 겹치지 않아 사용자가 전부 반려했다.)",
     "- 실존 인물의 얼굴, 브랜드 로고, 특정 제품의 외형을 지목하지 않는다.",
     "",
+    ...(usesKoreaplainImagePolicy(category)
+      ? [
+          "## ⚠️ 이 원고는 영문 블로그(Korea Plain)다 - 아래가 위 규칙과 부딪히면 이쪽이 이긴다(2026-11-10)",
+          "이 자리들이 비어 있는 이유는 **언론사·상업 사이트의 사진을 쓰지 않는 정책** 때문이다(공공·공식 출처에서",
+          "못 찾았다). 그래서 그 사진을 흉내 내지 않고 **같은 이야기를 하는 보편적 장면**을 새로 그린다.",
+          "- **특정 사진을 모사하지 않는다.** 자리 설명이 어떤 기사·사진의 구도를 묘사하고 있어도 그 구도를 따라 그리지 않는다",
+          "  (2차적저작물이 될 수 있다). 사람들이 흔히 보는 장면(아파트 엘리베이터 안, 지하철 에스컬레이터, 편의점 계산대,",
+          "  버스 정류장, 공항 입국장 줄)으로 일반화한다.",
+          "- **글자·숫자가 정보인 자리는 `SKIP`이다.** 층수 버튼, 요금표, 운영시간 안내판, 노선도, 영수증, 메뉴판, 간판 문구.",
+          "  AI는 숫자를 틀리게 그린다(실측: 층수 패널에 5가 두 번 나왔다). 틀린 정보가 박힌 그림은 빈 자리보다 나쁘다.",
+          "  `SKIP` 사유에 \"글자·숫자가 정보인 자리\"라고 적는다 - 사람이 공식 안내 페이지 캡처로 채운다.",
+          "- 키워드는 영문 검색 질의일 뿐 인물 이름이 아니다. 키워드와 겹친다는 이유로 SKIP하지 않는다.",
+          "",
+        ]
+      : []),
     "## 자리",
   ];
 
@@ -208,7 +224,7 @@ export function parseFallbackPrompts(raw: string): { index: number; prompt: stri
 }
 
 export async function buildFallbackImagePrompts(
-  input: { keyword: string; unfilled: UnfilledSlot[] },
+  input: { keyword: string; unfilled: UnfilledSlot[]; category?: string | null },
   options: { generate?: (prompt: string) => Promise<RunHeadlessClaudeResult> } = {}
 ): Promise<BuildFallbackImagePromptsResult> {
   if (input.unfilled.length === 0) return { slots: [], failures: [] };
@@ -217,7 +233,12 @@ export async function buildFallbackImagePrompts(
   // 자리는 그 자리에서 걸러낸다. 나머지만 LLM 판정으로 넘긴다(위 실측 사고 주석 참고).
   // 사용자가 AI 생성을 직접 지시한 자리는 이 방어선을 건너뛴다(2026-10-03) - 사람이 정한 것을
   // 코드가 뒤집으면 수정 요청이 영원히 안 먹는다(대구 북구 3·5번 실측).
-  const guarded = (slot: UnfilledSlot) => !slot.userRequested && mentionsKeywordEntity(slot.description, input.keyword);
+  // koreaplain은 이 방어선을 쓰지 않는다(2026-11-10): 키워드가 인물·팀이 아니라 영문 검색 질의라 "실존 대상을
+  // 지목한다"는 가정이 성립하지 않고, 한글 키워드가 들어와도 "서울"·"지하철" 같은 장소어가 전 자리를 막는다.
+  // 실존 인물·로고 금지는 프롬프트 규칙과 LLM 판정(SKIP)이 그대로 맡는다.
+  const koreaplain = usesKoreaplainImagePolicy(input.category);
+  const guarded = (slot: UnfilledSlot) =>
+    !koreaplain && !slot.userRequested && mentionsKeywordEntity(slot.description, input.keyword);
   const forcedSkip = input.unfilled.filter(guarded);
   const candidates = input.unfilled.filter((slot) => !guarded(slot));
 
@@ -234,7 +255,7 @@ export async function buildFallbackImagePrompts(
     ((prompt: string) =>
       runHeadlessClaude({ prompt, timeoutMs: FALLBACK_PROMPT_TIMEOUT_MS, allowedTools: [] }));
 
-  const result = await generate(buildFallbackPrompt(input.keyword, candidates));
+  const result = await generate(buildFallbackPrompt(input.keyword, candidates, input.category));
   if (!result.ok) {
     failures.push(`폴백 프롬프트 생성 실패: ${result.error}`);
     return { slots: [], failures };
@@ -264,7 +285,12 @@ export async function buildFallbackImagePrompts(
     // 캡션이 "포스터"인데 생성 이미지가 붙는 일이 없게, 대체 이미지임을 설명에 남긴다(뷰어 캡션에 보인다).
     slots.push({
       index: slot.index,
-      description: slot.userRequested ? `${slot.description} (AI 생성 장면)` : `${slot.description} (웹 검색 실패 - AI 대체 장면)`,
+      // koreaplain은 캡션이 곧 영문 발행본의 글이라 한글 메모 꼬리를 붙이지 않는다(일러스트 표기는 생성 단계가 단다).
+      description: koreaplain
+        ? slot.description
+        : slot.userRequested
+          ? `${slot.description} (AI 생성 장면)`
+          : `${slot.description} (웹 검색 실패 - AI 대체 장면)`,
       prompt: match.prompt,
     });
   }

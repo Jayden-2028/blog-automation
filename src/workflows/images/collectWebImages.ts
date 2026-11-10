@@ -22,6 +22,11 @@ import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { runClaudeWebSearch } from "../../services/llm/runClaudeWebSearch.js";
 import { imageMakerSpecLines } from "./imageMakerSpec.js";
 import { extractYoutubeVideoIds, fetchTrailerFrameCandidates } from "./youtubeTrailerFrames.js";
+import {
+  describeDroppedCandidates,
+  isAllowedKoreaplainCandidate,
+  usesKoreaplainImagePolicy,
+} from "./koreaplainImageSources.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
@@ -537,6 +542,19 @@ export function buildPrompt(
           "",
         ]),
     ...describeSearchPools(keyword, category, briefType),
+    ...(usesKoreaplainImagePolicy(category)
+      ? [
+          "",
+          "## ⚠️ 이 원고는 사용할 수 있는 출처가 정해져 있다(2026-11-10 사용자 결정) - 위 4번의 \"전부 쓸 수 있다\"를 덮어쓴다",
+          "**언론사·상업 사이트·블로그·커뮤니티의 사진은 고르지 않는다.** 코드가 아래 목록 밖의 후보를 전부 버린다.",
+          "- 허용: 정부·지자체·공공기관(`*.go.kr`, `korea.kr`), 서울관광재단(`visitseoul.net`), 한국관광공사",
+          "  (`visitkorea.or.kr`), 인천국제공항공사(`airport.kr`), 위키미디어(`wikimedia.org`)·위키백과(`wikipedia.org`)",
+          "- `imageUrl`과 `sourcePage`가 **둘 다** 위 호스트여야 한다. 목록 밖에서만 찾아지면 `skipped: true`로 두고",
+          "  `skipReason`에 \"공공·공식 출처에서 찾지 못함\"과 함께 **대신 그릴 일반 장면을 한 줄로 제안**한다",
+          "  (그 자리는 AI 생성으로 넘어간다). 억지로 목록 밖 사진을 고르지 않는다.",
+          "- `license`의 영문 출처 표기는 기관명으로 쓴다: \"Photo: Seoul Metropolitan Government\".",
+        ]
+      : []),
     "",
     "## 자리별 지시",
   ];
@@ -936,6 +954,28 @@ export async function collectWebImages(
   const verify = options.verify ?? true;
   const failures: string[] = [];
 
+  // koreaplain 트랙은 화이트리스트 밖 출처의 후보를 버린다(2026-11-10, koreaplainImageSources.ts).
+  // 다른 트랙은 이 값이 false라 아래 분기가 한 줄도 실행되지 않는다 - 엔터·사회·인물은 지금 그대로
+  // 언론사 사진을 쓴다(사용자 결정: 이 변경은 koreaplain 신규 원고에만 적용).
+  const enforceSources = usesKoreaplainImagePolicy(options.category);
+  // 같은 사진이 검색 후보와 에이전트 선택에 둘 다 있을 수 있어 URL로 센다(두 번 세지 않는다).
+  const droppedUrls = new Set<string>();
+  const dropDisallowed = <T>(items: T[], toCandidate: (item: T) => { imageUrl: string; sourcePage?: string | null }): T[] => {
+    if (!enforceSources) return items;
+    return items.filter((item) => {
+      const candidate = toCandidate(item);
+      if (isAllowedKoreaplainCandidate(candidate)) return true;
+      droppedUrls.add(candidate.imageUrl);
+      return false;
+    });
+  };
+  /** 버린 건수를 수집 기록에 **한 줄로** 남긴다 - 사람이 왜 자리가 비었는지 알아야 한다. */
+  const noteDroppedCandidates = (): void => {
+    if (droppedUrls.size === 0) return;
+    failures.push(describeDroppedCandidates(droppedUrls.size));
+    droppedUrls.clear();
+  };
+
   if (input.slots.length === 0) return { found: [], failures, unfilled: [] };
 
   // 자리마다 검색창에 친 결과를 후보로 먼저 모은다. 실패하면 빈 배열 - 에이전트가 직접 찾는다.
@@ -1072,6 +1112,17 @@ export async function collectWebImages(
     );
   }
 
+  // 검색창 후보도 에이전트에게 보여 주기 **전에** 거른다 - 보여 주면 에이전트가 언론사 사진을 1순위로
+  // 고르고, 그 뒤 필터가 전부 버려 자리가 비는 데다 대체 후보(alternates)까지 같은 곳에서 오기 쉽다.
+  if (enforceSources) {
+    for (const [slotIndex, list] of prefetched) {
+      prefetched.set(
+        slotIndex,
+        dropDisallowed(list, (c) => ({ imageUrl: c.link, sourcePage: c.sourcePage }))
+      );
+    }
+  }
+
   const run = await runCodex({
     prompt: buildPrompt(
       input.keyword,
@@ -1091,12 +1142,14 @@ export async function collectWebImages(
   // "왜 비었는지" 보려고 뷰어를 열었을 때 제일 필요한 정보가 그것이다.
   if (!run.ok) {
     failures.push(`웹 검색 에이전트 실행 실패: ${run.error}`);
+    noteDroppedCandidates();
     return { found: [], failures, unfilled: allUnfilled(input.slots) };
   }
 
   const results = parseCodexSlots(run.data);
   if (results.length === 0) {
     failures.push("웹 검색 에이전트가 자리 정보를 돌려주지 않았습니다.");
+    noteDroppedCandidates();
     return { found: [], failures, unfilled: allUnfilled(input.slots) };
   }
 
@@ -1145,7 +1198,17 @@ export async function collectWebImages(
       license: "",
     }));
     const seenUrls = new Set(agentPicks.map((c) => c.imageUrl));
-    const rawCandidates = [...agentPicks, ...searchFallback.filter((c) => !seenUrls.has(c.imageUrl))];
+    const unfilteredCandidates = [...agentPicks, ...searchFallback.filter((c) => !seenUrls.has(c.imageUrl))];
+    // koreaplain: 이미지 주소와 출처 페이지가 둘 다 허용 목록 안인 후보만 쓴다. 에이전트가 직접 찾은
+    // 후보(웹 검색)는 위 검색창 필터를 거치지 않았으므로 여기서 거른다. 사용자가 주소를 찍어 준 자리
+    // (userChosen)도 예외가 아니다 - "어느 경로로도 들어오지 못하게"가 목적이다.
+    const rawCandidates = dropDisallowed(unfilteredCandidates, (c) => c);
+    if (enforceSources && rawCandidates.length === 0) {
+      // 후보가 전부 허용 밖이었다. 아래의 "후보 N장을 모두 써봤지만" 문구는 내려받기를 시도한 경우의
+      // 말이라 여기서는 맞지 않는다 - 이 자리는 호출부가 AI 생성으로 넘긴다.
+      failures.push(`[자리 ${slot.index}] 허용 출처의 후보가 없어 비웠습니다(후보 ${unfilteredCandidates.length}장 모두 언론사·상업 사이트 등 허용 밖).`);
+      return null;
+    }
 
     const readSize = options.readSize ?? readImageSize;
     const stem = `${String(slot.index).padStart(2, "0")}-${keywordSlug(result.alt || slot.description).slice(0, 40).replace(/-+$/, "") || "image"}`;
@@ -1425,6 +1488,7 @@ export async function collectWebImages(
 
   const outcomes = await mapWithConcurrency(input.slots, SLOT_CONCURRENCY, processSlotGuarded);
   for (const outcome of outcomes) if (outcome) found.push(outcome);
+  noteDroppedCandidates();
 
   // 못 채운 자리는 실패 지점마다 모으지 않고 **끝에서 한 번에 계산한다.** 실패 경로가 10곳이라
   // (응답 누락/URL 형식/403/크기/비율/검증 탈락/업로드 실패…) 각 지점에 push를 넣으면 언젠가 한

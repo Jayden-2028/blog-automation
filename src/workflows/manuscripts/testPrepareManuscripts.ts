@@ -826,6 +826,56 @@ async function main(): Promise<void> {
     console.log("✅ 사용설명서 영어본 - 이미지 검색어를 번호순으로 보존(한글 설명과의 토큰 정렬 우회)");
   }
 
+  // koreaplain(2026-11-10): 폴백 단계가 트랙을 알아야 영문 블로그용 지시를 쓰고, 기획의 인포그래픽은 만들지 않는다.
+  // 다른 트랙은 category만 넘어가고 인포그래픽도 예전처럼 만든다.
+  {
+    const body = "도입입니다.\n\n[IMAGE: Seoul subway platform — 웹 검색]\n[IMAGE PROMPT: 서울 지하철 승강장]\n\n본문입니다.\n\n[IMAGE: Fare table — 웹 검색]\n[IMAGE PROMPT: 지하철 요금표]";
+    const run = async (category: string) => {
+      const seen: { category?: string | null }[] = [];
+      const genCalls: { fallbackSlots?: { index: number; acquisition?: string }[] }[] = [];
+      await prepareManuscript(
+        job("kp", category, {
+          imagePlanReadyAt: "2026-11-10T00:00:00Z",
+          imagePlan: {
+            summary: "s", protagonist: "p",
+            slots: [
+              { index: 1, subject: "Subway platform", queries: ["서울 지하철 승강장"], acquisition: "search", changed: false, reason: "", caution: "" },
+              { index: 2, subject: "Fare table", queries: ["\"1,500 KRW\" infographic of subway fares, no text except numbers. 16:9"], acquisition: "infographic", changed: true, reason: "", caution: "" },
+            ],
+          },
+        }),
+        {
+          loadArticles: async () => [baseArticle(body)],
+          writeManuscriptFile: async () => {},
+          mergeJobMetadata: async () => {},
+          loadPublishedPosts: false,
+          capturePages: false,
+          planSlots: false,
+          collectWebImages: async () => ({
+            images: [], failures: [],
+            unfilled: [{ index: 1, description: "Seoul subway platform", context: "c", suggestion: "" }],
+          }),
+          buildFallbackPrompts: async (input) => {
+            seen.push({ category: input.category });
+            return { slots: [], failures: [] };
+          },
+          generateImages: async (_input, options) => {
+            genCalls.push(options ?? {});
+            return { images: [], failures: [] };
+          },
+        }
+      );
+      return { seen, genCalls };
+    };
+    const kp = await run("kscene");
+    assert(kp.seen.length === 1 && kp.seen[0].category === "kscene", `koreaplain 폴백에 트랙이 넘어가야 한다 (${JSON.stringify(kp.seen)})`);
+    assert(!kp.genCalls.some((c) => c.fallbackSlots?.some((s) => s.acquisition === "infographic")), "koreaplain은 기획 인포그래픽을 생성에 보내지 않는다");
+    const ent = await run("entertainment");
+    assert(ent.seen[0].category === "entertainment", "다른 트랙은 자기 카테고리가 그대로 넘어간다");
+    assert(ent.genCalls.some((c) => c.fallbackSlots?.some((s) => s.acquisition === "infographic")), "다른 트랙은 기획 인포그래픽을 예전처럼 만든다");
+    console.log("✅ koreaplain 배선 - 폴백에 트랙 전달, 기획 인포그래픽 차단 / 다른 트랙은 그대로");
+  }
+
   console.log("\n✅ 전체 통과");
 }
 

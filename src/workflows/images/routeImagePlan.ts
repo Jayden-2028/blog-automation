@@ -51,6 +51,12 @@ export type RouteImagePlanOptions = {
    * subject는 판정 기준(caution)으로만 남긴다 - 검색어는 건드리지 않는다(한국 소재는 한국어로 잘 찾는다).
    */
   captionLanguage?: "ko" | "en";
+  /**
+   * 기획이 고른 `infographic` 자리를 만들지 않는다(koreaplain, 2026-11-10). 인포그래픽은 글자·숫자가 정보인
+   * 자리인데 AI는 숫자를 틀리게 그린다(실측: 층수 패널에 5가 두 번). 그 자리는 비워 두고 본문 목록이
+   * 정보를 전한다 - 공식 안내 페이지가 있으면 기획이 `capture`로 고른다.
+   */
+  blockInfographic?: boolean;
 };
 
 const HANGUL_RE = /[가-힣]/;
@@ -111,6 +117,10 @@ export function routeImagePlan(
         break;
       case "ai":
       case "infographic": {
+        if (slot.acquisition === "infographic" && options.blockInfographic) {
+          route.notes.push(`[자리 ${index}] 이미지 기획: 글자·숫자가 정보인 자리는 AI로 그리지 않아 인포그래픽을 만들지 않습니다.`);
+          break;
+        }
         // 집필자 마커가 이미 같은 방식이면 첫 생성 단계가 마커 프롬프트로 만든다 - 두 번 만들지 않는다.
         if (block.acquisition === slot.acquisition) break;
         const prompt = slot.queries[0] ?? "";
