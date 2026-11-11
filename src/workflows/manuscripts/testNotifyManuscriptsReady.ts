@@ -1,6 +1,7 @@
 // buildManuscriptReadyMessage 테스트. pagesUrl을 주입해 Cloudflare 설정 전/후 두 분기를 검증한다
 // (cloudflarePagesUrl()은 환경변수 기반 상수라 직접 흔들지 않고 인자로 override).
-import { buildManuscriptReadyMessage } from "./notifyManuscriptsReady.js";
+import { buildManuscriptReadyMessage, withManuscriptPageRow } from "./notifyManuscriptsReady.js";
+import type { ManuscriptKeyboardButton } from "./notifyManuscriptsReady.js";
 import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { JobManuscriptsResult } from "./prepareApprovedManuscripts.js";
 import type { ArticleJobRow } from "../../types/database.js";
@@ -308,4 +309,24 @@ main().catch((error) => {
     if (!msg.text.includes("자료조사 제공자")) throw new Error(`❌ ${track} 트랙 알림에도 제공자가 드러나야 한다 (${msg.text})`);
   }
   console.log("✅ 제공자 가시성 - codex/gemini는 한 줄 표시, claude·미설정은 표시 없음");
+}
+
+// withManuscriptPageRow: 📄 원고 페이지 열기는 공통 버튼이라 복원 키보드에서 빠지면 안 된다(2026-11-11).
+{
+  const page = { text: "📄 원고 페이지 열기", url: "https://x.pages.dev/#job" };
+  const rows: ManuscriptKeyboardButton[][] = [[{ text: "✅ 수정 요청됨", callback_data: "review:edit:job" }]];
+
+  const filled = withManuscriptPageRow(rows, [[page]]);
+  assert(filled.length === 2 && filled[0][0] === page, "링크 줄이 없으면 들어온 키보드의 링크 버튼을 맨 위에 되살린다");
+
+  const already = [[page], ...rows];
+  const untouched = withManuscriptPageRow(already, [[{ text: "다른 링크", url: "https://y" }]]);
+  assert(untouched.length === already.length && untouched[0][0] === page, "이미 링크 줄이 있으면 다른 링크를 덧붙이지 않는다");
+
+  assert(withManuscriptPageRow(rows, undefined).length === 1, "되살릴 링크가 없으면 그대로 둔다(알림이 사라지면 안 된다)");
+  assert(
+    withManuscriptPageRow(rows, [[{ text: "⏳ 처리 중…", callback_data: "noop" }]]).length === 1,
+    "릴레이가 덮어쓴 잠금 버튼은 링크가 아니다"
+  );
+  console.log("✅ withManuscriptPageRow - 📄 링크 줄 보존/복원/무해");
 }

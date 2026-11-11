@@ -99,6 +99,11 @@ jobs:
           KSCENE_IMAGES_BASE_URL: ${{ vars.KSCENE_IMAGES_BASE_URL }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # 버튼을 누른 뒤 키보드를 되살리는 자리가 여기다(markReviewButtonsDecided/markPublishButtonSettled).
+          # 이 변수가 없으면 cloudflarePagesUrl()이 null이라 **📄 원고 페이지 열기 줄이 통째로 빠진다**
+          # (2026-11-11 실측 - 한효주 인물 백과 원고에서 ✏️ 수정 요청을 누르자 링크 버튼이 사라졌다).
+          # 인물 백과 트랙은 발행 버튼이 없어 뷰어가 유일한 창구라 이 버튼이 빠지면 쓸 수 있는 게 없다.
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
           # 버튼 경로는 호출 인자로 공개(asDraft:false)를 명시하므로 이 값에 영향받지 않는다.
           BLOGGER_PUBLISH_AS_DRAFT: ${{ vars.BLOGGER_PUBLISH_AS_DRAFT }}
           # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.

@@ -66,11 +66,14 @@ function makeBot(job: ArticleJobRow, opts: { publishHistory?: boolean; manifestF
 
 // 릴레이(Cloudflare Worker)가 누른 순간 키보드를 "⏳ 처리 중…" 하나로 덮어쓴 상태를 재현한다.
 const LOCKED = { inline_keyboard: [[{ text: "⏳ 처리 중…", callback_data: "noop" }]] };
-function reviewUpdate(action: "edit" | "discard"): TelegramUpdate {
+// 2026-11-11 실측 payload: 릴레이가 덮기 전/덮지 못한 키보드에는 `📄 원고 페이지 열기` url 버튼이 남아 있다.
+const PAGE_BUTTON = { text: "📄 원고 페이지 열기", url: `https://blog-automation-manuscripts.pages.dev/#${JOB_ID}` };
+const LOCKED_WITH_PAGE = { inline_keyboard: [[PAGE_BUTTON], [{ text: "⏳ 처리 중…", callback_data: "noop" }]] };
+function reviewUpdate(action: "edit" | "discard", replyMarkup: unknown = LOCKED): TelegramUpdate {
   const query: TelegramCallbackQuery = {
     id: "cbq-1",
     data: `review:${action}:${JOB_ID}`,
-    message: { message_id: 77, chat: { id: CHAT_ID }, reply_markup: LOCKED },
+    message: { message_id: 77, chat: { id: CHAT_ID }, reply_markup: replyMarkup },
   } as never;
   return { update_id: 1, callback_query: query } as TelegramUpdate;
 }
@@ -191,4 +194,38 @@ const lastKeyboard = (state: State) => {
   assert(images.outcome.status !== "manual_only", "person도 이미지 수정은 받는다");
   console.log("✅ person - 발행 콜백 거부(naver·tistory·blogspot), 이미지 수정은 허용");
 }
+// 9) 📄 원고 페이지 열기는 **어떤 상태에서도** 남는다(2026-11-11 한효주 인물 백과 사고).
+//    이 테스트 프로세스에는 CLOUDFLARE_PAGES_PROJECT_NAME이 없다 - 변수가 빠진 러너
+//    (telegram-update.yml)와 같은 상태라, buildReadyKeyboard는 링크 줄을 만들지 못한다.
+//    그래도 눌린 메시지에 링크 버튼이 남아 있으면 복원 키보드가 그것을 되살려야 한다.
+{
+  const { bot, state } = makeBot(makeJob({ category: "person" }));
+  await bot.processUpdate(reviewUpdate("edit", LOCKED_WITH_PAGE));
+  const kb = lastKeyboard(state) ?? [];
+  const link = kb.flat().find((b) => (b as { url?: string }).url !== undefined) as { text: string; url: string } | undefined;
+  assert(link?.url === PAGE_BUTTON.url, "✏️ 수정 요청 복원 키보드에 📄 원고 페이지 열기가 남는다");
+  assert(kb[0]?.[0]?.text === PAGE_BUTTON.text, "링크 줄은 맨 위 자리(buildReadyKeyboard와 같은 배치)");
+  assert(kb.flat().some((b) => b.text.includes("수정 요청됨")), "수정 요청 표시는 그대로");
+  assert(
+    !kb.flat().some((b) => b.callback_data?.startsWith(`publish:naver:`)),
+    "person은 발행 버튼이 없는 트랙 - 공통 버튼만 되살아난다"
+  );
+  console.log("✅ person ✏️ 수정 요청 - 📄 원고 페이지 열기 유지(Pages 환경변수 없는 러너에서도)");
+}
+
+// 10) 🖼 이미지 수정·⬇️ 내려받기 복원 경로도 마찬가지다 - 전에는 이 분기가 링크 줄을 아예 세우지 않았다.
+{
+  const { bot, state } = makeBot(makeJob({ category: "person" }));
+  const query = {
+    id: "cbq-2",
+    data: `publish:images:${JOB_ID}`,
+    message: { message_id: 78, chat: { id: CHAT_ID }, reply_markup: LOCKED_WITH_PAGE },
+  };
+  await bot.processUpdate({ update_id: 2, callback_query: query } as never);
+  const kb = lastKeyboard(state) ?? [];
+  assert(kb.length > 0, "복원 키보드가 만들어진다");
+  assert(kb[0]?.[0]?.text === PAGE_BUTTON.text, "🖼 이미지 수정 복원 키보드에도 📄 원고 페이지 열기가 맨 위에 남는다");
+  console.log("✅ 발행 버튼 복원 경로 - 📄 원고 페이지 열기 유지");
+}
+
 console.log("\n✅ testPipelineMergeCallbacks 전체 통과");

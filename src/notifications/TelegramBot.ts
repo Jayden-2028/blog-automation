@@ -44,7 +44,7 @@ import { readEditPending } from "../workflows/manuscripts/viewerEditGuard.js";
 import { requestTistoryPublish } from "../workflows/publish/tistoryPublishQueue.js";
 import { requestManuscriptExport } from "../workflows/manuscripts/manuscriptExportQueue.js";
 import { readJobManuscriptImages, removeManifestTopic } from "../workflows/manuscripts/manuscriptManifest.js";
-import { buildReadyKeyboard } from "../workflows/manuscripts/notifyManuscriptsReady.js";
+import { buildReadyKeyboard, withManuscriptPageRow } from "../workflows/manuscripts/notifyManuscriptsReady.js";
 import { isAutoApproved, shouldSkipEnglishReview } from "../config/pipelineGate.js";
 import { listPublicationsByArticleIds } from "../services/supabase/repositories/publicationRepository.js";
 import { describeImageEditRequests, parseImageEditReply } from "../workflows/images/imageEditRequest.js";
@@ -1412,14 +1412,19 @@ export class TelegramBot {
     // 통합 알림(자동 승인 job, PIPELINE-MERGE §1-b)의 ✏️/🗑. 릴레이가 눌린 순간 키보드를 "⏳ 처리 중…" 하나로 덮어쓰므로
     // 아래 라벨 치환(원본 키보드 전제)이 통하지 않는다 - 반려는 한 버튼으로 닫고, 수정 요청은 발행 줄을 포함한 전체를 되살린다.
     if (job && isAutoApproved(job) && (action === "edit" || action === "discard")) {
-      const restored: TelegramInlineKeyboardButton[][] =
+      const restored =
         action === "discard"
           ? [[{ text: "🗑 반려됨", callback_data: "noop" }]]
-          : buildReadyKeyboard(job).map((row) =>
-              row.map((button) => {
-                const own = parseArticleReviewCallbackData(button.callback_data);
-                return own?.action === "edit" ? { ...button, text: "✅ 수정 요청됨" } : button;
-              })
+          : // 📄 원고 페이지 열기 줄은 공통 버튼이라 빠지면 안 된다 - 이 러너에 Pages 주소 환경변수가 없어
+            // buildReadyKeyboard가 링크 줄을 못 만들면 눌린 메시지에 남아 있던 링크 버튼으로 채운다.
+            withManuscriptPageRow(
+              buildReadyKeyboard(job).map((row) =>
+                row.map((button) => {
+                  const own = parseArticleReviewCallbackData(button.callback_data);
+                  return own?.action === "edit" ? { ...button, text: "✅ 수정 요청됨" } : button;
+                })
+              ),
+              keyboard
             );
       await this.post("editMessageReplyMarkup", {
         chat_id: this.chatId,
@@ -1744,6 +1749,10 @@ export class TelegramBot {
           )
         : undefined;
       if (reviewRow) keyboard.unshift(reviewRow);
+      // 📄 원고 페이지 열기 줄은 이 분기가 아예 세우지 않았다(2026-11-11). buildReadyKeyboard가 만들어 주면
+      // 그것을, 환경변수가 없어 못 만들면 눌린 메시지에 남아 있던 링크 버튼을 맨 위에 되돌린다.
+      const linkSources: OutgoingButton[][] = [...(job ? buildReadyKeyboard(job) : []), ...(original ?? [])];
+      keyboard = withManuscriptPageRow(keyboard, linkSources);
     }
 
     await this.post("editMessageReplyMarkup", {
