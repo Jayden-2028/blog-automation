@@ -54,7 +54,16 @@ jobs:
 
       # 1:2보다 긴 세로 후보를 자를 때만 쓴다(Chromium canvas + Claude로 자를 위치 판단). 드문 경로지만 러너가 매번 새로라
       # 미리 깔아 둔다 - 안 깔면 그 경우만 "자르지 못해 원본을 씁니다"로 떨어진다.
+      #
+      # **이 단계가 실패하거나 늦어도 교체는 계속한다**(2026-11-11 실측 사고). apt가 `azure.archive.ubuntu.com`을
+      # 풀지 못하면 `playwright install --with-deps`가 20초 간격으로 계속 재시도한다 - 실패로 끝나지 않고 **버틴다.**
+      # 그 바람에 job의 10분 시한을 이 단계가 다 먹고 `manuscripts:image-pick`이 skipped로 떨어져,
+      # 뷰어에서 후보를 눌러도 이미지가 바뀌지 않았다(11/11 14:12~16:02 사이 10개 run 전부 cancelled).
+      # 평시 run 전체가 70초쯤이므로 3분이면 넉넉하다. 못 깔면 긴 세로 이미지만 원본을 쓴다 -
+      # cropTallImage는 launch 실패를 {ok:false}로, pickCropFocus는 claude 실행 실패를 focus 0으로 돌린다.
       - name: Chromium + Claude Code CLI 설치 (긴 세로 이미지 자르기용)
+        timeout-minutes: 3
+        continue-on-error: true
         run: |
           npx playwright install --with-deps chromium
           npm install -g @anthropic-ai/claude-code
