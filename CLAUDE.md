@@ -140,6 +140,12 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   `gh workflow run job-publish-prepare.yml` 한 줄이 들어간다. 이 스크립트는 **의존성이 없다**(node 하나) -
   npm ci가 흔들린 run에서 알림까지 같이 죽으면 안 되고, 그 run은 `job:publish-poll`에 닿지도 못하고
   죽으므로 코드 안의 try/catch로는 잡히지 않는다. job을 못 읽으면 메인봇으로 가고 "job 식별 실패"가 적힌다.
+  **같은 알림을 사용자가 결과를 기다리는 나머지 워크플로로 넓혔다**(2026-11-12): `job-research`·`job-write`·
+  `job-translate`·`job-revise`. 문구는 워크플로마다 다르다(무엇이 멈췄는지 + 다시 돌리는 `gh workflow run` 한 줄) -
+  분기는 `FAILED_WORKFLOW_FILE`이 한다. 이 넷은 `inputs.job_id`를 `FAILED_JOB_ID`로 넘기므로 **대기열을 추측하지
+  않고 그 job만 집는다**(status 무관 - 조사·집필 중인 job도 찾는다). `image-pick`·`manuscript-edit`·
+  `publish-request`·`manuscripts-refresh`는 대기 시간이 짧고 일부는 자체 알림이 있어 아직 넣지 않았다.
+  워크플로 쪽 단정은 `testWorkflowEnv`(다섯 개 전부), 동작은 `test:workflow-failure-notify`가 본다.
 - **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가, 2026-10-05 트랙별 구성).
   원고 준비 완료 알림의 버튼은 공통 `📄 원고 페이지 열기` / `🖼 이미지 수정` /
   `⬇️ 맥으로 내려받기`에 **트랙별 발행 버튼**이 붙는다 - 엔터는 `🟢 네이버 발행`,
