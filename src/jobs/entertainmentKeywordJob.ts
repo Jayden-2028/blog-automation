@@ -32,7 +32,10 @@ const job: SchedulerJob = {
     const result = await runDailyKeywordWorkflow({
       // 커뮤니티(더쿠·루리웹·에펨코리아)도 이 회차에 함께 수집한다(§2.4 - 독립 커뮤니티 알림 폐지).
       // 엔터·OTT로 분류된 것만 이 알림에 오르고, 사회 계열은 trend_candidates에 남아 20시 리포트가 수거한다.
-      collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community"],
+      // news_feed_ent(2026-11-11, R1)는 엔터 트랙만 쓴다 - "연예 데스크가 오늘 무엇을 냈나"를
+      // 직접 읽는 유일한 소스다. 소스 자체가 기본 꺼짐이라(ENT_NEWS_FEED_ENABLED) 여기 적어 두는
+      // 것만으로는 아무 일도 일어나지 않고, 변수를 켜면 그날부터 들어온다.
+      collectionSources: ["creator_advisor", "google_trends", "daum_realtime", "community", "news_feed_ent"],
       // CA는 크롤링하지 않고 맥미니가 넣어 둔 값을 읽기만 한다. 구글·다음은 기본값(켜짐)으로 직접 수집한다.
       trendCollectOptions: { enabled: false },
       includeCategories: ["entertainment", "ott"],
@@ -67,6 +70,18 @@ const job: SchedulerJob = {
         `\n▶ 엔터 트렌드 게이트(${mode}): 동적 소스 후보 ${result.trendGate.evaluated}건 중 ` +
           `비엔터 확정 ${result.trendGate.strictDrops.length}건 / 엔터 신호 없음 ${result.trendGate.looseDrops.length}건`
       );
+    }
+
+    if (result.newsFeedEntCollection && result.newsFeedEntCollection.status !== "skipped") {
+      const feed = result.newsFeedEntCollection;
+      console.log(
+        `\n\u25b6 \uc5f0\uc608 \ub274\uc2a4 \ud53c\ub4dc: ${feed.status} \u2014 \uc2a4\ud1a0\ub9ac ${feed.fetchedCount}\uac74 \u2192 \uc2dc\ub4dc ${feed.upsertedCount}\uac74` +
+          ` (\ub2e4\uc74c \ub7ad\ud0b9 \ub9e4\uce6d ${feed.daumMatchedCount}/${feed.daumRankedCount}, \uc774\uc288 \uad6c LLM ${feed.llmPhraseCount} / \uacf5\uc720\ud1a0\ud070 ${feed.fallbackPhraseCount})` +
+          (feed.error ? ` \u2014 ${feed.error}` : "")
+      );
+      for (const [source, error] of Object.entries(feed.sourceErrors)) {
+        console.log(`   \u26a0\ufe0f \ub274\uc2a4 \ud53c\ub4dc "${source}" \uc870\ud68c \uc2e4\ud328(\ube44\uce58\uba85\uc801) - ${error}`);
+      }
     }
 
     if (result.topicConflict) {

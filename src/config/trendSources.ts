@@ -31,6 +31,7 @@ export const TREND_SOURCES = [
   "google_trends",
   "daum_realtime",
   "community",
+  "news_feed_ent",
 ] as const;
 export type TrendSource = (typeof TREND_SOURCES)[number];
 
@@ -90,6 +91,29 @@ export const TREND_SOURCE_CONFIGS: Record<TrendSource, TrendSourceConfig> = {
     maxCandidatesPerTopic: parseIntEnv(process.env.DAUM_REALTIME_MAX_DAILY_CANDIDATES, 8),
     // 10분 주기로 갱신되는 실시간 순위라 가장 짧다.
     candidateTtlHours: parseIntEnv(process.env.DAUM_REALTIME_CANDIDATE_TTL_HOURS, 8),
+  },
+  news_feed_ent: {
+    // **기본 false**(2026-11-11 신설, KEYWORD-ENT-REDESIGN-2026-11.md R1). 1~2일 preview 로그를
+    // 확인한 뒤 ENT_NEWS_FEED_ENABLED=true로 켠다 - 켜는 순간 동적 시드가 늘어 collect 단계가
+    // 길어지므로(아래 상한 근거) 관측 없이 켜지 않는다.
+    //
+    // 왜 이 소스가 필요한가: 나머지 네 소스는 전부 "사람들이 무엇을 **검색**했나" 또는 "커뮤니티에서
+    // 무엇을 떠들었나"다. 둘 다 아젠다의 후행 지표라, 기사가 뜬 당일 18시에는 아직 검색량이 붙지
+    // 않은 사안이 통째로 빠진다 - 2026-11-10에 연예면 주요 기사 14건이 후보 1334건 안에 **아예
+    // 없었던** 이유다. 이 소스만 "연예 데스크가 오늘 무엇을 냈나"를 직접 읽는다.
+    //
+    // 인증·브라우저·로그인 프로필이 필요 없고(구글 트렌드·다음 실시간과 같은 급), Google 뉴스
+    // RSS는 이슈를 이미 묶어 주므로 우리가 제목 유사도로 묶는 위험을 피한다.
+    enabled: parseBooleanEnv(process.env.ENT_NEWS_FEED_ENABLED, false),
+    // 15로 시작하는 근거: 시드 하나당 NAVER API 3회 순차 호출이고 현재 pool이 58 시드 / collect
+    // 약 70초다. 15를 더하면 약 73 시드 / 약 90초로 러너 상한 안이다(launchd + caffeinate 보호
+    // 범위, 클라우드 러너 45분 상한에 비하면 여유가 크다). 다음 「많이 본 뉴스」가 10건이라
+    // 상위 10칸은 독자 순위가 채우고 나머지 5칸을 피드 순서가 채운다.
+    maxDailyCandidates: parseIntEnv(process.env.ENT_NEWS_FEED_MAX_DAILY_CANDIDATES, 15),
+    // topic이 고정값("news_feed_ent")이라 per-topic sub-cap은 의미가 없다(google_trends와 동일 패턴).
+    maxCandidatesPerTopic: parseIntEnv(process.env.ENT_NEWS_FEED_MAX_DAILY_CANDIDATES, 15),
+    // 그날의 뉴스 아젠다라 수명이 짧다. 다음 회차(24시간 뒤)까지 남지 않게 구글 트렌드와 같은 12h.
+    candidateTtlHours: parseIntEnv(process.env.ENT_NEWS_FEED_CANDIDATE_TTL_HOURS, 12),
   },
   community: {
     // 기본 true(2026-08-30 사용자 승인 + 맥 dry-run 실측). 끄려면 COMMUNITY_TRENDS_ENABLED=false.

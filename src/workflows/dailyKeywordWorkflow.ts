@@ -20,6 +20,7 @@ import { runCommunityCollection } from "./community/runCommunityCollection.js";
 import { runCreatorAdvisorCollection } from "./creator-advisor/runCreatorAdvisorCollection.js";
 import { runGoogleTrendsCollection } from "./google-trends/runGoogleTrendsCollection.js";
 import { runDaumRealtimeCollection } from "./daum-realtime/runDaumRealtimeCollection.js";
+import { runNewsFeedEntCollection } from "./news-feed-ent/runNewsFeedEntCollection.js";
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
@@ -60,6 +61,10 @@ import type {
   RunDaumRealtimeCollectionOptions,
   RunDaumRealtimeCollectionResult,
 } from "./daum-realtime/runDaumRealtimeCollection.js";
+import type {
+  RunNewsFeedEntCollectionOptions,
+  RunNewsFeedEntCollectionResult,
+} from "./news-feed-ent/runNewsFeedEntCollection.js";
 import type {
   RunCommunityCollectionOptions,
   RunCommunityCollectionResult,
@@ -437,6 +442,11 @@ export type DailyKeywordWorkflowOptions = {
   googleTrendsOptions?: RunGoogleTrendsCollectionOptions;
   /** 다음 실시간 트렌드 수집 단계(trendCollect)에 그대로 전달된다. */
   daumRealtimeOptions?: RunDaumRealtimeCollectionOptions;
+  /**
+   * 연예 뉴스 피드 수집 옵션(2026-11-11, R1). 소스가 기본 꺼짐이라(ENT_NEWS_FEED_ENABLED)
+   * collectionSources에 넣어도 변수를 켜지 않으면 skipped로 지나간다.
+   */
+  newsFeedEntOptions?: RunNewsFeedEntCollectionOptions;
   /** 커뮤니티(더쿠 등) 수집 단계(trendCollect)에 그대로 전달된다. */
   communityOptions?: RunCommunityCollectionOptions;
   /**
@@ -493,6 +503,8 @@ export type DailyKeywordWorkflowResult = {
   googleTrendsCollection: RunGoogleTrendsCollectionResult | null;
   /** 다음 실시간 트렌드 수집 결과. 위와 같다. disabled면 status="skipped". */
   daumRealtimeCollection: RunDaumRealtimeCollectionResult | null;
+  /** 연예 뉴스 피드 수집 결과(2026-11-11, R1). 위와 같다. disabled면 status="skipped". */
+  newsFeedEntCollection: RunNewsFeedEntCollectionResult | null;
   /** 커뮤니티 수집 결과. 위와 같다. disabled면 status="skipped". */
   communityCollection: RunCommunityCollectionResult | null;
   /** options.queries를 명시적으로 넘긴 경우 null - buildDailyQueryPool()을 거치지 않았으므로. */
@@ -573,6 +585,7 @@ export async function runDailyKeywordWorkflow(
     trendCollection: null,
     googleTrendsCollection: null,
     daumRealtimeCollection: null,
+    newsFeedEntCollection: null,
     communityCollection: null,
     queryPool: null,
     collected: null,
@@ -614,6 +627,8 @@ export async function runDailyKeywordWorkflow(
     // 분류가 라우팅을 대신하므로 이 소스 자체를 특정 job 전용으로 두지 않는다).
     const collectionSources: readonly TrendSource[] =
       options.collectionSources ?? ["creator_advisor", "google_trends", "daum_realtime", "community"];
+    // news_feed_ent는 기본 목록에 **넣지 않는다**(2026-11-11). 엔터 트랙만 쓰는 소스이고, 기본
+    // 목록에 넣으면 사회·사용설명서 트랙이 자기 풀에 연예 아젠다를 끌어오게 된다.
     const forceSkip = { enabled: false } as const;
 
     // 소스별로 독립 수집한다. 하나가 실패해도 나머지는 계속 돌아야 하므로 순차 실행하되 서로의
@@ -633,6 +648,11 @@ export async function runDailyKeywordWorkflow(
       collectionSources.includes("daum_realtime") ? options.daumRealtimeOptions : { ...options.daumRealtimeOptions, ...forceSkip }
     );
     result.daumRealtimeCollection = daumRealtimeCollection;
+
+    const newsFeedEntCollection = await runNewsFeedEntCollection(
+      collectionSources.includes("news_feed_ent") ? options.newsFeedEntOptions : { ...options.newsFeedEntOptions, ...forceSkip }
+    );
+    result.newsFeedEntCollection = newsFeedEntCollection;
 
     const communityCollection = await runCommunityCollection(
       collectionSources.includes("community") ? options.communityOptions : { ...options.communityOptions, ...forceSkip }
@@ -657,6 +677,19 @@ export async function runDailyKeywordWorkflow(
           `${daumRealtimeCollection.upsertedCount}건 저장 (trendDate: ${daumRealtimeCollection.trendDate ?? "N/A"}, 만료 ${daumRealtimeCollection.expiredCount}건)`
       );
     }
+    if (newsFeedEntCollection.status === "success") {
+      console.log(
+        `ℹ️ [dailyKeywordWorkflow] 연예 뉴스 피드 수집: 스토리 ${newsFeedEntCollection.fetchedCount}건 조회 → ` +
+          `${newsFeedEntCollection.upsertedCount}건 저장 (trendDate: ${newsFeedEntCollection.trendDate ?? "N/A"}, 만료 ${newsFeedEntCollection.expiredCount}건)`
+      );
+      console.log(
+        `   다음 랭킹 ${newsFeedEntCollection.daumRankedCount}건 중 ${newsFeedEntCollection.daumMatchedCount}건 매칭 · ` +
+          `이슈 구 LLM ${newsFeedEntCollection.llmPhraseCount}건 / 공유토큰 ${newsFeedEntCollection.fallbackPhraseCount}건`
+      );
+      for (const item of newsFeedEntCollection.daumUnmatched) {
+        console.log(`   ⚠️ 다음 ${item.rank}위를 Google 클러스터와 못 맞췄다(시드 미생성): ${item.title}`);
+      }
+    }
     if (communityCollection.status === "success") {
       console.log(
         `ℹ️ [dailyKeywordWorkflow] 커뮤니티 수집: ${communityCollection.fetchedCount}건 조회 → ` +
@@ -673,6 +706,7 @@ export async function runDailyKeywordWorkflow(
       { source: "creator_advisor", result: trendCollection },
       { source: "google_trends", result: googleTrendsCollection },
       { source: "daum_realtime", result: daumRealtimeCollection },
+      { source: "news_feed_ent", result: newsFeedEntCollection },
       { source: "community", result: communityCollection },
     ];
     const succeeded = trendResults.filter((entry) => entry.result.status === "success");
