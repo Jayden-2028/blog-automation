@@ -40,6 +40,10 @@ const job: SchedulerJob = {
       // 로그·run metadata에만 남긴다. 1주 실측 후 ENT_TREND_GATE_APPLY로 켠다.
       // 사회 트랙은 켜지 않는다 - 거기선 전 분야 트렌드가 들어오는 것이 정상이다.
       entertainmentTrendGate: true,
+      // topic 라벨 충돌 판정(2026-11-11, R2). 같은 키워드가 그날 엔터 카드와 비엔터 카드에 동시에
+      // 올라왔으면 엔터 사안이 아니라고 본다. 기본은 preview - 무엇이 빠질지 run metadata에만
+      // 남긴다(ENT_TOPIC_CONFLICT_DROP로 켠다). 사회 트랙은 켜지 않는다.
+      entertainmentTopicConflict: true,
       metadata: { kind: "entertainment", round: round.round },
       notifyOptions: { headerTitle: formatEntertainmentHeader(round) },
     });
@@ -63,6 +67,25 @@ const job: SchedulerJob = {
         `\n▶ 엔터 트렌드 게이트(${mode}): 동적 소스 후보 ${result.trendGate.evaluated}건 중 ` +
           `비엔터 확정 ${result.trendGate.strictDrops.length}건 / 엔터 신호 없음 ${result.trendGate.looseDrops.length}건`
       );
+    }
+
+    if (result.topicConflict) {
+      const mode = result.topicConflict.applied ? "적용" : "preview";
+      console.log(
+        `\n▶ topic 라벨 충돌(${mode}): 동적 시드 ${result.topicConflict.evaluated}건 중 ` +
+          `${result.topicConflict.conflicts.length}건이 엔터·비엔터 카드 동시 등록`
+      );
+    }
+
+    if (result.topicQuery) {
+      const { status, requested, llmCount, fallbackCount, error } = result.topicQuery;
+      console.log(
+        `\n▶ 주제어 추출: ${status} — 요청 ${requested}건 / LLM ${llmCount}건 / 폴백 ${fallbackCount}건` +
+          (error ? ` (${error})` : "")
+      );
+      if (requested > 0 && llmCount === 0) {
+        console.log("   ⚠️ 전량 폴백 - 이 run의 경쟁도·중복 판정은 신뢰도가 낮다.");
+      }
     }
 
     if (result.communityCollection?.status === "failed") {

@@ -49,6 +49,7 @@ export async function sendKeywordNotification(
 
   const chunks = formatNotificationMessage(payload, {
     headerTitle: options.headerTitle,
+    headerNote: options.headerNote,
     communityQueries: options.communityQueries,
     sections: options.sections,
     evergreen: options.evergreen,

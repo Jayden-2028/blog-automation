@@ -51,6 +51,26 @@ export const BLOG_COMPETITION_CONFIG = {
   applyToScore: parseBooleanEnv(process.env.BLOG_COMPETITION_APPLY_TO_SCORE, false),
 
   /**
+   * 주제어가 **폴백**(LLM 추출 실패 → buildCompetitionQuery의 "앞에서부터 핵심 명사 2개")인 항목은
+   * 점수 반영에서 제외할지. **기본 false를 유지한다**(= 지금까지와 동작이 같다).
+   *
+   * 왜 필요한가(2026-11-10 run 260 실측): `extractTopicQueries`가 그날 60건 **전부** 실패해
+   * (11/06~11/09는 전부 llm) 폴백 질의가 경쟁도 조회로 나갔다. 폴백은 주제어가 아니라 제목 앞 두
+   * 어절이라 `외도 확인후`·`영화 평점`·`넷플릭스 영화` 같은 일반어가 됐고, 평균 blogTotal이
+   * 4,678~77,368건 → **1,243,037건(16~265배)**으로 튀었다. applyToScore가 켜져 있어 그 숫자가
+   * 실제로 점수를 **평균 −2.50점** 깎았다(60건 중 39건의 점수가 달라졌다. 다른 날은 +0.42~−1.87).
+   * 즉 무관한 일반어의 블로그 건수가 그날 순위를 흔들었다.
+   *
+   * 조회와 기록은 그대로 한다 - `entries`에 blogTotal·scoreAfter가 계속 남아야 "켜면 어떻게
+   * 달라지는지" 표를 만들 수 있다. 이 스위치는 **점수 반영만** 막고, 막은 항목에는
+   * `scoreApplied: false`가 붙는다.
+   *
+   * 켜는 것은 6-factor 점수에 닿는 변경이라 **사용자 승인 항목**이다. 켜려면
+   * BLOG_COMPETITION_SKIP_FALLBACK=true.
+   */
+  skipFallbackQueries: parseBooleanEnv(process.env.BLOG_COMPETITION_SKIP_FALLBACK, false),
+
+  /**
    * 프로브를 돌릴 최대 키워드 수(원래 점수 기준 상위 N건).
    *
    * 30 → 60으로 올린다(2026-09-18, applyToScore를 켜면서). **프로브 창을 고르는 기준이 바로

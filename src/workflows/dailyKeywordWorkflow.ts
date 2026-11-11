@@ -23,7 +23,12 @@ import { runDaumRealtimeCollection } from "./daum-realtime/runDaumRealtimeCollec
 import { buildDailyQueryPool } from "./keyword-discovery/buildDailyQueryPool.js";
 import { collectNaverCandidates } from "./keyword-discovery/collectNaverCandidates.js";
 import { filterCandidatesByRelevance } from "./keyword-discovery/seedRelevance.js";
+import { ENT_TOPIC_CONFLICT_CONFIG } from "../config/entertainmentTopicConflict.js";
 import { ENT_TREND_GATE_CONFIG } from "../config/entertainmentTrendGate.js";
+import {
+  evaluateEntertainmentTopicConflict,
+  type EntTopicConflictResult,
+} from "./keyword-discovery/entertainmentTopicConflict.js";
 import {
   evaluateEntertainmentTrendGate,
   type EntTrendGateResult,
@@ -166,12 +171,22 @@ export type RankCompetitionEntry = {
   blogTotal: number | null;
   scoreBefore: number;
   scoreAfter: number;
+  /**
+   * 이 항목의 scoreAfter가 **실제로** 점수에 반영됐는지(2026-11-11). applyToScore가 꺼져 있으면
+   * 전부 false이고, 켜져 있어도 `skipFallbackQueries`에 걸린 폴백 항목은 false다.
+   * scoreAfter는 어느 쪽이든 preview 값으로 그대로 채운다 - 관측 데이터를 잃지 않기 위함이다.
+   */
+  scoreApplied: boolean;
 };
 
 export type RankCompetitionInfo = {
   entries: RankCompetitionEntry[];
   /** 이번 run에서 실제로 점수에 반영했는지(BLOG_COMPETITION_CONFIG.applyToScore). */
   applied: boolean;
+  /** 주제어가 폴백이던 항목 수. 전체와 같으면 LLM 추출이 통째로 실패한 run이다. */
+  fallbackCount: number;
+  /** 폴백이라서 점수 반영을 건너뛴 항목 수(skipFallbackQueries가 꺼져 있으면 0). */
+  fallbackSkippedCount: number;
 };
 
 export type RankKeywordsResult = {
@@ -279,6 +294,14 @@ export async function rankKeywords(
           ? scoreKeyword({ ...input, blogDocumentTotal: found.total }, { useContentOpportunity: true })
           : null;
 
+      // 폴백 주제어는 "주제어"가 아니라 제목 앞 두 어절이다(2026-11-10 사고 - config/
+      // keywordCompetition.ts의 skipFallbackQueries 주석). 게이트가 켜져 있으면 점수 반영만 건너뛴다.
+      const isFallbackQuery = found?.source === "fallback";
+      const scoreApplied =
+        BLOG_COMPETITION_CONFIG.applyToScore &&
+        rescored !== null &&
+        !(BLOG_COMPETITION_CONFIG.skipFallbackQueries && isFallbackQuery);
+
       entries.push({
         keyword: item.ranked.keyword,
         query: found?.query ?? null,
@@ -286,15 +309,25 @@ export async function rankKeywords(
         blogTotal: found?.total ?? null,
         scoreBefore: item.totalScore,
         scoreAfter: rescored?.total ?? item.totalScore,
+        scoreApplied,
       });
 
-      if (BLOG_COMPETITION_CONFIG.applyToScore && rescored) {
+      if (scoreApplied && rescored) {
         item.totalScore = rescored.total;
         item.ranked = { ...item.ranked, totalScore: rescored.total, scoreBreakdown: rescored };
       }
     }
 
-    competition = { entries, applied: BLOG_COMPETITION_CONFIG.applyToScore };
+    competition = {
+      entries,
+      applied: BLOG_COMPETITION_CONFIG.applyToScore,
+      fallbackCount: entries.filter((entry) => entry.querySource === "fallback").length,
+      // "게이트가 실제로 막은 건수"다. applyToScore가 꺼져 있으면 애초에 아무것도 반영되지 않으므로 0이다.
+      fallbackSkippedCount:
+        BLOG_COMPETITION_CONFIG.applyToScore && BLOG_COMPETITION_CONFIG.skipFallbackQueries
+          ? entries.filter((entry) => entry.querySource === "fallback").length
+          : 0,
+    };
 
     if (BLOG_COMPETITION_CONFIG.applyToScore) {
       scoredSortedDesc = scoredSortedDesc.slice().sort((a, b) => b.totalScore - a.totalScore);
@@ -308,9 +341,16 @@ export async function rankKeywords(
   const diversityCandidates = scoredSortedDesc.map((item) => item.ranked);
 
   // 경쟁도 단계가 뽑아 둔 LLM 주제어. 프로브 범위(상위 60건) 안의 후보만 값이 있다.
+  //
+  // **폴백 주제어는 넣지 않는다**(2026-11-11). isSameTopicQuery는 양쪽에 주제어가 있으면 그것으로
+  // 판정을 **단정**하고(부분집합이 아니면 hard false) 기존 df 기반 판정으로 넘기지 않는다. 그런데
+  // 폴백 주제어는 제목 앞 두 어절이라 같은 사안이 서로 다른 주제어를 받는다 - 2026-11-10 run 260의
+  // 젠슨 황 3건이 `외도 확인후` / `엘리스황이 누구길래` / `젠슨황 앨리스황`이었다. "모르겠다"로
+  // 둬야 할 값을 "다른 주제다"로 단정하는 셈이라, 넣지 않고 null(= 판정 불가)로 흘린다.
   const topicQueryByKeyword = new Map<string, string>();
   for (const entry of competition?.entries ?? []) {
-    if (entry.query) topicQueryByKeyword.set(entry.keyword, entry.query);
+    if (!entry.query || entry.querySource === "fallback") continue;
+    topicQueryByKeyword.set(entry.keyword, entry.query);
   }
 
   const runSelection = (useTopicQuery: boolean): RankedKeyword[] =>
@@ -422,6 +462,15 @@ export type DailyKeywordWorkflowOptions = {
    */
   entertainmentTrendGate?: boolean;
   /**
+   * 동적 소스 유래 **시드**에 엔터 topic 라벨 충돌 판정을 적용할지(2026-11-11, R2).
+   * 엔터 트랙만 켠다 - 사회 트랙은 전 분야 트렌드가 들어오는 것이 정상이다.
+   * 켜도 기본은 preview(로그·metadata만)다. 실제 탈락은 ENT_TOPIC_CONFLICT_DROP=true일 때만.
+   *
+   * entertainmentTrendGate와 보는 자리가 다르다: 저쪽은 수집 **후** 기사 제목을 보고, 이쪽은
+   * 수집 **전** 시드를 본다. 그래서 이쪽이 걸러내면 NAVER API 호출 자체가 줄어든다.
+   */
+  entertainmentTopicConflict?: boolean;
+  /**
    * 정치 키워드를 받을지(2026-11-01). **사회 트랙만 true**다 - 티스토리 독자를 4060 남성으로 잡고
    * 정치를 받기로 했다(발행본 실측에서 `정치와 국정`이 평균 조회수 1.46배로 최상위, 0회 글 0/17).
    * 엔터(네이버) 트랙은 생략 = false로 지금까지와 같다. `trend_candidates` 저장소는 정치를 품고
@@ -454,6 +503,25 @@ export type DailyKeywordWorkflowResult = {
    * 켜져 있을 때만). 기본 설정에서는 계산·기록만 하고 후보는 그대로 통과한다.
    */
   trendGate: EntTrendGateResult | null;
+  /**
+   * 엔터 topic 라벨 충돌 판정(2026-11-11, R2). options.entertainmentTopicConflict가 켜져 있고
+   * preview/apply 중 하나라도 켜져 있을 때만. 기본 설정에서는 계산·기록만 하고 시드는 그대로 남는다.
+   */
+  topicConflict: EntTopicConflictResult | null;
+  /**
+   * 경쟁도 주제어 추출(`extractTopicQueries`) 결과 요약(2026-11-11, R4).
+   * 전에는 콘솔에만 남아 사후 진단이 불가능했다 - 2026-11-10에 60건 전부 폴백으로 떨어진 것을
+   * 아무도 몰랐던 이유다. 경쟁도 프로브를 돌지 않은 run에서는 null.
+   */
+  topicQuery: {
+    status: string;
+    requested: number;
+    llmCount: number;
+    fallbackCount: number;
+    durationMs: number;
+    /** LLM 호출·파싱 실패 사유. 전량 폴백이면 여기에 사유가 있다. */
+    error?: string;
+  } | null;
   relevance: FilterCandidatesByRelevanceResult | null;
   clusters: KeywordCluster<KeywordCandidate>[] | null;
   /**
@@ -509,6 +577,8 @@ export async function runDailyKeywordWorkflow(
     queryPool: null,
     collected: null,
     trendGate: null,
+    topicConflict: null,
+    topicQuery: null,
     relevance: null,
     clusters: null,
     topicMerge: null,
@@ -647,15 +717,44 @@ export async function runDailyKeywordWorkflow(
     const categoryScoped = options.includeCategories
       ? queryPool.entries.filter((entry) => options.includeCategories!.includes(entry.category))
       : queryPool.entries;
+    // 엔터 topic 라벨 충돌(2026-11-11, R2). 같은 키워드가 그날 엔터 카드와 비엔터 카드에 동시에
+    // 올라왔으면 분야가 엔터가 아니라고 본다. 기본은 **preview만** - 무엇이 빠질지 로그·metadata에
+    // 남기고 시드는 그대로 둔다(ENT_TOPIC_CONFLICT_DROP). 근거는 config 상단.
+    let conflictScoped = categoryScoped;
+    if (
+      options.entertainmentTopicConflict &&
+      (ENT_TOPIC_CONFLICT_CONFIG.previewEnabled || ENT_TOPIC_CONFLICT_CONFIG.apply)
+    ) {
+      const conflict = evaluateEntertainmentTopicConflict(categoryScoped, {
+        topicsByKeyword: queryPool.topicsByKeyword,
+      });
+      result.topicConflict = conflict;
+      conflictScoped = conflict.entries;
+
+      if (conflict.conflicts.length > 0) {
+        const mode = conflict.applied ? "적용" : "preview";
+        console.log(
+          `ℹ️ [topic충돌/${mode}] 동적 시드 ${conflict.evaluated}건 중 ${conflict.conflicts.length}건이 ` +
+            `엔터 카드와 비엔터 카드에 동시 등록`
+        );
+        for (const verdict of conflict.conflicts) {
+          console.log(
+            `   ✂️ ${verdict.keyword}  (엔터: ${verdict.entertainmentTopics.join("/")} · ` +
+              `비엔터: ${verdict.nonEntertainmentTopics.join("/")})`
+          );
+        }
+      }
+    }
+
     // 저장소(trend_candidates)는 정치를 품는다(excludeCandidateInserts.ts 머리말). 정치를 받지 않는
     // 트랙(엔터)은 읽는 이 자리에서 뺀다 - includeCategories로 대부분 걸리지만, 정치 기사가
     // entertainment/ott로 잘못 분류된 경우를 위한 두 번째 겹이다.
     const scopedEntries = options.allowPolitics
-      ? categoryScoped
-      : categoryScoped.filter((entry) => !isPoliticalKeyword(entry.keyword));
-    if (!options.allowPolitics && categoryScoped.length !== scopedEntries.length) {
+      ? conflictScoped
+      : conflictScoped.filter((entry) => !isPoliticalKeyword(entry.keyword));
+    if (!options.allowPolitics && conflictScoped.length !== scopedEntries.length) {
       console.log(
-        `\u2139\uFE0F [dailyKeywordWorkflow] 정치 키워드 제외: ${categoryScoped.length}건 -> ${scopedEntries.length}건`
+        `\u2139\uFE0F [dailyKeywordWorkflow] 정치 키워드 제외: ${conflictScoped.length}건 -> ${scopedEntries.length}건`
       );
     }
     if (options.includeCategories) {
@@ -777,6 +876,18 @@ export async function runDailyKeywordWorkflow(
       // "이 어투를 쓴 블로그 수"를 재게 된다. 규칙 기반 축약도 한국어 head-final 구조 때문에
       // 실패했다(extractTopicQueries.ts 상단 실측). LLM으로 주제구를 뽑는다 - 호출 1회.
       const extraction = await extractTopicQueries(items);
+      // 추출 결과를 result/metadata로 흘린다(2026-11-11, R4). 전에는 이 console.log 한 줄이
+      // 유일한 기록이어서, 2026-11-10에 60건 전부 폴백으로 떨어진 것을 run 기록만으로는 알 수
+      // 없었다(querySource로 역추정해야 했다).
+      const llmCount = extraction.queries.filter((entry) => entry.source === "llm").length;
+      result.topicQuery = {
+        status: extraction.status,
+        requested: items.length,
+        llmCount,
+        fallbackCount: extraction.queries.length - llmCount,
+        durationMs: extraction.durationMs,
+        ...(extraction.error ? { error: extraction.error } : {}),
+      };
       if (extraction.error) {
         console.log(`ℹ️ [주제어 추출] ${extraction.status} - ${extraction.error}`);
       }
@@ -821,13 +932,22 @@ export async function runDailyKeywordWorkflow(
   // 여기서는 결과를 사람이 읽을 수 있게 남긴다. applied=false면 "반영하면 어떻게 되는지"만 보여준다.
   const competitionStartedAt = Date.now();
   if (ranked.competition) {
-    const { entries, applied } = ranked.competition;
+    const { entries, applied, fallbackCount, fallbackSkippedCount } = ranked.competition;
     const changed = entries.filter((entry) => entry.scoreAfter !== entry.scoreBefore);
 
     console.log(
       `ℹ️ [경쟁도/${applied ? "적용" : "preview"}] ${entries.length}건 측정, ` +
-        `점수가 달라지는 항목 ${changed.length}건`
+        `점수가 달라지는 항목 ${changed.length}건` +
+        (fallbackCount > 0
+          ? ` · 폴백 주제어 ${fallbackCount}건${fallbackSkippedCount > 0 ? `(점수 반영 제외 ${fallbackSkippedCount}건)` : ""}`
+          : "")
     );
+    if (fallbackCount > 0 && fallbackCount === entries.length) {
+      console.log(
+        "   ⚠️ 주제어가 전부 폴백이다 - blogTotal은 주제 포화도가 아니라 일반어의 건수다. " +
+          "이 run의 경쟁도 점수는 신뢰하지 말 것(BLOG_COMPETITION_SKIP_FALLBACK 참고)."
+      );
+    }
     for (const entry of entries.slice(0, 15)) {
       const saturation = computeSaturation(entry.blogTotal);
       const delta =
@@ -885,7 +1005,26 @@ export async function runDailyKeywordWorkflow(
           ? {
               blogCompetition: {
                 applied: ranked.competition.applied,
+                // 폴백 집계(2026-11-11, R4). fallbackCount === entries.length면 LLM 추출이 통째로
+                // 실패한 run이고, 그때 blogTotal은 주제어가 아니라 일반어의 건수다.
+                fallbackCount: ranked.competition.fallbackCount,
+                fallbackSkippedCount: ranked.competition.fallbackSkippedCount,
                 entries: ranked.competition.entries,
+              },
+            }
+          : {}),
+        // 주제어 추출 결과(2026-11-11, R4). 실패 사유가 run 기록에 남아야 "그날 왜 나빴나"를
+        // 사후에 답할 수 있다. 경쟁도 프로브를 돌지 않은 run에서는 키가 없다.
+        ...(result.topicQuery ? { topicQuery: result.topicQuery } : {}),
+        // 엔터 topic 라벨 충돌 판정(2026-11-11, R2). preview에서도 남긴다 - 1주 뒤 이 기록으로
+        // 적용 여부를 판단한다(trendGate와 같은 절차).
+        ...(result.topicConflict
+          ? {
+              topicConflict: {
+                applied: result.topicConflict.applied,
+                evaluated: result.topicConflict.evaluated,
+                conflictCount: result.topicConflict.conflicts.length,
+                conflicts: result.topicConflict.conflicts,
               },
             }
           : {}),
@@ -957,10 +1096,19 @@ export async function runDailyKeywordWorkflow(
     return result;
   }
 
+  // 주제어 추출이 **통째로** 실패한 run은 알림에 한 줄 적는다(2026-11-11, R4). 일부 폴백은
+  // 평소에도 1~3건 있어 알리지 않는다 - 전량 실패일 때만 그날 순위를 의심해야 하기 때문이다
+  // (2026-11-10: 60/60 폴백 + 경쟁도 평균 blogTotal이 16~265배로 튀었다).
+  const topicQueryNote =
+    result.topicQuery && result.topicQuery.requested > 0 && result.topicQuery.llmCount === 0
+      ? `⚠️ 주제어 추출 실패(${result.topicQuery.fallbackCount}건 전부 폴백) — 경쟁도·중복 판정 신뢰도가 낮습니다`
+      : undefined;
+
   const notification = await runStage(stageLog, "notify", () =>
     sendTelegramNotification(runId, {
       ...options.notifyOptions,
       communityQueries: options.notifyOptions?.communityQueries ?? communityQueries,
+      headerNote: options.notifyOptions?.headerNote ?? topicQueryNote,
     })
   );
   result.notification = notification;
