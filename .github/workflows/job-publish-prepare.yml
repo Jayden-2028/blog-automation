@@ -130,3 +130,31 @@ jobs:
           # 미설정이면 코드 기본값(20)을 쓴다. 조절은 vars에서 - 코드 수정·배포가 필요 없다.
           BLOGGER_DAILY_LIMIT: ${{ vars.BLOGGER_DAILY_LIMIT }}
         run: npm run job:publish-poll
+
+      # **이 워크플로가 실패하면 아무도 모른다**(2026-11-11 한효주 인물 백과 사고). 품질 게이트가
+      # 사람인 파이프라인이라 알림이 오지 않는 실패는 파이프라인이 멈춘 것과 같다 - 수정 반영
+      # 알림은 "완료되면 발행 버튼과 함께 다시 보내드립니다"로 끝나 있었고, 사용자는 몇 시간 뒤
+      # 뷰어를 직접 열어 보고서야 알았다. apt 단계는 continue-on-error로 내렸지만 **다른 이유로
+      # 실패하면 여전히 조용하다**.
+      #
+      # 왜 워크플로 레벨인가: 그 run은 `npm run job:publish-poll`에 닿지도 못하고 죽었다 -
+      # job:publish-poll 안의 try/catch로는 잡을 수 없는 자리다. 그래서 스텝 레벨 `if: failure()`다.
+      #
+      # 왜 tsx가 아니라 node + .mjs인가: 알림 경로가 npm ci·node_modules에 기대면, npm ci가
+      # 흔들린 run에서는 알림도 같이 죽는다. 이 스크립트는 node 하나로 돈다(의존성 0).
+      - name: 실패 알림 (트랙 봇)
+        if: failure()
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 어느 봇으로 보낼지는 대기 중인 job의 track이 정한다. 못 읽으면 메인봇(엔터)으로 가고
+          # 본문에 "job 식별 실패"가 적힌다.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          FAILED_WORKFLOW_FILE: job-publish-prepare.yml
+        run: node scripts/notifyWorkflowFailure.mjs
