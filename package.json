@@ -252,6 +252,7 @@
     "test:keyword-input": "tsx src/workflows/instagram-capture/testKeywordInput.ts",
     "test:link-extract": "tsx src/workflows/input-extract/testLinkExtract.ts",
     "test:failure-notification": "tsx src/notifications/testNotifyPipelineFailure.ts",
+    "test:workflow-failure-notify": "tsx src/notifications/testNotifyWorkflowFailure.ts",
     "test:cloud-fallback": "tsx src/jobs/lib/testWarnLocalFallback.ts",
     "test:single-instance-lock": "tsx src/jobs/lib/testSingleInstanceLock.ts",
     "test:heavy-pipeline-lock": "tsx src/jobs/lib/testHeavyPipelineLock.ts",
