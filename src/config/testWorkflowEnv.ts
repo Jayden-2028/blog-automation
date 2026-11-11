@@ -84,4 +84,33 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   console.log("✅ job-publish-prepare: 실패하면 트랙 봇으로 알림이 나간다(의존성 없는 node 경로)");
 }
 
+// 4) 뷰어 후보 클릭 교체의 Chromium·Claude 설치는 **긴 세로 이미지를 자를 때만** 쓰는 보조 도구다.
+//    없으면 그 경우만 원본을 쓰면 된다(cropTallImage는 launch 실패를 {ok:false}로, pickCropFocus는
+//    claude 실행 실패를 focus 0으로 돌린다). 그런데 자체 시한이 없어서, apt가 흔들리면
+//    `playwright install --with-deps`가 20초 간격으로 **계속 버티다** job의 10분 시한을 다 먹고
+//    `manuscripts:image-pick`이 skipped로 떨어졌다 - 뷰어에서 후보를 눌러도 이미지가 바뀌지 않는다
+//    (2026-11-11 14:12~16:02 run 10개 전부 cancelled). 평시 run 전체가 70초쯤이다.
+{
+  const yml = read("image-pick.yml");
+  const start = yml.indexOf("Chromium + Claude Code CLI 설치");
+  assert(start > 0, "image-pick.yml에서 Chromium·Claude 설치 단계를 찾지 못했다");
+  const nextStep = yml.indexOf("\n      - name:", start);
+  const step = yml.slice(start, nextStep === -1 ? undefined : nextStep);
+
+  assert(
+    /continue-on-error:\s*true/.test(step),
+    "image-pick.yml의 Chromium·Claude 설치가 하드 실패다 - 보조 도구 설치 실패가 이미지 교체를 통째로 막는다"
+  );
+  const timeout = /timeout-minutes:\s*(\d+)/.exec(step);
+  assert(
+    timeout !== null,
+    "image-pick.yml의 Chromium·Claude 설치에 자체 시한이 없다 - apt가 버티면 job 시한을 다 먹고 교체가 skipped로 떨어진다"
+  );
+  assert(
+    Number(timeout[1]) <= 5,
+    `image-pick.yml 설치 단계 시한이 ${timeout[1]}분이다 - 평시 run 전체가 70초쯤이므로 5분 이하여야 교체할 시간이 남는다`
+  );
+  console.log("✅ image-pick: Chromium·Claude 설치가 늦거나 실패해도 이미지 교체는 돈다");
+}
+
 console.log("\n✅ testWorkflowEnv 전체 통과");
