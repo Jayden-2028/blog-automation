@@ -1,4 +1,5 @@
-// `job-publish-prepare` 실패 알림(scripts/notifyWorkflowFailure.mjs)을 **실제로 실행해** 검증한다.
+// 워크플로 실패 알림(scripts/notifyWorkflowFailure.mjs)을 **실제로 실행해** 검증한다.
+// 쓰는 워크플로는 다섯이다 - job-research / job-write / job-translate / job-revise / job-publish-prepare.
 // 실행: npm run test:workflow-failure-notify
 //
 // 외부 호출 없음: 가짜 Supabase REST와 가짜 Telegram API를 로컬(127.0.0.1)에 띄워 스크립트의
@@ -254,6 +255,93 @@ function baseEnv(port: number): Record<string, string> {
   assert(result.code === 0, `스크립트가 실패했다: ${result.stderr}`);
   assert(stub.sent[0]!.text.includes("&lt;b&gt;태그&lt;/b&gt; &amp; 기호"), "제목이 escape되지 않았다");
   console.log("✅ 제목의 HTML 특수문자를 escape한다");
+}
+
+// 9) jobId를 환경변수로 받으면 **대기열을 읽지 않는다**. 입력값이 이미 어느 원고인지 말해 주므로
+//    status 조건으로 추측할 필요가 없다 - 조사·집필 중(approved가 아닌) job도 그대로 집는다.
+{
+  const stub = await startStub({
+    rows: [{ id: "job-revise-1", keyword: "한효주", metadata: { track: "kscene" } }],
+  });
+  const result = await runScript({
+    ...baseEnv(stub.port),
+    GITHUB_WORKFLOW: "job-revise",
+    FAILED_WORKFLOW_FILE: "job-revise.yml",
+    FAILED_JOB_ID: "job-revise-1",
+  });
+  await stub.close();
+
+  assert(result.code === 0, `스크립트가 실패했다: ${result.stderr}`);
+  assert(stub.sent.length === 1, `알림이 1통이어야 한다 - ${stub.sent.length}통`);
+  assert(stub.sent[0]!.token === DUMMY_TOKENS.KSCENE_TELEGRAM_BOT_TOKEN, "그 job의 트랙 봇으로 가지 않았다");
+  assert(stub.sent[0]!.text.includes("한효주"), "원고 제목이 없다");
+
+  assert(stub.queries.length === 1, `조회가 한 번이어야 한다 - ${stub.queries.length}번`);
+  const query = decodeURIComponent(stub.queries[0]!);
+  assert(query.includes("id=eq.job-revise-1"), "jobId로 직접 묻지 않았다");
+  assert(!query.includes("status=eq.approved"), "jobId를 아는데 대기열 조건으로 추측했다 - 다른 job을 집는다");
+  assert(
+    !query.includes("channelManuscriptsReadyAt"),
+    "jobId를 아는데 준비 완료 플래그로 걸렀다 - 조사·집필 중인 job을 못 찾는다"
+  );
+  console.log("✅ jobId를 받으면 대기열 조회를 생략하고 그 job만 집는다");
+}
+
+// 10) 워크플로마다 **무엇이 멈췄는지와 다시 돌리는 명령**이 달라야 한다. "준비 실패"라고만 적으면
+//     재작성을 기다리던 사용자는 자기 답장이 날아간 줄 모르고, 재실행 인자도 워크플로마다 다르다.
+{
+  const expectations: { file: string; title: string; rerun: string; jobId?: string }[] = [
+    { file: "job-research.yml", title: "자료조사 실패", rerun: "gh workflow run job-research.yml -f job_id=job-x", jobId: "job-x" },
+    { file: "job-write.yml", title: "원고 집필 실패", rerun: "gh workflow run job-write.yml -f job_id=job-x", jobId: "job-x" },
+    { file: "job-translate.yml", title: "영어본 번역 실패", rerun: "gh workflow run job-translate.yml -f job_id=job-x", jobId: "job-x" },
+    { file: "job-revise.yml", title: "원고 수정 실패", rerun: "gh workflow run job-revise.yml -f job_id=job-x -f feedback=", jobId: "job-x" },
+    { file: "job-publish-prepare.yml", title: "원고 준비 실패", rerun: "gh workflow run job-publish-prepare.yml" },
+  ];
+
+  const titles = new Set<string>();
+  for (const { file, title, rerun, jobId } of expectations) {
+    const stub = await startStub({ rows: [{ id: "job-x", keyword: "제목", metadata: {} }] });
+    const env: Record<string, string> = {
+      ...baseEnv(stub.port),
+      FAILED_WORKFLOW_FILE: file,
+      GITHUB_WORKFLOW: file.replace(/\.yml$/, ""),
+    };
+    if (jobId) env.FAILED_JOB_ID = jobId;
+    const result = await runScript(env);
+    await stub.close();
+
+    assert(result.code === 0, `${file}: 스크립트가 실패했다: ${result.stderr}`);
+    assert(stub.sent.length === 1, `${file}: 알림이 1통이어야 한다`);
+    const text = stub.sent[0]!.text;
+    assert(text.includes(title), `${file}: 제목이 "${title}"이 아니다 - 무엇이 멈췄는지 알 수 없다`);
+    assert(text.includes(rerun), `${file}: 다시 돌리는 명령이 "${rerun}"이 아니다`);
+    titles.add(title);
+  }
+  assert(titles.size === expectations.length, "워크플로 문구가 겹친다 - 무엇이 멈췄는지 구분되지 않는다");
+  console.log(`✅ 워크플로 ${expectations.length}개의 문구·재실행 명령이 서로 다르다`);
+}
+
+// 11) jobId가 가리키는 job이 없을 때(이미 지워졌거나 잘못된 id): 기본 봇으로 보내고 jobId를 남긴다.
+//     행을 못 읽어도 jobId만 있으면 사람이 다시 돌릴 수 있다.
+{
+  const stub = await startStub({ rows: [] });
+  const result = await runScript({
+    ...baseEnv(stub.port),
+    FAILED_WORKFLOW_FILE: "job-write.yml",
+    GITHUB_WORKFLOW: "job-write",
+    FAILED_JOB_ID: "job-gone",
+  });
+  await stub.close();
+
+  assert(result.code === 0, `스크립트가 실패했다: ${result.stderr}`);
+  assert(stub.sent.length === 1, `기본 봇으로 1통이어야 한다 - ${stub.sent.length}통`);
+  assert(stub.sent[0]!.token === DUMMY_TOKENS.TELEGRAM_BOT_TOKEN, "기본 봇(엔터)이 아니다");
+  const text = stub.sent[0]!.text;
+  assert(text.includes("job 식별 실패"), "job 식별 실패를 적지 않았다");
+  assert(text.includes("찾지 못했습니다"), "행을 찾지 못한 사유가 없다");
+  assert(text.includes("jobId job-gone"), "jobId가 본문에 없다 - 다시 돌릴 단서가 없다");
+  assert(text.includes("gh workflow run job-write.yml -f job_id=job-gone"), "재실행 명령에 jobId가 들어가지 않았다");
+  console.log("✅ jobId가 가리키는 job이 없어도 기본 봇으로 가고 jobId가 남는다");
 }
 
 console.log("\n✅ testNotifyWorkflowFailure 전체 통과");

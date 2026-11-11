@@ -50,38 +50,80 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   console.log("✅ job-publish-prepare: 폰트·Chromium 설치 실패가 원고 준비를 멈추지 않는다");
 }
 
-// 3) 원고 준비가 실패하면 **그 자리에서 알림이 나가야 한다**. 품질 게이트가 사람인 파이프라인에서
-//    알림 없는 실패는 파이프라인이 멈춘 것과 같다(2026-11-11 run 43040388380 - 사용자는 몇 시간 뒤
-//    뷰어를 직접 열어 보고서야 알았다). 스텝 레벨이어야 하는 이유: 그 run은 job:publish-poll에
-//    닿지도 못하고 죽어, 코드 안의 try/catch로는 잡히지 않는다.
+// 3) **사용자가 결과를 기다리는 워크플로는 실패하면 그 자리에서 알려야 한다.** 품질 게이트가
+//    사람인 파이프라인에서 알림 없는 실패는 파이프라인이 멈춘 것과 같다(2026-11-11 run
+//    43040388380 - 사용자는 몇 시간 뒤 뷰어를 직접 열어 보고서야 알았다). 스텝 레벨이어야 하는
+//    이유: 그 run은 `npm run`에 닿지도 못하고 죽어, 코드 안의 try/catch로는 잡히지 않는다.
+//    2026-11-12에 준비 하나에서 다섯으로 넓혔다 - 조사·집필·번역·수정도 사용자가 기다리는 자리다.
 {
-  const yml = read("job-publish-prepare.yml");
-  const start = yml.indexOf("실패 알림 (트랙 봇)");
-  assert(start > 0, "job-publish-prepare.yml에 실패 알림 단계가 없다 - 실패하면 아무도 모른다");
-  const nextStep = yml.indexOf("\n      - name:", start);
-  const step = yml.slice(start, nextStep === -1 ? undefined : nextStep);
+  // jobId: job_id 입력이 있는 워크플로는 FAILED_JOB_ID로 넘겨 대기열 추측을 건너뛴다.
+  const needFailureNotify: { file: string; jobId: boolean }[] = [
+    { file: "job-research.yml", jobId: true },
+    { file: "job-write.yml", jobId: true },
+    { file: "job-translate.yml", jobId: true },
+    { file: "job-revise.yml", jobId: true },
+    { file: "job-publish-prepare.yml", jobId: false },
+  ];
 
-  assert(/if:\s*failure\(\)/.test(step), "실패 알림 단계에 if: failure()가 없다");
-  assert(
-    step.includes("node scripts/notifyWorkflowFailure.mjs"),
-    "실패 알림이 node 직실행이 아니다 - npm ci가 흔들린 run에서는 알림도 같이 죽는다"
-  );
-  assert(!/npm run|tsx|npx/.test(step), "실패 알림이 node_modules에 기대고 있다(npm/tsx/npx)");
+  for (const { file, jobId } of needFailureNotify) {
+    const yml = read(file);
+    const start = yml.indexOf("실패 알림 (트랙 봇)");
+    assert(start > 0, `${file}에 실패 알림 단계가 없다 - 실패하면 아무도 모른다`);
+    const nextStep = yml.indexOf("\n      - name:", start);
+    const step = yml.slice(start, nextStep === -1 ? undefined : nextStep);
 
-  // 트랙 봇을 고르려면 대기열 조회(Supabase)와 봇 3종 자격증명이 전부 필요하다.
-  for (const key of [
-    "SUPABASE_URL:",
-    "SUPABASE_SERVICE_ROLE_KEY:",
-    "TELEGRAM_BOT_TOKEN:",
-    "TELEGRAM_CHAT_ID:",
-    "SOCIAL_TELEGRAM_BOT_TOKEN:",
-    "SOCIAL_TELEGRAM_CHAT_ID:",
-    "KSCENE_TELEGRAM_BOT_TOKEN:",
-    "KSCENE_TELEGRAM_CHAT_ID:",
-  ]) {
-    assert(step.includes(key), `실패 알림 단계에 ${key.replace(":", "")}가 없다 - 그 트랙 봇으로 보낼 수 없다`);
+    assert(/if:\s*failure\(\)/.test(step), `${file} 실패 알림 단계에 if: failure()가 없다`);
+    assert(
+      step.includes("node scripts/notifyWorkflowFailure.mjs"),
+      `${file} 실패 알림이 node 직실행이 아니다 - npm ci가 흔들린 run에서는 알림도 같이 죽는다`
+    );
+    assert(!/npm run|tsx|npx/.test(step), `${file} 실패 알림이 node_modules에 기대고 있다(npm/tsx/npx)`);
+
+    // 트랙 봇을 고르려면 조회(Supabase)와 봇 3종 자격증명이 전부 필요하다.
+    for (const key of [
+      "SUPABASE_URL:",
+      "SUPABASE_SERVICE_ROLE_KEY:",
+      "TELEGRAM_BOT_TOKEN:",
+      "TELEGRAM_CHAT_ID:",
+      "SOCIAL_TELEGRAM_BOT_TOKEN:",
+      "SOCIAL_TELEGRAM_CHAT_ID:",
+      "KSCENE_TELEGRAM_BOT_TOKEN:",
+      "KSCENE_TELEGRAM_CHAT_ID:",
+    ]) {
+      assert(step.includes(key), `${file} 실패 알림 단계에 ${key.replace(":", "")}가 없다 - 그 트랙 봇으로 보낼 수 없다`);
+    }
+
+    // 문구가 워크플로마다 달라야 한다(무엇이 멈췄는지·다시 돌리는 명령). 그 분기는 이 변수로 한다.
+    assert(
+      step.includes(`FAILED_WORKFLOW_FILE: ${file}`),
+      `${file} 실패 알림에 FAILED_WORKFLOW_FILE이 자기 파일명으로 들어가 있지 않다 - 다른 워크플로 문구가 나간다`
+    );
+
+    if (jobId) {
+      assert(
+        /FAILED_JOB_ID:\s*\$\{\{\s*inputs\.job_id\s*\}\}/.test(step),
+        `${file} 실패 알림에 FAILED_JOB_ID가 없다 - 입력값으로 아는 job을 대기열로 추측하게 된다`
+      );
+    } else {
+      assert(!step.includes("FAILED_JOB_ID:"), `${file}에는 job_id 입력이 없는데 FAILED_JOB_ID를 넘긴다`);
+    }
   }
-  console.log("✅ job-publish-prepare: 실패하면 트랙 봇으로 알림이 나간다(의존성 없는 node 경로)");
+  console.log(
+    `✅ 사용자가 기다리는 워크플로 ${needFailureNotify.length}개 모두 실패하면 트랙 봇으로 알린다(의존성 없는 node 경로)`
+  );
+}
+
+// 4) 큐를 마감하는 워크플로에서는 실패 알림이 **마감보다 앞**이어야 한다. 마감(always())이 실패한
+//    것까지 "집필 실패"로 알리면, 이미 원고를 받은 사용자에게 거짓 경보가 간다.
+{
+  for (const file of ["job-research.yml", "job-write.yml", "job-revise.yml"]) {
+    const yml = read(file);
+    const notify = yml.indexOf("실패 알림 (트랙 봇)");
+    const drain = yml.indexOf("Drain pipeline queue");
+    assert(drain > 0, `${file}에 Drain pipeline queue 단계가 없다`);
+    assert(notify < drain, `${file}의 실패 알림이 큐 마감 뒤에 있다 - 마감 실패까지 알림이 나간다(거짓 경보)`);
+  }
+  console.log("✅ 큐를 마감하는 셋은 실패 알림이 마감보다 앞이다");
 }
 
 // 4) 뷰어 후보 클릭 교체의 Chromium·Claude 설치는 **긴 세로 이미지를 자를 때만** 쓰는 보조 도구다.

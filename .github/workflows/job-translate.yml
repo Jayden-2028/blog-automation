@@ -69,3 +69,32 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           FEEDBACK: ${{ inputs.feedback }}
         run: npm run job:translate -- "$JOB_ID" "$FEEDBACK"
+
+      # 번역이 멈추면 한글 ✅ 뒤가 끊긴다 - 영어본도, Blogger 발행 버튼도 오지 않는다.
+      #
+      # 2026-11-12: **이 워크플로가 실패하면 아무도 모른다.** 품질 게이트가 사람인 파이프라인에서
+      # 알림이 오지 않는 실패는 파이프라인이 멈춘 것과 같다 - 2026-11-11 한효주 인물 백과 사고가
+      # 그랬다(job-publish-prepare.yml #77이 그 자리를 먼저 막았다).
+      #
+      # 왜 스텝 레벨 `if: failure()`인가: 그 사고의 run은 `npm run` 단계에 닿지도 못하고 apt에서
+      # 죽었다 - CLI 안의 try/catch로는 잡을 수 없는 자리다.
+      # 왜 node + .mjs인가: 알림이 npm ci·node_modules에 기대면, npm ci가 흔들린 run에서는 알림도
+      # 같이 죽는다. 이 스크립트는 node 하나로 돈다(의존성 0).
+      - name: 실패 알림 (트랙 봇)
+        if: failure()
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 어느 봇으로 보낼지는 이 job의 track이 정한다. 못 읽으면 메인봇(엔터)으로 가고
+          # 본문에 "job 식별 실패"와 jobId가 적힌다.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          # 입력값으로 이미 어느 원고인지 안다 - 대기열을 추측하지 않고 이 job만 집는다.
+          FAILED_JOB_ID: ${{ inputs.job_id }}
+          FAILED_WORKFLOW_FILE: job-translate.yml
+        run: node scripts/notifyWorkflowFailure.mjs

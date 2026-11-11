@@ -85,6 +85,39 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: npm run job:research -- "${{ inputs.job_id }}"
 
+      # 조사가 멈추면 집필도 발화되지 않아, Go를 누른 키워드가 그 자리에서 조용히 사라진다.
+      # (CLI 자체의 실패 알림은 CLI가 살아서 끝까지 돈 경우에만 나간다 - 러너가 그 전에 죽으면 없다.)
+      #
+      # 2026-11-12: **이 워크플로가 실패하면 아무도 모른다.** 품질 게이트가 사람인 파이프라인에서
+      # 알림이 오지 않는 실패는 파이프라인이 멈춘 것과 같다 - 2026-11-11 한효주 인물 백과 사고가
+      # 그랬다(job-publish-prepare.yml이 #77에서 그 자리를 먼저 막았다).
+      #
+      # 왜 스텝 레벨 `if: failure()`인가: 그 사고의 run은 `npm run` 단계에 닿지도 못하고 apt에서
+      # 죽었다 - CLI 안의 try/catch로는 잡을 수 없는 자리다.
+      # 왜 node + .mjs인가: 알림이 npm ci·node_modules에 기대면, npm ci가 흔들린 run에서는 알림도
+      # 같이 죽는다. 이 스크립트는 node 하나로 돈다(의존성 0).
+      #
+      # 큐 마감(Drain)보다 **앞**에 둔다: 마감이 실패한 것까지 "집필 실패"로 알리면 이미 원고를
+      # 받은 사용자에게 거짓 경보가 간다. 마감은 always()라 이 스텝 뒤에도 그대로 돈다.
+      - name: 실패 알림 (트랙 봇)
+        if: failure()
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 어느 봇으로 보낼지는 이 job의 track이 정한다. 못 읽으면 메인봇(엔터)으로 가고
+          # 본문에 "job 식별 실패"와 jobId가 적힌다.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          # 입력값으로 이미 어느 원고인지 안다 - 대기열을 추측하지 않고 이 job만 집는다.
+          FAILED_JOB_ID: ${{ inputs.job_id }}
+          FAILED_WORKFLOW_FILE: job-research.yml
+        run: node scripts/notifyWorkflowFailure.mjs
+
       # 2026-09-16: 성공/실패/타임아웃 무관하게 항상 돈다(if: always()) - 이 실행이 DB 큐 행을
       # 대신하고 있었다면 마감하고 락을 풀어 다음 대기 항목을 스스로 깨운다. queue_id가 없으면
       # (수동 gh workflow run 복구 실행 등) CLI가 조용히 아무것도 안 하고 끝난다.
