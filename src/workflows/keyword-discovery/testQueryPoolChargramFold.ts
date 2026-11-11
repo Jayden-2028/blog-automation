@@ -11,6 +11,7 @@ import {
   buildDailyQueryPool,
   charBigrams,
   charGramKeepCount,
+  isCharGramExcludedKeyword,
   isSameCharGramGroup,
   parseCharGramFoldEnabled,
 } from "./buildDailyQueryPool.js";
@@ -71,6 +72,10 @@ const RUN_260_TRENDS = [
   makeTrend("김지원 닥터X", 9, 22, "드라마"),
   makeTrend("김지원 광고", 11, 20, "영화"),
   makeTrend("이세계아이돌", 5, 26, "영화"),
+  // #72 검수 반례(2026-11-11): 짧은 일반어가 구체적인 이슈 키워드를 삼키던 자리.
+  // `아이돌` {아이,이돌} ⊂ `이세계아이돌` {이세,세계,계아,아이,이돌}이라 첫 구현은 한 그룹으로
+  // 묶고 **토큰 수가 적은 `아이돌`을 남겼다.** 자카드로는 2/5 = 0.40 < 0.5라 묶이지 않아야 한다.
+  makeTrend("아이돌", 1, 30, "방송"),
 ];
 
 async function buildPool(charGramFoldEnabled: boolean, trends: TrendCandidateRow[], seeds: SeedQueryRow[] = []) {
@@ -86,6 +91,19 @@ async function buildPool(charGramFoldEnabled: boolean, trends: TrendCandidateRow
 
 function keywordsOf(entries: { keyword: string }[]): string[] {
   return entries.map((entry) => entry.keyword).sort();
+}
+
+/**
+ * 불변식: 어느 그룹의 `kept`에 적힌 키워드도 **반드시 풀에 남아 있어야 한다.**
+ * 1주 preview 기록으로 적용 여부를 판단하므로, 이게 깨지면 관측 자체가 무의미해진다.
+ */
+function assertKeptIsInPool(pool: { entries: { keyword: string }[]; foldedGroups: { kept: string[] }[] }): void {
+  const inPool = new Set(pool.entries.map((entry) => entry.keyword));
+  const missing = pool.foldedGroups.flatMap((group) => group.kept).filter((keyword) => !inPool.has(keyword));
+  assert(
+    missing.length === 0,
+    `foldedGroups.kept에 풀에 없는 키워드가 있다: ${JSON.stringify(missing)}`
+  );
 }
 
 async function testGateOffIsUnchanged(): Promise<void> {
@@ -111,7 +129,11 @@ async function testGateOffIsUnchanged(): Promise<void> {
   for (const keyword of ["젠슨 황 불륜", "젠슨 황 불륜 인정", "앨리스황", "엘리스황"]) {
     assert(survived.includes(keyword), `게이트 off에서는 "${keyword}"가 남아야 한다(기존 동작)`);
   }
-  assert(off.entries.length === RUN_260_TRENDS.length - 1, `게이트 off: 10건 중 1건만 접힘`);
+  assert(
+    off.entries.length === RUN_260_TRENDS.length - 1,
+    `게이트 off: ${RUN_260_TRENDS.length}건 중 1건만 접힘 (${off.entries.length})`
+  );
+  assertKeptIsInPool(off);
   console.log("✅ 게이트 off = 2026-11-10 동작 그대로(그룹 1개·접힘 1건, 젠슨/앨리스 변형 전부 생존)");
 }
 
@@ -148,8 +170,54 @@ async function testGateOnFoldsObservedVariants(): Promise<void> {
   // ③ 과접기 가드: 서로 다른 이슈는 그대로.
   assert(survived.includes("김지원 닥터X"), "서로 다른 이슈(김지원 닥터X)를 죽이면 안 된다");
   assert(survived.includes("김지원 광고"), "서로 다른 이슈(김지원 광고)를 죽이면 안 된다");
-  assert(survived.includes("이세계아이돌"), "관련 없는 후보를 건드리면 안 된다");
-  console.log("✅ 과접기 가드: 김지원 닥터X / 김지원 광고 / 이세계아이돌 전부 생존");
+  // #72 검수 반례. 둘 다 살아남아야 한다 - 특히 **구체적인 쪽**이 살아야 한다.
+  assert(
+    survived.includes("이세계아이돌") && survived.includes("아이돌"),
+    `짧은 일반어가 구체적인 키워드를 삼키면 안 된다: ${JSON.stringify(survived)}`
+  );
+  assertKeptIsInPool(on);
+  console.log("✅ 과접기 가드: 김지원 닥터X / 김지원 광고 / 아이돌 · 이세계아이돌 전부 생존");
+}
+
+/**
+ * #72 검수에서 찾은 재현 케이스(2026-11-11). 두 단계가 서로의 대표를 떨어뜨려 4건 그룹이
+ * 1건만 남고, metadata의 kept에 풀에 없는 키워드가 적혔다. 그 조건을 그대로 고정한다.
+ *
+ * 조건: 2단계가 2순위 대표를 compareForRank(rank 우선)로 고르는데, 3단계는 compareForBase
+ * (토큰 수 우선)로 정렬한다 -> 토큰 수는 적지만 rank가 나쁜 멤버에서 둘의 선택이 갈린다.
+ */
+async function testStageKeepersAgree(): Promise<void> {
+  const trends = [
+    makeTrend("젠슨황", 9, 10, "방송"), // 1토큰, rank 최하 -> 두 단계 모두 base
+    makeTrend("젠슨황 와이프", 5, 20, "방송"), // 2토큰, rank 중간 -> 3단계만 2순위로 고른다
+    makeTrend("젠슨황 와이프 논란", 1, 30, "방송"), // 3토큰, rank 1위 -> 2단계만 2순위로 고른다
+    makeTrend("젠슨 황 불륜", 2, 25, "드라마"),
+  ];
+
+  const on = await buildPool(true, trends);
+  const survived = keywordsOf(on.entries);
+
+  assert(
+    on.entries.length === 2,
+    `4건 그룹은 charGramKeepCount(4)=2 대로 2건이 남아야 한다 (${on.entries.length}: ${JSON.stringify(survived)})`
+  );
+  assert(survived.includes("젠슨황"), "두 단계의 base는 반드시 살아남는다");
+  assert(
+    survived.includes("젠슨황 와이프 논란"),
+    "2단계가 고른 2순위 대표를 3단계가 떨어뜨려서는 안 된다"
+  );
+  assertKeptIsInPool(on);
+
+  // 3단계가 적는 대표는 **살아 있는 멤버**여야 한다. 그룹이 몇 개로 갈리는지는 판정 가드에 따라
+  // 달라질 수 있으므로(㉢ 교정으로 실제로 달라졌다) 그룹 수·구성을 고정하지 않고, 이 불변식만 건다.
+  const charGram = on.foldedGroups.filter((group) => group.kind === "charGram");
+  assert(charGram.length > 0, "3단계가 무언가는 접어야 하는 입력이다");
+  const dropped = new Set(on.foldedGroups.flatMap((group) => group.dropped));
+  assert(
+    charGram.every((group) => group.kept.every((keyword) => !dropped.has(keyword))),
+    `3단계 대표에 앞 단계가 접은 키워드가 섞이면 안 된다: ${JSON.stringify(charGram.map((g) => g.kept))}`
+  );
+  console.log("✅ 두 단계가 서로의 대표를 떨어뜨리지 않는다(4건 그룹 → 2건 생존, kept 정합)");
 }
 
 async function testTwoMemberGroupFolds(): Promise<void> {
@@ -206,7 +274,31 @@ function testPureJudgements(): void {
   // bigram이 2개 미만(= 공백 제거 후 2글자)인 키워드는 대상에서 뺀다.
   assert(charBigrams("신랑").size === 1, "2글자 키워드의 bigram은 1개");
   assert(!isSameCharGramGroup(charBigrams("신랑"), charBigrams("신랑감 소개")), "bigram 1개짜리는 판정 제외");
-  console.log("✅ 판정 가드: 부분집합·자카드 0.5·교집합 2개·최소 bigram 2개");
+
+  // #72 검수 교정 ㉢: 부분집합 경로는 작은 쪽 bigram 3개 이상을 요구한다.
+  // 전역 최소 크기를 올리지 **않은** 이유는 `젠슨황`(bigram 2개)이 이 단계의 1순위 목적이라서다.
+  assert(
+    !isSameCharGramGroup(charBigrams("아이돌"), charBigrams("이세계아이돌")),
+    "짧은 일반어가 부분문자열 포함으로 긴 키워드를 삼키면 안 된다(자카드 0.40)"
+  );
+  assert(
+    isSameCharGramGroup(charBigrams("젠슨황"), charBigrams("젠슨황 불륜")),
+    "3글자 키워드도 자카드 0.50이면 묶여야 한다(이 단계의 1순위 목적)"
+  );
+  assert(
+    isSameCharGramGroup(charBigrams("나솔사계"), charBigrams("나솔사계 최종커플")),
+    "작은 쪽 bigram이 3개 이상이면 부분집합 경로가 그대로 돈다"
+  );
+  console.log("✅ 판정 가드: 부분집합 bigram 3개 · 자카드 0.5 · 교집합 2개 · 최소 bigram 2개");
+
+  // #72 검수 교정 ㉣: 분류어·범용어와 글자까지 같은 키워드는 접기 앵커가 되지 못한다.
+  for (const term of ["드라마", "영화", "넷플릭스", "리뷰", "총정리"]) {
+    assert(isCharGramExcludedKeyword(term), `분류어·범용어는 제외: ${term}`);
+  }
+  assert(isCharGramExcludedKeyword(" 드라마 "), "공백은 무시한다");
+  assert(!isCharGramExcludedKeyword("아이돌 그룹"), "분류어를 포함하는 구는 제외하지 않는다");
+  assert(!isCharGramExcludedKeyword("이세계아이돌"), "구체적인 키워드는 제외하지 않는다");
+  console.log("✅ 분류어·범용어 제외: 글자까지 같은 단독 키워드만(구는 그대로)");
 
   // 게이트 해석. **미설정·빈 값은 꺼짐**이다(기존 QUERY_POOL_VARIANT_FOLD와 반대 - 승인 전이므로).
   assert(parseCharGramFoldEnabled(undefined) === false, "미설정은 꺼짐");
@@ -222,6 +314,7 @@ async function main(): Promise<void> {
   testPureJudgements();
   await testGateOffIsUnchanged();
   await testGateOnFoldsObservedVariants();
+  await testStageKeepersAgree();
   await testTwoMemberGroupFolds();
   await testKeepCountByGroupSize();
   await testSeedIsNeverFolded();

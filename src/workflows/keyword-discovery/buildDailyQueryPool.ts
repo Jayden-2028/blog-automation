@@ -23,6 +23,7 @@
 // dailyKeywordWorkflow.ts의 "seed" 단계는 이 함수 하나만 호출하면 되고 소스별 분기를 두지 않는다.
 // 동적 소스는 전부 seed_queries 파이프라인을 보강하는 enrichment일 뿐, 필수 의존성이 아니다.
 
+import { TOPIC_GROUPING_CONFIG } from "../../config/keywordScoring.js";
 import { TREND_SOURCE_CONFIGS, TREND_SOURCES, type TrendSource } from "../../config/trendSources.js";
 import { SeedQueryRepository } from "../../repositories/SeedQueryRepository.js";
 import { describeError } from "../../services/describeError.js";
@@ -277,11 +278,35 @@ export function parseVariantFoldEnabled(value: string | undefined): boolean {
 //   젠슨황 {젠슨,슨황} ⊂ 젠슨황불륜 {젠슨,슨황,황불,불륜}      -> 부분집합
 //   앨리스황 {앨리,리스,스황} vs 엘리스황 {엘리,리스,스황}       -> 자카드 0.5
 //
-// 과접기를 막는 가드 셋: ㉠ 자카드 경로는 교집합 2개 이상을 요구한다(1개 우연 일치 금지).
-// ㉡ 부분집합 경로는 작은 쪽 bigram이 2개 이상이어야 한다(아주 짧은 키워드가 모든 긴 키워드에
-// 삼켜지는 것을 막는다). ㉢ bigram이 2개 미만인 키워드는 아예 대상에서 뺀다.
+// 과접기를 막는 가드 넷:
+//   ㉠ 자카드 경로는 교집합 2개 이상을 요구한다(1개 우연 일치 금지).
+//   ㉡ bigram이 2개 미만인 키워드(공백 제거 후 3글자 미만)는 아예 대상에서 뺀다.
+//   ㉢ **부분집합 경로는 작은 쪽 bigram이 3개 이상**이어야 한다(2026-11-11 교정, 아래).
+//   ㉣ **분류어·범용어와 글자까지 같은 키워드는 대상에서 뺀다**(2026-11-11 교정, 아래).
 // 이 가드로 `김지원 닥터X` vs `김지원 광고`는 자카드 0.29로 **묶이지 않는다**(2단계 주석이 적어 둔
 // "서로 다른 이슈를 한 주제로 죽이지 않는다"는 보수성을 그대로 지킨다).
+//
+// ---------- 2026-11-11 교정: 짧은 일반어가 구체적인 키워드를 삼키던 문제 ----------
+//
+// 첫 구현의 부분집합 경로는 "작은 쪽 bigram이 전부 큰 쪽에 있다"만 요구했다. 한국어에서 그건 사실상
+// **부분문자열 포함**이라, 짧은 일반어가 아무 긴 키워드나 삼킨다. 실측 재현:
+//   아이돌 {아이,이돌} ⊂ 이세계아이돌 {이세,세계,계아,아이,이돌}
+//   -> 한 그룹, charGramKeepCount(2)=1, **살아남는 쪽이 `아이돌`**(토큰 수가 적어 base다).
+// 구체적인 이슈 키워드를 버리고 분류어를 남기는 셈이고, PR #66에서 1등 키워드를 잃은 것과 같은
+// 계열의 손실이다. 2단계는 **첫 토큰이 같을 것**을 요구해 면역이었는데 여기엔 그 앵커가 없었다.
+//
+// ㉢을 "전역 최소 크기를 3으로 올린다"로 하지 **않은** 이유: `젠슨황`은 공백을 지워도 3글자(bigram
+// 2개)라, 전역으로 올리면 이 단계를 만든 1순위 목적(`젠슨황`↔`젠슨 황 불륜`)이 먼저 죽는다.
+// 그래서 **부분집합 경로에만** 3개를 요구하고, 자카드 경로는 2개를 그대로 둔다. 그러면
+//   젠슨황(2) vs 젠슨황불륜(4)  — 자카드 2/4 = 0.50 >= 0.5  -> 묶인다 ✅ (의도)
+//   아이돌(2) vs 이세계아이돌(5) — 자카드 2/5 = 0.40 <  0.5  -> 안 묶인다 ✅ (교정)
+// 로 갈린다. 자카드 0.5는 "긴 쪽이 짧은 쪽의 2배를 넘지 않는다"는 뜻이라, 3글자 키워드가 임의로
+// 긴 문자열에 삼켜지는 길이 막힌다 - 길이 상한이 판정 안에 들어 있는 셈이다.
+//
+// ㉣은 의도를 직접 말하는 겹이다. `드라마`·`영화`·`방송`·`연예`처럼 TOPIC_GROUPING_CONFIG가 이미
+// "주제가 아니라 분류"로 선언해 둔 말이 동적 소스에서 단독 키워드로 올라오면 접기 앵커가 되지
+// 못하게 한다. 두 겹을 함께 두는 이유: ㉣만 두면 목록에 없는 짧은 일반어(`아이돌`이 그렇다)가
+// 그대로 통과하고, ㉢만 두면 `넷플릭스`처럼 긴 분류어가 남는다.
 //
 // 2·1단계는 **한 줄도 바꾸지 않았다.** 이 단계는 그 결과(survivors) 위에 덧붙어 돌고, 게이트가
 // 꺼져 있으면 아예 실행되지 않는다 - 끄면 동작이 2026-11-10과 완전히 같다.
@@ -296,6 +321,28 @@ export const QUERY_POOL_CHARGRAM_MIN_INTERSECTION = 2;
 
 /** 이 수보다 bigram이 적은 키워드는 판정 대상에서 뺀다(= 공백 제거 후 3글자 미만). */
 export const QUERY_POOL_CHARGRAM_MIN_SIZE = 2;
+
+/**
+ * **부분집합 경로**가 요구하는 작은 쪽 최소 bigram 수(2026-11-11 교정). 전역 최소 크기를 올리는
+ * 대신 이 경로에만 걸어, `젠슨황`(bigram 2개)이 자카드 경로로는 계속 묶이게 둔다 - 근거는 위 주석.
+ */
+export const QUERY_POOL_CHARGRAM_SUBSET_MIN_SIZE = 3;
+
+/**
+ * 접기 앵커가 되지 못하게 뺄 분류어·범용어. topicGrouping과 **같은 목록**을 쓴다 - 두 경로의
+ * 기준이 어긋나면 "여기선 주제인데 저기선 분류어"가 생긴다. 글자까지 같은 키워드만 뺀다
+ * (`아이돌 그룹`처럼 분류어를 포함하는 구는 그대로 둔다 - 그건 주제를 가리킬 수 있다).
+ */
+const CHARGRAM_EXCLUDED_KEYWORDS = new Set(
+  [...TOPIC_GROUPING_CONFIG.categoryTerms, ...TOPIC_GROUPING_CONFIG.genericTokens].map((term) =>
+    term.trim().toLowerCase().replace(/\s+/g, "")
+  )
+);
+
+/** 이 키워드가 분류어·범용어와 글자까지 같은가(공백 무시). 같으면 접기 대상에서 뺀다. */
+export function isCharGramExcludedKeyword(keyword: string): boolean {
+  return CHARGRAM_EXCLUDED_KEYWORDS.has(keyword.trim().toLowerCase().replace(/\s+/g, ""));
+}
 
 /**
  * 문자 bigram 그룹에서 남길 대표 수. **그룹 크기가 정한다**(설계안 R3 (ii)안).
@@ -336,8 +383,10 @@ export function isSameCharGramGroup(a: ReadonlySet<string>, b: ReadonlySet<strin
   const shared = intersectionCount(a, b);
   if (shared === 0) return false;
 
-  const [smaller, larger] = a.size <= b.size ? [a, b] : [b, a];
-  if (shared === smaller.size) return true; // 부분집합 (작은 쪽 size >= 2는 위에서 보장했다)
+  const [smaller] = a.size <= b.size ? [a, b] : [b, a];
+  // 부분집합 경로. 작은 쪽이 너무 짧으면 쓰지 않는다 - 한국어에서 그건 부분문자열 포함이라
+  // 짧은 일반어가 아무 긴 키워드나 삼킨다(파일 상단 2026-11-11 교정).
+  if (shared === smaller.size && smaller.size >= QUERY_POOL_CHARGRAM_SUBSET_MIN_SIZE) return true;
 
   if (shared < QUERY_POOL_CHARGRAM_MIN_INTERSECTION) return false;
   const union = a.size + b.size - shared;
@@ -608,6 +657,20 @@ function foldVariantQueries(
  * 대표 선정 순서는 2단계와 같다(토큰 수 적은 것 -> CA rank -> candidateScore -> 사전순) -
  * 같은 사안이면 **짧은 쪽이 검색 커버리지가 넓기** 때문이고, 동률에서 run마다 결과가 흔들리지
  * 않도록 마지막에 사전순을 둔다.
+ *
+ * **대표는 앞 단계가 접지 않은 멤버 중에서 고른다**(2026-11-11 교정). 그러지 않으면 두 단계가
+ * 서로의 대표를 떨어뜨린다 - 2단계는 2순위 대표를 compareForRank(rank 우선)로 고르고 이 단계는
+ * 가족 전체를 compareForBase(토큰 수 우선)로 정렬하므로, 둘이 고르는 2순위가 다를 수 있다.
+ * 실측 반례(게이트 켠 상태):
+ *   입력 젠슨황(1토큰 rank9) / 젠슨황 와이프(2토큰 rank5) / 젠슨황 와이프 논란(3토큰 rank1) / 젠슨 황 불륜(rank2)
+ *   2단계 대표 [젠슨황, 젠슨황 와이프 논란]  접힘 [젠슨황 와이프]
+ *   3단계 대표 [젠슨황, 젠슨황 와이프]       접힘 [젠슨황 와이프 논란, 젠슨 황 불륜]
+ *   -> 합쳐서 4건 중 3건이 접혀 **1건만 남는다**(charGramKeepCount(4)는 2인데).
+ * 게다가 metadata.queryPoolFold의 kept에 **풀에 없는 키워드**(젠슨황 와이프)가 적혀, 1주 preview로
+ * 적용 여부를 판단할 숫자가 양방향으로 틀어진다.
+ *
+ * keepCount는 계속 **전체 그룹 크기**로 계산한다 - 10/17 나솔사계의 KEEP=2 전례를 지키려면
+ * 앞 단계가 줄여 놓은 수가 아니라 가족의 실제 크기를 봐야 한다(이 함수 호출부 주석).
  */
 function foldCharGramVariants(
   foldable: readonly FoldableEntry[],
@@ -617,6 +680,7 @@ function foldCharGramVariants(
   const groups: QueryPoolFoldGroup[] = [];
 
   const targets = foldable
+    .filter((item) => !isCharGramExcludedKeyword(item.entry.keyword))
     .map((item) => ({ item, grams: charBigrams(item.entry.keyword) }))
     .filter((candidate) => candidate.grams.size >= QUERY_POOL_CHARGRAM_MIN_SIZE);
   if (targets.length < 2) return { droppedIndexes, groups };
@@ -653,15 +717,15 @@ function foldCharGramVariants(
     const keepCount = charGramKeepCount(bucket.length);
     if (bucket.length <= keepCount) continue;
 
-    const ordered = [...bucket].sort((a, b) => compareForBase(targets[a].item, targets[b].item));
-    const keptIndexes = ordered.slice(0, keepCount);
-
-    // 앞 단계가 이미 접은 것은 **다시 세지 않는다.** 그러지 않으면 metadata.queryPoolFold의
-    // droppedCount가 같은 키워드를 두 번 세고, 앞 단계와 결과가 같은 그룹(실측: 나솔사계)이
-    // 그룹 목록에 중복으로 들어간다. 이 단계가 새로 접은 것이 없으면 그룹도 만들지 않는다.
-    const newlyDropped = ordered
-      .slice(keepCount)
-      .filter((index) => !alreadyDropped.has(targets[index].item.index));
+    // 앞 단계가 이미 접은 멤버는 대표 후보에서 **빼고** 고른다(함수 주석의 실측 반례).
+    // 그러면 이 단계가 새로 접는 것은 "살아 있는 멤버 중 대표 밖"뿐이고, 앞 단계가 접은 것을
+    // 다시 세지도 않는다 - metadata.queryPoolFold의 droppedCount 이중 집계와, 앞 단계와 결과가
+    // 같은 그룹(실측: 나솔사계)이 목록에 중복으로 들어가는 문제도 함께 사라진다.
+    const available = [...bucket]
+      .filter((index) => !alreadyDropped.has(targets[index].item.index))
+      .sort((a, b) => compareForBase(targets[a].item, targets[b].item));
+    const keptIndexes = available.slice(0, keepCount);
+    const newlyDropped = available.slice(keepCount);
     if (newlyDropped.length === 0) continue;
 
     for (const index of newlyDropped) droppedIndexes.add(targets[index].item.index);
