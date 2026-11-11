@@ -608,6 +608,20 @@ function foldVariantQueries(
  * 대표 선정 순서는 2단계와 같다(토큰 수 적은 것 -> CA rank -> candidateScore -> 사전순) -
  * 같은 사안이면 **짧은 쪽이 검색 커버리지가 넓기** 때문이고, 동률에서 run마다 결과가 흔들리지
  * 않도록 마지막에 사전순을 둔다.
+ *
+ * **대표는 앞 단계가 접지 않은 멤버 중에서 고른다**(2026-11-11 교정). 그러지 않으면 두 단계가
+ * 서로의 대표를 떨어뜨린다 - 2단계는 2순위 대표를 compareForRank(rank 우선)로 고르고 이 단계는
+ * 가족 전체를 compareForBase(토큰 수 우선)로 정렬하므로, 둘이 고르는 2순위가 다를 수 있다.
+ * 실측 반례(게이트 켠 상태):
+ *   입력 젠슨황(1토큰 rank9) / 젠슨황 와이프(2토큰 rank5) / 젠슨황 와이프 논란(3토큰 rank1) / 젠슨 황 불륜(rank2)
+ *   2단계 대표 [젠슨황, 젠슨황 와이프 논란]  접힘 [젠슨황 와이프]
+ *   3단계 대표 [젠슨황, 젠슨황 와이프]       접힘 [젠슨황 와이프 논란, 젠슨 황 불륜]
+ *   -> 합쳐서 4건 중 3건이 접혀 **1건만 남는다**(charGramKeepCount(4)는 2인데).
+ * 게다가 metadata.queryPoolFold의 kept에 **풀에 없는 키워드**(젠슨황 와이프)가 적혀, 1주 preview로
+ * 적용 여부를 판단할 숫자가 양방향으로 틀어진다.
+ *
+ * keepCount는 계속 **전체 그룹 크기**로 계산한다 - 10/17 나솔사계의 KEEP=2 전례를 지키려면
+ * 앞 단계가 줄여 놓은 수가 아니라 가족의 실제 크기를 봐야 한다(이 함수 호출부 주석).
  */
 function foldCharGramVariants(
   foldable: readonly FoldableEntry[],
@@ -653,15 +667,15 @@ function foldCharGramVariants(
     const keepCount = charGramKeepCount(bucket.length);
     if (bucket.length <= keepCount) continue;
 
-    const ordered = [...bucket].sort((a, b) => compareForBase(targets[a].item, targets[b].item));
-    const keptIndexes = ordered.slice(0, keepCount);
-
-    // 앞 단계가 이미 접은 것은 **다시 세지 않는다.** 그러지 않으면 metadata.queryPoolFold의
-    // droppedCount가 같은 키워드를 두 번 세고, 앞 단계와 결과가 같은 그룹(실측: 나솔사계)이
-    // 그룹 목록에 중복으로 들어간다. 이 단계가 새로 접은 것이 없으면 그룹도 만들지 않는다.
-    const newlyDropped = ordered
-      .slice(keepCount)
-      .filter((index) => !alreadyDropped.has(targets[index].item.index));
+    // 앞 단계가 이미 접은 멤버는 대표 후보에서 **빼고** 고른다(함수 주석의 실측 반례).
+    // 그러면 이 단계가 새로 접는 것은 "살아 있는 멤버 중 대표 밖"뿐이고, 앞 단계가 접은 것을
+    // 다시 세지도 않는다 - metadata.queryPoolFold의 droppedCount 이중 집계와, 앞 단계와 결과가
+    // 같은 그룹(실측: 나솔사계)이 목록에 중복으로 들어가는 문제도 함께 사라진다.
+    const available = [...bucket]
+      .filter((index) => !alreadyDropped.has(targets[index].item.index))
+      .sort((a, b) => compareForBase(targets[a].item, targets[b].item));
+    const keptIndexes = available.slice(0, keepCount);
+    const newlyDropped = available.slice(keepCount);
     if (newlyDropped.length === 0) continue;
 
     for (const index of newlyDropped) droppedIndexes.add(targets[index].item.index);

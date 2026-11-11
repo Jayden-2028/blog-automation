@@ -88,6 +88,19 @@ function keywordsOf(entries: { keyword: string }[]): string[] {
   return entries.map((entry) => entry.keyword).sort();
 }
 
+/**
+ * 불변식: 어느 그룹의 `kept`에 적힌 키워드도 **반드시 풀에 남아 있어야 한다.**
+ * 1주 preview 기록으로 적용 여부를 판단하므로, 이게 깨지면 관측 자체가 무의미해진다.
+ */
+function assertKeptIsInPool(pool: { entries: { keyword: string }[]; foldedGroups: { kept: string[] }[] }): void {
+  const inPool = new Set(pool.entries.map((entry) => entry.keyword));
+  const missing = pool.foldedGroups.flatMap((group) => group.kept).filter((keyword) => !inPool.has(keyword));
+  assert(
+    missing.length === 0,
+    `foldedGroups.kept에 풀에 없는 키워드가 있다: ${JSON.stringify(missing)}`
+  );
+}
+
 async function testGateOffIsUnchanged(): Promise<void> {
   const off = await buildPool(false, RUN_260_TRENDS);
 
@@ -112,6 +125,7 @@ async function testGateOffIsUnchanged(): Promise<void> {
     assert(survived.includes(keyword), `게이트 off에서는 "${keyword}"가 남아야 한다(기존 동작)`);
   }
   assert(off.entries.length === RUN_260_TRENDS.length - 1, `게이트 off: 10건 중 1건만 접힘`);
+  assertKeptIsInPool(off);
   console.log("✅ 게이트 off = 2026-11-10 동작 그대로(그룹 1개·접힘 1건, 젠슨/앨리스 변형 전부 생존)");
 }
 
@@ -149,7 +163,46 @@ async function testGateOnFoldsObservedVariants(): Promise<void> {
   assert(survived.includes("김지원 닥터X"), "서로 다른 이슈(김지원 닥터X)를 죽이면 안 된다");
   assert(survived.includes("김지원 광고"), "서로 다른 이슈(김지원 광고)를 죽이면 안 된다");
   assert(survived.includes("이세계아이돌"), "관련 없는 후보를 건드리면 안 된다");
+  assertKeptIsInPool(on);
   console.log("✅ 과접기 가드: 김지원 닥터X / 김지원 광고 / 이세계아이돌 전부 생존");
+}
+
+/**
+ * #72 검수에서 찾은 재현 케이스(2026-11-11). 두 단계가 서로의 대표를 떨어뜨려 4건 그룹이
+ * 1건만 남고, metadata의 kept에 풀에 없는 키워드가 적혔다. 그 조건을 그대로 고정한다.
+ *
+ * 조건: 2단계가 2순위 대표를 compareForRank(rank 우선)로 고르는데, 3단계는 compareForBase
+ * (토큰 수 우선)로 정렬한다 -> 토큰 수는 적지만 rank가 나쁜 멤버에서 둘의 선택이 갈린다.
+ */
+async function testStageKeepersAgree(): Promise<void> {
+  const trends = [
+    makeTrend("젠슨황", 9, 10, "방송"), // 1토큰, rank 최하 -> 두 단계 모두 base
+    makeTrend("젠슨황 와이프", 5, 20, "방송"), // 2토큰, rank 중간 -> 3단계만 2순위로 고른다
+    makeTrend("젠슨황 와이프 논란", 1, 30, "방송"), // 3토큰, rank 1위 -> 2단계만 2순위로 고른다
+    makeTrend("젠슨 황 불륜", 2, 25, "드라마"),
+  ];
+
+  const on = await buildPool(true, trends);
+  const survived = keywordsOf(on.entries);
+
+  assert(
+    on.entries.length === 2,
+    `4건 그룹은 charGramKeepCount(4)=2 대로 2건이 남아야 한다 (${on.entries.length}: ${JSON.stringify(survived)})`
+  );
+  assert(survived.includes("젠슨황"), "두 단계의 base는 반드시 살아남는다");
+  assert(
+    survived.includes("젠슨황 와이프 논란"),
+    "2단계가 고른 2순위 대표를 3단계가 떨어뜨려서는 안 된다"
+  );
+  assertKeptIsInPool(on);
+
+  const charGram = on.foldedGroups.filter((group) => group.kind === "charGram");
+  assert(charGram.length === 1, `charGram 그룹 1개 (${charGram.length})`);
+  assert(
+    JSON.stringify(charGram[0].kept) === JSON.stringify(["젠슨황", "젠슨황 와이프 논란"]),
+    `3단계 대표는 살아 있는 멤버여야 한다: ${JSON.stringify(charGram[0].kept)}`
+  );
+  console.log("✅ 두 단계가 서로의 대표를 떨어뜨리지 않는다(4건 그룹 → 2건 생존, kept 정합)");
 }
 
 async function testTwoMemberGroupFolds(): Promise<void> {
@@ -222,6 +275,7 @@ async function main(): Promise<void> {
   testPureJudgements();
   await testGateOffIsUnchanged();
   await testGateOnFoldsObservedVariants();
+  await testStageKeepersAgree();
   await testTwoMemberGroupFolds();
   await testKeepCountByGroupSize();
   await testSeedIsNeverFolded();
