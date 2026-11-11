@@ -56,6 +56,14 @@ jobs:
       - name: 한글 폰트 + Chromium 설치 (페이지 캡처용)
         # 정상 27초인 단계가 apt/네트워크 문제로 30분 넘게 멈춘 적이 있어(2026-10-08) 상한을 둔다.
         timeout-minutes: 8
+        # **이 단계가 실패해도 원고 준비는 계속한다**(2026-11-11). 캡처는 `— 페이지 캡처` 자리를 채우는
+        # 보조 기능이고, 설치가 안 되면 capturePagesForJob이 그 자리만 실패로 기록하고 넘어간다
+        # (captureWithBrowser가 launch 실패를 {ok:false}로 돌려준다). 그런데 이 단계가 하드 실패라
+        # **원고 재생성·뷰어 재배포·준비 완료 알림이 통째로 날아갔다**: 2026-11-11 한효주 인물 백과
+        # 수정 반영이 발화한 run 43040388380이 `azure.archive.ubuntu.com` 이름풀이 실패(apt exit 100)로
+        # 죽어, 수정본은 DB에만 남고 뷰어는 수정 전 본문을 계속 보여줬다. apt 한 번 흔들린 것이
+        # 파이프라인 전체를 멈출 이유가 되면 안 된다.
+        continue-on-error: true
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq fonts-noto-cjk

@@ -73,6 +73,7 @@
     "test:topic-coverage": "tsx src/workflows/writing/testTopicCoverage.ts",
     "test:revise-images": "tsx src/workflows/manuscripts/testReconcileReviseImages.ts",
     "test:pipeline-merge-callbacks": "tsx src/notifications/testPipelineMergeCallbacks.ts",
+    "test:workflow-env": "tsx src/config/testWorkflowEnv.ts",
     "test:storage-cleanup": "tsx src/workflows/storage/testStorageCleanup.ts",
     "sync:images": "tsx src/workflows/images/syncManuscriptImagesCli.ts",
     "manuscript:export": "tsx src/workflows/manuscripts/exportManuscriptCli.ts",

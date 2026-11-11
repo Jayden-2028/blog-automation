@@ -119,6 +119,31 @@ export function buildReadyKeyboard(
   return rows;
 }
 
+/**
+ * 공통 `📄 원고 페이지 열기` 줄을 지킨다(2026-11-11 실측 사고 - 한효주 인물 백과 원고).
+ *
+ * 이 줄은 발행 버튼과 달리 **어떤 상태에서도** 남아 있어야 한다(인물 백과 트랙은 발행 버튼이 없어
+ * 뷰어가 유일한 산출물 창구다). 그런데 두 자리에서 사라졌다:
+ *  - 키보드를 다시 세우는 러너(telegram-update.yml)에 `CLOUDFLARE_PAGES_PROJECT_NAME`이 없어
+ *    `cloudflarePagesUrl()`이 null이었다 - buildReadyKeyboard가 링크 줄 자체를 만들지 못한다.
+ *  - 발행 버튼 복원 경로(markPublishButtonSettled)는 링크 줄을 애초에 세우지 않았다.
+ *
+ * 주소를 만들 수 없는 러너에서도 **눌린 메시지에 남아 있던 링크 버튼**이 정답이므로 그것을 그대로 되돌려 쓴다.
+ * 이미 링크 줄이 있으면 손대지 않는다.
+ */
+export type ManuscriptKeyboardButton = { text: string; url?: string; callback_data?: string };
+
+export function withManuscriptPageRow(
+  rows: readonly (readonly ManuscriptKeyboardButton[])[],
+  linkSources?: readonly (readonly ManuscriptKeyboardButton[])[] | null
+): ManuscriptKeyboardButton[][] {
+  const isLink = (button?: ManuscriptKeyboardButton): boolean => typeof button?.url === "string" && button.url.length > 0;
+  const kept = rows.map((row) => [...row]);
+  if (kept.some((row) => row.some((button) => isLink(button)))) return kept;
+  const found = linkSources?.find((row) => row.length === 1 && isLink(row[0]));
+  return found ? [[...found], ...kept] : kept;
+}
+
 function reviewActionRows(job: ArticleJobRow): TelegramInlineKeyboardButton[][] {
   const row = buildReviewActionRow(job);
   return row ? [row] : [];
