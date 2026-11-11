@@ -126,7 +126,7 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   console.log("✅ 큐를 마감하는 셋은 실패 알림이 마감보다 앞이다");
 }
 
-// 4) 뷰어 후보 클릭 교체의 Chromium·Claude 설치는 **긴 세로 이미지를 자를 때만** 쓰는 보조 도구다.
+// 5) 뷰어 후보 클릭 교체의 Chromium·Claude 설치는 **긴 세로 이미지를 자를 때만** 쓰는 보조 도구다.
 //    없으면 그 경우만 원본을 쓰면 된다(cropTallImage는 launch 실패를 {ok:false}로, pickCropFocus는
 //    claude 실행 실패를 focus 0으로 돌린다). 그런데 자체 시한이 없어서, apt가 흔들리면
 //    `playwright install --with-deps`가 20초 간격으로 **계속 버티다** job의 10분 시한을 다 먹고
