@@ -47,7 +47,30 @@ function payload(items: NotificationKeywordItem[]): KeywordNotificationPayload {
   };
 }
 
+// 헤더 사고 알림 한 줄(2026-11-11, R4). **넘기지 않으면 헤더가 기존과 바이트 단위로 같아야 한다.**
+function testHeaderNote(): void {
+  const data = payload([item()]);
+
+  const baseline = formatNotificationMessage(data);
+  const omitted = formatNotificationMessage(data, {});
+  const empty = formatNotificationMessage(data, { headerNote: "   " });
+  assert(baseline[0].text === omitted[0].text, "headerNote를 생략하면 헤더가 기존과 같아야 한다");
+  assert(baseline[0].text === empty[0].text, "headerNote가 공백뿐이면 헤더가 기존과 같아야 한다");
+
+  const note = "⚠️ 주제어 추출 실패(60건 전부 폴백) — 경쟁도·중복 판정 신뢰도가 낮습니다";
+  const withNote = formatNotificationMessage(data, { headerNote: note });
+  assert(withNote[0].text === `${baseline[0].text}\n${note}`, "headerNote는 헤더 마지막 줄로 붙는다");
+  assert(withNote[0].ranks.length === 0, "헤더는 여전히 버튼이 없다(ranks: [])");
+  assert(
+    withNote.length === baseline.length &&
+      withNote.slice(1).every((chunk, index) => chunk.text === baseline[index + 1].text),
+    "headerNote는 항목 chunk를 건드리지 않는다"
+  );
+  console.log("✅ headerNote: 생략·공백이면 기존 헤더 그대로, 있으면 헤더 마지막 줄로만 붙는다");
+}
+
 function main(): void {
+  testHeaderNote();
   console.log("▶ formatNotificationMessage 테스트 시작\n");
 
   const [, itemChunk] = formatNotificationMessage(payload([item()]));

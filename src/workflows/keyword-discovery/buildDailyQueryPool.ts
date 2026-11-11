@@ -72,6 +72,13 @@ export type BuildDailyQueryPoolResult = {
    */
   foldedGroups: QueryPoolFoldGroup[];
   /**
+   * 정규화된 키워드 -> 그날 그 키워드가 올라온 **원본 topic 카드 제목** 목록(2026-11-11).
+   * quota 선별·merge·접기 **이전**의 전체 동적 후보에서 모은다 - 선별 후에는 비엔터 행이 떨어져
+   * "같은 키워드가 여러 분야 카드에 동시에 올라왔다"는 증거가 사라진다.
+   * 엔터 topic 충돌 판정(entertainmentTopicConflict.ts)이 이 값을 읽는다. 동적 소스가 없으면 빈 객체다.
+   */
+  topicsByKeyword: Record<string, string[]>;
+  /**
    * 조회에 실패한 소스가 있을 때만 채워진다. 실패해도 entries는 나머지 소스로 채워져 반환된다.
    * 단수형 trendError는 하위 호환용으로, 실패한 소스 중 첫 번째 메시지를 담는다.
    */
@@ -103,6 +110,11 @@ export type BuildDailyQueryPoolOptions = {
    * 운영 호출은 이 옵션을 넘기지 않고 env QUERY_POOL_VARIANT_FOLD를 그대로 쓴다.
    */
   variantFoldEnabled?: boolean;
+  /**
+   * 문자 bigram 접기(3단계) 스위치를 테스트에서만 덮어쓴다. 운영 호출은 이 옵션을 넘기지 않고
+   * env QUERY_POOL_FOLD_CHARGRAM(기본 꺼짐)을 그대로 쓴다.
+   */
+  charGramFoldEnabled?: boolean;
 };
 
 // 동적 소스 기반 entry의 기본 priority. seed_queries 기본값(5)보다 낮게 둬서, 같은 우선순위
@@ -251,6 +263,87 @@ export function parseVariantFoldEnabled(value: string | undefined): boolean {
   return !FOLD_OFF_VALUES.has(normalized);
 }
 
+// ---------- 3단계: 문자 bigram 접기 (2026-11-11, KEYWORD-ENT-REDESIGN-2026-11.md R3) ----------
+//
+// 왜: 위 두 단계는 **공백으로 자른 토큰**을 본다. 그래서 2026-11-10 run 260에서 한 사안이 Top 10의
+// 3칸을 먹는 동안 접힌 그룹이 하나뿐이었다. 토큰 판정이 원리적으로 못 보는 세 가지가 있다.
+//   ① 띄어쓰기 차이: `젠슨황`(1토큰) vs `젠슨 황 불륜`(3토큰) — isSameVariantGroup이 첫 토큰
+//      (`젠슨황` vs `젠슨`)부터 다르다고 보고 그룹을 만들지 않는다.
+//   ② 한 글자 표기 차이: `앨리스황` vs `엘리스황` — 각각 1토큰 단독이고 문자열이 달라 교집합이 0이다.
+//   ③ 2개짜리 그룹: `젠슨 황 불륜` + `젠슨 황 불륜 인정`은 같은 그룹이 되지만 2단계의
+//      `bucket.length <= QUERY_POOL_VARIANT_KEEP`(=2) 조기 반환에 걸려 **영원히 접히지 않는다.**
+//
+// 그래서 **공백을 지운 문자 bigram**으로 한 번 더 묶는다. 위 세 경우가 전부 접힌다.
+//   젠슨황 {젠슨,슨황} ⊂ 젠슨황불륜 {젠슨,슨황,황불,불륜}      -> 부분집합
+//   앨리스황 {앨리,리스,스황} vs 엘리스황 {엘리,리스,스황}       -> 자카드 0.5
+//
+// 과접기를 막는 가드 셋: ㉠ 자카드 경로는 교집합 2개 이상을 요구한다(1개 우연 일치 금지).
+// ㉡ 부분집합 경로는 작은 쪽 bigram이 2개 이상이어야 한다(아주 짧은 키워드가 모든 긴 키워드에
+// 삼켜지는 것을 막는다). ㉢ bigram이 2개 미만인 키워드는 아예 대상에서 뺀다.
+// 이 가드로 `김지원 닥터X` vs `김지원 광고`는 자카드 0.29로 **묶이지 않는다**(2단계 주석이 적어 둔
+// "서로 다른 이슈를 한 주제로 죽이지 않는다"는 보수성을 그대로 지킨다).
+//
+// 2·1단계는 **한 줄도 바꾸지 않았다.** 이 단계는 그 결과(survivors) 위에 덧붙어 돌고, 게이트가
+// 꺼져 있으면 아예 실행되지 않는다 - 끄면 동작이 2026-11-10과 완전히 같다.
+
+export const QUERY_POOL_FOLD_CHARGRAM_ENV = "QUERY_POOL_FOLD_CHARGRAM";
+
+/** 문자 bigram 자카드 임계값. `앨리스황`↔`엘리스황`(0.5)이 통과하는 지점이다. */
+export const QUERY_POOL_CHARGRAM_THRESHOLD = 0.5;
+
+/** 자카드 경로가 요구하는 최소 bigram 교집합 수. 1개 우연 일치로 묶이는 것을 막는다. */
+export const QUERY_POOL_CHARGRAM_MIN_INTERSECTION = 2;
+
+/** 이 수보다 bigram이 적은 키워드는 판정 대상에서 뺀다(= 공백 제거 후 3글자 미만). */
+export const QUERY_POOL_CHARGRAM_MIN_SIZE = 2;
+
+/**
+ * 문자 bigram 그룹에서 남길 대표 수. **그룹 크기가 정한다**(설계안 R3 (ii)안).
+ *
+ * 왜 고정값이 아닌가: 10/17 나솔사계처럼 변형이 13개 쏟아지는 프로그램 키워드는 대표 2개가 유용했고
+ * (QUERY_POOL_VARIANT_KEEP의 근거), 11/10 젠슨 황처럼 2~3개로 갈라진 인물 표기는 1개면 충분했다.
+ * 같은 상수로 둘을 만족시킬 수 없으므로 크기로 가른다.
+ */
+export function charGramKeepCount(groupSize: number): number {
+  return groupSize >= 4 ? 2 : 1;
+}
+
+/** QUERY_POOL_FOLD_CHARGRAM 해석. **미설정·빈 값이면 꺼짐**(승인 전 preview 단계이므로 기본이 off다). */
+export function parseCharGramFoldEnabled(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "true";
+}
+
+/** 공백을 모두 지운 소문자 문자열의 bigram 집합. */
+export function charBigrams(keyword: string): Set<string> {
+  const compact = keyword.toLowerCase().replace(/\s+/g, "");
+  const grams = new Set<string>();
+  for (let i = 0; i + 2 <= compact.length; i++) grams.add(compact.slice(i, i + 2));
+  return grams;
+}
+
+function intersectionCount(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
+  let count = 0;
+  for (const value of a) {
+    if (b.has(value)) count++;
+  }
+  return count;
+}
+
+/** 두 키워드가 같은 사안의 표기 변형인가(문자 bigram 기준). 가드는 이 파일 상단 주석 참고. */
+export function isSameCharGramGroup(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size < QUERY_POOL_CHARGRAM_MIN_SIZE || b.size < QUERY_POOL_CHARGRAM_MIN_SIZE) return false;
+
+  const shared = intersectionCount(a, b);
+  if (shared === 0) return false;
+
+  const [smaller, larger] = a.size <= b.size ? [a, b] : [b, a];
+  if (shared === smaller.size) return true; // 부분집합 (작은 쪽 size >= 2는 위에서 보장했다)
+
+  if (shared < QUERY_POOL_CHARGRAM_MIN_INTERSECTION) return false;
+  const union = a.size + b.size - shared;
+  return shared / union >= QUERY_POOL_CHARGRAM_THRESHOLD;
+}
+
 export type QueryPoolFoldGroup = {
   /** 그룹의 base 키워드(토큰이 가장 적은 대표 - 보통 프로그램·인물명 단독). kept[0]과 같다. */
   base: string;
@@ -262,8 +355,10 @@ export type QueryPoolFoldGroup = {
    * 그룹 종류(2026-10-21 추가 필드. 기존 base·kept·dropped 모양은 그대로다).
    *   "subset"    — 첫 토큰 동일 + 토큰 부분집합. 대표 2개를 남긴다.
    *   "wordOrder" — 토큰 집합이 완전히 같고 순서만 다름. 대표 1개만 남긴다.
+   *   "charGram"  — 공백을 지운 문자 bigram이 겹침(2026-11-11, QUERY_POOL_FOLD_CHARGRAM).
+   *                 띄어쓰기·한 글자 표기 차이를 잡는다. 대표 수는 그룹 크기가 정한다.
    */
-  kind: "subset" | "wordOrder";
+  kind: "subset" | "wordOrder" | "charGram";
 };
 
 type FoldableEntry = {
@@ -413,7 +508,7 @@ function foldWordOrderVariants(
  */
 function foldVariantQueries(
   entries: QueryPoolEntry[],
-  options: { enabled: boolean }
+  options: { enabled: boolean; charGramEnabled: boolean }
 ): { entries: QueryPoolEntry[]; foldedGroups: QueryPoolFoldGroup[] } {
   if (!options.enabled) return { entries, foldedGroups: [] };
 
@@ -488,8 +583,104 @@ function foldVariantQueries(
     );
   }
 
+  // 3단계: 문자 bigram 접기(게이트 뒤).
+  //
+  // 입력은 1·2단계 **이전**의 전체 동적 entry다(survivors가 아니다). 대표 수를 그룹 크기가 정하므로
+  // (charGramKeepCount) 앞 단계가 이미 줄여 놓은 목록을 보면 크기를 잘못 센다 - 실측 반례:
+  // 나솔사계 변형 5건은 2단계가 2건으로 줄이는데, 그 2건만 보면 "크기 2 → 대표 1"이 되어
+  // 10/17에 KEEP=2로 정한 전례가 조용히 무너진다. 전체를 보면 "크기 5 → 대표 2"로 보존된다.
+  // 이 단계는 **접힘만 더한다**(앞 단계가 접은 것을 되살리지 않는다). 끄면 droppedIndexes와
+  // foldedGroups가 위에서 만들어진 그대로여서 동작이 기존과 완전히 같다.
+  if (options.charGramEnabled) {
+    const charGram = foldCharGramVariants(allFoldable, droppedIndexes);
+    for (const index of charGram.droppedIndexes) droppedIndexes.add(index);
+    foldedGroups.push(...charGram.groups);
+  }
+
   if (droppedIndexes.size === 0) return { entries, foldedGroups };
   return { entries: entries.filter((_, index) => !droppedIndexes.has(index)), foldedGroups };
+}
+
+/**
+ * 3단계 — 공백을 지운 문자 bigram으로 같은 사안의 표기 변형을 묶고, 그룹 크기별 대표만 남긴다.
+ * 판정 규칙과 과접기 가드는 isSameCharGramGroup 위 주석에 있다.
+ *
+ * 대표 선정 순서는 2단계와 같다(토큰 수 적은 것 -> CA rank -> candidateScore -> 사전순) -
+ * 같은 사안이면 **짧은 쪽이 검색 커버리지가 넓기** 때문이고, 동률에서 run마다 결과가 흔들리지
+ * 않도록 마지막에 사전순을 둔다.
+ */
+function foldCharGramVariants(
+  foldable: readonly FoldableEntry[],
+  alreadyDropped: ReadonlySet<number>
+): { droppedIndexes: Set<number>; groups: QueryPoolFoldGroup[] } {
+  const droppedIndexes = new Set<number>();
+  const groups: QueryPoolFoldGroup[] = [];
+
+  const targets = foldable
+    .map((item) => ({ item, grams: charBigrams(item.entry.keyword) }))
+    .filter((candidate) => candidate.grams.size >= QUERY_POOL_CHARGRAM_MIN_SIZE);
+  if (targets.length < 2) return { droppedIndexes, groups };
+
+  // union-find. 쌍 판정에 전이성이 없으므로(`젠슨황`-`젠슨황불륜`-`젠슨황불륜인정`은 사슬로 이어진다)
+  // 묶기는 집합 연산으로 한다. 동적 entry는 하루 수십 건이라 O(n^2)로 충분하다(2단계와 같은 전제).
+  const parent = targets.map((_, index) => index);
+  const find = (index: number): number => {
+    let node = index;
+    while (parent[node] !== node) {
+      parent[node] = parent[parent[node]];
+      node = parent[node];
+    }
+    return node;
+  };
+  for (let i = 0; i < targets.length; i++) {
+    for (let j = i + 1; j < targets.length; j++) {
+      if (!isSameCharGramGroup(targets[i].grams, targets[j].grams)) continue;
+      const rootA = find(i);
+      const rootB = find(j);
+      if (rootA !== rootB) parent[rootB] = rootA;
+    }
+  }
+
+  const buckets = new Map<number, number[]>();
+  for (let i = 0; i < targets.length; i++) {
+    const root = find(i);
+    const bucket = buckets.get(root);
+    if (bucket) bucket.push(i);
+    else buckets.set(root, [i]);
+  }
+
+  for (const bucket of buckets.values()) {
+    const keepCount = charGramKeepCount(bucket.length);
+    if (bucket.length <= keepCount) continue;
+
+    const ordered = [...bucket].sort((a, b) => compareForBase(targets[a].item, targets[b].item));
+    const keptIndexes = ordered.slice(0, keepCount);
+
+    // 앞 단계가 이미 접은 것은 **다시 세지 않는다.** 그러지 않으면 metadata.queryPoolFold의
+    // droppedCount가 같은 키워드를 두 번 세고, 앞 단계와 결과가 같은 그룹(실측: 나솔사계)이
+    // 그룹 목록에 중복으로 들어간다. 이 단계가 새로 접은 것이 없으면 그룹도 만들지 않는다.
+    const newlyDropped = ordered
+      .slice(keepCount)
+      .filter((index) => !alreadyDropped.has(targets[index].item.index));
+    if (newlyDropped.length === 0) continue;
+
+    for (const index of newlyDropped) droppedIndexes.add(targets[index].item.index);
+
+    const group: QueryPoolFoldGroup = {
+      base: targets[keptIndexes[0]].item.entry.keyword,
+      kept: keptIndexes.map((index) => targets[index].item.entry.keyword),
+      dropped: newlyDropped.map((index) => targets[index].item.entry.keyword),
+      kind: "charGram",
+    };
+    groups.push(group);
+
+    console.log(
+      `ℹ️ [buildDailyQueryPool] 문자 bigram 접기: ${group.base} (그룹 ${bucket.length}건 → 대표 ${group.kept.length}건) — ` +
+        `대표 [${group.kept.join(", ")}], 이 단계에서 접힘 [${group.dropped.join(", ")}]`
+    );
+  }
+
+  return { droppedIndexes, groups };
 }
 
 /**
@@ -535,12 +726,23 @@ export async function buildDailyQueryPool(
   const enabledSources = resolveEnabledSources(options);
   const trendErrorBySource: Partial<Record<TrendSource, string>> = {};
   const trendEntries: QueryPoolEntry[] = [];
+  // 정규화 키워드 -> 그날 올라온 원본 topic 카드 제목. **quota 선별 전**에 모은다(선별이 비엔터
+  // 행을 떨어뜨리면 "한 키워드가 여러 분야 카드에 동시에 올라왔다"는 증거가 사라진다).
+  const topicsByKeyword: Record<string, string[]> = {};
+  const addTopic = (keyword: string, topic: string | null | undefined): void => {
+    const name = topic?.trim();
+    if (!name) return;
+    const key = normalizeKeyword(keyword);
+    const list = topicsByKeyword[key] ?? (topicsByKeyword[key] = []);
+    if (!list.includes(name)) list.push(name);
+  };
 
   for (const source of enabledSources) {
     try {
       // latestAvailableTrendDate의 active 후보만 사용한다(오늘/어제로 날짜를 고정하지 않는다 -
       // 수집기가 이미 "데이터가 있는 날짜"를 trend_date로 저장해뒀으므로 그 값을 그대로 신뢰한다).
       const { candidates } = await resolveLoader(source, options)();
+      for (const row of candidates) addTopic(row.keyword, row.topic);
 
       // 소스별 quota + topic diversity로 상위 일부만 고른다. 전체를 다 NAVER API 검증에 보내면
       // collect 단계 소요 시간이 소스 수에 비례해 폭증한다.
@@ -573,6 +775,9 @@ export async function buildDailyQueryPool(
   const { entries, foldedGroups } = foldVariantQueries(mergedEntries, {
     enabled:
       options.variantFoldEnabled ?? parseVariantFoldEnabled(process.env[QUERY_POOL_VARIANT_FOLD_ENV]),
+    charGramEnabled:
+      options.charGramFoldEnabled ??
+      parseCharGramFoldEnabled(process.env[QUERY_POOL_FOLD_CHARGRAM_ENV]),
   });
 
   const trendCountBySource: Partial<Record<TrendSource, number>> = {};
@@ -591,6 +796,7 @@ export async function buildDailyQueryPool(
     trendCountBySource,
     trendMergedCount: mergedCount,
     foldedGroups,
+    topicsByKeyword,
     ...(firstError ? { trendError: firstError } : {}),
     trendErrorBySource,
   };

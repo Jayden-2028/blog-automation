@@ -140,6 +140,8 @@ export type NotificationMessageChunk = {
 export type FormatNotificationMessageOptions = {
   /** 헤더 첫 줄. 생략하면 "📊 오늘의 키워드 랭킹 TOP N"(오전 기본). 오후 커뮤니티 run은 별도 문구를 넘긴다. */
   headerTitle?: string;
+  /** 헤더 마지막에 덧붙일 한 줄(이번 run의 사고 알림). 비거나 생략하면 헤더가 기존과 같다. */
+  headerNote?: string;
   /** 커뮤니티 유래 seedQuery. 일치하는 항목 제목에 📡를 붙인다. */
   communityQueries?: readonly string[];
   /** 에버그린 주제 제안(사용설명서). 뉴스·마감 경고를 붙이지 않는다. */
@@ -161,12 +163,14 @@ export function formatNotificationMessage(
   const headerTitle = options.headerTitle ?? `📊 <b>오늘의 키워드 랭킹 TOP ${payload.items.length}</b>`;
 
   // 헤더는 버튼이 없다(ranks: []). 발송 측이 이 값으로 reply_markup 생략을 판단한다.
+  const headerNote = options.headerNote?.trim();
   const header: NotificationMessageChunk = {
     text:
       `${headerTitle}\n` +
       `${formatDateHeader(run.startedAt)} · run #${run.id}\n` +
       `Seed ${run.activeSeedsCount}개 · 후보 ${run.candidatesCount}건 · 클러스터 ${run.clustersCount}개 · ` +
-      `${run.categories.length}개 카테고리`,
+      `${run.categories.length}개 카테고리` +
+      (headerNote ? `\n${headerNote}` : ""),
     ranks: [],
   };
 
