@@ -761,6 +761,9 @@ export async function runDailyKeywordWorkflow(
     ) {
       const conflict = evaluateEntertainmentTopicConflict(categoryScoped, {
         topicsByKeyword: queryPool.topicsByKeyword,
+        // includeCategories를 그대로 넘긴다. 생략하면 판정 함수가 entertainment/ott 기본값을 쓴다 -
+        // 어느 쪽이든 판정이 엔터 범위를 스스로 지킨다(함수 상단 주석).
+        ...(options.includeCategories ? { entertainmentCategories: options.includeCategories } : {}),
       });
       result.topicConflict = conflict;
       conflictScoped = conflict.entries;
@@ -772,9 +775,13 @@ export async function runDailyKeywordWorkflow(
             `엔터 카드와 비엔터 카드에 동시 등록`
         );
         for (const verdict of conflict.conflicts) {
+          const evidence =
+            verdict.entertainmentEvidence.kind === "card"
+              ? `카드 ${verdict.entertainmentTopics.join("/")}`
+              : `category ${verdict.entertainmentEvidence.category}(${verdict.entertainmentEvidence.source ?? "?"})`;
           console.log(
-            `   ✂️ ${verdict.keyword}  (엔터: ${verdict.entertainmentTopics.join("/")} · ` +
-              `비엔터: ${verdict.nonEntertainmentTopics.join("/")})`
+            `   ✂️ ${verdict.keyword}  (엔터 증거: ${evidence} · ` +
+              `비엔터 카드: ${verdict.nonEntertainmentTopics.join("/")})`
           );
         }
       }
@@ -1058,6 +1065,16 @@ export async function runDailyKeywordWorkflow(
                 applied: result.topicConflict.applied,
                 evaluated: result.topicConflict.evaluated,
                 conflictCount: result.topicConflict.conflicts.length,
+                // 엔터 증거의 출처별 집계(2026-11-11 교정). card = CA 엔터 카드,
+                // category = 카드 없이 entry.category로 들어온 비CA 소스. 첫 구현은 card만 잡았다.
+                evidenceCounts: {
+                  card: result.topicConflict.conflicts.filter(
+                    (verdict) => verdict.entertainmentEvidence.kind === "card"
+                  ).length,
+                  category: result.topicConflict.conflicts.filter(
+                    (verdict) => verdict.entertainmentEvidence.kind === "category"
+                  ).length,
+                },
                 conflicts: result.topicConflict.conflicts,
               },
             }
