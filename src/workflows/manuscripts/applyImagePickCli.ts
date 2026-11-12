@@ -7,6 +7,11 @@
 // **DB(job.metadata, manuscript_manifest_topics)와 Storage에 쓴다** - 사용자가 뷰어에서 후보를 눌렀을 때만 돈다.
 // 원고 준비 재실행·준비 완료 알림 재발송은 하지 않는다(그 슬롯만 바꾼다). 끝나면 그 트랙 봇으로 결과를 한 통 알린다
 // (2026-11-05, 뷰어 링크 버튼 포함). 순수 로직은 applyImagePick.ts.
+//
+// **1건이 아니라 큐를 비운다**(2026-11-12, drainImagePicks.ts). 요청은 워크플로의 `enqueue` job이
+// `image_pick_requests`에 적어 두고, 이 CLI가 그 job의 pending을 **순서대로 전부** 처리한 뒤
+// **배포 한 번·알림 한 통**으로 끝낸다. IMAGE_PICK_JSON은 jobId의 출처이자, 테이블이 아직 없을 때
+// (migration 미적용) 처리할 단건이다 - 그 경우 옛 동작(건당 배포·알림)으로 떨어진다.
 import "dotenv/config";
 
 import { readFile } from "node:fs/promises";
@@ -26,7 +31,10 @@ import { readImageSize } from "./exportManuscript.js";
 import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
 import { writeCostSnapshot } from "../reports/writeCostSnapshot.js";
-import { applyImagePick, parseImagePickRequest } from "./applyImagePick.js";
+import { parseImagePickRequest } from "./applyImagePick.js";
+import { drainImagePicks } from "./drainImagePicks.js";
+import { supabaseImagePickQueue } from "./imagePickQueue.js";
+import { supabase } from "../../services/supabase/client.js";
 import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
 import { viewerPageLink } from "../../config/manuscriptViewerPages.js";
 
@@ -67,46 +75,53 @@ async function readRequestJson(): Promise<string> {
 
 async function main(): Promise<void> {
   const request = parseImagePickRequest(await readRequestJson());
-  console.log(`▶ 후보 이미지 교체: job ${request.jobId} · ${request.index}번 자리 ← 후보 ${request.candidateNumber}`);
+  console.log(`▶ 후보 이미지 교체 큐 처리: job ${request.jobId} (요청 payload: ${request.index}번 자리 ← 후보 ${request.candidateNumber})`);
 
-  const outcome = await applyImagePick(request, {
-    loadJob: (jobId) => ArticleJobRepository.findById(jobId),
-    loadManifest,
-    fetchImage: ({ url, referer }) => defaultFetchImage({ url, referer }),
-    readSize: readImageSize,
-    // Chromium·Claude가 필요한 경로라 긴 세로 이미지일 때만 불러온다.
-    cropTall: async (input) => {
-      const { cropTallImageWithFocus } = await import("../images/cropTallImage.js");
-      return cropTallImageWithFocus({ ...input, filePath: await writeTemp(input.buffer) });
-    },
-    upload: async ({ jobId, index, buffer, mimeType }) => {
-      const uploaded = await uploadArticleImage({ jobId, index, variant: "web", imageBuffer: buffer, mimeType, optimize: true });
-      return uploaded.ok
-        ? { ok: true as const, url: uploaded.url, extension: uploaded.extension, width: uploaded.width, height: uploaded.height }
-        : { ok: false as const, error: uploaded.error };
-    },
-    mergeJobMetadata: async (jobId, patch) => {
-      await ArticleJobRepository.mergeMetadata(jobId, patch);
-    },
-    saveTopic: (topic) => saveManifest({ topics: [topic] }),
-    publishPage,
-    isPublished: async (job) => {
-      const articles = await listArticlesByJobId(job.id);
-      if (articles.length === 0) return false;
-      const publications = await listPublicationsByArticleIds(articles.map((a) => a.id));
-      return publications.some((p) => p.status === "published");
-    },
-    notify: async (job, text) => {
-      await TelegramNotifier.fromEnv(trackOfJob(job)).sendMessages([{ text, replyMarkup: viewerKeyboard(job) }]);
+  const outcome = await drainImagePicks({
+    request,
+    queue: supabaseImagePickQueue(supabase),
+    deps: {
+      loadJob: (jobId) => ArticleJobRepository.findById(jobId),
+      loadManifest,
+      fetchImage: ({ url, referer }) => defaultFetchImage({ url, referer }),
+      readSize: readImageSize,
+      // Chromium·Claude가 필요한 경로라 긴 세로 이미지일 때만 불러온다.
+      cropTall: async (input) => {
+        const { cropTallImageWithFocus } = await import("../images/cropTallImage.js");
+        return cropTallImageWithFocus({ ...input, filePath: await writeTemp(input.buffer) });
+      },
+      upload: async ({ jobId, index, buffer, mimeType }) => {
+        const uploaded = await uploadArticleImage({ jobId, index, variant: "web", imageBuffer: buffer, mimeType, optimize: true });
+        return uploaded.ok
+          ? { ok: true as const, url: uploaded.url, extension: uploaded.extension, width: uploaded.width, height: uploaded.height }
+          : { ok: false as const, error: uploaded.error };
+      },
+      mergeJobMetadata: async (jobId, patch) => {
+        await ArticleJobRepository.mergeMetadata(jobId, patch);
+      },
+      saveTopic: (topic) => saveManifest({ topics: [topic] }),
+      publishPage,
+      isPublished: async (job) => {
+        const articles = await listArticlesByJobId(job.id);
+        if (articles.length === 0) return false;
+        const publications = await listPublicationsByArticleIds(articles.map((a) => a.id));
+        return publications.some((p) => p.status === "published");
+      },
+      notify: async (job, text) => {
+        await TelegramNotifier.fromEnv(trackOfJob(job)).sendMessages([{ text, replyMarkup: viewerKeyboard(job) }]);
+      },
     },
   });
 
-  if (outcome.status === "failed") {
-    console.error(`❌ ${outcome.reason}`);
-    process.exitCode = 1;
-    return;
-  }
-  console.log(`✅ 교체 완료 - ${request.index}번 ← 후보 ${request.candidateNumber}${outcome.record.alreadyPublished ? " (이미 발행된 글 - 발행본 미반영)" : ""}`);
+  const applied = outcome.results.filter((r) => r.status === "applied").length;
+  const failed = outcome.results.filter((r) => r.status === "failed").length;
+  const skipped = outcome.results.filter((r) => r.status === "skipped").length;
+  console.log(
+    `✅ 큐 처리 완료(${outcome.mode}) - 적용 ${applied} · 실패 ${failed} · 건너뜀 ${skipped}` +
+      `${outcome.remaining > 0 ? ` · 남김 ${outcome.remaining}` : ""} / 배포 ${outcome.deploys}회 · 알림 ${outcome.notifications}통`
+  );
+  // 하나도 적용하지 못했고 실패가 있으면 run을 실패로 남긴다(사용자는 알림으로 이미 사유를 받았다).
+  if (applied === 0 && failed > 0) process.exitCode = 1;
 }
 
 async function writeTemp(buffer: Buffer): Promise<string> {

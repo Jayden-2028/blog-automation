@@ -141,6 +141,7 @@
     "manuscripts:image-pick": "tsx src/workflows/manuscripts/applyImagePickCli.ts",
     "test:viewer-image-zip": "tsx src/workflows/manuscripts/testManuscriptImageZip.ts",
     "test:viewer-image-pick": "tsx src/workflows/manuscripts/testApplyImagePick.ts",
+    "test:viewer-image-pick-queue": "tsx src/workflows/manuscripts/testDrainImagePicks.ts",
     "test:viewer-image-pick-api": "tsx cloudflare/manuscripts-pages/testImagePickApi.ts",
     "test:image-notes": "tsx src/workflows/manuscripts/testImageNotes.ts",
     "test:manuscript-manifest": "tsx src/workflows/manuscripts/testManuscriptManifest.ts",
