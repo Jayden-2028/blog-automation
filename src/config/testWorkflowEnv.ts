@@ -155,4 +155,28 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   console.log("✅ image-pick: Chromium·Claude 설치가 늦거나 실패해도 이미지 교체는 돈다");
 }
 
+// 6) 같은 원고의 교체는 **한 번에 하나씩** 돌아야 한다. 겹치면 나중에 끝난 run이 옛 상태로 배포해
+//    앞 교체를 덮고(2026-11-12 한효주 - 1번 누르고 3번을 눌렀더니 1번만 남았다),
+//    `mergeMetadata`가 read-modify-write라 DB의 images 배열까지 되돌아간다.
+{
+  const yml = read("image-pick.yml");
+  const start = yml.indexOf("  apply:");
+  assert(start > 0, "image-pick.yml에서 apply job을 찾지 못했다");
+  const job = yml.slice(start, yml.indexOf("    steps:", start));
+
+  assert(
+    /concurrency:/.test(job),
+    "image-pick.yml의 apply job에 concurrency가 없다 - 같은 원고의 교체 둘이 겹치면 나중 배포가 앞 교체를 덮는다"
+  );
+  assert(
+    /group:\s*image-pick-\$\{\{\s*github\.event\.client_payload\.jobId\s*\}\}/.test(job),
+    "image-pick.yml의 concurrency group이 jobId별이 아니다 - 원고 하나가 밀리면 다른 원고까지 같이 기다린다"
+  );
+  assert(
+    /cancel-in-progress:\s*false/.test(job),
+    "image-pick.yml이 cancel-in-progress: true다 - 먼저 누른 교체가 죽는다(이어서 돌아야 한다)"
+  );
+  console.log("✅ image-pick: 같은 원고의 교체는 줄을 서서 하나씩 돈다");
+}
+
 console.log("\n✅ testWorkflowEnv 전체 통과");
