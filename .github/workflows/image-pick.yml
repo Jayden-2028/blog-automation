@@ -25,6 +25,18 @@
 # **마이그레이션 적용 전에도 깨지지 않는다**: insert 스텝은 continue-on-error라 테이블이 없으면 실패해도
 # apply가 그대로 돌고, 큐를 읽을 수 없으면 CLI가 옛 경로(payload 단건 처리 - 건당 배포·알림)로 떨어진다.
 #
+# **apply는 enqueue가 실패해도 돈다**(`if: !cancelled()`, 2026-11-12). needs만 걸면 enqueue가 죽을 때
+# apply가 skipped로 **조용히** 사라진다 - 사용자는 교체를 기다리는데 run은 초록색으로 끝난 것처럼 보인다.
+# enqueue의 두 스텝은 continue-on-error라 거의 실패하지 않지만, 러너 자체가 흔들리는 경우가 남는다.
+# 큐에 적지 못했더라도 apply는 **payload 단건**으로 옛 경로를 탈 수 있으므로 돌아 보는 쪽이 낫다.
+#
+# **교체가 실패하면 그 트랙 봇으로 한 통 알린다**(2026-11-12, `scripts/notifyWorkflowFailure.mjs`).
+# 교체는 1~2분 걸리고 성공 알림이 따로 오므로, 실패가 조용하면 사용자는 **온다고 믿고 계속 기다린다**
+# (2026-11-11 apt 장애 때 run 10개가 cancelled로 죽었는데 알림이 한 통도 없었다). 다시 돌리는 명령은
+# 적지 않는다 - 이 워크플로는 repository_dispatch 전용이라 `gh workflow run`으로 돌지 않고, 요청 행은
+# 큐에 pending으로 남아 있어 **후보를 한 번 더 누르면** 다음 run이 남은 자리까지 같이 비운다.
+# enqueue에는 알림을 두지 않는다 - apply가 이어서 돌아 같은 실패를 한 통으로 알린다.
+#
 # 원고 준비(job-publish-prepare)는 다시 돌리지 않고 준비 완료 알림도 다시 보내지 않는다.
 # repository_dispatch 전용이라 cron에 영향이 없다.
 
@@ -92,6 +104,10 @@ jobs:
   # 다시 lost update가 난다. 대기 중 취소는 이제 무해하다(요청 행은 DB에 남아 있다).
   apply:
     needs: enqueue
+    # **enqueue가 실패해도 돈다.** needs만 걸면 enqueue 실패가 apply를 조용히 skipped로 만든다 -
+    # 교체를 기다리는 사용자에게 아무 일도 일어나지 않고 알림도 못 나간다(스텝이 돌지 않으니 if: failure()도
+    # 걸리지 않는다). 취소된 경우에만 멈춘다(새 run이 이어받는다).
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # 한 run이 여러 건을 처리한다(상한 DEFAULT_MAX_ITEMS=12). 평시 1건이 30~60초라 넉넉히 둔다.
     timeout-minutes: 25
@@ -142,3 +158,24 @@ jobs:
           SERPER_CREDITS_PURCHASED_AT: ${{ vars.SERPER_CREDITS_PURCHASED_AT }}
           IMAGE_PICK_JSON: ${{ toJson(github.event.client_payload) }}
         run: npm run manuscripts:image-pick
+
+      # 교체가 실패하면 그 트랙 봇으로 한 통. **의존성 없는 node 직실행**이다 - npm ci나 설치 단계가
+      # 흔들린 run에서 알림까지 같이 죽으면 안 된다(그게 알려야 하는 바로 그 실패다).
+      - name: 실패 알림 (트랙 봇)
+        if: failure()
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 어느 봇으로 보낼지는 이 job의 track이 정한다. 못 읽으면 메인봇(엔터)으로 가고
+          # 본문에 "job 식별 실패"와 jobId가 적힌다.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          # 뷰어가 보낸 payload로 어느 원고인지 이미 안다 - 대기열을 추측하지 않는다.
+          FAILED_JOB_ID: ${{ github.event.client_payload.jobId }}
+          FAILED_WORKFLOW_FILE: image-pick.yml
+        run: node scripts/notifyWorkflowFailure.mjs

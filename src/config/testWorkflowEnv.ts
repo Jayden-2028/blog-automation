@@ -54,15 +54,21 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
 //    사람인 파이프라인에서 알림 없는 실패는 파이프라인이 멈춘 것과 같다(2026-11-11 run
 //    43040388380 - 사용자는 몇 시간 뒤 뷰어를 직접 열어 보고서야 알았다). 스텝 레벨이어야 하는
 //    이유: 그 run은 `npm run`에 닿지도 못하고 죽어, 코드 안의 try/catch로는 잡히지 않는다.
-//    2026-11-12에 준비 하나에서 다섯으로 넓혔다 - 조사·집필·번역·수정도 사용자가 기다리는 자리다.
+//    2026-11-12에 준비 하나에서 여섯으로 넓혔다 - 조사·집필·번역·수정·이미지 교체도 사용자가
+//    기다리는 자리다(교체는 11/11 apt 장애로 run 10개가 죽는 동안 알림이 한 통도 없었다).
 {
-  // jobId: job_id 입력이 있는 워크플로는 FAILED_JOB_ID로 넘겨 대기열 추측을 건너뛴다.
-  const needFailureNotify: { file: string; jobId: boolean }[] = [
-    { file: "job-research.yml", jobId: true },
-    { file: "job-write.yml", jobId: true },
-    { file: "job-translate.yml", jobId: true },
-    { file: "job-revise.yml", jobId: true },
-    { file: "job-publish-prepare.yml", jobId: false },
+  // jobId: 어느 원고인지 아는 워크플로는 FAILED_JOB_ID로 넘겨 대기열 추측을 건너뛴다. 출처가
+  // 워크플로마다 다르다 - 넷은 workflow_dispatch 입력, image-pick은 뷰어가 보낸 payload다.
+  const INPUT_JOB_ID = "${{ inputs.job_id }}";
+  const needFailureNotify: { file: string; jobId?: string }[] = [
+    { file: "job-research.yml", jobId: INPUT_JOB_ID },
+    { file: "job-write.yml", jobId: INPUT_JOB_ID },
+    { file: "job-translate.yml", jobId: INPUT_JOB_ID },
+    { file: "job-revise.yml", jobId: INPUT_JOB_ID },
+    { file: "job-publish-prepare.yml" },
+    // 2026-11-12 추가. 11/11 apt 장애 때 run 10개가 죽었는데 알림이 한 통도 없었고, 사용자는
+    // 교체가 오는 줄 알고 계속 기다렸다. 되살리는 길은 명령이 아니라 "후보를 한 번 더 누르기"다.
+    { file: "image-pick.yml", jobId: "${{ github.event.client_payload.jobId }}" },
   ];
 
   for (const { file, jobId } of needFailureNotify) {
@@ -101,8 +107,8 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
 
     if (jobId) {
       assert(
-        /FAILED_JOB_ID:\s*\$\{\{\s*inputs\.job_id\s*\}\}/.test(step),
-        `${file} 실패 알림에 FAILED_JOB_ID가 없다 - 입력값으로 아는 job을 대기열로 추측하게 된다`
+        step.includes(`FAILED_JOB_ID: ${jobId}`),
+        `${file} 실패 알림의 FAILED_JOB_ID가 ${jobId}가 아니다 - 이미 아는 job을 대기열로 추측하게 된다`
       );
     } else {
       assert(!step.includes("FAILED_JOB_ID:"), `${file}에는 job_id 입력이 없는데 FAILED_JOB_ID를 넘긴다`);
@@ -198,6 +204,12 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   assert(
     /cancel-in-progress:\s*false/.test(applyHeader),
     "image-pick.yml이 cancel-in-progress: true다 - 먼저 누른 교체가 죽는다(이어서 돌아야 한다)"
+  );
+  // needs만 걸면 enqueue 실패가 apply를 **조용히 skipped로** 만든다 - 스텝이 아예 돌지 않으니
+  // if: failure() 알림도 걸리지 않고, run은 초록색으로 끝난 것처럼 보인다. 취소만 멈춤 사유다.
+  assert(
+    /if:\s*\$\{\{\s*!cancelled\(\)\s*\}\}/.test(applyHeader),
+    "image-pick.yml의 apply에 if: !cancelled()가 없다 - enqueue가 실패하면 교체가 조용히 건너뛰어진다"
   );
   console.log("✅ image-pick: 요청은 그룹 밖에서 큐에 쌓이고, 같은 원고의 적용은 줄을 서서 하나씩 비운다");
 }

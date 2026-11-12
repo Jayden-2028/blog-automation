@@ -1,10 +1,14 @@
 // 사용자가 결과를 기다리는 워크플로가 실패했을 때 그 트랙 봇으로 텔레그램 한 통을 보낸다.
 // 실행: node scripts/notifyWorkflowFailure.mjs   (워크플로의 `if: failure()` 스텝이 부른다)
 //
-// 쓰는 워크플로는 다섯이다 - job-research / job-write / job-translate / job-revise /
-// job-publish-prepare. 어느 워크플로인지는 `FAILED_WORKFLOW_FILE`이 말하고, 그에 따라 **무엇이
-// 멈췄는지와 다시 돌리는 명령**이 달라진다(WORKFLOW_COPY). 넷은 `inputs.job_id`가 있어
-// `FAILED_JOB_ID`로 받으면 대기열을 추측하지 않고 그 job만 집는다 - 더 정확하고 조회가 한 번이다.
+// 쓰는 워크플로는 여섯이다 - job-research / job-write / job-translate / job-revise /
+// job-publish-prepare / image-pick. 어느 워크플로인지는 `FAILED_WORKFLOW_FILE`이 말하고, 그에 따라
+// **무엇이 멈췄는지와 어떻게 되살리는지**가 달라진다(WORKFLOW_COPY). 다섯은 jobId를 알고 있어
+// (`inputs.job_id`, image-pick은 `client_payload.jobId`) `FAILED_JOB_ID`로 받으면 대기열을 추측하지
+// 않고 그 job만 집는다 - 더 정확하고 조회가 한 번이다.
+//
+// 되살리는 방법이 명령 한 줄이 아닌 경우가 있다: image-pick은 `repository_dispatch` 전용이라
+// `gh workflow run`으로 못 돌린다. 그래서 copy가 `recovery`를 주면 그 줄을 그대로 쓴다.
 //
 // ─ 왜 이 파일만 의존성이 없는가 ────────────────────────────────────────────────
 // 이 알림이 막아야 하는 사고는 **Node 프로세스가 시작조차 못 하고 죽는 경우**다. 2026-11-11
@@ -92,6 +96,21 @@ const WORKFLOW_COPY = {
     rerun: (jobId) => `gh workflow run job-revise.yml -f job_id=${jobId} -f feedback='<보낸 수정 요청 원문>'`,
     rerunNote: "(수정 요청 원문이 입력값입니다 - 텔레그램에 보낸 답장을 그대로 넣거나, ✏️ 수정 요청을 다시 눌러 답장합니다)",
   },
+  // repository_dispatch 전용이라 다시 돌리는 명령이 없다 - 그럴 필요도 없다. 누른 요청은
+  // `image_pick_requests`에 pending으로 남아 있어서, 후보를 한 번 더 누르면 그때 도는 run이
+  // 남은 행까지 같이 비운다(drainImagePicks). 그래서 rerun 대신 recovery를 준다.
+  "image-pick.yml": {
+    title: "이미지 교체 실패",
+    what: [
+      "뷰어에서 누른 후보 이미지 교체가 끝까지 돌지 못했습니다.",
+      "이미지도, 교체 완료 알림도 <b>오지 않습니다</b> - 뷰어 원고는 교체 전 그대로입니다.",
+    ],
+    jobsHeading: "교체되지 않은 원고",
+    recovery: () => [
+      "다시 하기: <b>뷰어에서 그 후보를 한 번 더 누릅니다.</b>",
+      "(누른 요청은 DB 큐에 남아 있어, 다음 run이 남은 자리까지 같이 처리합니다)",
+    ],
+  },
   "job-publish-prepare.yml": {
     title: "원고 준비 실패",
     what: [
@@ -146,12 +165,16 @@ export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, 
   }
 
   const rerunId = (typeof jobs[0]?.id === "string" ? jobs[0].id : undefined) ?? jobId ?? "<jobId>";
+  // 되살리는 방법이 명령 한 줄인 워크플로는 rerun, 그렇지 않은 쪽(image-pick - 버튼을 다시 누른다)은
+  // recovery가 자기 줄을 그대로 준다. 둘 중 하나는 반드시 있다.
+  const recoveryLines = copy.recovery
+    ? copy.recovery(rerunId)
+    : [`다시 돌리기: <code>${escapeHtml(copy.rerun(rerunId))}</code>`, copy.rerunNote];
   lines.push(
     `실패한 run: ${escapeHtml(runUrl)}`,
     "어느 단계에서 죽었는지는 위 run 로그에서 봅니다.",
     "",
-    `다시 돌리기: <code>${escapeHtml(copy.rerun(rerunId))}</code>`,
-    copy.rerunNote
+    ...recoveryLines
   );
 
   const message = lines.join("\n");
