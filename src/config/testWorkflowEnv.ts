@@ -158,25 +158,48 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
 // 6) 같은 원고의 교체는 **한 번에 하나씩** 돌아야 한다. 겹치면 나중에 끝난 run이 옛 상태로 배포해
 //    앞 교체를 덮고(2026-11-12 한효주 - 1번 누르고 3번을 눌렀더니 1번만 남았다),
 //    `mergeMetadata`가 read-modify-write라 DB의 images 배열까지 되돌아간다.
+//
+//    그래서 job이 둘이다(2026-11-12 큐 전환):
+//      - enqueue: **concurrency 그룹이 없다.** 요청을 image_pick_requests에 적는 쪽이 그룹 안에 들어가면
+//        대기 중 취소(그룹당 대기분 1개 한도)로 **요청 자체가 사라진다** - 그게 이번 개편으로 없앤 구멍이다.
+//      - apply: jobId별 그룹 + cancel-in-progress: false + needs: enqueue. 큐를 비운다.
 {
   const yml = read("image-pick.yml");
-  const start = yml.indexOf("  apply:");
-  assert(start > 0, "image-pick.yml에서 apply job을 찾지 못했다");
-  const job = yml.slice(start, yml.indexOf("    steps:", start));
 
+  const enqueueStart = yml.indexOf("  enqueue:");
+  const applyStart = yml.indexOf("  apply:");
+  assert(enqueueStart > 0, "image-pick.yml에 enqueue job이 없다 - 요청을 큐에 적는 자리가 사라졌다");
+  assert(applyStart > enqueueStart, "image-pick.yml에서 apply job을 찾지 못했다(enqueue 뒤에 있어야 한다)");
+
+  // enqueue의 job 헤더(steps 앞까지)에 concurrency가 있으면 안 된다.
+  const enqueueHeader = yml.slice(enqueueStart, yml.indexOf("    steps:", enqueueStart));
   assert(
-    /concurrency:/.test(job),
+    !/concurrency:/.test(enqueueHeader),
+    "image-pick.yml의 enqueue job에 concurrency가 걸려 있다 - 대기 중 취소로 요청이 큐에 쌓이지도 못하고 사라진다"
+  );
+  assert(
+    /image_pick_requests/.test(yml.slice(enqueueStart, applyStart)),
+    "image-pick.yml의 enqueue가 image_pick_requests에 적지 않는다 - 큐가 비어 apply가 할 일이 없다"
+  );
+
+  const applyHeader = yml.slice(applyStart, yml.indexOf("    steps:", applyStart));
+  assert(
+    /needs:\s*enqueue/.test(applyHeader),
+    "image-pick.yml의 apply에 needs: enqueue가 없다 - 큐에 적기 전에 비우려 들면 자기 요청을 놓친다"
+  );
+  assert(
+    /concurrency:/.test(applyHeader),
     "image-pick.yml의 apply job에 concurrency가 없다 - 같은 원고의 교체 둘이 겹치면 나중 배포가 앞 교체를 덮는다"
   );
   assert(
-    /group:\s*image-pick-\$\{\{\s*github\.event\.client_payload\.jobId\s*\}\}/.test(job),
+    /group:\s*image-pick-\$\{\{\s*github\.event\.client_payload\.jobId\s*\}\}/.test(applyHeader),
     "image-pick.yml의 concurrency group이 jobId별이 아니다 - 원고 하나가 밀리면 다른 원고까지 같이 기다린다"
   );
   assert(
-    /cancel-in-progress:\s*false/.test(job),
+    /cancel-in-progress:\s*false/.test(applyHeader),
     "image-pick.yml이 cancel-in-progress: true다 - 먼저 누른 교체가 죽는다(이어서 돌아야 한다)"
   );
-  console.log("✅ image-pick: 같은 원고의 교체는 줄을 서서 하나씩 돈다");
+  console.log("✅ image-pick: 요청은 그룹 밖에서 큐에 쌓이고, 같은 원고의 적용은 줄을 서서 하나씩 비운다");
 }
 
 console.log("\n✅ testWorkflowEnv 전체 통과");

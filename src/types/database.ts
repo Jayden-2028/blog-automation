@@ -515,6 +515,39 @@ export type PipelineLockInsert = {
 
 export type PipelineLockUpdate = Partial<PipelineLockInsert>;
 
+// ---------- image_pick_requests ----------
+// 뷰어 후보 이미지 클릭 교체 요청 큐. 요청을 **대기 중인 GitHub run이 아니라 DB에** 보관해,
+// concurrency 그룹당 대기분 1개 한도로 가운데 요청이 취소돼도 유실되지 않게 한다
+// (2026-11-12, supabase/migrations/20261112130000_image_pick_requests.sql 참고).
+
+export type ImagePickRequestStatus = "pending" | "done" | "failed" | "skipped";
+
+export type ImagePickRequestRow = {
+  id: string;
+  job_id: string;
+  slot_index: number;
+  candidate_number: number;
+  from_url: string;
+  status: ImagePickRequestStatus;
+  error: string | null;
+  requested_at: string;
+  processed_at: string | null;
+};
+
+export type ImagePickRequestInsert = {
+  id?: string;
+  job_id: string;
+  slot_index: number;
+  candidate_number: number;
+  from_url?: string;
+  status?: ImagePickRequestStatus;
+  error?: string | null;
+  requested_at?: string;
+  processed_at?: string | null;
+};
+
+export type ImagePickRequestUpdate = Partial<ImagePickRequestInsert>;
+
 // ---------- images ----------
 // 원고에 연결된 이미지와 출처·저작권·대체 텍스트 정보를 보관한다.
 
@@ -765,6 +798,12 @@ export type Database = {
         Row: PipelineLockRow;
         Insert: PipelineLockInsert;
         Update: PipelineLockUpdate;
+        Relationships: [];
+      };
+      image_pick_requests: {
+        Row: ImagePickRequestRow;
+        Insert: ImagePickRequestInsert;
+        Update: ImagePickRequestUpdate;
         Relationships: [];
       };
       images: {

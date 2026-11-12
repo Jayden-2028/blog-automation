@@ -181,22 +181,44 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     때까지 네이버·티스토리 폴러(`listPending*Requests`)와 텔레그램 발행 콜백(naver/tistory/blogspot)이 그 원고를 집지
     않는다(콜백은 "수정 반영 진행 중 - 잠시 후 다시 누르세요"). 10분 넘으면 stale로 보고 막지 않고 경고 알림 후 진행한다.
   - **후보 이미지 클릭 교체**(2026-10-07): 뷰어 후보 썸네일을 누르면 그 자리(슬롯)만 바뀐다. 경로: Pages Function
-    `/api/image-pick` → `image-pick.yml`(repository_dispatch `image_pick`) → `applyImagePickCli.ts`/`applyImagePick.ts`.
+    `/api/image-pick` → `image-pick.yml`(repository_dispatch `image_pick`) → `applyImagePickCli.ts` →
+    `drainImagePicks.ts` → `applyImagePick.ts`.
     **후보 URL은 DB `imageCandidates`에서 번호로 찾고 클라이언트 URL은 신뢰하지 않으며**, 뷰어가 본 채택본(`fromUrl`)이
     지금과 다르면 중단한다. 내려받기(`defaultFetchImage`, referer=출처) → 크기·형식 검사 → 긴 세로 자르기 → Storage 같은
     경로 upsert → `metadata.images[슬롯]`·`imageCandidates.picked`·manifest → 페이지 재배포. 캡션은 그대로(뷰어에서 수정).
-    **원고 준비는 다시 돌리지 않고 준비 완료 알림도 다시 보내지 않는다.** 다만 **교체가 끝나면 그 트랙 봇으로 한 통
-    알린다**(2026-11-05, `imagePickDoneMessage` - 전에는 실패와 「이미 발행된 글」만 알렸다): 교체가 1~2분 걸리는데
-    성공이 조용해서 끝났는지 보려고 뷰어를 계속 새로고침해야 했고, 뷰어의 「⏳ 교체 중」 표식은 localStorage라
-    **다른 기기에서는 보이지 않는다**. 알림은 **배포까지 끝난 뒤** 보내고 `📄 원고 페이지 열기` 버튼이 붙는다
-    (주소 규칙은 `buildReadyKeyboard`와 같다). **교체 1건 = 알림 1통**이다(run이 건마다 따로 돌아 묶을 수 없다 -
-    한 글에서 3장을 바꾸면 3통). 실패(403·소멸·너무 작음)는 manifest(`imagePick`)와 텔레그램에 남는다.
-    **같은 원고의 교체는 한 번에 하나씩 돈다**(2026-11-12, job 레벨 `concurrency: image-pick-<jobId>` +
-    `cancel-in-progress: false`): 반영 전에 다음 자리를 눌러도 앞 교체가 끝난 뒤 이어서 돈다. 전에는 겹쳐 돌아
-    **나중에 끝난 run이 옛 상태로 배포해 앞 교체를 덮었고**(한효주 - 1번 누르고 3번을 눌렀더니 1번만 남았다),
-    `mergeMetadata`가 read-modify-write라 DB의 images까지 되돌아갔다(옛 주석의 "DB는 둘 다 맞다"는 사실이 아니었다).
-    **다만 한 건이 도는 중에 두 건이 더 들어오면 가운데 것이 조용히 취소된다** - GitHub이 그룹당 대기분을 하나만
-    들고, 대기 중 취소는 스텝이 돌지 않아 알림도 못 보낸다. 그 자리는 다시 누르면 된다.
+    **원고 준비는 다시 돌리지 않고 준비 완료 알림도 다시 보내지 않는다.**
+    - **요청은 DB 큐에 쌓고, 한 run이 큐를 비운다**(2026-11-12, `image_pick_requests` + `drainImagePicks.ts`).
+      워크플로가 두 job이다: `enqueue`(**concurrency 그룹 없음** - 요청 행 insert + 진행 중 표식 선기록)와
+      `apply`(`needs: enqueue` + **jobId별 `concurrency`** + `cancel-in-progress: false` - 큐를 비운다).
+      **몇 건을 연달아 눌러도 하나도 잃지 않는다.**
+      - 왜 이 모양인가(사고 두 단계): ① 전에는 concurrency가 없어 두 교체가 겹쳐 돌았고, 나중에 끝난 run이
+        **자기가 시작할 때 읽은 옛 상태로** 배포해 앞 교체를 덮었다(한효주 - 1번 누르고 3번을 눌렀더니 1번만
+        남았다. run 둘 다 "교체 완료"로 끝났다). `mergeMetadata`가 버전 검사 없는 read-modify-write라 DB의
+        images까지 되돌아갔다(옛 주석의 "DB는 둘 다 맞다"는 사실이 아니었다). PR #80이 jobId별 concurrency로
+        **2건**을 막았다. ② 그런데 **3건 이상은 못 막았다** - GitHub은 그룹당 대기분을 하나만 들고 있어
+        가운데 것이 조용히 취소됐다(대기 중 취소는 스텝이 돌지 않아 알림도 못 보낸다). 이제 요청은 대기 중인
+        run이 아니라 **DB에** 있으므로 대기분 취소가 무해하다 - 뒤에 도는 `apply`가 남은 행을 같이 가져간다.
+      - 큐가 `metadata` JSON이 **아니라 별도 테이블**인 이유: metadata에 쌓으면 위의 `mergeMetadata`
+        read-modify-write와 경합해 **또 같은 lost update가 난다**. 테이블 insert는 그 자체로 원자적이다.
+      - 드레인은 **requested_at 오름차순으로 한 건씩** 적용하고, 한 바퀴 돈 뒤 **다시 읽어** 도는 중에 들어온
+        요청까지 집는다. 같은 슬롯을 두 번 누르면 **나중 것이 이긴다**(앞의 것은 `skipped`로 마감 - 앞 요청이
+        이미 그 자리를 바꿔 놓아 뒤 요청의 `fromUrl`이 당연히 어긋나기 때문이다. `fromUrl` 검사 자체는 **다른
+        경로가 그 사이 바꾼 경우를 잡는 안전장치**로 살아남은 한 건에 대해 그대로 본다).
+      - 한 run 상한은 12건(`DEFAULT_MAX_ITEMS`)이고 job 시한은 25분이다. 넘치면 남은 행은 `pending`으로 남고
+        알림에 "N건이 남았습니다"가 붙는다 - 후보를 한 번 더 누르면 같이 비워진다.
+      - **마이그레이션 적용 전에도 깨지지 않는다**: insert 스텝은 `continue-on-error`라 테이블이 없으면 실패해도
+        `apply`가 그대로 돌고, 큐를 읽을 수 없으면(42P01·PGRST205) CLI가 **옛 경로(payload 단건 - 건당 배포·알림)**
+        로 떨어진다(`isQueueTableMissing`).
+      - 큐가 비어 있으면(앞 run이 이미 비웠다) 아무것도 하지 않고 **`imagePickPendingAt`만 풀어 준다** - 안 풀면
+        발행 폴러·텔레그램 콜백이 10분 동안 그 원고를 집지 않는다.
+    - **교체가 끝나면 그 트랙 봇으로 알린다**(2026-11-05, `imagePickDoneMessage` - 전에는 실패와 「이미 발행된 글」만
+      알렸다): 교체가 1~2분 걸리는데 성공이 조용해서 끝났는지 보려고 뷰어를 계속 새로고침해야 했고, 뷰어의
+      「⏳ 교체 중」 표식은 localStorage라 **다른 기기에서는 보이지 않는다**. 알림은 **배포까지 끝난 뒤** 보내고
+      `📄 원고 페이지 열기` 버튼이 붙는다(주소 규칙은 `buildReadyKeyboard`와 같다).
+      **이제 run 하나가 처리한 자리를 한 통으로 묶는다**(2026-11-12, `imagePickDrainMessage`) - 배포도 마지막에
+      한 번뿐이다. 전에는 "교체 1건 = 알림 1통"이라 한 글에서 3장을 바꾸면 3통이 왔다(run이 건마다 따로 돌아
+      묶을 수 없었다). 성공·실패·건너뜀이 섞이면 줄로 나눠 적는다(`1번 ← 후보 3번 ✅ / 7번 ← 후보 2번 ❌ 403`).
+      실패(403·소멸·너무 작음)는 manifest(`imagePick`)와 큐 행(`status=failed`, `error`)에도 남는다.
     이미 발행된 글에는 반영되지 않는다(알림에 그 한 줄이 붙는다). 텔레그램 `🖼 이미지 수정`(`N번 후보M` 등 **답장형 재수집 → 원고 준비 재실행**)은
     후보가 다 마음에 안 들 때의 대체 수단으로 그대로 있다.
   - **✏️ 수정 요청**(2026-10-08): 누르면 "이 메시지에 답장" 안내가 오고 답장하면 `job-revise`가 돈다. 이미지가 이미 붙은 원고라
