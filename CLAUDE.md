@@ -141,11 +141,16 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   npm ci가 흔들린 run에서 알림까지 같이 죽으면 안 되고, 그 run은 `job:publish-poll`에 닿지도 못하고
   죽으므로 코드 안의 try/catch로는 잡히지 않는다. job을 못 읽으면 메인봇으로 가고 "job 식별 실패"가 적힌다.
   **같은 알림을 사용자가 결과를 기다리는 나머지 워크플로로 넓혔다**(2026-11-12): `job-research`·`job-write`·
-  `job-translate`·`job-revise`. 문구는 워크플로마다 다르다(무엇이 멈췄는지 + 다시 돌리는 `gh workflow run` 한 줄) -
-  분기는 `FAILED_WORKFLOW_FILE`이 한다. 이 넷은 `inputs.job_id`를 `FAILED_JOB_ID`로 넘기므로 **대기열을 추측하지
-  않고 그 job만 집는다**(status 무관 - 조사·집필 중인 job도 찾는다). `image-pick`·`manuscript-edit`·
-  `publish-request`·`manuscripts-refresh`는 대기 시간이 짧고 일부는 자체 알림이 있어 아직 넣지 않았다.
-  워크플로 쪽 단정은 `testWorkflowEnv`(다섯 개 전부), 동작은 `test:workflow-failure-notify`가 본다.
+  `job-translate`·`job-revise`, 그리고 **`image-pick`**(2026-11-12). 문구는 워크플로마다 다르다(무엇이 멈췄는지 +
+  되살리는 한 줄) - 분기는 `FAILED_WORKFLOW_FILE`이 한다. 이 다섯은 jobId를 `FAILED_JOB_ID`로 넘기므로
+  **대기열을 추측하지 않고 그 job만 집는다**(status 무관 - 조사·집필 중인 job도 찾는다. 넷은 `inputs.job_id`,
+  image-pick은 뷰어가 보낸 `client_payload.jobId`다). **되살리는 길이 명령이 아닌 워크플로도 있다**:
+  image-pick은 `repository_dispatch` 전용이라 `gh workflow run`으로 돌지 않으므로 "뷰어에서 후보를 한 번 더
+  누르세요"라고 적는다(요청 행이 큐에 남아 다음 run이 같이 비운다). 그 분기는 copy의 `recovery`이고, 테스트가
+  **그 알림에 `gh workflow run`이 들어가지 않는 것까지** 단정한다 - 돌지 않는 명령을 적으면 사용자가 붙여넣고
+  시간을 쓴다. `manuscript-edit`·`publish-request`·`manuscripts-refresh`는 대기 시간이 짧고 일부는 자체
+  알림이 있어 아직 넣지 않았다.
+  워크플로 쪽 단정은 `testWorkflowEnv`(여섯 개 전부), 동작은 `test:workflow-failure-notify`가 본다.
 - **발행은 사람이 버튼으로 한다**(2026-09-19 결정, 2026-09-22 네이버 추가, 2026-10-05 트랙별 구성).
   원고 준비 완료 알림의 버튼은 공통 `📄 원고 페이지 열기` / `🖼 이미지 수정` /
   `⬇️ 맥으로 내려받기`에 **트랙별 발행 버튼**이 붙는다 - 엔터는 `🟢 네이버 발행`,
@@ -211,6 +216,14 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
         로 떨어진다(`isQueueTableMissing`).
       - 큐가 비어 있으면(앞 run이 이미 비웠다) 아무것도 하지 않고 **`imagePickPendingAt`만 풀어 준다** - 안 풀면
         발행 폴러·텔레그램 콜백이 10분 동안 그 원고를 집지 않는다.
+      - **`apply`는 `enqueue`가 실패해도 돈다**(`if: !cancelled()`, 2026-11-12). `needs`만 걸면 enqueue 실패가
+        apply를 **조용히 skipped로** 만든다 - 스텝이 아예 돌지 않으니 `if: failure()` 알림도 안 걸리고 run은
+        초록색으로 끝난 것처럼 보인다. 큐에 적지 못했어도 apply는 payload 단건으로 옛 경로를 탈 수 있다.
+      - **교체가 실패하면 그 트랙 봇으로 한 통 알린다**(2026-11-12, 위 「원고 준비」의 `notifyWorkflowFailure.mjs`
+        경로를 함께 쓴다). 성공 알림이 따로 오는 흐름이라 실패가 조용하면 사용자는 **온다고 믿고 계속 기다린다** -
+        11/11 apt 장애로 run 10개가 cancelled로 죽는 동안 알림이 한 통도 없었다. 알림에 다시 돌리는 명령은 적지
+        않는다(위 참조). **대기 중 취소는 여전히 알릴 수 없다** - 스텝이 하나도 돌지 않는다. 그건 무해하다
+        (뒤에 도는 apply가 큐를 같이 비운다)는 것이 이 설계의 전제다.
     - **교체가 끝나면 그 트랙 봇으로 알린다**(2026-11-05, `imagePickDoneMessage` - 전에는 실패와 「이미 발행된 글」만
       알렸다): 교체가 1~2분 걸리는데 성공이 조용해서 끝났는지 보려고 뷰어를 계속 새로고침해야 했고, 뷰어의
       「⏳ 교체 중」 표식은 localStorage라 **다른 기기에서는 보이지 않는다**. 알림은 **배포까지 끝난 뒤** 보내고

@@ -296,6 +296,9 @@ function baseEnv(port: number): Record<string, string> {
     { file: "job-translate.yml", title: "영어본 번역 실패", rerun: "gh workflow run job-translate.yml -f job_id=job-x", jobId: "job-x" },
     { file: "job-revise.yml", title: "원고 수정 실패", rerun: "gh workflow run job-revise.yml -f job_id=job-x -f feedback=", jobId: "job-x" },
     { file: "job-publish-prepare.yml", title: "원고 준비 실패", rerun: "gh workflow run job-publish-prepare.yml" },
+    // repository_dispatch 전용이라 다시 돌리는 **명령이 없다** - 되살리는 길은 버튼을 다시 누르는
+    // 것이다(요청 행이 큐에 pending으로 남아 다음 run이 같이 비운다). copy.recovery가 그 줄을 준다.
+    { file: "image-pick.yml", title: "이미지 교체 실패", rerun: "뷰어에서 그 후보를 한 번 더 누릅니다", jobId: "job-x" },
   ];
 
   const titles = new Set<string>();
@@ -314,7 +317,14 @@ function baseEnv(port: number): Record<string, string> {
     assert(stub.sent.length === 1, `${file}: 알림이 1통이어야 한다`);
     const text = stub.sent[0]!.text;
     assert(text.includes(title), `${file}: 제목이 "${title}"이 아니다 - 무엇이 멈췄는지 알 수 없다`);
-    assert(text.includes(rerun), `${file}: 다시 돌리는 명령이 "${rerun}"이 아니다`);
+    assert(text.includes(rerun), `${file}: 되살리는 안내가 "${rerun}"이 아니다`);
+    if (file === "image-pick.yml") {
+      // 돌지 않는 명령을 적으면 사용자가 그걸 붙여넣고 "왜 안 되지"로 시간을 쓴다.
+      assert(
+        !text.includes("gh workflow run"),
+        "image-pick: repository_dispatch 전용인데 gh workflow run을 안내한다 - 그 명령으로는 돌지 않는다"
+      );
+    }
     titles.add(title);
   }
   assert(titles.size === expectations.length, "워크플로 문구가 겹친다 - 무엇이 멈췄는지 구분되지 않는다");
