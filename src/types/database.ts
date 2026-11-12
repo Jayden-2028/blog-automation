@@ -499,6 +499,24 @@ export type PipelineDispatchQueueInsert = {
 
 export type PipelineDispatchQueueUpdate = Partial<PipelineDispatchQueueInsert>;
 
+/** 공개 이미지 Pages 프로젝트 배포 뮤텍스(2026-11-12, 프로젝트당 1행). pagesDeployLock.ts가 쓴다. */
+export type PagesDeployLockRow = {
+  project: string;
+  holder: string | null;
+  locked_at: string | null;
+  /** 리스 만료. 이 시각이 지나면 다음 발행이 가져간다(러너 비정상 종료 대비). */
+  expires_at: string;
+};
+
+export type PagesDeployLockInsert = {
+  project: string;
+  holder?: string | null;
+  locked_at?: string | null;
+  expires_at?: string;
+};
+
+export type PagesDeployLockUpdate = Partial<PagesDeployLockInsert>;
+
 export type PipelineLockRow = {
   id: number;
   is_busy: boolean;
@@ -798,6 +816,12 @@ export type Database = {
         Row: PipelineLockRow;
         Insert: PipelineLockInsert;
         Update: PipelineLockUpdate;
+        Relationships: [];
+      };
+      pages_deploy_lock: {
+        Row: PagesDeployLockRow;
+        Insert: PagesDeployLockInsert;
+        Update: PagesDeployLockUpdate;
         Relationships: [];
       };
       image_pick_requests: {

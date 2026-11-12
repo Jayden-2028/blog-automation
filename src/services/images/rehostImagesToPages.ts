@@ -23,8 +23,23 @@
 // **그런데 2026-10-31에 또 터졌다** - 사용설명서 세 건을 5초 안에 발행하자 셋 다 "진행 중 0건"을 보고 함께 출발했다.
 // 락은 **먼저 출발한 배포**만 막지 같은 순간에 출발한 배포는 막지 못하고, 사후 검증은 그 시점의 사진일 뿐이라
 // 먼저 끝난 두 건은 검증을 통과한 **뒤에** 마지막 배포에 덮였다(이미지 12장 404, 11-03 복구).
-// 그래서 사후 검증을 **진행 중인 배포가 다 빠진 뒤로** 미룬다 - 그 뒤에 출발하는 배포는 내 파일이 든 manifest를
-// 읽으므로 더는 나를 덮지 못한다. 그래도 깨지면 `npm run images:repair-pages -- <jobId>`로 되살린다(같은 URL).
+// 그래서 사후 검증을 **진행 중인 배포가 다 빠진 뒤로** 미뤘다.
+// **그런데 2026-11-12에 또 터졌다 - 그 드레인으로는 애초에 막을 수 없는 구간이 있었다.** 그날 세 편이
+// 15초·13초 간격으로 발행됐는데 Cloudflare 배포는 **1.3~1.8초**만 걸렸다(API 실측: 02:22:59.9→02:23:01.5,
+// 02:23:15.2→02:23:16.5, 02:23:23.8→02:23:25.6). 정작 다투는 구간은 **목록 읽기 → 기존 전량 내려받기 →
+// 배포 생성**의 15~25초인데 이 구간은 배포 목록 API에 아무 흔적이 없다. 그래서 세 run 모두 락·드레인을
+// 즉시 통과했고(대기 로그 0줄) 가운데 글만 이미지 7장 전부 404가 됐다 - 마지막 글이 **가운데 글의 배포
+// 전에 읽은 목록**으로 스냅샷을 만들어 올렸기 때문이다(가장 이른 것과 가장 늦은 것이 살아남은 이유).
+// "진행 중인 배포 0건"은 "지금 아무도 스냅샷을 만들고 있지 않다"는 뜻이 아니다. 그래서 세 겹을 더한다:
+//   3) **락을 Cloudflare 밖에 둔다**(`pagesDeployLock.ts` - Supabase 단일 행 뮤텍스). 목록 읽기부터
+//      검증까지를 통째로 감싸므로 러너가 몇 대든 스냅샷을 한 번에 하나만 만든다. 테이블이 적용되기
+//      전에는 효력이 없어 아래 두 그물이 받는다.
+//   4) **배포 직전에 목록을 다시 읽는다**. 내가 재구성하는 동안 끝난 배포의 파일은 내 스냅샷에 없으므로
+//      그대로 올리면 **내가 그 글을 죽인다**(그날 가운데 글). 늘어난 파일이 보이면 배포하지 않고
+//      재구성부터 다시 한다.
+//   5) **검증을 통과한 뒤에도 잠시 더 지켜본다**. 검증은 그 시점의 사진일 뿐이고, 그 순간 다른 발행이
+//      목록을 이미 읽고 아직 올리지 않았을 수 있다(그 구간은 보이지 않는다). 그 사이에 덮이면 재배포한다.
+// 그래도 깨지면 `npm run images:repair-pages -- <jobId>`로 되살린다(같은 URL).
 // manifest는 **캐시를 우회해서** 읽는다 - `_headers`의 `/*` 영구 캐시가 manifest.json에도 걸려 있어서(실측:
 // `cache-control: max-age=31536000, immutable`) 캐시된 옛 목록을 읽으면 경합 없이도 같은 사고가 난다.
 
@@ -35,6 +50,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { readImageSize } from "./imageDimensions.js";
+import { LOCK_WAIT_MS } from "./pagesDeployLock.js";
 import { KSCENE_IMAGES_FILE_LIMIT_WARN } from "../../config/koreaplainImages.js";
 import type { KoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import type { ManuscriptImage } from "../../workflows/manuscripts/manuscriptManifest.js";
@@ -59,6 +75,11 @@ export type RehostDeps = {
   /** 스테이징 디렉터리 생성/정리. */
   makeStagingDir: () => Promise<string>;
   removeDir: (dir: string) => Promise<void>;
+  /**
+   * 같은 Pages 프로젝트에 배포하는 다른 발행과 겹치지 않게 잡는 뮤텍스(목록 읽기~검증 전체를 감싼다).
+   * null이면 락 없이 진행한다 - 발행을 막는 것보다(버튼이 먹지 않는다) 아래 두 그물에 맡기는 쪽이 낫다.
+   */
+  acquireProjectLock: (input: { jobId: string; config: KoreaplainImagesConfig }) => Promise<{ release: () => Promise<void> } | null>;
 };
 
 export type RehostResult = {
@@ -87,6 +108,17 @@ const LOCK_WAIT_ATTEMPTS = 60;
 const LOCK_WAIT_INTERVAL_MS = 5_000;
 /** 덮어쓰기를 감지했을 때 재구성·재배포를 다시 시도하는 횟수. */
 const CLOBBER_ATTEMPTS = 3;
+/** 배포 직전 재확인에서 "다른 배포가 끼어들었다"를 보고 재구성부터 다시 하는 횟수(배포는 하지 않았다). */
+const RESTART_ATTEMPTS = 3;
+/** 검증용 목록 읽기 재시도 - 못 읽은 것을 "이상 없음"으로 넘기면 덮인 줄 모르고 성공으로 끝난다. */
+const VERIFY_READ_ATTEMPTS = 3;
+const VERIFY_READ_INTERVAL_MS = 3_000;
+/**
+ * 검증을 통과한 뒤 더 지켜보는 횟수·간격. 다른 발행이 목록을 읽고 배포를 만들기까지가 이 창보다
+ * 짧아야 잡힌다 - 실측 2~4초(목록 쓰기 + wrangler 업로드)라 15초면 넉넉하다.
+ */
+const SETTLE_ATTEMPTS = 5;
+const SETTLE_INTERVAL_MS = 3_000;
 
 type SiteManifest = { version: 1; files: Record<string, { bytes: number }> };
 
@@ -161,26 +193,66 @@ export async function rehostImagesToPages(
       .fetchBytes(`${baseUrl}/${MANIFEST_PATH}?at=${Date.now()}`)
       .then((response) => (response ? (JSON.parse(Buffer.from(response.bytes).toString("utf8")) as SiteManifest) : null));
 
-  // 다른 배포가 돌고 있으면 기다린다(락). 다투는 자원이 Pages 프로젝트라 그 자원을 직접 본다.
+  // **스냅샷을 만드는 동안 다른 발행이 끼어들지 못하게 잡는다**(2026-11-12). Cloudflare 배포 목록으로는
+  // 이 구간이 보이지 않으므로(배포는 1.5초, 재구성은 15~25초) 락은 Supabase에 있다. 못 잡아도 발행은
+  // 진행한다 - 아래 두 그물(배포 직전 재확인·검증 후 지켜보기)이 받는다.
+  const lock = await deps.acquireProjectLock({ jobId, config }).catch((error) => {
+    console.warn(`⚠️ [rehost] 배포 락 처리 중 오류(락 없이 진행): ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  });
+  try {
+    return await runDeployRounds(
+      { jobId, images, config, baseUrl, projectName: config.projectName, downloaded, newPaths, alreadyDone, failures, isOurs, readManifest },
+      deps
+    );
+  } finally {
+    await lock?.release().catch((error) =>
+      console.warn(`⚠️ [rehost] 배포 락 해제 실패(리스 만료 뒤 자동 회수): ${error instanceof Error ? error.message : String(error)}`)
+    );
+  }
+}
+
+/** 락을 쥔 채로 도는 재구성 -> 배포 -> 검증 루프. 덮였으면 다시, 배포 직전에 끼어든 것이 보이면 재구성부터. */
+async function runDeployRounds(input: RoundInput, deps: RehostDeps): Promise<RehostResult> {
+  const { config, images, failures } = input;
+  const passthrough = (): RehostResult => ({ images: [...images], rehosted: 0, complete: false, deployed: false, failures });
+
+  // 진행 중인 배포가 있으면 기다린다(락 밖에서 사람이 손으로 배포한 경우까지 본다).
   await waitForDeploymentsToDrain(config, deps, (active) =>
     console.log(`⏳ [rehost] 같은 프로젝트에 배포 ${active}건이 진행 중입니다 - 끝나기를 기다립니다`)
   );
 
-  for (let round = 1; round <= CLOBBER_ATTEMPTS; round += 1) {
-    const outcome = await deployRound(
-      { jobId, images, config, baseUrl, projectName: config.projectName, downloaded, newPaths, alreadyDone, failures, isOurs, readManifest },
-      deps
-    );
+  let round = 1;
+  let restarts = 0;
+  while (round <= CLOBBER_ATTEMPTS) {
+    const outcome = await deployRound(input, deps);
     if (outcome.kind === "done") return outcome.result;
-    // 다른 배포가 내 파일을 덮었다. 그 배포가 끝나길 기다린 뒤 재구성부터 다시 한다.
+
+    if (outcome.kind === "restart") {
+      // 재구성하는 동안 다른 발행이 배포를 끝냈다. 이대로 올리면 그 파일을 내가 지운다 - 배포하지 않았다.
+      restarts += 1;
+      console.warn(
+        `⚠️ [rehost] 재구성 중에 다른 배포가 끝났습니다(내 스냅샷에 없는 파일 ${outcome.added.length}개) - ` +
+          `배포하지 않고 ${restarts}/${RESTART_ATTEMPTS}회차 재구성부터 다시 합니다: ${outcome.added.slice(0, 3).join(", ")}`
+      );
+      if (restarts >= RESTART_ATTEMPTS) {
+        failures.push(`다른 발행과 ${RESTART_ATTEMPTS}번 연속 겹쳐 배포하지 못했습니다 - Supabase URL로 발행합니다`);
+        return passthrough();
+      }
+      await waitForDeploymentsToDrain(config, deps);
+      continue;
+    }
+
+    // 배포한 뒤 내 파일이 사라졌다. 그 배포가 끝나길 기다린 뒤 재구성부터 다시 한다.
     console.warn(`⚠️ [rehost] 배포한 파일이 사라졌습니다(동시 배포에 덮였습니다) - ${round}/${CLOBBER_ATTEMPTS}회차, 다시 시도합니다: ${outcome.missing.join(", ")}`);
     if (round === CLOBBER_ATTEMPTS) {
       failures.push(`동시 배포에 ${CLOBBER_ATTEMPTS}번 연속 덮였습니다(${outcome.missing.join(", ")}) - Supabase URL로 발행합니다`);
-      return passthrough(failures);
+      return passthrough();
     }
+    round += 1;
     await waitForDeploymentsToDrain(config, deps);
   }
-  return passthrough(failures);
+  return passthrough();
 }
 
 /**
@@ -200,6 +272,55 @@ async function waitForDeploymentsToDrain(
   }
 }
 
+type Verdict = { kind: "ok" } | { kind: "clobbered"; missing: string[] } | { kind: "unknown"; detail: string };
+
+/**
+ * 배포한 내 파일이 **지금 사이트의** 목록에 있는지 확인하고, 통과한 뒤에도 잠시 더 지켜본다.
+ *
+ * 왜 한 번 보고 끝내면 안 되는가(2026-11-12): 검증은 그 시점의 사진일 뿐이다. 그 순간 다른 발행이
+ * 내 배포 전에 읽은 목록으로 스냅샷을 만들고 있을 수 있고, 그 구간은 배포 목록 API에 보이지 않으므로
+ * 드레인이 통과한다. 그 발행이 몇 초 뒤 올리면 내 파일이 사라진다 - 그래서 짧게 더 본다.
+ *
+ * 왜 "못 읽음"을 통과로 보지 않는가: 그날 세 job 모두 경고 한 줄 없이 끝났다. 확인하지 못한 것은
+ * 이상 없음이 아니다.
+ */
+async function verifyDeployedFiles(
+  newPaths: Set<string>,
+  readManifest: () => Promise<SiteManifest | null>,
+  deps: RehostDeps
+): Promise<Verdict> {
+  const missingIn = (manifest: SiteManifest | null): string[] =>
+    manifest ? [...newPaths].filter((path) => !manifest.files?.[path]) : [...newPaths];
+
+  let detail = "목록을 읽지 못했습니다";
+  let confirmed = false;
+  for (let attempt = 0; attempt < VERIFY_READ_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) await deps.sleep(VERIFY_READ_INTERVAL_MS);
+    let current: SiteManifest | null;
+    try {
+      current = await readManifest();
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+      continue;
+    }
+    const missing = missingIn(current);
+    if (missing.length > 0) return { kind: "clobbered", missing };
+    confirmed = true;
+    break;
+  }
+  if (!confirmed) return { kind: "unknown", detail };
+
+  for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt += 1) {
+    await deps.sleep(SETTLE_INTERVAL_MS);
+    // 지켜보는 중의 읽기 실패는 넘긴다 - 이미 한 번 확인했고, 읽기 실패 자체가 덮임의 근거는 아니다.
+    const current = await readManifest().catch(() => undefined);
+    if (current === undefined) continue;
+    const missing = missingIn(current);
+    if (missing.length > 0) return { kind: "clobbered", missing };
+  }
+  return { kind: "ok" };
+}
+
 type RoundInput = {
   jobId: string;
   images: readonly ManuscriptImage[];
@@ -214,7 +335,11 @@ type RoundInput = {
   readManifest: () => Promise<SiteManifest | null>;
 };
 
-type RoundOutcome = { kind: "done"; result: RehostResult } | { kind: "clobbered"; missing: string[] };
+type RoundOutcome =
+  | { kind: "done"; result: RehostResult }
+  | { kind: "clobbered"; missing: string[] }
+  /** 배포 직전 재확인에서 다른 배포가 끼어든 것이 보였다 - **배포하지 않았다**. 재구성부터 다시 한다. */
+  | { kind: "restart"; added: string[] };
 
 /** 재구성 -> 배포 -> 서비스 확인 -> 사후 검증 한 바퀴. 덮인 것이 확인되면 "clobbered"로 돌려준다. */
 async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOutcome> {
@@ -261,6 +386,15 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
     // 4) 새 파일이 하나도 없으면(같은 이미지를 다시 발행) 배포하지 않는다 - 이미 서비스 중이다.
     let deployed = false;
     if (!alreadyPublished) {
+      // **배포 직전에 목록을 한 번 더 읽는다**(2026-11-12). 재구성(기존 전량 내려받기)이 15~25초인데
+      // Cloudflare 배포는 1.5초면 끝나므로, 그 사이에 다른 발행이 배포를 끝냈을 수 있다. 그 파일은 내
+      // 스냅샷에 없어서 이대로 올리면 **내가 그 글의 이미지를 전부 지운다**(그날 가운데 글이 그렇게 죽었다).
+      // 배포 목록 API로는 이미 끝난 그 배포가 "진행 중"으로 보이지 않으므로 락·드레인이 못 잡는다.
+      const fresh = await readManifest().catch(() => null);
+      const added = fresh ? Object.keys(fresh.files ?? {}).filter((path) => !previous.files?.[path] && !newPaths.has(path)) : [];
+      if (added.length > 0) return { kind: "restart", added };
+
+      console.log(`🖼 [rehost] 배포합니다 - 새 파일 ${newPaths.size}개 + 기존 ${previousPaths.length}개`);
       await deps.runWrangler(
         ["--yes", "wrangler@4", "pages", "deploy", stagingDir, "--project-name", projectName, "--branch", "main", "--commit-dirty=true"],
         { ...process.env, CLOUDFLARE_API_TOKEN: config.apiToken, CLOUDFLARE_ACCOUNT_ID: config.accountId }
@@ -291,12 +425,15 @@ async function deployRound(input: RoundInput, deps: RehostDeps): Promise<RoundOu
       // **진행 중인 배포가 다 끝난 뒤에** 본다(2026-10-31). 바로 확인하면 나를 덮을 배포가 아직 날아오는
       // 중이라 통과한 뒤에 덮인다 - 그날 세 건이 5초 안에 발행돼 셋 다 "진행 중 0건"을 보고 출발했고,
       // 먼저 끝난 두 건이 검증을 통과한 다음 마지막 배포에 덮여 이미지 12장이 404가 됐다.
-      // 배포가 다 빠진 뒤에도 내 파일이 남아 있으면 안전하다 - 그 뒤에 출발하는 배포는 내 파일이 든
-      // manifest를 읽기 때문이다.
       await waitForDeploymentsToDrain(config, deps);
-      const current = await readManifest().catch(() => null);
-      const missing = current ? [...newPaths].filter((path) => !current.files?.[path]) : [];
-      if (missing.length > 0) return { kind: "clobbered", missing };
+      const verdict = await verifyDeployedFiles(newPaths, readManifest, deps);
+      if (verdict.kind === "clobbered") return { kind: "clobbered", missing: verdict.missing };
+      if (verdict.kind === "unknown") {
+        // 못 읽은 것을 "이상 없음"으로 넘기면 **덮인 줄 모르고 성공으로 끝난다**(2026-11-12의 조용한 실패).
+        // 실패로 올려 Supabase URL로 발행하고 경고를 남긴다 - 그 경고가 알림으로 나간다.
+        throw new Error(`배포한 파일이 목록에 들어갔는지 확인하지 못했습니다(${VERIFY_READ_ATTEMPTS}회 시도): ${verdict.detail}`);
+      }
+      console.log(`✅ [rehost] 배포 검증 통과 - 내 파일 ${newPaths.size}개가 지금 사이트 목록에 있습니다`);
     }
     if (!live) throw new Error(`배포 후 ${(LIVE_CHECK_ATTEMPTS * LIVE_CHECK_INTERVAL_MS) / 1000}초 안에 새 이미지가 서비스되지 않았습니다(${probe})`);
 
@@ -381,5 +518,21 @@ export function defaultRehostDeps(): RehostDeps {
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     makeStagingDir: () => mkdtemp(join(tmpdir(), "kscene-images-")),
     removeDir: (dir) => rm(dir, { recursive: true, force: true }),
+    acquireProjectLock: async ({ jobId, config }) => {
+      if (!config.projectName) return null;
+      const { acquirePagesDeployLock, lockHolderId } = await import("./pagesDeployLock.js");
+      const result = await acquirePagesDeployLock({ project: config.projectName, holder: lockHolderId(jobId) });
+      if (result.status === "held") {
+        if (result.waitedMs > 1_000) console.log(`⏳ [rehost] 앞 발행의 배포를 ${Math.round(result.waitedMs / 1000)}초 기다렸습니다`);
+        return result.handle;
+      }
+      // 락이 없어도 발행은 진행한다 - 배포 직전 재확인과 검증 후 지켜보기가 받는다.
+      console.warn(
+        result.status === "unavailable"
+          ? `⚠️ [rehost] 배포 락 테이블이 없어 락 없이 진행합니다(migration 미적용): ${result.detail}`
+          : `⚠️ [rehost] 배포 락을 ${Math.round(LOCK_WAIT_MS / 60000)}분 기다렸는데 안 풀려 락 없이 진행합니다(holder=${result.holder ?? "?"})`
+      );
+      return null;
+    },
   };
 }

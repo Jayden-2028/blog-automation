@@ -331,10 +331,15 @@ async function main(): Promise<void> {
     saved.length = 0;
     const failedRehost = await run({}, async ({ images }) => ({ images, rehosted: 0, complete: false, deployed: false, failures: ["x"] }));
     assert(failedRehost.ok === true && (inserted as unknown as { contentHtml: string }).contentHtml.includes("sb.example"), "복사에 실패해도 발행은 Supabase URL로 계속한다");
-    assert(saved.length === 0, "아무것도 못 옮겼으면 기록하지 않는다");
+    // 경고는 **발행 결과와 job에 남는다**(2026-11-12 - 전에는 러너 로그에만 있어 사용자가 몰랐다).
+    // 아무것도 못 옮겼어도 imagesRehostedAt은 남기지 않는다(핫링크 보호 유지).
+    assert(failedRehost.ok === true && failedRehost.imageWarnings?.join() === "x", `경고를 발행 결과에 싣는다 (${JSON.stringify(failedRehost.ok === true ? failedRehost.imageWarnings : null)})`);
+    const failedSave = saved[0] as { imageRehostWarnings?: string[] | null; imagesRehostedAt?: string } | undefined;
+    assert(saved.length === 1 && failedSave?.imageRehostWarnings?.join() === "x" && !failedSave?.imagesRehostedAt, `경고를 job에 남긴다 (${JSON.stringify(saved)})`);
     saved.length = 0;
     const thrown = await run({}, async () => { throw new Error("wrangler 없음"); });
-    assert(thrown.ok === true && saved.length === 0, "복사 단계가 던져도 발행은 계속한다");
+    assert(thrown.ok === true && thrown.imageWarnings?.length === 1, `복사 단계가 던져도 발행은 계속하고 경고가 남는다 (${JSON.stringify(thrown.ok === true ? thrown.imageWarnings : null)})`);
+    assert(!(saved[0] as { imagesRehostedAt?: string } | undefined)?.imagesRehostedAt, "던진 경우에도 imagesRehostedAt은 남기지 않는다");
     saved.length = 0;
     await run({}, async ({ images }) => ({ images: images.map((image) => (image.index === 1 ? { ...image, url: pages(1) } : image)), rehosted: 1, complete: false, deployed: true, failures: ["이미지 2"] }));
     const partial = saved[0] as { rehostedBySource: Record<string, string>; imagesRehostedAt?: string };

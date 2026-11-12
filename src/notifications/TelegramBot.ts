@@ -1302,6 +1302,10 @@ export class TelegramBot {
       };
     }
 
+    // 이미지 복사 경고는 **발행 알림에 적는다**(2026-11-12). 공개 Pages 복사가 삐끗하면 본문 이미지가
+    // 404가 되거나 Supabase 핫링크로 나가는데, 전에는 러너 로그에만 남아 사용자가 다음 날 점검
+    // 알림까지 몰랐다(그날 세 편 중 가운데 글의 이미지 7장이 조용히 전부 404였다).
+    const imageWarnings = published.imageWarnings ?? [];
     return {
       outcome: { status: "published", url: published.url },
       message: [
@@ -1313,6 +1317,14 @@ export class TelegramBot {
         "",
         `<b>${escapeTelegramHtml(job.keyword)}</b>`,
         escapeTelegramHtml(published.url),
+        ...(imageWarnings.length > 0
+          ? [
+              "",
+              `⚠️ <b>이미지 처리 경고 ${imageWarnings.length}건</b> - 본문 이미지를 눈으로 확인해 주세요`,
+              ...imageWarnings.slice(0, 3).map((warning) => `· ${escapeTelegramHtml(warning)}`),
+              `복구: <code>npm run images:repair-pages -- ${escapeTelegramHtml(job.id)} --apply</code>`,
+            ]
+          : []),
       ].join("\n"),
     };
   }
