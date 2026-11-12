@@ -78,6 +78,13 @@ export type PublishArticleToBlogspotResult =
       alreadyDone: boolean;
       /** 새 글을 올린 게 아니라 **이미 있던 글의 본문을 지금 원고로 덮어썼다**(수정 반영). */
       updatedExisting?: boolean;
+      /**
+       * 이미지를 Pages로 옮기는 중에 생긴 경고(2026-11-12). 발행은 됐지만 이미지가 Supabase URL로
+       * 나갔거나 덮어쓰기 때문에 확인이 안 된 경우다 - **조용히 넘기지 않고 알림에 적는다.**
+       * 2026-11-12 사고에서 세 job 모두 경고 한 줄 없이 끝나(기록할 자리 자체가 없었다) 사용자는
+       * 다음 날 점검 알림까지 404를 몰랐다.
+       */
+      imageWarnings?: string[];
     }
   | { ok: false; reason: "disabled"; detail: string }
   | { ok: false; reason: "job_not_found" | "job_not_approved" | "base_article_not_found"; detail: string }
@@ -245,6 +252,8 @@ export async function publishArticleToBlogspot(
   // 이미 옮긴 것은 다시 옮기지 않는다. 전부 옮겨졌을 때만 `imagesRehostedAt`을 남긴다 - 그 표식이 있어야 storage-cleanup이
   // Supabase 원본을 지운다(없으면 핫링크 보호로 보존).
   let imagesForHtml: ManuscriptImage[] | null = null;
+  /** 이미지 복사 경고(발행 결과에 실어 알림에 적고, job에도 남겨 나중에 대조한다). */
+  const imageWarnings: string[] = [];
   const resolveImages = async (): Promise<ManuscriptImage[]> => {
     if (imagesForHtml) return imagesForHtml;
     const original = readJobManuscriptImages(job);
@@ -265,6 +274,8 @@ export async function publishArticleToBlogspot(
         console.warn(`⚠️ [publish] 이미지 복사 실패(Supabase URL로 발행): ${error instanceof Error ? error.message : String(error)}`);
       }
       for (const failure of result?.failures ?? []) console.warn(`⚠️ [publish] 이미지 복사: ${failure}`);
+      imageWarnings.push(...(result?.failures ?? []));
+      if (!result) imageWarnings.push("이미지 복사가 예외로 끝났습니다(Supabase URL로 발행) - 러너 로그를 보세요");
     }
 
     const bySource: Record<string, string> = { ...saved };
@@ -287,9 +298,12 @@ export async function publishArticleToBlogspot(
     const allMapped = hasImages && original.every((image) => !image.url || Boolean(bySource[image.url]));
     const grew = Object.keys(bySource).length > Object.keys(saved).length;
     const needsMark = allMapped && !job.metadata?.imagesRehostedAt;
-    if (grew || needsMark) {
+    // 경고는 **있을 때도 없을 때도** 남긴다 - 지난 발행의 경고가 그대로 남아 있으면 거짓 경보가 된다.
+    const hadWarnings = Boolean((job.metadata?.imageRehostWarnings as string[] | null | undefined)?.length);
+    if (grew || needsMark || imageWarnings.length > 0 || hadWarnings) {
       await saveJobMetadata(jobId, {
         rehostedBySource: bySource,
+        imageRehostWarnings: imageWarnings.length > 0 ? imageWarnings : null,
         ...(allMapped ? { imagesRehostedAt: new Date().toISOString() } : {}),
       }).catch((error) => console.warn(`⚠️ [publish] 이미지 복사 기록 실패: ${error instanceof Error ? error.message : String(error)}`));
     }
@@ -414,7 +428,7 @@ export async function publishArticleToBlogspot(
         await markPublished({ publicationId: done.id, url: promotedUrl, articleId: finalArticle.id });
         const promotedHub = await finalizeTkm({ postId, url: promotedUrl, title: refreshTitle, published: promoted.publishedAt || new Date().toISOString(), html: refreshHtml });
         await submitToBing(promotedUrl, promotedHub);
-        return { ok: true, publicationId: done.id, url: promotedUrl, isDraft: false, alreadyDone: false };
+        return { ok: true, publicationId: done.id, url: promotedUrl, isDraft: false, alreadyDone: false, imageWarnings };
       }
 
       // 이미 공개돼 있던 글이다 - 주소는 그대로고 본문만 바뀐다(옛 blogspot 기록이면 공개 주소로 맞춰 남긴다).
@@ -428,6 +442,7 @@ export async function publishArticleToBlogspot(
         isDraft: false,
         alreadyDone: false,
         updatedExisting: true,
+        imageWarnings,
       };
     }
 
@@ -437,6 +452,7 @@ export async function publishArticleToBlogspot(
       url: normalizeTkmUrl(done.published_url ?? ""),
       isDraft: done.status === "pending",
       alreadyDone: true,
+      imageWarnings,
     };
   }
 
@@ -501,5 +517,6 @@ export async function publishArticleToBlogspot(
     url: insertedUrl,
     isDraft: inserted.isDraft,
     alreadyDone: false,
+    imageWarnings,
   };
 }
