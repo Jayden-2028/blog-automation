@@ -14,6 +14,7 @@ import {
 } from "../services/supabase/repositories/articleRepository.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { DEFAULT_TELEGRAM_RECEIVER_ID, TelegramOffsetRepository } from "../repositories/TelegramOffsetRepository.js";
+import { sendTelegramWithRetry } from "./telegramRetry.js";
 import { spawnDetachedTask } from "../jobs/lib/spawnDetachedTask.js";
 import { dispatchResearch } from "../workflows/research/dispatchResearch.js";
 import { rejectArticleJob } from "../workflows/writing/rejectArticleJob.js";
@@ -525,11 +526,15 @@ export class TelegramBot {
     this.sendTelegramRequest =
       options.sendTelegramRequest ??
       (async <T = unknown>(method: string, body: Record<string, unknown>): Promise<T | null> => {
-        const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.botToken}/${method}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+        // 흔들리면 다시 보낸다(2026-11-13). 버튼 복원·콜백 응답도 한 번 끊기면 사용자가 누른 것이
+        // 아무 일도 없었던 것처럼 끝난다. label은 method만 - URL에는 봇 토큰이 들어 있다.
+        const response = await sendTelegramWithRetry(method, () =>
+          fetch(`${TELEGRAM_API_BASE_URL}/bot${this.botToken}/${method}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        );
 
         if (!response.ok) {
           // 오류 응답 본문에는 credential이 포함되지 않으므로 그대로 노출해도 안전하다.
