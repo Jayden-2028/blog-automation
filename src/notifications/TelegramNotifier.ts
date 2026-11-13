@@ -1,6 +1,7 @@
 // Telegram Bot API(https://core.telegram.org/bots/api) 발송 클래스.
 // credential(botToken/chatId)은 절대 로그로 출력하지 않는다.
 
+import { sendTelegramWithRetry } from "./telegramRetry.js";
 import { DEFAULT_TRACK, resolveTrackCredentials } from "./telegramTracks.js";
 import type { Track } from "./telegramTracks.js";
 
@@ -128,11 +129,15 @@ export class TelegramNotifier {
       body.reply_markup = replyMarkup;
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // 흔들리면 다시 보낸다(2026-11-13 - 알림 한 통이 끊겨 그날 수집 전체가 날아갔다).
+    // label에 url을 넘기지 않는다 - 텔레그램 API URL에는 봇 토큰이 들어 있다.
+    const response = await sendTelegramWithRetry("sendMessage", () =>
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    );
 
     if (!response.ok) {
       // 오류 응답 본문에는 credential이 포함되지 않으므로 그대로 노출해도 안전하다.
