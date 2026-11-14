@@ -40,6 +40,7 @@ import {
 } from "./koreaplainTopics.js";
 import type { SendKeywordNotificationResult } from "../../types/keywordNotification.js";
 import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
+import { koreaplainJobTopics, koreaplainProposalRuns } from "./koreaplainExistingTopics.js";
 
 export const KOREAPLAIN_JOB_KIND = "kscene_topic";
 
@@ -68,8 +69,8 @@ export type RunKoreaplainTopicCollectionOptions = {
   redditCredentials?: RedditCredentials | null;
   /** 구글 트렌드(US) 급상승어 조회. 테스트 주입. 실패해도 무시한다. */
   fetchTrendTerms?: () => Promise<string[]>;
-  /** 이미 쓴/제안한 주제 목록. 테스트 주입. */
-  loadExistingTopics?: () => Promise<string[]>;
+  /** 이미 쓴/제안한 주제 목록. 테스트 주입. 배열이면 경고 없음으로 본다. */
+  loadExistingTopics?: () => Promise<string[] | ExistingTopicsResult>;
   /** 저장·알림. 테스트 주입. */
   save?: typeof saveRankingHistory;
   notify?: typeof sendKeywordNotification;
@@ -84,6 +85,12 @@ export type RunKoreaplainTopicCollectionResult = {
   candidateCount: number;
   droppedAsDuplicate: number;
   topics: string[];
+  /** 이번 run이 요청한 제안 수(`topicsPerRun`). 실제 제안이 이보다 적은 날을 구분하려고 남긴다. */
+  requestedTopicCount: number;
+  /** 기발행·기제안 목록을 읽었는가. false면 중복 제거가 **돌지 않았다**. */
+  existingTopicsLoaded: boolean;
+  /** 알림 헤더에 적은 한 줄들(모자란 날·중복 제거 생략·기억 창 잘림). 평소에는 빈 배열이다. */
+  notes: string[];
   /** 선정된 주제 중 로컬 우위 용어가 든 것(2026-10-30). */
   localEdgeCount: number;
   /** 선정된 주제 중 관광 포화 감점을 받은 것(2026-10-30). */
@@ -112,32 +119,52 @@ export function dayIndexOf(date: Date): number {
   return Math.floor((date.getTime() + 9 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000));
 }
 
-async function defaultLoadExistingTopics(): Promise<string[]> {
+/** 기억 창 상한. 넘어가면 잘렸다는 경고를 남긴다(조용히 약해지지 않게). */
+const JOB_MEMORY_LIMIT = 1500;
+const RUN_MEMORY_LIMIT = 400;
+
+export type ExistingTopicsResult = { topics: string[]; warnings: string[] };
+
+async function defaultLoadExistingTopics(): Promise<ExistingTopicsResult> {
   // 기발행·진행 중 job의 키워드 + 최근 N일간 제안했던 주제. DB 접근은 동적 import로 둔다(순수 테스트가 Supabase를
   // 로드하지 않게 - 이 파일의 다른 함수는 주입으로 대체된다).
-  const [{ ArticleJobRepository }, { listRecentDiscoveryRuns }, { listKeywordRankingsByRunId }, { trackOfJob }] = await Promise.all([
+  const [{ ArticleJobRepository }, { listRecentDiscoveryRuns }, { listKeywordRankingsByRunId }] = await Promise.all([
     import("../../repositories/ArticleJobRepository.js"),
     import("../../services/supabase/repositories/discoveryRunRepository.js"),
     import("../../services/supabase/repositories/keywordRankingRepository.js"),
-    import("../../notifications/telegramTracks.js"),
   ]);
 
-  const topics: string[] = [];
-  const jobs = await ArticleJobRepository.listRecent(500);
-  for (const job of jobs) {
-    if (trackOfJob(job) === KOREAPLAIN_TRACK && job.status !== "rejected") topics.push(job.keyword);
-  }
+  const warnings: string[] = [];
 
+  // 1) job 키워드. **트랙으로 걸러서 읽는다**(2026-11-14) - 전에는 전 트랙 최근 500행을 통째로 읽어
+  //    ① 하루 10건씩 쌓이는 다른 트랙 job이 창을 밀어내면 사용설명서 기발행분이 조용히 빠지고
+  //    ② metadata 전체가 실려 egress가 컸다(2026-10 전면 차단 사고의 패턴). 질의가 실패하면 옛 경로로 떨어진다.
+  let jobRows: { keyword: string; status?: string | null; metadata?: unknown }[];
+  try {
+    jobRows = await ArticleJobRepository.listKeywordsByTrack(KOREAPLAIN_TRACK, JOB_MEMORY_LIMIT);
+  } catch (error) {
+    warnings.push("⚠️ 기발행 목록을 트랙으로 걸러 읽지 못해 최근 500건만 봤습니다 — 오래된 발행분이 다시 올라올 수 있습니다");
+    console.warn(`⚠️ listKeywordsByTrack 실패 - listRecent(500) 폴백: ${error instanceof Error ? error.message : String(error)}`);
+    jobRows = await ArticleJobRepository.listRecent(500);
+  }
+  if (jobRows.length >= JOB_MEMORY_LIMIT) {
+    warnings.push(`⚠️ 기발행 기억 창이 잘렸습니다(job ${JOB_MEMORY_LIMIT}건 상한) — 오래된 발행분이 다시 올라올 수 있습니다`);
+  }
+  const topics: string[] = koreaplainJobTopics(jobRows);
+
+  // 2) 제안 기억(기간 제한 있음).
   const cutoff = Date.now() - KOREAPLAIN_TOPIC_CONFIG.proposalMemoryDays * 24 * 60 * 60 * 1000;
   // 하루 run이 4건(엔터 1·핫스타 1·사회 1·koreaplain 1, 2026-10-11 개편)이라 제안 기억 기간(60일)을 덮으려면
-  // 240건 넘게 읽어야 한다(전에는 하루 5건 = 300건).
-  const runs = await listRecentDiscoveryRuns(400);
-  for (const run of runs) {
-    if (run.metadata?.kind !== KOREAPLAIN_JOB_KIND || Date.parse(run.started_at) < cutoff) continue;
-    const rankings = await listKeywordRankingsByRunId(run.id);
+  // 240건 넘게 읽어야 한다(전에는 하루 5건 = 300건). 그 가정이 깨지면 koreaplainProposalRuns가 경고를 낸다.
+  const runs = await listRecentDiscoveryRuns(RUN_MEMORY_LIMIT);
+  const { runIds, warnings: runWarnings } = koreaplainProposalRuns(runs, cutoff, RUN_MEMORY_LIMIT);
+  warnings.push(...runWarnings);
+
+  for (const runId of runIds) {
+    const rankings = await listKeywordRankingsByRunId(runId);
     topics.push(...rankings.map((row) => row.keyword));
   }
-  return topics;
+  return { topics, warnings };
 }
 
 /** 레딧 검색어: 시드에서 korea/korean/south를 뺀다(r/Living_in_Korea 질문은 "korea"를 잘 안 쓴다). */
@@ -271,17 +298,37 @@ export async function runKoreaplainTopicCollection(
   const autocompleteCandidates = buildCandidates(observations, labelBySeed);
   const candidates = redditTitles.length > 0 ? attachRedditSupport(autocompleteCandidates, redditTitles) : autocompleteCandidates;
   let existing: string[] = [];
+  let existingTopicsLoaded = true;
+  const notes: string[] = [];
   try {
-    existing = await loadExisting();
+    const loaded = await loadExisting();
+    if (Array.isArray(loaded)) {
+      existing = loaded;
+    } else {
+      existing = loaded.topics;
+      notes.push(...loaded.warnings);
+    }
   } catch (error) {
     // 기발행 목록을 못 읽으면 중복 제안 위험이 있지만, 알림 자체를 막지는 않는다(사람이 Go/Pass로 거른다).
+    // 다만 **조용히 넘기지 않는다**(2026-11-14) - 그날 알림에 같은 주제가 섞일 수 있다는 것을 헤더에 적는다.
+    existingTopicsLoaded = false;
+    notes.push("⚠️ 기발행·기제안 목록을 읽지 못해 중복 제거를 건너뛰었습니다 — 같은 주제가 섞일 수 있습니다");
     log(`⚠️ 기발행·기제안 주제 조회 실패(중복 제거 생략): ${error instanceof Error ? error.message : String(error)}`);
   }
+  const requestedTopicCount = options.topicsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.topicsPerRun;
   const { selected, droppedAsDuplicate } = selectTopics(candidates, {
-    topN: options.topicsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.topicsPerRun,
+    topN: requestedTopicCount,
     existingTopics: existing,
     similarity: KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity,
   });
+
+  // 중복을 다 걸러내면 5건을 못 채우는 날이 온다(시드 241개는 유한하다). **조용히 적게 보내지 않는다** -
+  // 몇 건인지와 왜 모자랐는지를 알림 헤더에 적는다. 모자란다고 중복 기준을 풀지는 않는다.
+  if (selected.length > 0 && selected.length < requestedTopicCount) {
+    notes.push(
+      `ℹ️ 오늘은 ${selected.length}건입니다(요청 ${requestedTopicCount}건) — 중복 ${droppedAsDuplicate}건을 걸러내 새 주제가 모자랍니다`
+    );
+  }
 
   const base = {
     seedsUsed: seedQueries,
@@ -289,6 +336,9 @@ export async function runKoreaplainTopicCollection(
     candidateCount: candidates.length,
     droppedAsDuplicate,
     topics: selected.map((item) => item.topic),
+    requestedTopicCount,
+    existingTopicsLoaded,
+    notes,
     localEdgeCount: selected.filter((item) => item.score.localEdge > 0).length,
     saturatedCount: selected.filter((item) => item.score.saturation > 0).length,
     failedSeeds,
@@ -300,6 +350,7 @@ export async function runKoreaplainTopicCollection(
   };
 
   log(`ℹ️ 로컬 우위 ${base.localEdgeCount}건 · 포화 감점 ${base.saturatedCount}건`);
+  for (const note of notes) log(`   ${note}`);
   for (const item of base.redditSupported) log(`   🟠 레딧 뒷받침 ${item.hits}건: ${item.topic} ← "${item.example}"`);
 
   if (selected.length === 0) {
@@ -332,6 +383,7 @@ export async function runKoreaplainTopicCollection(
     topN: selected.length,
     headerTitle: "🌏 <b>사용설명서 주제 제안</b>",
     evergreen: true,
+    ...(notes.length > 0 ? { headerNote: notes.join("\n") } : {}),
   });
   if (!notification.sent) {
     return { status: "notify_failed", runId: saved.runId, ...base, notification, error: `알림 미발송 (${notification.reason ?? "unknown"})` };

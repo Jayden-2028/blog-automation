@@ -332,13 +332,26 @@ export const KOREAPLAIN_TOPIC_CONFIG = {
   // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   /** 한 번에 자동완성을 돌릴 시드 수. 날짜로 돌려 가며 고른다(전체가 며칠 안에 한 바퀴). */
   seedsPerRun: intEnv(process.env.KSCENE_SEEDS_PER_RUN, 20),
-  /** 알림으로 제안할 주제 수(§4.2: 5~10건). */
-  topicsPerRun: intEnv(process.env.KSCENE_TOPICS_PER_RUN, 8),
+  /**
+   * 알림으로 제안할 주제 수(§4.2: 5~10건). **2026-11-14 사용자 요청으로 8 -> 5.**
+   *
+   * 하한·상한 공식(`defaultPracticalFloor`·`defaultLocalEdgeFloor`·`perLabelCap`)은 topN 비례라 그대로 둔다 -
+   * 5건이면 실용 하한 2건(40%, 전 37.5%)·로컬 우위 하한 1건(20%, 전 25%)·라벨 상한 2건(40%, 전 37.5%)이다.
+   * 라벨 상한 2면 5건이 최소 3개 라벨에 걸쳐 다양성도 유지된다.
+   * 공급은 충분하다 - 실측 후보가 하루 100~270건이라 5건을 못 채우는 날은 중복 제외 때문이지 후보 부족이 아니다.
+   */
+  topicsPerRun: intEnv(process.env.KSCENE_TOPICS_PER_RUN, 5),
   /** 자동완성 요청 사이 간격(ms) - 공개 엔드포인트라 부드럽게 쓴다. */
   requestDelayMs: intEnv(process.env.KSCENE_AUTOCOMPLETE_DELAY_MS, 250),
   /** 기발행·기제안 주제와 이 값 이상 겹치면 같은 주제로 본다(토큰 자카드, 0~1). */
   duplicateSimilarity: 0.6,
-  /** 이미 제안했던 주제를 다시 제안하지 않는 기간(일). */
+  /**
+   * **제안만 하고 고르지 않은** 주제를 다시 제안하지 않는 기간(일).
+   *
+   * job이 된 주제(기발행·집필 중)는 이 기간과 무관하게 **영구히** 다시 제안하지 않는다 - 기간 제한은
+   * 제안 기억에만 걸린다(`koreaplainExistingTopics.ts` 머리글). 시드가 241개뿐이라 제안 기억까지
+   * 영구로 두면 몇 달 뒤 뽑을 것이 없어진다.
+   */
   proposalMemoryDays: 60,
   // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   /**
