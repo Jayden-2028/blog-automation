@@ -308,6 +308,33 @@ export class ArticleJobRepository {
     });
   }
 
+  /**
+   * 한 트랙의 키워드만 최신순으로(2026-11-14). 사용설명서 주제 수집의 **중복 기억**이 쓴다.
+   *
+   * `listRecent`를 쓰지 않는 이유 둘:
+   *   ① 전 트랙 공용 창이라 다른 트랙 job(하루 10건쯤)이 쌓이면 **사용설명서 기발행분이 조용히 창 밖으로 밀린다.**
+   *   ② `select("*")`는 metadata 전체가 실려 100행에 ~3MB다(2026-10 egress 전면 차단의 패턴).
+   * 여기서는 keyword·status 두 칸만 받는다 - 중복 판정에 필요한 전부다.
+   *
+   * 트랙이 없는 옛 행은 엔터로 본다(`trackOfJob`과 같은 규칙)므로 질의에서 빠진다.
+   */
+  static async listKeywordsByTrack(track: string, limit = 1000): Promise<{ keyword: string; status: string | null; metadata: { track: string } }[]> {
+    const { data, error } = await supabase
+      .from("article_jobs")
+      .select("keyword,status")
+      .filter("metadata->>track", "eq", track)
+      .order("selected_at", { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return (data ?? []).map((row) => ({
+      keyword: String((row as { keyword?: unknown }).keyword ?? ""),
+      status: ((row as { status?: unknown }).status ?? null) as string | null,
+      // 호출 측(koreaplainJobTopics)이 metadata.track으로 트랙을 본다 - 질의로 이미 걸렀으므로 그대로 채워 준다.
+      metadata: { track },
+    }));
+  }
+
   /** id 목록의 전체 행. listRecentSlim으로 거른 건을 집어 갈 때 쓴다. */
   static async listByIds(ids: readonly string[]): Promise<ArticleJobRow[]> {
     if (ids.length === 0) return [];

@@ -1,5 +1,8 @@
 // 사용설명서 주제 수집 테스트 - 네트워크·DB 없음(전부 주입).
-import { KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, KOREAPLAIN_SEEDS } from "../../config/koreaplainSeeds.js";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, KOREAPLAIN_SEEDS, KOREAPLAIN_TOPIC_CONFIG } from "../../config/koreaplainSeeds.js";
 import { buildAutocompleteUrl, parseAutocompleteResponse } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import {
   KOREAPLAIN_SUBREDDITS,
@@ -40,9 +43,11 @@ import {
   scoreTopic,
   selectTopics,
   toRankedKeywords,
+  topicContainment,
   topicSimilarity,
 } from "./koreaplainTopics.js";
-import { dayIndexOf, redditQueryForSeed, runKoreaplainTopicCollection } from "./runKoreaplainTopicCollection.js";
+import { KOREAPLAIN_RUN_KIND, koreaplainJobTopics, koreaplainProposalRuns } from "./koreaplainExistingTopics.js";
+import { KOREAPLAIN_JOB_KIND, dayIndexOf, redditQueryForSeed, runKoreaplainTopicCollection } from "./runKoreaplainTopicCollection.js";
 
 function assert(c: unknown, m: string): asserts c {
   if (!c) throw new Error(`❌ ${m}`);
@@ -225,7 +230,14 @@ async function main(): Promise<void> {
   console.log("  ✅ 후보·점수·중복 제거·변환");
 
   // 라벨 쏠림 방지: 한 라벨 후보만 20개여도 topN까지 채우되, 다른 라벨이 있으면 먼저 올라온다.
-  const many = Array.from({ length: 12 }, (_, i) => ({ topic: `korean food topic number${i} guide`, seed: "korean bbq", label: "Food & Dining" as const, hits: 1, bestPosition: i % 3 }));
+  // 서로 다른 주제 12개여야 한다(2026-11-14): 전에는 `... number${i} guide`로 찍어 냈는데, 토큰 5개 중 4개가
+  // 같아 포함 관계 중복 규칙에 걸린다 - 라벨 상한을 보려던 fixture가 중복 제거를 보게 된다.
+  const manyFoodTopics = [
+    "korean bbq grill order", "kimchi fridge rental price", "banchan refill rules", "soju bottle cap game",
+    "convenience store lunch box", "korean bakery opening hours", "street toast vendor payment", "jokbal delivery minimum",
+    "temple food reservation", "makgeolli brewery tour", "hangover soup late night", "halal butcher itaewon",
+  ];
+  const many = manyFoodTopics.map((topic, i) => ({ topic, seed: "korean bbq", label: "Food & Dining" as const, hits: 1, bestPosition: i % 3 }));
   const other = [{ topic: "seoul subway transfer guide tips", seed: "korea subway", label: "Travel & Transit" as const, hits: 1, bestPosition: 8 }];
   const mixed = selectTopics([...many, ...other], { topN: 6, existingTopics: [], similarity: 0.95 });
   assert(mixed.selected.some((s) => s.label === "Travel & Transit"), "점수가 낮아도 다른 라벨이 상한 덕에 들어온다");
@@ -241,7 +253,13 @@ async function main(): Promise<void> {
   assert(defaultPracticalFloor(8) === 3 && defaultPracticalFloor(1) === 1, `하한 기본값(${defaultPracticalFloor(8)})`);
 
   // 문화 후보가 점수를 독점해도 실용 주제가 하한만큼 올라온다(개편 전에는 0~1건으로 밀렸다).
-  const cultural = Array.from({ length: 10 }, (_, i) => ({ topic: `korean festival custom number${i} explained`, seed: "korean etiquette", label: "Culture & Etiquette" as const, hits: 3, bestPosition: 0 }));
+  // 서로 다른 문화 후보 10개(2026-11-14 - 복제 fixture는 포함 관계 중복 규칙에 걸린다. 위 라벨 상한 fixture와 같은 이유).
+  const culturalTopics = [
+    "seollal bow money custom", "chuseok ancestral rite table", "wedding cash gift amount", "funeral dress code rules",
+    "housewarming gift tissue", "name stamp dojang making", "red ink name taboo", "fan death belief origin",
+    "first birthday doljanchi table", "lunar calendar age counting",
+  ];
+  const cultural = culturalTopics.map((topic) => ({ topic, seed: "korean etiquette", label: "Culture & Etiquette" as const, hits: 3, bestPosition: 0 }));
   const practicalCandidates = [
     { topic: "how to pay korea utility bill online", seed: "korea utility bill payment", label: "Living in Korea" as const, hits: 1, bestPosition: 9 },
     { topic: "korea bus subway transfer discount rules", seed: "korea bus subway transfer", label: "Travel & Transit" as const, hits: 1, bestPosition: 9 },
@@ -412,7 +430,7 @@ async function main(): Promise<void> {
   const noLocal = selectTopics(touristy, { topN: 4, existingTopics: [], similarity: 0.95, localEdgeFloor: 2 });
   assert(noLocal.selected.length === 4 && noLocal.selected.every((item) => item.score.localEdge === 0), "로컬 후보가 없으면 그냥 점수순");
   // 실용 하한과 겹침: gu office(Living) 하나가 둘 다 만족 -> 둘 다로 센다
-  const overlap = selectTopics([...touristy.filter((item) => item.label !== "Living in Korea"), localOnes[1], mk("korea certificate documents at gu office", { label: "Living in Korea", bestPosition: 9 })], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 1, localEdgeFloor: 2 });
+  const overlap = selectTopics([...touristy.filter((item) => item.label !== "Living in Korea"), localOnes[1], mk("apartment management fee breakdown", { label: "Living in Korea", bestPosition: 9 })], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 1, localEdgeFloor: 2 });
   assert(overlap.selected.filter((item) => item.score.localEdge > 0).length === 2, "실용 하한과 겹쳐도 로컬 하한 충족");
   const capped = selectTopics([...touristy.slice(0, 2), ...[1, 2, 3, 4].map((n) => mk(`korea ${n} neighbor noise rules`, { label: "Culture & Etiquette", bestPosition: 8 }))], { topN: 4, existingTopics: [], similarity: 0.95, practicalFloor: 0, localEdgeFloor: 4, perLabelCap: 2 });
   assert(capped.selected.filter((item) => item.label === "Culture & Etiquette").length <= 4, "라벨 상한 로직은 유지(하한이 상한을 깨지 않는 단계)");
@@ -465,6 +483,117 @@ async function main(): Promise<void> {
   for (const query of ["korea subway etiquette", "korea ondol", "korean bbq", "korea delivery apps"]) assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === query), `기존 시드 유지: ${query}`);
   for (const query of ["korea stock market hours", "krx holidays", "uber eats korea", "korea traffic light rules"]) assert(KOREAPLAIN_SEEDS.some((seed) => seed.query === query), `운영 정보 시드: ${query}`);
   console.log("  ✅ 제외 규칙 좁히기(stock·today)·운영 정보 +15·의미 포화 -10(superstition 제외)·승자>패자 대소 단언·신규 시드");
+
+  // ---------- 하루 5건 + 중복 없음(2026-11-14 사용자 요청) ----------
+  // 왜 이 절이 있나: 제안이 하루 8건이었고, 중복 판정이 자카드 0.6 하나뿐이라 **한 알림 안에서**
+  // 같은 주제가 두 번 나갔다. 실측(run 2026-11-13): "korea stock exchange hours"와 "korea stock market
+  // hours in est"가 같은 run에 같이 나갔다(자카드 0.50 - 임계값 아래라 통과). 날짜를 넘는 쪽도 같다:
+  // "korean food delivery app"(10/12 제안) 뒤에 "korean food delivery app without phone number"(11/06)가 나갔다.
+  assert(KOREAPLAIN_TOPIC_CONFIG.topicsPerRun === 5, `하루 제안은 5건(실제 ${KOREAPLAIN_TOPIC_CONFIG.topicsPerRun})`);
+  // 하한·상한은 공식 그대로 두고 topN만 줄인다 - 5건이면 실용 2(40%)·로컬 1(20%)·라벨 상한 2(40%)다.
+  assert(defaultPracticalFloor(5) === 2 && defaultLocalEdgeFloor(5) === 1, `topN=5의 하한(실용 ${defaultPracticalFloor(5)} · 로컬 ${defaultLocalEdgeFloor(5)})`);
+  assert(defaultPracticalFloor(8) === 3 && defaultLocalEdgeFloor(8) === 2, "topN=8의 하한은 그대로(공식 불변)");
+
+  // 포함 관계 중복(2026-11-14): 토큰 집합이 상대에 거의 들어가면 같은 주제다. 자카드는 긴 쪽의 수식어가
+  // 분모를 키워 이걸 못 잡는다. 실측 쌍으로 단언한다.
+  const dupPairs: readonly [string, string][] = [
+    ["korea stock market hours in est", "korea stock exchange hours"],
+    ["korean food delivery app without phone number", "korean food delivery app"],
+    ["living in korea as a foreign woman", "living in korea as foreigner"],
+    ["olive young tax refund minimum amount", "korea tax refund olive young"],
+    ["korean skincare routine day and night", "korean skincare routine order"],
+    ["korea autumn foliage forecast 2026", "korea autumn foliage map"],
+    ["hong kong vs korea cost of living", "korea cost of living vs us"],
+  ];
+  for (const [topic, existing] of dupPairs) {
+    assert(topicSimilarity(topic, existing) < KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity, `자카드만으로는 못 잡는 쌍이어야 재현이 된다: ${topic}`);
+    assert(isDuplicateTopic(topic, [existing], KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity), `포함 관계면 중복: "${topic}" ← "${existing}"`);
+  }
+  // 짧은 시드가 모든 롱테일을 삼키면 안 된다 - 의미 토큰 3개 미만은 포함 판정에서 뺀다.
+  assert(!isDuplicateTopic("korea subway etiquette guide", ["korea subway"], 0.6), "토큰 2개짜리는 포함 판정을 걸지 않는다");
+  assert(!isDuplicateTopic("korea garbage bag rules", ["korea traffic signal rules"], 0.6), "겹치는 토큰이 적으면 중복 아님");
+  assert(topicContainment("korean food delivery app", "korean food delivery app without phone number") === 1, "포함률은 작은 쪽 기준");
+
+  // 같은 알림 안 중복: 한 run에 같은 주제 두 건이 들어오면 한 건만 나간다(날짜를 넘는 쪽과 같은 규칙).
+  const sameRun = selectTopics(
+    [
+      mk("korea stock market hours in est", { label: "Living in Korea", bestPosition: 0 }),
+      mk("korea stock exchange hours", { label: "Living in Korea", bestPosition: 1 }),
+      mk("korea garbage bag rules guide", { label: "Living in Korea", bestPosition: 2 }),
+    ],
+    { topN: 5, existingTopics: [], similarity: KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity, practicalFloor: 0, localEdgeFloor: 0 }
+  );
+  assert(sameRun.selected.length === 2 && sameRun.droppedAsDuplicate === 1, `한 알림 안 중복 제거(실제 ${sameRun.selected.map((i) => i.topic).join(" | ")})`);
+
+  // 기억 재료: 트랙이 섞이지 않는다. 사용설명서 job·run만 본다.
+  const jobRows = [
+    { keyword: "korea taxi app guide", status: "published", metadata: { track: "kscene" } },
+    { keyword: "손흥민 결혼", status: "published", metadata: { track: "entertainment" } },
+    { keyword: "전세사기 판결", status: "published", metadata: { track: "social" } },
+    { keyword: "korea trash rules rejected", status: "rejected", metadata: { track: "kscene" } },
+    { keyword: "korea old job no track", status: "published", metadata: {} },
+  ];
+  const jobTopics = koreaplainJobTopics(jobRows);
+  assert(jobTopics.length === 1 && jobTopics[0] === "korea taxi app guide", `사용설명서 job만 기억한다(실제 ${jobTopics.join(" | ")})`);
+
+  // 두 곳에 같은 kind 문자열이 있다(순수 모듈이 수집 모듈을 import 하지 않게 하려고) - 갈라지면 제안 기억이 통째로 빈다.
+  assert(KOREAPLAIN_RUN_KIND === KOREAPLAIN_JOB_KIND, `run kind 상수가 같아야 한다(${KOREAPLAIN_RUN_KIND} vs ${KOREAPLAIN_JOB_KIND})`);
+  const cutoff = Date.parse("2026-09-15T12:00:00Z");
+  const runRows = [
+    { id: 3, started_at: "2026-11-14T12:00:00Z", metadata: { kind: "kscene_topic" } },
+    { id: 2, started_at: "2026-11-14T11:00:00Z", metadata: { kind: "social-issue" } },
+    { id: 1, started_at: "2026-09-01T12:00:00Z", metadata: { kind: "kscene_topic" } },
+  ];
+  const picked = koreaplainProposalRuns(runRows, cutoff, 10);
+  assert(picked.runIds.join() === "3", `기억 기간 안의 사용설명서 run만(실제 ${picked.runIds.join()})`);
+  assert(picked.warnings.length === 0, "창이 안 잘렸으면 경고 없음");
+  // 창이 잘리면 조용히 넘기지 않는다 - 읽은 만큼이 상한에 닿았고 가장 오래된 run이 기억 기간 안이면 더 있다.
+  const truncated = koreaplainProposalRuns(runRows.slice(0, 2), cutoff, 2);
+  assert(truncated.warnings.length === 1 && truncated.warnings[0].includes("중복 기억"), `창 잘림 경고(실제 ${truncated.warnings.join(" / ")})`);
+  // 트랙 격리: 이 중복 규칙은 사용설명서 밖으로 새지 않는다(엔터·사회의 제안 수·중복 판정은 그대로여야 한다).
+  const srcRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const importers = readdirSync(srcRoot, { recursive: true, encoding: "utf-8" })
+    .filter((file) => file.endsWith(".ts"))
+    .filter((file) => readFileSync(join(srcRoot, file), "utf-8").includes("koreaplainTopics.js"));
+  assert(
+    importers.every((file) => file.replace(/\\/g, "/").startsWith("workflows/koreaplain/")),
+    `koreaplainTopics를 읽는 파일은 사용설명서 트랙뿐(실제 ${importers.join(" | ")})`
+  );
+  console.log("  ✅ 하루 5건 · 포함 관계 중복(같은 알림 안·날짜 넘김) · 기억 재료 트랙 분리 · 창 잘림 경고");
+
+  // ---------- 모자란 날·중복 제거 실패를 알림에 적는다 ----------
+  const notes: (string | undefined)[] = [];
+  const shortDay = await runKoreaplainTopicCollection({
+    now: new Date("2026-10-07T12:00:00Z"), delayMs: 0, seedsPerRun: 2, topicsPerRun: 5, log: () => {},
+    fetchSuggestions: async (q) => [`${q} complete guide for residents`],
+    fetchTrendTerms: async () => [],
+    loadExistingTopics: async () => [],
+    save: async () => ({ runId: 101, persisted: true }),
+    notify: async (opts = {}) => {
+      notes.push(opts.headerNote);
+      return { sent: true, payload: null, messages: [] };
+    },
+  });
+  assert(shortDay.status === "notified" && shortDay.topics.length < 5, `시드가 모자라면 적게 나간다(${shortDay.topics.length}건)`);
+  assert((notes[0] ?? "").includes(`오늘은 ${shortDay.topics.length}건`), `모자란 날은 알림에 적는다(실제 ${notes[0] ?? "(없음)"})`);
+
+  const failNotes: (string | undefined)[] = [];
+  const dedupeDown = await runKoreaplainTopicCollection({
+    now: new Date("2026-10-07T12:00:00Z"), delayMs: 0, seedsPerRun: 6, topicsPerRun: 5, log: () => {},
+    fetchSuggestions: async (q) => [`${q} complete guide for residents`, `how to ${q} in korea step by step`],
+    fetchTrendTerms: async () => [],
+    loadExistingTopics: async () => {
+      throw new Error("db down");
+    },
+    save: async () => ({ runId: 102, persisted: true }),
+    notify: async (opts = {}) => {
+      failNotes.push(opts.headerNote);
+      return { sent: true, payload: null, messages: [] };
+    },
+  });
+  assert(dedupeDown.status === "notified", "기발행 목록을 못 읽어도 알림은 간다");
+  assert((failNotes[0] ?? "").includes("중복 제거"), `중복 제거를 건너뛴 날은 알림에 적는다(실제 ${failNotes[0] ?? "(없음)"})`);
+  console.log("  ✅ 모자란 날 \"오늘은 N건\" · 중복 제거 생략 경고가 알림 헤더로 간다");
 
   console.log("\n✅ testKoreaplainTopics 통과");
 }

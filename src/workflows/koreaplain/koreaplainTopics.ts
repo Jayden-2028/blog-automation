@@ -91,10 +91,44 @@ export function topicSimilarity(a: string, b: string): number {
   return shared / (setA.size + setB.size - shared);
 }
 
-/** 후보가 이미 쓴/제안한 주제와 같은 주제인가. */
+/**
+ * 포함률(overlap coefficient, 0~1): 작은 쪽 토큰 집합이 상대에 얼마나 들어 있나.
+ * 자카드는 **긴 쪽의 수식어가 분모를 키워** 포함 관계를 놓친다(2026-11-14 실측 아래).
+ */
+export function topicContainment(a: string, b: string): number {
+  const setA = new Set(topicTokens(a));
+  const setB = new Set(topicTokens(b));
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let shared = 0;
+  for (const token of setA) if (setB.has(token)) shared += 1;
+  return shared / Math.min(setA.size, setB.size);
+}
+
+/**
+ * 포함 관계를 중복으로 보는 기준(2026-11-14). 작은 쪽이 **의미 토큰 3개 이상**이고 그 3/4 이상이
+ * 상대에 들어 있으면 같은 주제로 본다.
+ *
+ * 왜 자카드만으로는 모자랐나 - 제안 320건 실측(2026-10-06~11-14)에서 **같은 알림 안에** 이런 쌍이 나갔다:
+ *   · "korea stock exchange hours" + "korea stock market hours in est"(11/13 같은 run, 자카드 0.50)
+ *   · "hong kong vs korea cost of living" + "korea cost of living vs us"(10/06 같은 run, 0.50)
+ * 날짜를 넘는 쪽도 같다 - "korean food delivery app"(10/12) 뒤 "korean food delivery app without phone
+ * number"(11/06)는 **앞의 토큰을 통째로 품고 있는데도** 자카드가 0.57이라 통과했다.
+ *
+ * 토큰 3개 하한이 이 규칙의 안전장치다 - 없으면 "korea subway"(2토큰) 하나가 지하철 롱테일 전부를 삼킨다.
+ */
+export const DUPLICATE_CONTAINMENT = 0.75;
+export const CONTAINMENT_MIN_TOKENS = 3;
+
+/** 후보가 이미 쓴/제안한 주제와 같은 주제인가. 같은 알림 안 후보끼리도 이 함수로 본다. */
 export function isDuplicateTopic(topic: string, existing: readonly string[], threshold: number): boolean {
   const normalized = normalizeTopic(topic);
-  return existing.some((other) => normalizeTopic(other) === normalized || topicSimilarity(topic, other) >= threshold);
+  const tokenCount = new Set(topicTokens(topic)).size;
+  return existing.some((other) => {
+    if (normalizeTopic(other) === normalized) return true;
+    if (topicSimilarity(topic, other) >= threshold) return true;
+    const smaller = Math.min(tokenCount, new Set(topicTokens(other)).size);
+    return smaller >= CONTAINMENT_MIN_TOKENS && topicContainment(topic, other) >= DUPLICATE_CONTAINMENT;
+  });
 }
 
 // ---------- 로컬 우위·관광 포화 용어(2026-10-30) ----------
@@ -609,8 +643,10 @@ export function selectTopics(
   const kept: typeof scored = [];
   let droppedAsDuplicate = 0;
   for (const candidate of scored) {
+    // 같은 알림 안(kept)과 날짜를 넘는 쪽(existingTopics)에 **같은 규칙**을 쓴다(2026-11-14). 전에는 kept만
+    // 자카드로 봐서 "korea stock exchange hours"와 "korea stock market hours in est"가 같은 run에 같이 나갔다.
     const dup = isDuplicateTopic(candidate.topic, options.existingTopics, options.similarity) ||
-      kept.some((other) => topicSimilarity(candidate.topic, other.topic) >= options.similarity);
+      isDuplicateTopic(candidate.topic, kept.map((other) => other.topic), options.similarity);
     if (dup) {
       droppedAsDuplicate += 1;
       continue;
