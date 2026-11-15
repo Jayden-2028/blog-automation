@@ -9,6 +9,13 @@
 // (2026-11-06 - 그때까지는 조사 기록조차 못 봐서 "필모그래피를 늘려 달라"를 거부했다).
 
 import { PIPELINE_ROOT } from "../../config/pipelinePaths.js";
+import {
+  HUMANIZE_SKILL_EXTRA_TOOLS,
+  buildHumanizeOverrideBlock,
+  humanizeAwareTimeoutMs,
+  humanizeMode,
+  humanizePathLogLine,
+} from "../../config/humanizeMode.js";
 import { runHeadlessClaude } from "../../services/llm/runHeadlessClaude.js";
 import { sanitizeArticleBody } from "./sanitizeArticleBody.js";
 import { enforceWritingRules } from "./enforceWritingRules.js";
@@ -16,6 +23,7 @@ import { formatSpecList, specCategoryOf, writingSpecFiles } from "./specFiles.js
 import type { RunHeadlessClaudeResult } from "../../services/llm/runHeadlessClaude.js";
 
 // 배리에이션과 같은 부하(writer.md 500줄+ 재독 + skill 2개) - 같은 타임아웃을 쓴다.
+// 이 값은 self 모드 기준이다. WRITING_HUMANIZE_SKILL=skill이면 스킬 호출 시간이 더해져 28분이다(humanizeAwareTimeoutMs).
 export const REVISION_TIMEOUT_MS = 20 * 60 * 1000;
 
 export const REVISION_OUTPUT_MARKERS = {
@@ -137,6 +145,8 @@ function buildPrompt(input: ReviseArticleInput): string {
     `## 기존 원고 (키워드: ${keyword} / 제목: ${originalTitle})`,
     originalBody,
     ...(researchText ? [``, `## 조사 자료 (사실 출처 - 이 글을 쓸 때 쓴 조사 기록)`, researchText] : []),
+    // WRITING_HUMANIZE_SKILL=im-not-ai|skill일 때만(2026-11-15 시험 운영). 변수를 지우면 이 블록이 사라진다.
+    ...(humanizeMode() === "skill" ? buildHumanizeOverrideBlock("revise") : []),
   ]
     .filter((line) => line !== ``)
     .join("\n");
@@ -174,10 +184,14 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
     ((prompt: string) =>
       runHeadlessClaude({
         prompt,
-        allowedTools: ["Skill", "Read"],
+        // 스킬 모드: humanize-korean이 _workspace/ 파일을 만들고 python3·Glob을 쓴다.
+        allowedTools:
+          humanizeMode() === "skill"
+            ? ["Skill", "Read", "Write", ...HUMANIZE_SKILL_EXTRA_TOOLS]
+            : ["Skill", "Read"],
         permissionMode: "acceptEdits",
         cwd: PIPELINE_ROOT,
-        timeoutMs: REVISION_TIMEOUT_MS,
+        timeoutMs: humanizeAwareTimeoutMs(),
       }));
 
   const startedAt = Date.now();
@@ -185,6 +199,8 @@ export async function reviseArticleWithFeedback(input: ReviseArticleInput): Prom
   if (!result.ok) {
     return { status: "failed", error: result.error };
   }
+  // 1주일 시험 운영의 실사용률 로그(러너 로그에서 grep "[humanize]").
+  if (humanizeMode() === "skill") console.log(humanizePathLogLine("revise", result.output));
 
   // 반영 불가는 실패가 아니라 **사유가 있는 결론**이다. 마커 검사보다 먼저 본다.
   const blocked = parseBlockedReason(result.output);

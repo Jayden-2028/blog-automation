@@ -28,6 +28,7 @@ import type { KeywordBrief } from "../brief/buildKeywordBrief.js";
 import { formatSpecList, pickStyleFile, specCategoryOf, writingSpecFiles } from "./specFiles.js";
 import { isConverterJobSource } from "../instagram-capture/instagramTrack.js";
 import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
+import { buildHumanizeOverrideBlock, humanizeMode } from "../../config/humanizeMode.js";
 
 export type BuildWritingPromptInput = {
   job: Pick<ArticleJobRow, "keyword" | "headline" | "category">;
@@ -133,6 +134,9 @@ export function buildWritingPrompt(input: BuildWritingPromptInput): string {
     "- 사실은 위 자료조사 파일에서만 가져온다. WebSearch를 쓰지 않는다.",
     "",
     `완료하면 파일을 저장한 뒤 마지막 줄에 \`SAVED: ${draftFilePath}\`만 답하라.`,
+    // WRITING_HUMANIZE_SKILL=im-not-ai|skill일 때만 §10 윤문을 스킬 호출로 덮어쓴다(2026-11-15 시험 운영).
+    // 규격 파일은 건드리지 않는다 - 변수를 지우면 이 블록이 사라져 바로 옛 동작이다(config/humanizeMode.ts).
+    ...(humanizeMode() === "skill" ? buildHumanizeOverrideBlock("write") : []),
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

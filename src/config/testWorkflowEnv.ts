@@ -214,4 +214,34 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
   console.log("✅ image-pick: 요청은 그룹 밖에서 큐에 쌓이고, 같은 원고의 적용은 줄을 서서 하나씩 비운다");
 }
 
+// 6) 윤문 스킬 시험 운영(2026-11-15): 게이트 변수를 넘기고, 스킬 설치 스텝이 있되 **실패가 조용하지 않아야** 한다.
+//    - 변수를 안 넘기면 repo variable을 켜도 러너에서는 항상 self라 시험이 시작되지 않는다.
+//    - 설치 스텝은 continue-on-error다(폴백이 있어 집필을 막을 이유가 없다). 그런데 continue-on-error는
+//      `gh run view --json jobs`의 conclusion을 success로 덮는다(2026-11-11 교훈) - 그래서 실패 echo가 있어야 한다.
+//    - 집필 상한: 스킬 모드는 호출 상한이 28분이라 job 시한이 그보다 넉넉해야 한다(write 55, revise 60).
+{
+  for (const [file, minTimeout] of [["job-write.yml", 55], ["job-revise.yml", 60]] as const) {
+    const yml = read(file);
+    assert(
+      /WRITING_HUMANIZE_SKILL:\s*\$\{\{\s*vars\.WRITING_HUMANIZE_SKILL\s*\}\}/.test(yml),
+      `${file}가 WRITING_HUMANIZE_SKILL을 Run job 스텝에 넘기지 않는다 - repo variable을 켜도 러너에서는 항상 self다`
+    );
+    const start = yml.indexOf("humanize-korean@im-not-ai");
+    assert(start > 0, `${file}에 im-not-ai 설치가 없다 - 스킬 모드를 켜면 항상 폴백한다`);
+    assert(yml.includes("marketplace add https://github.com/epoko77-ai/im-not-ai.git"), `${file}가 im-not-ai 마켓플레이스를 추가하지 않는다`);
+    const nameIdx = yml.lastIndexOf("\n      - name:", start);
+    const nextStep = yml.indexOf("\n      - name:", start);
+    const step = yml.slice(nameIdx, nextStep === -1 ? undefined : nextStep);
+    assert(!step.includes("moai-marketer@moai-cowork"), `${file}의 im-not-ai 설치가 moai-marketer 설치와 같은 스텝이다 - 별도 스텝이어야 continue-on-error가 그 설치에만 걸린다`);
+    assert(/continue-on-error:\s*true/.test(step), `${file}의 im-not-ai 설치가 하드 실패다 - 폴백이 있는데 집필을 막는다`);
+    assert(
+      /echo\s+"\[humanize-install\] OK/.test(step) && /echo\s+"\[humanize-install\] FAILED/.test(step),
+      `${file}의 im-not-ai 설치가 성공/실패를 echo로 남기지 않는다 - continue-on-error가 conclusion을 success로 덮어 실패가 조용해진다`
+    );
+    const timeout = /timeout-minutes:\s*(\d+)/.exec(yml);
+    assert(timeout !== null && Number(timeout[1]) >= minTimeout, `${file}의 job 시한이 ${timeout?.[1]}분이다 - 스킬 모드(28분 호출)에는 ${minTimeout}분 이상이어야 한다`);
+  }
+  console.log("✅ 윤문 스킬: 두 워크플로가 게이트 변수를 넘기고, im-not-ai는 별도 스텝(continue-on-error + 성공/실패 echo)으로 설치하며, 시한이 넉넉하다");
+}
+
 console.log("\n✅ testWorkflowEnv 전체 통과");
