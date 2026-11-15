@@ -52,11 +52,27 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   스킬(`*-blog-writer`)은 쓰지 않는다(클라우드에서 로드되지 않고 맥과 규격이 갈라진다). 대화형으로 원고를
   쓸 때는 프로젝트 스킬 `write-manuscript`를 쓴다. 저장 직전 `enforceWritingRules`가 금지 표현을 코드로
   집행한다.
-- **한국어 윤문(AI 티 제거)은 `anthropic-skills:humanize-korean`을 쓴다**(2026-11-05 사용자 결정).
-  같은 일을 하는 `moai-writer:korean-humanize`는 **쓰지 않는다** - 플러그인은 지우지 않고 사용만
-  멈춘다(9월까지 66회 썼으므로 돌아갈 길은 남겨 둔다). 둘 다 켜 두면 세션마다 고르는 스킬이 갈려
-  문체 기준이 둘로 쪼개진다. 윤문은 **발행 전 사람이 손볼 때** 쓰는 보조 수단이고, 파이프라인이
-  자동으로 거치는 단계가 아니다 - 자동 경로의 문체 기준은 위 `core-rules.md`와 `style/*.md`다.
+- **한국어 윤문(AI 티 제거)은 두 갈래이고, 집필 단계는 게이트로 고른다**(2026-11-15 시험 운영 시작).
+  - **쓰는 스킬은 `humanize-korean:humanize-korean`(epoko77-ai/im-not-ai 플러그인 v2.4.4)이다.** 옛 문단이 적은
+    `anthropic-skills:humanize-korean`은 **이 맥에 더 이상 없다**(2026-11-15 실측). 같은 일을 하는
+    `moai-writer:korean-humanize`는 **쓰지 않는다** - 플러그인은 지우지 않고 사용만 멈춘다(9월까지 66회
+    썼으므로 돌아갈 길은 남겨 둔다). 둘 다 켜 두면 세션마다 고르는 스킬이 갈려 문체 기준이 둘로 쪼개진다.
+  - **집필·수정 재작성의 "저장 직전 윤문"은 `WRITING_HUMANIZE_SKILL`이 정한다**(`src/config/humanizeMode.ts`):
+    비었거나 `self` = **기본값, 지금 동작**(에이전트가 `rules/humanize.md` 체크리스트로 직접 윤문), `im-not-ai`
+    또는 `skill` = 프롬프트 끝에 override 블록이 붙어 스킬을 호출한다. 규격 파일(`prompts/writing/rules/*.md`)은
+    두 모드 모두 그대로다 - **롤백은 repo variable `WRITING_HUMANIZE_SKILL`을 지우는 것 하나**다.
+    **2026-11-15부터 1주일 시험 운영 뒤 유지/롤백을 판단한다.** 변수를 켜는 것은 운영 동작 변경이라 사용자 승인 몫이다.
+  - **스킬 모드의 안전장치**: 스킬 실패(플러그인 미설치 등) = `rules/humanize.md`로 자체 윤문하고 계속(집필을 실패로
+    끝내지 않는다), 재검증(§10 체크리스트)이 어긋나거나 변경률 30% 경고 = 윤문본을 버리고 윤문 전 원고를 저장한다.
+    윤문 경로는 `HUMANIZE: skill | self-fallback | skill-discarded` 한 줄로 남고 러너 로그의 `[humanize]` 줄로 찍힌다
+    (1주일 뒤 실사용률을 이 로그로 잰다). 스킬 모드에서만 `Bash`·`Glob`(+재작성은 `Write`)을 더 열고 호출 상한이
+    28분이며 job 시한은 write 55분·revise 60분이다(self는 그대로 20분). im-not-ai 설치는 별도 스텝이고
+    `continue-on-error`다 - 실패해도 폴백이 있으니 집필을 막지 않되, 조용하지 않도록 `[humanize-install]` echo를 남긴다.
+  - **2026-10-15의 "외부 윤문 스킬은 호출하지 않는다" 전제가 바뀐 이유**: 그때 막힌 것은 **계정 레벨 스킬**
+    (`anthropic-skills:*`)이라 클라우드 러너에서 로드되지 않았다. 지금 쓰는 것은 **GitHub 마켓플레이스 플러그인**이라
+    러너에서 `claude plugin install`로 설치된다(`job-write.yml`이 moai-marketer를 이미 그렇게 설치한다). 단 **러너에서
+    플러그인 설치·스킬 로드가 실제로 되는지는 첫 실제 run에서만 확인된다.** 스킬 모드가 꺼져 있을 때 윤문은
+    **발행 전 사람이 손볼 때** 쓰는 보조 수단이고, 자동 경로의 문체 기준은 위 `core-rules.md`와 `style/*.md`다.
 - 키워드 승인 → 자료조사 → 집필: `prompts/research/researcher.md` → `prompts/writing/core-rules.md` +
   `writer.md`가 규격이다. Claude(리드)는 직접 리서치·집필하지 않고 이 서브 스펙을 호출·조율·감독만 한다.
   헤드리스 실행(`claude -p`)도 이 스펙과 `docs/seo-guide.md`를 로드해 따른다. 산출물은 파일이다

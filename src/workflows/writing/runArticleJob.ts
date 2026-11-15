@@ -28,6 +28,12 @@ import { dirname } from "node:path";
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { ARTICLE_IMAGE_GENERATION_ENABLED } from "../../config/articleImages.js";
+import {
+  HUMANIZE_SKILL_EXTRA_TOOLS,
+  humanizeAwareTimeoutMs,
+  humanizeMode,
+  humanizePathLogLine,
+} from "../../config/humanizeMode.js";
 import { isMedicalTopic } from "../../config/medicalTopicRules.js";
 import { shouldSkipDraftReview } from "../../config/pipelineGate.js";
 import { PIPELINE_ROOT, draftFilePath, researchFilePath } from "../../config/pipelinePaths.js";
@@ -80,6 +86,7 @@ import type { ArticleJobRow, ArticleRow, SourceAuthorityLevel, SourceInsert, Sou
  * (2026-09-01 E2E에서 10분 타임아웃에 걸림) - 20분으로 늘린다.
  */
 export const WRITE_TIMEOUT_MS = 20 * 60 * 1000;
+// 위 값은 self 모드 기준이다. WRITING_HUMANIZE_SKILL=skill이면 스킬 호출 시간이 더해져 28분이다(humanizeAwareTimeoutMs).
 
 /** 이미 결정이 끝난 job은 재실행하지 않는다 - 재실행하면 승인된/발행된 원고 위에 새 원고가 덮어써진다. */
 const NON_RETRYABLE_STATUSES: ArticleJobRow["status"][] = ["review", "approved", "published", "rejected"];
@@ -737,10 +744,12 @@ async function defaultRunWriter(prompt: string): Promise<{ ok: true; rawOutput: 
   return runWithHeavyPipelineLock(async () => {
     const result = await runHeadlessClaude({
       prompt,
-      allowedTools: ["Read", "Write", "Skill"],
+      // 스킬 모드: humanize-korean이 _workspace/ 파일을 만들고 python3·Glob을 쓴다.
+      allowedTools:
+        humanizeMode() === "skill" ? ["Read", "Write", "Skill", ...HUMANIZE_SKILL_EXTRA_TOOLS] : ["Read", "Write", "Skill"],
       permissionMode: "acceptEdits",
       cwd: PIPELINE_ROOT,
-      timeoutMs: WRITE_TIMEOUT_MS,
+      timeoutMs: humanizeAwareTimeoutMs(),
     });
     return result.ok ? { ok: true, rawOutput: result.output } : { ok: false, error: result.error };
   });
@@ -924,6 +933,8 @@ async function runWritingStageInner(
       return { status: "failed", error: ran.error };
     }
     rawOutput = ran.rawOutput;
+    // 1주일 시험 운영의 실사용률 로그(러너 로그에서 grep "[humanize]").
+    if (humanizeMode() === "skill") console.log(humanizePathLogLine(`job=${jobId}`, ran.rawOutput));
   }
   const durationMs = Date.now() - startedAt;
 
