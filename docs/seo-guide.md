@@ -245,8 +245,6 @@
   **실제 판정축은 빈도가 아니라 유사·저가치 페이지의 양산이다**(아래 §9 "AI 생성 원고의 특수
   리스크" 1번 참고). 네이버가 쓴 유일한 수치 표현은 "문장 일부만 바꾼 페이지를 **수십 개 이상**
   발행"인데, 조건이 *동일·유사 템플릿*이라 주제가 서로 다른 하루 몇 건과는 범주가 다르다.
-- **수정은 발행 후 24시간 이후에.** 발행 직후 잦은 수정은 문서 재평가를 유발한다 `[관행]`.
-- **과거 글 업데이트**를 파이프라인에 넣는다. 신선도 신호는 신규 발행뿐 아니라 갱신으로도 만들어진다.
 
 ---
 
@@ -440,41 +438,6 @@ AI는 여러 출처가 **같은 말을 하는지**를 본다. 같은 사실을 �
 
 **GEO(Generative Engine Optimization)는 AEO보다 상위 개념이다.** AEO가 "문장을 어떻게 쓸까"라면, GEO는 "AI 요약 답변 안에 내 콘텐츠가 살아남게 하려면 무엇을 넣을까"다.
 
-### 근거: 측정된 효과 `[연구]`
-
-KDD 2024 GEO 논문(Aggarwal et al., arXiv:2311.09735)이 9가지 기법을 실험한 결과:
-
-| 기법 | 가시성 변화 | 해석 |
-|---|---|---|
-| **인용문 추가** (Quotation Addition) | 큰 폭 상승 | 전문가 발언을 직접 인용 |
-| **통계 추가** (Statistics Addition) | 큰 폭 상승 | 서술을 수치로 대체 |
-| **출처 인용** (Cite Sources) | **약 +27%** | 신뢰 가능한 출처 링크 |
-| **문장 유창성 개선** (Fluency) | **약 +28%** | 가장 효과가 큰 단일 기법 |
-| **권위적 어조** (Authoritative) | 약 +18% | 단정적·전문적 서술 |
-| **전문 용어 사용** (Technical Terms) | 약 +18% | 도메인 용어 정확히 사용 |
-| **쉬운 표현** (Easy-to-Understand) | 약 +14% | |
-| **고유 단어 추가** (Unique Words) | 약 +6% | 효과 미미 |
-| **키워드 스터핑** | **약 -8%** | 역효과 |
-
-> ### ⚠️ 이 표를 읽는 법 (2026-09-22 보정)
->
-> 널리 인용되는 **"GEO로 가시성 40% 향상"** 은 **오독이다.** 이 실험은 **5개 문서가 이미
-> 컨텍스트에 들어와 있는 상태**를 전제로 그 안에서의 인용 지분 변화를 잰 것이다. 45편 서베이
-> (arXiv:2607.14035)의 평가:
->
-> > *"이미 검색된 콘텐츠가 인과적으로 자신의 인용을 바꿀 수는 있지만, 검토한 어떤 기법도
-> > **오가닉 발견가능성에 안정적·종단적·플랫폼 교차적 인과 효과를 보이지 않았다.**"*
->
-> 즉 위 표의 수치는 **"이미 후보에 든 다음"** 의 이야기이고, **애초에 검색되게 만드는 것과는
-> 무관하다.** 서베이의 증거 등급으로 「"GEO가 가시성 40% 증가"」는 **Rejected**다.
->
-> 후속 대규모 실험(SIGIR '26, 25만 건·6개 모델·18개 요인)의 결론은 **relevance와 position이
-> 1차 인용의 주 결정 요인이고 포맷팅 단독 개입은 효과가 약하다**는 것이다. 반증도 있다 —
-> C-SEO Bench(1,900 쿼리)에서 54개 method–domain 조합 중 **질의응답 도메인에서 유의하게
-> 긍정적인 것은 하나도 없었다.**
-
-이 표에서 **여전히 유효하다고 볼 것은 마지막 줄 하나**다.
-
 **키워드 반복은 AI 검색에서 순효과가 마이너스다(−8%).** 이건 방향이 여러 자료에서 일치하고,
 구글의 키워드 스터핑 정책과도 같은 방향이라 그대로 지킨다.
 
@@ -603,24 +566,4 @@ AI가 다른 곳에서 못 구하는 정보가 있어야 인용된다.
 
 ## 출처
 
-**네이버 공식**
-- [네이버, AI 브리핑 도입 후 블로그 창작자 지원 규모 약 2배 확대 (네이버 보도자료, 2026-08-07)](https://navercorp.com/media/pressReleasesDetail?seq=10034578)
-- ["AI 피인용 많은 창작자에 현금 쏜다"…네이버 메이트 뭐길래 (ZDNet Korea, 2026-05-28)](https://zdnet.co.kr/view/?no=20260528132349)
-- [네이버, AI 브리핑 인용 창작자에 최대 1천만 원 지원 — SEO NEWS](https://seonews.co.kr/naver-mate-ai-briefing-citation/)
-
-**연구**
-- [GEO: Generative Engine Optimization (Aggarwal et al., KDD 2024, arXiv:2311.09735)](https://arxiv.org/html/2311.09735v2)
-
-**실무·업계 자료**
-- [네이버 블로그 상위노출 체크리스트 20가지 (2026년 최신판) — 로카포스팅](https://locaposting.com/blog/naver-seo-checklist)
-- [네이버 C-Rank와 D.I.A 알고리즘 — 로카포스팅](https://locaposting.com/blog/naver-crank-dia-algorithm)
-- [네이버 스마트블록 완벽 가이드 2026 — 로카포스팅](https://locaposting.com/blog/naver-smart-block-guide)
-- [네이버 스마트블록의 인기글 도입과 SEO 대응 방법 — TBWA Korea](https://seo.tbwakorea.com/blog/naver-smartblock-and-seo/)
-- [다시 정립해야 할 네이버 유사문서 개념 — 오픈애즈](https://www.openads.co.kr/content/contentDetail?contsId=4748)
-- [2026 네이버 블로그 저품질 원인과 탈출 방법 — TILNOTE](https://tilnote.io/en/pages/69ce9379a5dad016ee58c5b9)
-- [2026년 확 바뀐 네이버 알고리즘 — 코드잇](https://sprint.codeit.kr/blog/naver-blog-algorithm-change-ai-briefing-clip-mate)
-- [네이버 AI 브리핑에 인용되는 콘텐츠 설계법 — 원포인트](https://1point.kr/blog/insights/naver-ai-briefing-content-design/)
-- [네이버 AI 브리핑 노출 전략 4가지 조건 — 원플랜](https://blog.oneplan.co.kr/naver-ai-search-optimization/)
-- [AEO 완전 정리: 글로벌 3사가 공통으로 강조한 6가지 (2026) — Frostai](https://www.frostai.co/blog/what-is-aeo-answer-engine-optimization-2026)
-- [Generative Engine Optimization: The 2026 Guide to AI Search Visibility — LLMrefs](https://llmrefs.com/generative-engine-optimization)
-- [네이버 블로그 상위노출 체크리스트 2026 — magister1318](https://magister1318.blog/guides/naver-blog-checklist-2026/)
+분리한 참고문헌 목록은 `docs/archive/2026-11-16-prompt-background.md`에 있다.
