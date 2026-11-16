@@ -1,13 +1,13 @@
 // 규격 파일 목록 테스트. 실행: npm run test:spec-files
 import { existsSync, readFileSync } from "node:fs";
-import { formatSpecList, pickStyleFile, specCategoryOf, writingSpecFiles } from "./specFiles.js";
+import { formatSpecList, isSeniorAudience, pickStyleFile, specCategoryOf, writingSpecFiles } from "./specFiles.js";
 import { LOCAL_CALLOUT_CLASSES } from "../../services/publish/renderPublishBlocks.js";
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`❌ ${msg}`);
 }
 
-for (const category of ["entertainment", "ott", "parenting", "living", "community", "incident", "kscene", "person", null]) {
+for (const category of ["entertainment", "ott", "parenting", "living", "community", "incident", "kscene", "person", "senior", null]) {
   const files = writingSpecFiles(category);
   assert(files[0].path === "prompts/writing/core-rules.md", `${category}: core-rules가 맨 앞이어야 한다`);
   for (const f of files) assert(existsSync(f.path), `${category}: 파일이 없다 ${f.path}`);
@@ -72,3 +72,38 @@ assert(koreaplainTranslation.includes("Practice, not psychology"), "번역 지�
 assert(!koreaplainTranslation.includes('no "I"'), "번역 지침에 옛 'Korea Plain has no I'가 남았다");
 assert(koreaplainTranslation.includes("Written by Jayden, a Korean living in Seoul"), "번역 지침에 바이라인 안내가 없다");
 console.log("✅ koreaplain 화자·마무리·소제목 상한 개정 + 10/29 개정 보존");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 시니어 우회 루트(2026-11-16). 표식은 metadata.audience 하나이고, track·category는 건드리지 않는다.
+const SENIOR_JOB = { category: "living", metadata: { track: "social", audience: "senior" } };
+const PLAIN_LIVING_JOB = { category: "living", metadata: { track: "social" } };
+
+assert(isSeniorAudience(SENIOR_JOB), "audience=senior를 못 읽는다");
+assert(!isSeniorAudience(PLAIN_LIVING_JOB), "표식 없는 living job이 시니어로 잡혔다");
+assert(!isSeniorAudience({ metadata: null }), "metadata가 없으면 시니어가 아니다");
+
+assert(specCategoryOf(SENIOR_JOB) === "senior", "시니어 표식이 규격 카테고리를 senior로 돌려야 한다");
+// **같은 track·category인데 표식만 없는 job은 그대로다** - 이게 분리의 핵심이다.
+assert(specCategoryOf(PLAIN_LIVING_JOB) === "living", "표식 없는 사회 트랙 living job의 규격이 바뀌었다");
+assert(pickStyleFile("senior") === "prompts/writing/style/senior.md", "senior는 senior.md");
+
+const seniorPaths = writingSpecFiles("senior").map((f) => f.path);
+assert(seniorPaths.includes("prompts/writing/style/senior.md"), "시니어 목록에 senior.md가 없다");
+assert(!seniorPaths.includes("prompts/writing/style/trend.md"), "시니어 목록에 trend.md(후킹 제목)가 섞였다");
+assert(seniorPaths.includes("prompts/writing/style/voice.md"), "시니어도 공통 어투는 voice.md를 쓴다");
+// senior.md가 구조·비중 문서를 이긴다는 것이 목록의 purpose에 적혀 있어야 한다 - 안 적으면 모델이 §6 정책 흐름을 따른다.
+const seniorEntry = writingSpecFiles("senior").find((f) => f.path.endsWith("style/senior.md"));
+assert(!!seniorEntry && seniorEntry.purpose.includes("이긴다"), "senior.md 항목에 우선순위 설명이 없다");
+
+// 시니어 표식이 사건·사고 분기보다 먼저다(입력 툴 living/tech 트랙과 겹쳐도 시니어가 이긴다).
+assert(specCategoryOf({ category: "living", metadata: { track: "living", audience: "senior" } }) === "senior",
+  "입력 툴 living 트랙 + 시니어 표식이면 시니어가 이겨야 한다");
+assert(specCategoryOf({ category: "living", metadata: { track: "living" } }) === "incident",
+  "표식이 없으면 입력 툴 living 트랙은 그대로 incident 규격이다");
+
+const seniorSpec = readFileSync("prompts/writing/style/senior.md", "utf8");
+assert(seniorSpec.includes("job.metadata.audience"), "senior.md에 적용 기준이 없다");
+assert(seniorSpec.includes("1,800자"), "senior.md에 분량 상한이 없다");
+assert(seniorSpec.includes("45자"), "senior.md에 문장 길이 상한이 없다");
+assert(seniorSpec.includes("예상 효과"), "senior.md가 article-structure §6의 '예상 효과' 제외를 말해야 한다");
+console.log("✅ 시니어 우회 루트: 표식 하나로 집필 규격만 갈린다(track·category 불변)");

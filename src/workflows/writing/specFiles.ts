@@ -8,6 +8,26 @@ import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 
 export type SpecFile = { path: string; purpose: string };
 
+/** `job.metadata.audience` 값이 이것이면 시니어 집필 규격으로 간다(2026-11-16). */
+export const SENIOR_AUDIENCE = "senior";
+
+/**
+ * 시니어 표식(2026-11-16). 티스토리 주제 전환 시험의 원고가 "내용은 어렵지 않은데 글을 너무 어렵게 쓴다"는
+ * 지적을 받아 **집필 규격만** 갈랐다 - 전체 흐름(조사 → 집필 → 자동 승인 → 통합 알림 → 티스토리 임시저장)은
+ * 그대로다.
+ *
+ * **왜 track이 아니라 audience인가**: track은 어느 봇이 알리고 어느 뷰어에 뜨고 어느 발행 버튼이 붙는지를
+ * 정한다. 시니어 원고도 사회 봇·사회 뷰어·티스토리 버튼을 그대로 써야 하므로 track을 새로 만들면 그 셋을
+ * 전부 다시 배선해야 한다. audience는 track과 **직교하는 축**이라 집필 규격 한 곳만 갈라진다.
+ *
+ * **왜 category가 아닌가**: 시니어 job의 category는 `living`이고, 트렌드 경로의 living job이 같은 값을 쓴다.
+ * category로 갈라면 관계없는 living 원고까지 문체가 바뀐다(아래 living/tech 트랙이 metadata로 갈린 것과 같은 이유).
+ */
+export function isSeniorAudience(job: { metadata?: unknown }): boolean {
+  const meta = job.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>) : null;
+  return meta?.audience === SENIOR_AUDIENCE;
+}
+
 /**
  * 종합 키워드 입력 툴의 일상(living)·테크(tech) 트랙은 **사회(incident) 문체·규격**을 쓴다(KEYWORD-INPUT-TOOL-2026-10.md A-2).
  *
@@ -18,6 +38,9 @@ export type SpecFile = { path: string; purpose: string };
 export function specCategoryOf(job: { category?: string | null; metadata?: unknown }): string | null {
   const meta = job.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>) : null;
   const track = meta?.track;
+  // 시니어 표식이 제일 먼저다. 사건·사고(incident)와 겹칠 일이 없는 주제군이고, 겹친다면 그 job에
+  // 표식을 붙인 쪽이 잘못이다 - 시니어 원고에 사망 사건이 들어오면 안 된다.
+  if (isSeniorAudience(job)) return "senior";
   if (track === "living" || track === "tech" || job.category === "tech") return "incident";
   return job.category ?? null;
 }
@@ -26,6 +49,8 @@ export function specCategoryOf(job: { category?: string | null; metadata?: unkno
 export function pickStyleFile(category: string | null): string {
   // incident(사건·사고)는 반드시 맨 앞이다. 다른 카테고리로 폴백되면 사망 사건에 개인 블로거 톤이 적용된다.
   if (category === "incident") return "prompts/writing/style/incident.md";
+  // 시니어(2026-11-16): 질문 순서·문장 길이·분량 상한이 article-structure/topic-allocation을 이긴다.
+  if (category === "senior") return "prompts/writing/style/senior.md";
   // 사용설명서 트랙(개편3): 해외 독자 대상 에버그린 안내. 한글 초고를 쓰고 승인 뒤 영어로 번역된다.
   if (category === KOREAPLAIN_TRACK) return "prompts/writing/style/koreaplain.md";
   // 인물 백과(2026-10-13): incident 뒤에 둔다 - 수사·재판 키워드가 person job으로 들어와도 incident 라우팅이 이긴다.
@@ -37,6 +62,7 @@ export function pickStyleFile(category: string | null): string {
 
 export function writingSpecFiles(category: string | null): SpecFile[] {
   const isIncident = category === "incident";
+  const isSenior = category === "senior";
   const files: SpecFile[] = [
     { path: "prompts/writing/core-rules.md", purpose: "한 페이지 핵심 규칙 - 금지 표현·어투·마무리·서식. 다른 문서와 부딪히면 이 파일이 이긴다" },
     { path: "prompts/writing/rules/humanize.md", purpose: "저장 직전 자체 윤문 - 의미·사실·인용 불변 철칙 + 명료성 7원칙 + AI 티 제거(스킬 대체, 전 카테고리)" },
@@ -45,7 +71,12 @@ export function writingSpecFiles(category: string | null): SpecFile[] {
     isIncident
       ? { path: "prompts/writing/style/incident.md", purpose: "사건·사고 규격 - 무죄추정·신원 보호. 다른 모든 어투·구조 규칙을 이긴다" }
       : { path: "prompts/writing/style/voice.md", purpose: "공통 어투·어미·인칭 표" },
-    { path: pickStyleFile(category), purpose: "이 카테고리의 제목 기법·흐름" },
+    {
+      path: pickStyleFile(category),
+      purpose: isSenior
+        ? "시니어 규격 - 질문 순서·한 문장 한 사실·분량 상한. article-structure.md와 topic-allocation.md를 이긴다"
+        : "이 카테고리의 제목 기법·흐름",
+    },
     { path: "prompts/writing/rules/article-structure.md", purpose: "유형별 소제목 순서" },
     { path: "prompts/writing/rules/topic-allocation.md", purpose: "내적 60%+/외적 40%-/외적의 외적 0" },
     { path: "prompts/writing/rules/output-format.md", purpose: "출력 서식·저장 형식·윤문 계약(코드가 파싱)" },
