@@ -55,7 +55,16 @@ export const DEFAULT_HEADLESS_TIMEOUT_MS = 120_000;
 export type RunHeadlessClaudeOptions = {
   prompt: string;
   timeoutMs?: number;
-  /** 생략하면 도구를 전혀 허용하지 않는다. 원고 생성 단계에서 필요한 것만 명시적으로 넘긴다. */
+  /**
+   * `--allowed-tools`로 넘길 **자동 승인 목록**(2026-11-16 정정, 외부 감사 F8).
+   *
+   * 생략하면 추가 자동 승인 목록을 전달하지 않는다 - "도구를 전혀 쓸 수 없다"는 뜻이 아니다.
+   * 실제 사용 범위는 CLI 기본 권한·설정·`permissionMode`가 정하고, 작업 디렉터리 안의 Read/Grep
+   * 등은 기본적으로 승인을 요구하지 않는다. 별도로 승인되지 않아 권한 응답이 필요한 요청은
+   * 비대화형 실행에서 거부될 수 있다(아래 permissionMode 주석의 2026-09-01 실측).
+   *
+   * 원고 생성 단계에서 필요한 것만 명시적으로 넘긴다.
+   */
   allowedTools?: string[];
   /**
    * `--permission-mode` 값(예: "acceptEdits"). 비대화형 `claude -p`에서 Write/WebSearch/WebFetch를

@@ -416,6 +416,36 @@ export function stampResearchProvider(text: string, provider: ResearchProvider):
   return text.slice(0, insertAt) + `${line}\n` + text.slice(insertAt);
 }
 
+/**
+ * 코드가 확정한 `verdict`를 조사 파일 frontmatter에 반영한다(2026-11-16, 외부 감사 F1).
+ *
+ * 왜 필요한가: `reconcileVerdict`가 출처 개수로 고친 값은 `metadata.researchVerdict`에만 들어갔고,
+ * 집필 러너가 복원하는 `researchFileContent`에는 **에이전트가 적은 옛 값**이 그대로 남았다. 그래서
+ * 코드가 blocked -> thin으로 고친 뒤에도 집필 에이전트는 파일의 `blocked`를 읽고 `writer.md` §12대로
+ * 작성을 중단했다(11/15 두 건 실측: 뉴스 9·커뮤니티 11, 뉴스 7·커뮤니티 22 - blocked 조건이 아닌데
+ * 멈췄고, 재조사·재집필로 CLI 호출을 더 썼다). 검수 단계는 이미 고친 값을 쓰고 있어서
+ * (`runArticleReview`의 `researchThin`) **한 job 안에서 두 단계가 서로 다른 판정을 봤다.**
+ *
+ * 에이전트가 원래 적었던 값은 `metadata.researchVerdictWritten`에 그대로 남는다(감사 이력 보존).
+ * `stampResearchProvider`와 같은 계약 - 바꿀 것이 없으면 null을 돌려 되쓰기를 건너뛴다.
+ */
+export function stampResearchVerdict(text: string, verdict: ResearchVerdict): string | null {
+  const match = text.match(/^\ufeff?---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!match) return null; // frontmatter가 없는 파일(규격 위반)은 건드리지 않는다.
+  const line = `verdict: ${verdict}`;
+  const existing = match[1].match(/^verdict:\s*(.*)$/m);
+  if (existing) {
+    // 템플릿이 `verdict: ok        # ok | thin | blocked`처럼 인라인 주석을 남긴다 - parseResearchFile과
+    // **같은 방식으로** 주석·따옴표를 떼고 비교해야 "안 바뀌었는데 되쓰기"를 피할 수 있다.
+    const current = existing[1].replace(/\s+#.*$/, "").trim().replace(/^["']|["']$/g, "");
+    if (current === verdict) return null;
+    // 치환은 **frontmatter 블록 안에서만** 한다 - 본문에 `verdict:`로 시작하는 줄이 있어도 건드리지 않는다.
+    return match[0].replace(/^verdict:\s*.*$/m, line) + text.slice(match[0].length);
+  }
+  const insertAt = match[0].lastIndexOf("---");
+  return text.slice(0, insertAt) + `${line}\n` + text.slice(insertAt);
+}
+
 /** 파일이 존재하고 maxAgeMs 안에 수정됐으면 true. 재조사 생략 판정에 쓴다. */
 function fileModifiedWithin(path: string, maxAgeMs: number): boolean {
   try {
@@ -564,10 +594,10 @@ async function runResearchStageInner(
     return { status: "failed", error };
   }
   // 어느 제공자로 조사했는지 파일에도 남긴다(가시성). 되쓰기 실패는 조사를 실패시키지 않는다.
+  const writeResearchFileFn = options.writeResearchFile ?? ((path: string, text: string) => writeFile(path, text, "utf8"));
   const stamped = stampResearchProvider(rawFileText, provider);
   const fileText = stamped ?? rawFileText;
   if (stamped) {
-    const writeResearchFileFn = options.writeResearchFile ?? ((path: string, text: string) => writeFile(path, text, "utf8"));
     await writeResearchFileFn(outputPath, stamped).catch((error) => {
       console.warn(`⚠️ [research] frontmatter에 제공자를 남기지 못했습니다(진행은 계속): ${describeError(error)}`);
     });
@@ -623,10 +653,26 @@ async function runResearchStageInner(
     );
   }
 
+  // 고친 verdict를 **파일에도** 반영한다(2026-11-16 감사 F1). 집필 러너는 아래 runWritingStage에서
+  // 이 내용으로 파일을 복원하므로, 여기서 반영하지 않으면 집필 단계만 옛 값을 보고 작성을 중단한다.
+  let effectiveFileText = fileText;
+  if (reconciled.corrected) {
+    const restamped = stampResearchVerdict(fileText, reconciled.verdict);
+    if (restamped) {
+      effectiveFileText = restamped;
+      await writeResearchFileFn(outputPath, restamped).catch((error) => {
+        // 로컬 파일 되쓰기가 실패해도 조사를 실패시키지 않는다 - DB(아래 researchFileContent)에는
+        // 고친 값이 들어가므로 **클라우드 집필은 정상**이다. 같은 프로세스가 이어서 집필하는 로컬
+        // 실행에서만 디스크의 옛 값이 남는다.
+        console.warn(`⚠️ [research] 파일에 고친 verdict를 남기지 못했습니다(DB에는 반영됨): ${describeError(error)}`);
+      });
+    }
+  }
+
   await ArticleJobRepository.mergeMetadata(jobId, {
     lastError: null,
     researchFilePath: outputPath,
-    researchFileContent: fileText,
+    researchFileContent: effectiveFileText,
     // 어느 제공자로 조사했나(2026-11-01). 검수 카드가 이 값을 한 줄로 보여 준다 - 스위치를 켠 채
     // 잊는 것을 막고, 나중에 조사 품질을 제공자별로 역추적할 수 있다.
     researchProvider: provider,

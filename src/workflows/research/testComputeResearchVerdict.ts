@@ -5,6 +5,8 @@
 // 그래서 351건 중 306건(85%)이 thin이 됐고, 신호가 소음이 됐다.
 
 import { computeResearchVerdict, reconcileVerdict, verdictProfileFor } from "./computeResearchVerdict.js";
+import { stampResearchVerdict } from "../writing/runArticleJob.js";
+import { parseResearchFile } from "./parseResearchFile.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -81,4 +83,47 @@ const counts = (official: number, news: number, community: number, medical = 0) 
   assert(same.verdict === "ok" && !same.corrected, "일치하면 corrected=false");
 }
 
-console.log("✅ computeResearchVerdict: 카테고리 분기·blocked 우선·의료 규칙·오기 교정 통과");
+// ── 8. 고친 판정이 집필 단계까지 닿는다(2026-11-16 감사 F1) ──────
+//
+// 감사가 지적한 공백: 7번은 "코드가 고친다"까지만 봤고, 그 값이 **집필 러너가 읽는 파일**에
+// 반영되는지는 아무 테스트도 보지 않았다. 11/15에 실제로 집필 2건이 멈춘 자리다.
+{
+  const body = [
+    "---",
+    "keyword: 테스트 키워드",
+    "verdict: blocked        # ok | thin | blocked",
+    "---",
+    "",
+    "## 1. 요약",
+    "본문",
+  ].join("\n");
+
+  // 뉴스 9·커뮤니티 11 = 11/15 첫 사고(김민석 최민희 윤리심판원 - official 프로파일)와 같은 조건.
+  // 전체 20건이라 blocked 조건에 못 미치고, 공식 0건이라 ok도 아니다 -> thin.
+  const r = reconcileVerdict("blocked", { counts: counts(0, 9, 11), category: "incident" });
+  assert(r.verdict === "thin" && r.corrected, `뉴스 9·커뮤니티 11(official 프로파일)은 thin이어야 한다 (${JSON.stringify(r)})`);
+
+  const stamped = stampResearchVerdict(body, r.verdict);
+  assert(stamped !== null, "고친 값이 다르면 파일을 되쓴다");
+  // 집필 에이전트는 파일을 파서가 아니라 눈으로 읽지만, 계약은 frontmatter 한 줄이다.
+  assert(parseResearchFile(stamped as string).verdict === "thin", "복원된 파일의 verdict가 thin이다");
+  assert(!/blocked/.test(stamped as string), "옛 값(blocked)이 파일에 남아 있으면 writer.md §12가 또 멈춘다");
+  assert((stamped as string).includes("## 1. 요약"), "본문은 그대로 보존한다");
+
+  assert(stampResearchVerdict(stamped as string, "thin") === null, "같은 값이면 되쓰지 않는다(파일 mtime 보존)");
+  assert(stampResearchVerdict("frontmatter 없는 파일", "thin") === null, "frontmatter가 없으면 건드리지 않는다");
+
+  // 진짜 blocked는 그대로 막혀야 한다 - 이 수정이 조사 품질 게이트를 여는 것이 아니다.
+  const stillBlocked = reconcileVerdict("blocked", { counts: counts(0, 0, 12), category: "incident" });
+  assert(stillBlocked.verdict === "blocked" && !stillBlocked.corrected, "전부 커뮤니티면 blocked 유지");
+  const thin4 = reconcileVerdict("thin", { counts: counts(0, 3, 1), category: "incident" });
+  assert(thin4.verdict === "blocked", "전체 5건 미만은 blocked로 내려간다");
+
+  // verdict 줄이 없는 파일에도 끼워 넣는다(§7 템플릿을 어긴 산출물).
+  const noVerdict = ["---", "keyword: k", "---", "", "본문"].join("\n");
+  const inserted = stampResearchVerdict(noVerdict, "thin");
+  assert(inserted !== null && /^verdict: thin$/m.test(inserted), "verdict 줄이 없으면 넣는다");
+  assert(inserted !== null && inserted.indexOf("verdict:") < inserted.indexOf("본문"), "본문이 아니라 frontmatter 안에 넣는다");
+}
+
+console.log("✅ computeResearchVerdict: 카테고리 분기·blocked 우선·의료 규칙·오기 교정 + 집필 전달 통과");
