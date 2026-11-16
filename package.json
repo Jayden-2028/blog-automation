@@ -23,6 +23,7 @@
     "test:topic-grouping": "tsx src/workflows/keyword-ranking/testTopicGrouping.ts",
     "test:seed-query": "tsx src/repositories/testSeedQueryRepository.ts",
     "test:trend-candidate-repository": "tsx src/repositories/testTrendCandidateRepository.ts",
+    "manuscripts:strip-related": "tsx src/workflows/manuscripts/stripRelatedPostsCli.ts",
     "test:merge-metadata": "tsx src/repositories/testMergeJobMetadata.ts",
     "test:creator-advisor-parser": "tsx src/services/search/providers/creatorAdvisor/testParseTrendPage.ts",
     "test:creator-advisor-pipeline": "tsx src/workflows/creator-advisor/testCreatorAdvisorPipeline.ts",
