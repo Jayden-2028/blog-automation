@@ -23,6 +23,69 @@ const UNIQUE_VIOLATION = "23505";
  */
 const MANUAL_SOURCE_RUN_ID = -1;
 
+/** metadata 원자 병합 DB 함수(2026-11-16 감사 F4, migration 20261116120000). */
+export const MERGE_METADATA_FN = "merge_article_job_metadata";
+
+/** 테스트 주입용으로 좁힌 Supabase 인터페이스(rpc 하나만 쓴다). */
+export type MetadataMergeClient = {
+  rpc: (
+    fn: string,
+    args: Record<string, unknown>
+  ) => Promise<{ data: unknown; error: { code?: string | null; message?: string | null } | null }>;
+};
+
+export type MetadataMergeResult =
+  | { status: "merged"; row: ArticleJobRow | null }
+  /** 함수가 아직 없다(migration 미적용) - 호출부가 옛 read-modify-write로 떨어진다. */
+  | { status: "unavailable"; detail: string };
+
+/**
+ * 함수가 아직 없는지. 42883 = undefined_function, PGRST202 = 스키마 캐시에 함수 없음.
+ * imagePickQueue.isQueueTableMissing·pagesDeployLock.isLockTableMissing과 같은 판정이다.
+ */
+export function isMergeFunctionMissing(
+  error: { code?: string | null; message?: string | null } | null | undefined
+): boolean {
+  if (!error) return false;
+  const code = error.code ?? "";
+  if (code === "42883" || code === "PGRST202") return true;
+  const message = (error.message ?? "").toLowerCase();
+  return (
+    message.includes(MERGE_METADATA_FN) &&
+    (message.includes("does not exist") || message.includes("could not find the function"))
+  );
+}
+
+/**
+ * 값이 undefined인 키를 경고한다. `jsonb ||` 병합에서는 그 키가 patch에 **없는** 것이므로 옛 값이
+ * 남는다(옛 read-modify-write에서는 JSON 직렬화에서 빠져 키가 지워졌다). 지우려면 null을 쓴다.
+ */
+export function warnUndefinedPatchKeys(id: string, patch: Record<string, unknown>): string[] {
+  const keys = Object.keys(patch).filter((key) => patch[key] === undefined);
+  if (keys.length > 0) {
+    console.warn(`⚠️ [metadata] undefined 값은 키를 지우지 않습니다(지우려면 null) - job ${id}: ${keys.join(", ")}`);
+  }
+  return keys;
+}
+
+/** metadata를 DB 함수로 한 문장에 병합한다. 함수가 없으면 던지지 않고 unavailable을 돌려준다. */
+export async function mergeMetadataAtomic(
+  client: MetadataMergeClient,
+  id: string,
+  patch: Record<string, unknown>
+): Promise<MetadataMergeResult> {
+  const { data, error } = await client.rpc(MERGE_METADATA_FN, { p_id: id, p_patch: patch });
+  if (error) {
+    if (isMergeFunctionMissing(error)) {
+      return { status: "unavailable", detail: error.message ?? error.code ?? "함수 없음" };
+    }
+    throw error;
+  }
+  // setof를 돌려주므로 배열이다. 없는 id면 0행 - 옛 구현의 "findById -> null"과 같은 결과다.
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as ArticleJobRow[];
+  return { status: "merged", row: rows[0] ?? null };
+}
+
 /** listRecentSlim이 돌려주는 경량 행 - metadata에는 요청한 키 조각만 들어 있다(없으면 null). */
 export type ArticleJobSlim = { id: string; keyword: string; metadata: Record<string, unknown> };
 
@@ -393,8 +456,25 @@ export class ArticleJobRepository {
   /**
    * metadata를 병합한다(덮어쓰지 않는다). 단계별로 서로 다른 키를 추가하므로
    * (titleSuggestions -> factCards -> imageRefs ...) 통째로 교체하면 앞 단계 결과가 사라진다.
+   *
+   * **DB 함수 한 문장으로 병합한다**(2026-11-16, 외부 감사 F4). 옛 구현은 읽고(findById)
+   * 자바스크립트에서 합쳐 통째로 UPDATE 하는 read-modify-write라, 읽기와 쓰기 사이에 다른 러너가
+   * **다른 키**를 쓰면 그 키가 조용히 사라졌다(lost update - 2026-11-11 한효주 원고 이미지 교체
+   * 사고. 그 경로는 PR #80·#83이 앞단에서 막았지만 나머지 59개 호출 지점은 열려 있었다).
+   * `jsonb ||`는 UPDATE 한 문장 안에서 읽고 합치므로 행 잠금이 전 구간을 덮는다.
+   *
+   * 키를 지우려면 `null`을 넣는다 - `undefined`는 옛 값을 남긴다(위 warnUndefinedPatchKeys).
+   * migration 적용 전에는 함수가 없으므로 아래 옛 경로로 떨어진다(동시 쓰기 시 유실 가능).
    */
   static async mergeMetadata(id: string, patch: Record<string, unknown>): Promise<ArticleJobRow | null> {
+    warnUndefinedPatchKeys(id, patch);
+
+    const atomic = await mergeMetadataAtomic(supabase as unknown as MetadataMergeClient, id, patch);
+    if (atomic.status === "merged") return atomic.row;
+    console.warn(
+      `⚠️ [metadata] 원자 병합 함수를 쓸 수 없어 옛 경로로 떨어집니다(동시 쓰기 시 유실 가능): ${atomic.detail}`
+    );
+
     const current = await this.findById(id);
     if (!current) return null;
 

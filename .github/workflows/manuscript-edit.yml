@@ -35,11 +35,15 @@ jobs:
           JOB_ID: ${{ github.event.client_payload.jobId }}
         run: |
           [[ "$JOB_ID" =~ ^[0-9a-f-]{36}$ ]] || { echo "jobId 형식 아님 - 건너뜀"; exit 0; }
-          url="$SUPABASE_URL/rest/v1/article_jobs?id=eq.$JOB_ID"
           auth=(-H "apikey: $SUPABASE_SERVICE_ROLE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY")
-          meta=$(curl -sf "${auth[@]}" "$url&select=metadata" | jq -c '.[0].metadata // {}')
-          body=$(jq -cn --argjson m "$meta" --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" '{metadata: ($m + {viewerEditPendingAt: $t})}')
-          curl -sf -X PATCH "${auth[@]}" -H "Content-Type: application/json" -d "$body" "$url"
+          # **읽고 통째로 PATCH 하지 않는다**(2026-11-16, 외부 감사 F4). 옛 코드는 metadata를 읽어
+          # jq로 합쳐 다시 통째로 썼는데, 그 사이에 러너·폴러가 다른 키를 쓰면 그 키가 사라졌다
+          # (ArticleJobRepository.mergeMetadata와 같은 lost update). DB 함수는 UPDATE 한 문장이다.
+          # 응답은 행 전체라 로그에 metadata가 통째로 찍히지 않게 버린다.
+          body=$(jq -cn --arg id "$JOB_ID" --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            '{p_id: $id, p_patch: {viewerEditPendingAt: $t}}')
+          curl -sf -o /dev/null -X POST "${auth[@]}" -H "Content-Type: application/json" -d "$body" \
+            "$SUPABASE_URL/rest/v1/rpc/merge_article_job_metadata"
           echo "표식 기록 완료"
 
       - uses: actions/checkout@v4
