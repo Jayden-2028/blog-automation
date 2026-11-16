@@ -86,7 +86,6 @@ async function main(): Promise<void> {
     loadArticles: async () => [],
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(noBase.status === "failed" && noBase.reason.includes("기준 원고"), "기준 원고 없음 처리 실패");
@@ -99,83 +98,59 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(parenting.status === "success", "카테고리와 무관하게 원고를 준비해야 한다");
   console.log("✅ 모든 카테고리 -> Blogspot 원고 1건 (채널 배정 실패 경로 없음)");
 
-  // 2-1) 내부 링크는 DB 원고에도 저장한다(2026-10-04). 전에는 뷰어에만 붙어 버튼 발행본에 빠졌다.
+  // 2-1) "함께 보면 좋은 글"을 붙이지 않는다(2026-11-16 사용자 결정). 블로그스팟(우아아빠 블로그)이 폐쇄돼
+  //      내부 링크의 목적이 사라졌고, 점수 미달이어도 하나는 남기는 설계 때문에 관계없는 글이 붙었다
+  //      (기안84 원고에 유홍준, 남주혁·한소희 드라마 원고에 백제금동대향로).
   {
     const original = "도입 문단입니다.\n\n**참고 자료**\n- [출처](https://example.com/src)\n\n#태그1 #태그2";
-    const posts = [
-      { jobId: "other", keyword: "테스트 키워드 다른 글", category: "living", title: "다른 글", url: "https://whynowissue.blogspot.com/2026/09/other.html" },
-    ];
-    const saved: { id: number; content: string }[] = [];
-    const run = (content: string) =>
-      prepareManuscript(job("a", "living"), {
-        loadArticles: async () => [baseArticle(content)],
-        writeManuscriptFile: async () => {},
-        mergeJobMetadata: async () => {},
-        generateImages: false,
-        collectWebImages: false,
-        capturePages: false,
-        loadPublishedPosts: async () => posts as never,
-        saveArticleContent: async (id, body) => {
-          saved.push({ id, content: body });
-        },
-      });
-    const first = await run(original);
-    assert(first.status === "success", "준비가 성공해야 한다");
-    assert(saved.length === 1 && saved[0].id === 1, `기준 원고(id 1)에 한 번 저장해야 한다 (${saved.length})`);
-    const persisted = saved[0].content;
-    assert(persisted.includes("**함께 보면 좋은 글**\n- [다른 글](https://whynowissue.blogspot.com/2026/09/other.html)"), `DB 원고에 내부 링크 (${persisted})`);
-    assert(persisted.indexOf("함께 보면 좋은 글") < persisted.indexOf("**참고 자료**"), "참고 자료 앞에 들어간다");
-    assert(persisted.endsWith("#태그1 #태그2"), "해시태그 줄은 그대로 끝에 남는다");
-    assert(first.status === "success" && first.topic.manuscript.body.includes("함께 보면 좋은 글"), "뷰어 본문에도 같은 링크");
-    assert(first.status === "success" && !first.topic.manuscript.body.includes("#태그1"), "뷰어 본문에는 해시태그 줄이 없다(tags로 따로)");
-    assert(first.status === "success" && first.topic.manuscript.tags.join(",") === "태그1,태그2", "태그는 해시태그 줄에서");
-
-    // 다시 돌려도(이미지 수정 등) 블록이 쌓이지 않고, 바뀐 게 없으면 저장하지 않는다.
-    const second = await run(persisted);
-    assert(second.status === "success" && (second.topic.manuscript.body.match(/함께 보면 좋은 글/g) ?? []).length === 1, "블록이 한 번만");
-    assert(saved.length === 1, `같은 내용이면 다시 저장하지 않는다 (${saved.length})`);
-
-    // 저장이 실패해도 원고 준비는 계속되고, 그 사실이 기록에 남는다.
-    const failing = await prepareManuscript(job("a", "living"), {
+    const saved: string[] = [];
+    const result = await prepareManuscript(job("a", "entertainment"), {
       loadArticles: async () => [baseArticle(original)],
+      writeManuscriptFile: async (_path, content) => void saved.push(content),
+      mergeJobMetadata: async () => {},
+      generateImages: false,
+      collectWebImages: false,
+      capturePages: false,
+    });
+    assert(result.status === "success", "준비가 성공해야 한다");
+    assert(saved.length === 1 && !saved[0].includes("함께 보면 좋은 글"), `원고 파일에 내부 링크 블록이 없다 (${saved[0]})`);
+    assert(result.status === "success" && !result.topic.manuscript.body.includes("함께 보면 좋은 글"), "뷰어 본문에도 없다");
+    assert(result.status === "success" && result.topic.manuscript.body.includes("**참고 자료**"), "바깥 출처(참고 자료)는 그대로 둔다");
+    assert(result.status === "success" && result.topic.manuscript.tags.join(",") === "태그1,태그2", "태그는 해시태그 줄에서");
+
+    // 옛 원고에 남아 있는 블록은 지우지 않는다(결정은 "앞으로"다).
+    const legacy = "도입 문단입니다.\n\n**함께 보면 좋은 글**\n- [지난 글](https://b.example.com/old.html)\n\n**참고 자료**\n- [출처](https://example.com/src)";
+    const kept = await prepareManuscript(job("a", "entertainment"), {
+      loadArticles: async () => [baseArticle(legacy)],
       writeManuscriptFile: async () => {},
       mergeJobMetadata: async () => {},
       generateImages: false,
       collectWebImages: false,
       capturePages: false,
-      loadPublishedPosts: async () => posts as never,
-      saveArticleContent: async () => {
-        throw new Error("db down");
-      },
     });
-    assert(failing.status === "success", "저장 실패가 준비를 막으면 안 된다");
-    assert(failing.status === "success" && (failing.topic.manuscript.imageNotes ?? []).some((n) => n.includes("내부 링크를 발행 원고에 저장하지 못했습니다")), "실패 기록이 남아야 한다");
+    assert(kept.status === "success" && kept.topic.manuscript.body.includes("**함께 보면 좋은 글**"), "옛 원고의 블록은 흐른다");
   }
-  console.log("✅ 내부 링크를 DB 원고에도 저장(참고 자료 앞·해시태그 유지), 재실행 시 중복·재저장 없음, 실패해도 계속");
+  console.log("✅ 함께 보면 좋은 글: 새 원고에는 붙이지 않음, 옛 원고의 블록은 보존");
 
-  // 2-2) person(수동 복붙 트랙, 2026-10-15 B-2): 뷰어 본문에서만 "함께 보면 좋은 글"·"참고 자료"를 뺀다. DB 원문에는 남는다.
+  // 2-2) person(수동 복붙 트랙, 2026-10-15 B-2): 옛 원고에 남은 "함께 보면 좋은 글"·"참고 자료"를 뺀다.
+  //      DB 원문(articles.content)은 **준비 단계가 더 이상 되쓰지 않으므로** 구조적으로 보존된다(2026-11-16).
   {
-    const original = "도입 문단입니다.\n\n**소제목**\n본문 문단입니다.\n\n**참고 자료**\n- [출처](https://example.com/src)\n\n#태그1 #태그2";
-    const posts = [
-      { jobId: "other", keyword: "테스트 키워드 다른 글", category: "living", title: "다른 글", url: "https://whynowissue.blogspot.com/2026/09/other.html" },
-    ];
+    // 블록은 이제 코드가 붙이지 않으므로(2026-11-16) **옛 원고에 남아 있는 경우**를 재현한다.
+    const original = "도입 문단입니다.\n\n**소제목**\n본문 문단입니다.\n\n**함께 보면 좋은 글**\n- [다른 글](https://whynowissue.blogspot.com/2026/09/other.html)\n\n**참고 자료**\n- [출처](https://example.com/src)\n\n#태그1 #태그2";
     const runWith = async (category: string | null) => {
       const saved: string[] = [];
       const result = await prepareManuscript(job("a", category), {
         loadArticles: async () => [baseArticle(original)],
-        writeManuscriptFile: async () => {},
+        writeManuscriptFile: async (_path, content) => void saved.push(content),
         mergeJobMetadata: async () => {},
         generateImages: false,
         collectWebImages: false,
         capturePages: false,
-        loadPublishedPosts: async () => posts as never,
-        saveArticleContent: async (_id, body) => void saved.push(body),
       });
       assert(result.status === "success", "준비 성공");
       return { body: result.topic.manuscript.body, saved };
@@ -184,15 +159,16 @@ async function main(): Promise<void> {
     const person = await runWith("person");
     assert(!person.body.includes("함께 보면 좋은 글") && !person.body.includes("참고 자료") && !person.body.includes("example.com/src"), `person 뷰어 본문에는 내부 링크·참고 자료가 없다 (${person.body})`);
     assert(person.body.includes("도입 문단입니다.") && person.body.includes("**소제목**\n본문 문단입니다."), "본문은 그대로");
-    assert(person.saved.length === 1 && person.saved[0].includes("**함께 보면 좋은 글**") && person.saved[0].includes("**참고 자료**"), "DB 원문에는 두 블록이 남는다");
+    assert(person.saved.length === 1 && !person.saved[0].includes("**함께 보면 좋은 글**"), "person은 원고 파일(.md)도 복붙용이라 블록이 없다");
     assert(!person.body.includes("#태그1") && person.body.trimEnd().endsWith("본문 문단입니다."), "해시태그는 기존대로 tags로 분리, 본문은 깔끔히 끝난다");
 
     for (const category of ["entertainment", "living", null]) {
       const other = await runWith(category);
       assert(other.body.includes("함께 보면 좋은 글") && other.body.includes("**참고 자료**"), `${category}: 다른 카테고리의 뷰어 본문은 무변경`);
+      assert(other.saved.length === 1 && other.saved[0].includes("**함께 보면 좋은 글**"), `${category}: 원고 파일(.md)에도 옛 블록이 남는다`);
     }
   }
-  console.log("✅ person 뷰어 본문: 내부 링크·참고 자료 제외, DB 원문 유지, 타 카테고리 무변경");
+  console.log("✅ person 뷰어·원고 파일: 옛 내부 링크·참고 자료 제외, 타 카테고리는 무변경");
 
   // 3) 기준 원고가 곧 최종본: LLM 호출 없이 파일 1개 + draftMeta + imagePrompts 전달
   const writes: Record<string, string> = {};
@@ -209,7 +185,6 @@ async function main(): Promise<void> {
       mergeJobMetadata: async () => {},
       generateImages: false,
       collectWebImages: false,
-      loadPublishedPosts: false,
       capturePages: false,
     }
   );
@@ -236,7 +211,6 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(r4.status === "success", "재사용 케이스 실패");
@@ -256,7 +230,6 @@ async function main(): Promise<void> {
     mergeJobMetadata: async () => {},
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(r6.status === "success", "이미지 프롬프트 재삽입 케이스 실패");
@@ -277,7 +250,6 @@ async function main(): Promise<void> {
     },
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(r7.status === "success", "draftMeta 없는 케이스 실패");
@@ -298,7 +270,6 @@ async function main(): Promise<void> {
       writeManuscriptFile: async () => {},
       generateImages: false,
       collectWebImages: false,
-    loadPublishedPosts: false,
       capturePages: false,
     }
   );
@@ -313,7 +284,6 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     generateImages: false,
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
   });
   assert(
@@ -332,7 +302,6 @@ async function main(): Promise<void> {
       imagePatches.push(patch);
     },
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
     generateImages: async (input) => {
       imageCalls += 1;
@@ -386,7 +355,6 @@ async function main(): Promise<void> {
     writeManuscriptFile: async () => {},
     mergeJobMetadata: async () => {},
     collectWebImages: false,
-    loadPublishedPosts: false,
     capturePages: false,
     generateImages: async () => noImages(),
   });
@@ -536,7 +504,6 @@ async function main(): Promise<void> {
         failures: [],
       }),
       capturePages: false,
-      loadPublishedPosts: false,
       collectWebImages: async (input) => {
         calls.push(input.filledIndexes);
         return {
@@ -579,22 +546,12 @@ async function main(): Promise<void> {
     console.log("✅ 웹 검색 자리 수집 - 생성분과 병합 + 출처 보존 + 재수집 게이트");
   }
 
-  // 12) 내부 링크가 원고 본문(.md 파일)에 들어간다(2026-09-22). 2026-09-30부터 DB 행은 건드리지 않는다.
-  //     서치콘솔이 우리 글을 전부 "참조 페이지 없음"으로 보던 문제 - 본문 내부 링크가 0개였다.
+  // 12) 발행 기록을 읽지 않는다(2026-11-16). 전에는 publications에서 후보를 읽어 내부 링크를 붙였다 -
+  //     그 질의 자체가 없어졌으므로, 발행 기록 없이도 준비가 끝나는 것을 단정한다.
   {
     let savedContent = "";
     const result = await prepareManuscript(job("a", "entertainment"), {
       loadArticles: async () => [baseArticle("본문입니다.\n\n**참고 자료**\n- [출처](https://src.example.com/a)")],
-      loadPublishedPosts: async () => [
-        {
-          jobId: "other",
-          title: "관련 있는 지난 글",
-          url: "https://b.example.com/old.html",
-          keyword: "테스트 키워드 a 관련",
-          category: "entertainment",
-          publishedAt: "2026-09-20T00:00:00Z",
-        },
-      ],
       generateImages: false,
       collectWebImages: false,
       capturePages: false,
@@ -603,15 +560,11 @@ async function main(): Promise<void> {
       },
       mergeJobMetadata: async () => ({}),
     });
-    assert(result.status === "success", `내부 링크 경로 실패 (${JSON.stringify(result)})`);
-    assert(savedContent.includes("https://b.example.com/old.html"), "원고 파일에 링크가 있어야 한다");
-    assert(savedContent.includes("관련 있는 지난 글"), "앵커 텍스트가 글 제목이어야 한다");
-    assert(
-      savedContent.indexOf("함께 보면 좋은 글") < savedContent.indexOf("**참고 자료**"),
-      "우리 글 링크가 바깥 출처보다 앞에 와야 한다"
-    );
-    console.log("✅ 내부 링크 - 원고 본문에 삽입, 참고 자료보다 앞");
+    assert(result.status === "success", `준비 실패 (${JSON.stringify(result)})`);
+    assert(!savedContent.includes("함께 보면 좋은 글"), "내부 링크 블록이 없다");
+    assert(savedContent.includes("**참고 자료**"), "바깥 출처는 그대로");
   }
+  console.log("✅ 발행 기록 없이도 원고 준비 완료 - 내부 링크 질의 자체가 없다");
 
   // --- 이미지 기획 배선(2026-10-02, A안 3단계) -----------------------------------------------
   // 기획이 자리 배분과 검색어를 정하면 수집·캡처가 **그걸 쓴다**. 마커의 획득 방식은 보지 않는다.
@@ -632,7 +585,6 @@ async function main(): Promise<void> {
       writeManuscriptFile: async () => {},
       mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
       generateImages: false,
-      loadPublishedPosts: false,
       planSlots: async () => ({
         plan: {
           summary: "예고편 공개",
@@ -684,7 +636,6 @@ async function main(): Promise<void> {
       loadArticles: async () => [baseArticle(body)],
       writeManuscriptFile: async () => {},
       mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
-      loadPublishedPosts: false,
       capturePages: false,
       buildFallbackPrompts: false,
       generateImages: async (_input, options) => {
@@ -745,7 +696,6 @@ async function main(): Promise<void> {
         loadArticles: async () => [baseArticle(body)],
         writeManuscriptFile: async () => {},
         mergeJobMetadata: async (_id, patch) => { merged.push(patch); },
-        loadPublishedPosts: false,
         capturePages: false,
         planSlots: false,
         buildFallbackPrompts: async (input) => {
@@ -779,7 +729,6 @@ async function main(): Promise<void> {
       writeManuscriptFile: async () => {},
       mergeJobMetadata: async () => {},
       generateImages: false,
-      loadPublishedPosts: false,
       capturePages: false,
       planSlots: false,
       collectWebImages: async (input) => { collectInput = input as never; return { images: [], failures: [], unfilled: [] }; },
@@ -808,7 +757,6 @@ async function main(): Promise<void> {
         writeManuscriptFile: async () => {},
         mergeJobMetadata: async () => {},
         collectWebImages: false,
-        loadPublishedPosts: false,
         capturePages: false,
         planSlots: false,
         generateImages: async (input) => {
@@ -848,7 +796,6 @@ async function main(): Promise<void> {
           loadArticles: async () => [baseArticle(body)],
           writeManuscriptFile: async () => {},
           mergeJobMetadata: async () => {},
-          loadPublishedPosts: false,
           capturePages: false,
           planSlots: false,
           collectWebImages: async () => ({

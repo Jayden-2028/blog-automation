@@ -45,10 +45,7 @@ import { routeImagePlan } from "../images/routeImagePlan.js";
 import { alignImagePrompts } from "./alignImagePrompts.js";
 import { pickFinalArticle } from "./pickFinalArticle.js";
 import { splitTrailingHashtags } from "./articleContentParts.js";
-import { appendRelatedPosts, pickRelatedPosts } from "./appendRelatedPosts.js";
 import { viewerBodyForCategory } from "./manualPasteView.js";
-import { listPublishedPosts } from "../../services/supabase/repositories/publicationRepository.js";
-import type { PublishedPost } from "../../services/supabase/repositories/publicationRepository.js";
 import { readJobManuscriptImages } from "./manuscriptManifest.js";
 import type { ImageCandidateRecord, ManuscriptEntry, ManuscriptImage, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import { readImageCandidates } from "../images/applyImageEditRequest.js";
@@ -73,13 +70,6 @@ export type PrepareManuscriptResult =
 
 export type PrepareManuscriptOptions = {
   loadArticles?: (jobId: string) => Promise<ArticleRow[]>;
-  /** 내부 링크 후보(이미 발행된 글). 기본은 publications에서 읽는다. false면 링크를 붙이지 않는다. */
-  loadPublishedPosts?: (() => Promise<PublishedPost[]>) | false;
-  /**
-   * 내부 링크를 붙인 본문을 기준 원고(articles.content)에 저장한다(2026-10-04). 기본은 updateArticle.
-   * 발행 버튼은 DB 본문을 읽으므로 여기서 저장하지 않으면 링크가 뷰어에만 남는다.
-   */
-  saveArticleContent?: (articleId: number, content: string) => Promise<unknown>;
   writeManuscriptFile?: (path: string, content: string) => Promise<void>;
   /** job.metadata 병합(이미지 진행 표시 등). 기본은 ArticleJobRepository.mergeMetadata. */
   mergeJobMetadata?: (jobId: string, patch: Record<string, unknown>) => Promise<unknown>;
@@ -211,40 +201,6 @@ async function defaultWriteManuscriptFile(path: string, content: string): Promis
   await writeFile(path, content, "utf8");
 }
 
-/**
- * 이미 발행된 글 중 관련 있는 것을 본문 끝에 내부 링크로 붙인다(2026-09-22).
- *
- * 실패해도 원고를 막지 않는다 - 링크는 부가 기능이고, 여기서 예외를 던지면 원고 준비 전체가
- * 실패한다. 발행 기록을 못 읽으면 링크 없이 그대로 간다.
- *
- * 기준 원고 경로에서 붙이고, 붙인 본문은 호출부가 DB(articles.content)에도 저장한다(2026-10-04) -
- * 뷰어와 발행본이 같은 링크를 갖게 하려고. 옛 배리에이션 행을 재사용하는 경로는 그 행에 이미 링크가
- * 들어 있어(배리에이션 시절 저장분) 여기를 거치지 않는다.
- */
-async function withRelatedPosts(
-  content: string,
-  job: ArticleJobRow,
-  options: PrepareManuscriptOptions
-): Promise<string> {
-  const loadPublished = options.loadPublishedPosts;
-  if (loadPublished === false) return content;
-
-  try {
-    const candidates = await (loadPublished ?? listPublishedPosts)();
-    const related = pickRelatedPosts(
-      { jobId: job.id, keyword: job.keyword, category: job.category ?? null },
-      candidates
-    );
-    if (related.length === 0) return content;
-    console.log(`· [manuscripts] ${job.keyword}: 내부 링크 ${related.length}개를 붙였습니다.`);
-    return appendRelatedPosts(content, related);
-  } catch (error) {
-    console.warn(
-      `⚠️ [manuscripts] ${job.keyword}: 내부 링크를 붙이지 못했습니다(무시하고 계속): ${error instanceof Error ? error.message : error}`
-    );
-    return content;
-  }
-}
 
 type DraftMeta = { searchDescription: string | null; slug: string | null; shortName: string | null; tags: string[] };
 
@@ -319,7 +275,6 @@ export async function prepareManuscript(
   let tags: string[] = [];
   let shortName: string | null = null;
   // 이미지 단계 전에 생긴 기록(내부 링크 저장 실패 등). 아래 imageFailures 앞에 붙인다.
-  const imageFailuresBeforeImages: string[] = [];
 
   if (existing) {
     title = existing.title ?? job.keyword;
@@ -337,24 +292,19 @@ export async function prepareManuscript(
   } else {
     // 기준 원고가 곧 최종본이다. 발행 메타는 writer가 남긴 draftMeta에서, 태그는 본문 끝 해시태그 줄에서 읽는다.
     const meta = readDraftMeta(job);
-    // 내부 링크는 **DB 원고에 붙여 저장한다**(2026-10-04). 2026-09-30 배리에이션 폐지 전에는 준비 단계가
-    // 링크를 붙인 원고를 새 article 행(platform=blogspot)으로 저장했고 발행이 그 행을 읽었다. 폐지 뒤에는
-    // 링크가 뷰어(manifest)에만 붙어, 10-01 이후 버튼으로 발행한 Blogspot 글 9건에 내부 링크가 0개였다
-    // (공개 피드 실측). 다시 돌려도 appendRelatedPosts가 기존 블록을 갈아 끼우므로 쌓이지 않는다.
-    const original = baseArticle.content ?? "";
-    const withLinks = await withRelatedPosts(original, job, options);
-    if (withLinks !== original) {
-      const save = options.saveArticleContent ?? ((id: number, body: string) => updateArticle(id, { content: body }));
-      try {
-        await save(baseArticle.id, withLinks);
-      } catch (error) {
-        // 저장 실패가 원고 준비를 막지는 않는다 - 뷰어에는 링크가 보이지만 발행본에는 빠진다는 것을 남긴다.
-        imageFailuresBeforeImages.push(
-          `ℹ️ 내부 링크를 발행 원고에 저장하지 못했습니다(뷰어에만 보임): ${error instanceof Error ? error.message : error}`
-        );
-      }
-    }
-    const split = splitTrailingHashtags(withLinks);
+    // **"함께 보면 좋은 글"을 붙이지 않는다**(2026-11-16 사용자 결정). 한글 원고가 가던 블로그스팟
+    // (우아아빠 블로그)은 폐쇄됐고, 남은 발행처는 티스토리·네이버·복붙뿐이다 - 이 블록을 2026-09-22에
+    // 넣은 이유("새 글이 옛 글을 가리켜 고아 페이지를 줄인다")가 사라졌다. 게다가 pickRelatedPosts는
+    // 점수가 전부 기준 미달이어도 **가장 가까운 것 하나는 남기는** 설계라, 관계없는 글이 밀려 들어왔다
+    // (11/16 실측 2건: 기안84 원고에 유홍준 글, 남주혁·한소희 드라마 원고에 백제금동대향로 글).
+    //
+    // 블로그스팟에 남은 영문 사용설명서(koreaplain)는 이 경로를 타지 않는다 - 번역본은
+    // platform=blogspot 행으로 저장돼 위 "배리에이션 재사용" 분기로 가고, Related Guides는
+    // tkmPostStructure가 따로 만든다(pickTkmRelated). 그래서 koreaplain은 그대로다.
+    //
+    // 이미 발행된 글의 블록은 지우지 않는다(결정은 "앞으로"다). 옛 원고를 다시 준비하면 본문에 남은
+    // 블록이 그대로 흐르고, person 트랙은 지금처럼 뷰어 본문에서만 걷힌다.
+    const split = splitTrailingHashtags(baseArticle.content ?? "");
     title = baseArticle.title ?? job.keyword;
     // 수동 복붙 트랙(person)은 뷰어 본문에서만 내부 링크·참고 자료를 뺀다(2026-10-15 B-2). 위 DB 저장분은 그대로다.
     content = viewerBodyForCategory(job.category, split.body, job.metadata);
@@ -370,7 +320,7 @@ export async function prepareManuscript(
     }
   }
 
-  const imageFailures: string[] = [...imageFailuresBeforeImages];
+  const imageFailures: string[] = [];
 
   // 배리에이션이 문단을 재배열하면 마커 순서도 바뀌는데, imagePrompts는 **기준 원고 순서**로
   // 저장돼 있다. 번호로만 짝지으면 통째로 밀려 "검색은 A, 판정은 B"가 된다 - 2026-09-21 지창욱
