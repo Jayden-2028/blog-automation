@@ -25,6 +25,13 @@
 # **마이그레이션 적용 전에도 깨지지 않는다**: insert 스텝은 continue-on-error라 테이블이 없으면 실패해도
 # apply가 그대로 돌고, 큐를 읽을 수 없으면 CLI가 옛 경로(payload 단건 처리 - 건당 배포·알림)로 떨어진다.
 #
+# **적재 실패를 "앞 run이 이미 비웠다"와 구분한다**(2026-11-16, 외부 감사 F3). continue-on-error는
+# 테이블 없음만이 아니라 **네트워크가 흔들려 INSERT만 실패한 경우도** 삼킨다. 그때는 큐 조회가
+# 성공하고 결과가 0건이라 CLI가 "앞 run이 이미 비웠습니다"로 조용히 끝났다 - 사용자는 교체를 눌렀는데
+# 아무 일도 없고 실패 알림도 못 받았다. 이제 적재 스텝이 성공했을 때만 job output `enqueued=true`를
+# 내고, apply가 그 값을 `IMAGE_PICK_ENQUEUED`로 넘긴다. 적재 실패 + 빈 큐면 payload 단건으로 처리한다
+# (요청 행이 없으니 중복 적용 위험이 없다).
+#
 # **apply는 enqueue가 실패해도 돈다**(`if: !cancelled()`, 2026-11-12). needs만 걸면 enqueue가 죽을 때
 # apply가 skipped로 **조용히** 사라진다 - 사용자는 교체를 기다리는데 run은 초록색으로 끝난 것처럼 보인다.
 # enqueue의 두 스텝은 continue-on-error라 거의 실패하지 않지만, 러너 자체가 흔들리는 경우가 남는다.
@@ -55,10 +62,15 @@ jobs:
   enqueue:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # 적재가 **실제로 됐는지** apply에 알린다(2026-11-16 외부 감사 F3). 전에는 적재 실패와
+    # "앞 run이 이미 비웠다"가 구분되지 않아, 저장되지 못한 요청이 조용히 사라졌다(알림 0통).
+    outputs:
+      enqueued: ${{ steps.enqueue_row.outputs.enqueued }}
     steps:
       # 요청을 큐에 한 행으로 적는다. **테이블이 없으면(migration 미적용) 실패하지만 막지 않는다** -
       # 그 경우 apply가 payload 단건으로 옛 경로를 탄다. 네트워크가 흔들릴 수 있으니 --retry를 둔다.
       - name: 교체 요청 큐에 적기
+        id: enqueue_row
         continue-on-error: true
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -81,6 +93,9 @@ jobs:
             -H "Content-Type: application/json" \
             -H "Prefer: return=minimal" \
             -d "$body"
+          # curl이 실패하면 `bash -e`가 여기서 끊어 이 줄이 돌지 않는다 - 그래서 출력이 없으면
+          # "적재 안 됨"이다(payload 형식이 틀려 위에서 exit 0한 경우도 같다).
+          echo "enqueued=true" >> "$GITHUB_OUTPUT"
           echo "큐 적재 완료: $SLOT_INDEX번 <- 후보 $CANDIDATE_NUMBER"
 
       # 진행 중 표식을 **러너가 뜨자마자** 먼저 쓴다(2026-10-08). 체크아웃·npm ci에 20~40초가 걸리는데, 표식을 CLI 시작 때
@@ -157,6 +172,8 @@ jobs:
           SERPER_CREDITS_PURCHASED: ${{ vars.SERPER_CREDITS_PURCHASED }}
           SERPER_CREDITS_PURCHASED_AT: ${{ vars.SERPER_CREDITS_PURCHASED_AT }}
           IMAGE_PICK_JSON: ${{ toJson(github.event.client_payload) }}
+          # "true"면 큐에 적혔다. 빈 값이면 적재 실패 - CLI가 단건 경로로 떨어진다(감사 F3).
+          IMAGE_PICK_ENQUEUED: ${{ needs.enqueue.outputs.enqueued == 'true' && 'true' || 'false' }}
         run: npm run manuscripts:image-pick
 
       # 교체가 실패하면 그 트랙 봇으로 한 통. **의존성 없는 node 직실행**이다 - npm ci나 설치 단계가

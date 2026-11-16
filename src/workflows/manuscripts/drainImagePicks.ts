@@ -87,7 +87,12 @@ function shorten(text: string): string {
  *
  * 캡션을 짚는 이유는 전과 같다: 교체는 그림만 바꾸고 캡션(description)은 그대로 둔다.
  */
-export function imagePickDrainMessage(keyword: string, results: readonly DrainPickResult[], remaining = 0): string {
+export function imagePickDrainMessage(
+  keyword: string,
+  results: readonly DrainPickResult[],
+  remaining = 0,
+  enqueueFailed = false
+): string {
   const lines = [`🖼 "${keyword}" 이미지 교체 결과 (${results.length}건)`, ""];
   for (const result of results) {
     const head = `${result.slotIndex}번 ← 후보 ${result.candidateNumber}번`;
@@ -108,6 +113,11 @@ export function imagePickDrainMessage(keyword: string, results: readonly DrainPi
   if (remaining > 0) {
     lines.push(`요청 ${remaining}건이 남았습니다 - 뷰어에서 후보를 아무거나 한 번 더 누르면 같이 처리됩니다.`);
   }
+  if (enqueueFailed) {
+    // 이 run이 다른 요청은 처리했지만 **마지막에 누른 그 요청은 큐에 적히지 못했다**(감사 F3).
+    // 조용히 넘기면 사용자는 바뀐 자리를 보고 다 됐다고 믿는다.
+    lines.push("방금 누른 자리 한 건은 접수에 실패했습니다 - 그 자리만 다시 눌러 주세요.");
+  }
   return lines.join("\n").trimEnd();
 }
 
@@ -117,6 +127,17 @@ export type DrainImagePicksInput = {
   deps: ApplyImagePickDeps;
   /** null이면 큐를 쓰지 않는다(옛 경로). */
   queue: ImagePickQueue | null;
+  /**
+   * enqueue 스텝이 이 요청을 큐에 **실제로 적었는가**(2026-11-16, 외부 감사 F3).
+   *
+   * `image-pick.yml`의 적재 스텝은 `continue-on-error`라 테이블이 없을 때뿐 아니라 네트워크가
+   * 흔들려 INSERT만 실패해도 그냥 넘어간다. 그 경우 큐 **조회는 성공하고** 결과가 0건이라,
+   * 이 파일이 "앞 run이 이미 비웠습니다"로 조용히 끝났다 - 사용자는 교체를 눌렀는데 아무 일도
+   * 일어나지 않고 실패 알림도 없었다. 그 두 상황을 구분하려고 받는다.
+   *
+   * `undefined`는 **모른다**(손으로 재실행·구 워크플로)는 뜻이고, 그때는 옛 동작을 그대로 쓴다.
+   */
+  enqueued?: boolean;
   maxItems?: number;
   maxRounds?: number;
 };
@@ -193,6 +214,13 @@ export async function drainImagePicks(input: DrainImagePicksInput): Promise<Drai
     if (remaining > 0) break;
   }
 
+  if (results.length === 0 && input.enqueued === false) {
+    // 큐가 비어 있는데 **적재가 실패했다**(2026-11-16 감사 F3) - "앞 run이 이미 처리했다"가 아니라
+    // "애초에 저장되지 않았다"다. 옛 단건 경로로 payload를 처리한다: 요청 행이 없으므로 중복 적용
+    // 위험이 없고, 사용자는 적어도 결과(성공이든 실패든) 알림을 한 통 받는다.
+    return single(request, deps, "큐 적재가 실패했습니다(enqueue 스텝 실패) - 요청 payload를 단건으로 처리합니다");
+  }
+
   if (results.length === 0) {
     // 큐가 비어 있었다(앞 run이 이미 비웠다). **진행 중 표식은 풀어 준다** - enqueue가 쓴 표식을 그냥
     // 두면 발행 폴러·텔레그램 콜백이 10분(EDIT_PENDING_STALE_MS) 동안 이 원고를 집지 않는다.
@@ -218,7 +246,7 @@ export async function drainImagePicks(input: DrainImagePicksInput): Promise<Drai
   const target = captured.job ?? (await deps.loadJob(request.jobId).catch(() => null));
   if (target) {
     try {
-      await deps.notify(target, imagePickDrainMessage(target.keyword, results, remaining));
+      await deps.notify(target, imagePickDrainMessage(target.keyword, results, remaining, input.enqueued === false));
       notifications = 1;
     } catch (error) {
       console.warn(`⚠️ 텔레그램 알림 실패(무시): ${error instanceof Error ? error.message : error}`);

@@ -77,8 +77,17 @@ async function main(): Promise<void> {
   const request = parseImagePickRequest(await readRequestJson());
   console.log(`▶ 후보 이미지 교체 큐 처리: job ${request.jobId} (요청 payload: ${request.index}번 자리 ← 후보 ${request.candidateNumber})`);
 
+  // enqueue 스텝이 요청을 실제로 적었는가(2026-11-16 감사 F3). 워크플로가 job output으로 넘긴다 -
+  // 값이 없으면(손으로 재실행) undefined로 둬서 옛 동작을 그대로 쓴다.
+  const enqueuedRaw = process.env.IMAGE_PICK_ENQUEUED?.trim();
+  const enqueued = enqueuedRaw === "" || enqueuedRaw === undefined ? undefined : enqueuedRaw === "true";
+  if (enqueued === false) {
+    console.warn("⚠️ enqueue 스텝이 요청을 큐에 적지 못했습니다 - 큐가 비어 있으면 payload 단건으로 처리합니다.");
+  }
+
   const outcome = await drainImagePicks({
     request,
+    enqueued,
     queue: supabaseImagePickQueue(supabase),
     deps: {
       loadJob: (jobId) => ArticleJobRepository.findById(jobId),

@@ -8,6 +8,8 @@
 //  ④ 드레인 중 들어온 요청을 **같은 run이** 집는다(한 바퀴 돈 뒤 다시 읽는다).
 //  ⑤ 배포는 **마지막에 한 번**, 알림은 **한 통**(옛 동작은 건당 1회·1통이었다).
 //  ⑥ 큐가 비어 있으면 아무것도 하지 않고 **진행 중 표식만 풀어 준다**(앞 run이 이미 비웠다).
+//  ⑥-2 단, **적재가 실패해서** 빈 것이면 payload 단건으로 처리한다 - 요청이 조용히 사라지지 않는다
+//      (2026-11-16 외부 감사 F3).
 //  ⑦ 테이블이 없으면(migration 미적용) 옛 경로(payload 단건)로 떨어진다 - 적용 전 병합이 안전해야 한다.
 //  ⑧ 같은 슬롯 접기는 순수 함수(foldSameSlot)로 검증 가능하다.
 import {
@@ -255,6 +257,62 @@ async function main(): Promise<void> {
     const released = calls.metadataPatches.some((p) => IMAGE_PICK_PENDING_KEY in p && p[IMAGE_PICK_PENDING_KEY] === null);
     assert(released, "enqueue가 쓴 진행 중 표식을 풀어 준다 - 안 풀면 발행 폴러가 10분 동안 이 원고를 집지 않는다");
     console.log("✅ 빈 큐 - 조용히 끝내고 진행 중 표식을 풀어 준다");
+  }
+
+  // ⑥-2 빈 큐인데 **적재가 실패했다** - "앞 run이 비웠다"와 구분한다(2026-11-16 외부 감사 F3)
+  {
+    const { deps, calls } = makeWorld();
+    const { queue } = makeQueue([]);
+    const out = await drainImagePicks({
+      request: { jobId: JOB_ID, index: 1, candidateNumber: 2, fromUrl: old(1) },
+      deps,
+      queue,
+      enqueued: false,
+    });
+    assert(out.mode === "single", `적재 실패 + 빈 큐는 단건 경로로 떨어진다 (${out.mode})`);
+    assert(out.results.length === 1 && out.results[0].status === "applied", "요청 payload가 그대로 적용된다");
+    assert(calls.notified.length === 1, "요청이 사라지지 않고 결과 알림이 한 통 간다");
+
+    // 같은 빈 큐인데 적재는 성공한 경우(앞 run이 비웠다)는 **옛 동작 그대로** - 단건으로 떨어지면
+    // 앞 run이 이미 적용한 교체를 한 번 더 적용한다.
+    const second = makeWorld();
+    const out2 = await drainImagePicks({
+      request: { jobId: JOB_ID, index: 1, candidateNumber: 2, fromUrl: old(1) },
+      deps: second.deps,
+      queue: makeQueue([]).queue,
+      enqueued: true,
+    });
+    assert(out2.mode === "queue" && out2.results.length === 0, "적재가 됐는데 큐가 비었으면 앞 run이 처리한 것 - 중복 적용하지 않는다");
+    assert(second.calls.deploys === 0 && second.calls.notified.length === 0, "두 번 알리지 않는다");
+
+    // 모르면(손으로 재실행) 옛 동작을 쓴다.
+    const third = makeWorld();
+    const out3 = await drainImagePicks({
+      request: { jobId: JOB_ID, index: 1, candidateNumber: 2, fromUrl: old(1) },
+      deps: third.deps,
+      queue: makeQueue([]).queue,
+    });
+    assert(out3.mode === "queue" && out3.results.length === 0, "enqueued를 모르면 옛 동작(조용히 끝내기)");
+    console.log("✅ 적재 실패와 '앞 run이 비웠다'를 구분한다 - 요청이 조용히 사라지지 않는다");
+  }
+
+  // ⑥-3 적재 실패인데 큐에 다른 건이 있으면, 처리하고 **알림에 한 줄 남긴다**
+  {
+    const { deps, calls } = makeWorld();
+    const { queue } = makeQueue([item(1, 2, 3, old(2))]);
+    const out = await drainImagePicks({
+      request: { jobId: JOB_ID, index: 5, candidateNumber: 2, fromUrl: old(5) },
+      deps,
+      queue,
+      enqueued: false,
+    });
+    assert(out.mode === "queue" && out.results.length === 1, "큐에 있던 건은 정상 처리한다");
+    assert(calls.notified.length === 1, "알림 한 통");
+    assert(
+      calls.notified[0].includes("접수에 실패했습니다"),
+      `방금 누른 자리가 접수되지 않았음을 알린다 (${calls.notified[0]})`
+    );
+    console.log("✅ 적재 실패 + 다른 요청 처리 - 사용자가 누락을 알 수 있다");
   }
 
   // ⑦ 테이블이 없으면 옛 경로(단건)로 떨어진다
