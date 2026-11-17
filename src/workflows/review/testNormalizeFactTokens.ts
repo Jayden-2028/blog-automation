@@ -163,3 +163,30 @@ try {
   console.log("✅ 한국식 복합 금액 - 단위 뒤 나머지·연속 단위, 기존 표기 회귀 없음");
 }
 
+
+// --- 정규식 폭주 회귀(2026-11-17) - 쉼표로 이어진 숫자 나열 ------------------------------------
+{
+  // 실측: 한국은행 화폐박물관 페이지(https://www.bok.or.kr/eng/main/contents.do?menuNo=400267)의
+  // 버스 노선 나열. 끝에 `원`도 단위도 없어 정규식이 전 조합을 되짚었고, job f9bd88b3의 검수
+  // 단계가 영원히 멈춰 55분 job 시한에 걸려 죽었다(알림도 없었다 - 타임아웃은 cancelled다).
+  // 1초는 넉넉한 상한이다: 수정 전 2^34 조합으로 수 시간, 수정 후 실측 1ms 미만.
+  const busList =
+    "Red Bus 2500, 9301, 9401, 9401B, 9701, 9702, 9703, 9709, 9710, 9714, M5107, M5115, M5121, M7106, M7111, M7119\n" +
+    "Blue Bus 100, 103, 104, 105, 143, 151, 152, 162, 163, 172, 201, 202, 261, 262, 401, 405, 406, 408, 421, 472, " +
+    "500, 501, 503, 504, 505, 506, 507, 701, 702A, 702B, 704";
+  const startedAt = Date.now();
+  extractFactTokens(busList);
+  const elapsed = Date.now() - startedAt;
+  assert(elapsed < 1_000, `쉼표 숫자 나열에서 토큰 추출이 폭주한다 (${elapsed}ms) - 정규식 백트래킹을 확인하라`);
+  console.log(`✅ 쉼표로 이어진 숫자 나열에서 폭주하지 않음 (${elapsed}ms)`);
+
+  // 수정이 기존 복합 표기를 깨지 않았는지 다시 못 박는다 - `\s*`를 `\s+`로 좁힌 변경이다.
+  const money = normalizedOf("시간당 1만 949원, 월 62만 7,090원, 사업 규모 1억 2천만 원");
+  assert(money.includes("money:10949"), `1만 949원이 money:10949이어야 한다 (실제: ${money})`);
+  assert(money.includes("money:627090"), `62만 7,090원이 money:627090이어야 한다 (실제: ${money})`);
+  assert(money.includes("money:120000000"), `1억 2천만 원이 money:120000000이어야 한다 (실제: ${money})`);
+  // 단위 바로 뒤에 공백 없이 나머지가 붙는 표기도 유지된다(`(?<=[억만천])` 분기).
+  const noSpace = normalizedOf("1만949원");
+  assert(noSpace.includes("money:10949"), `1만949원도 money:10949이어야 한다 (실제: ${noSpace})`);
+  console.log("✅ 복합 금액 표기 회귀 없음(공백 있는 경우·단위 뒤 붙는 경우 모두)");
+}
