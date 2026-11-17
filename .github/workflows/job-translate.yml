@@ -80,8 +80,14 @@ jobs:
       # 죽었다 - CLI 안의 try/catch로는 잡을 수 없는 자리다.
       # 왜 node + .mjs인가: 알림이 npm ci·node_modules에 기대면, npm ci가 흔들린 run에서는 알림도
       # 같이 죽는다. 이 스크립트는 node 하나로 돈다(의존성 0).
+      # 2026-11-17: 조건이 `failure()`만이면 **시한 초과를 놓친다.** job 레벨 timeout-minutes로
+      # 죽은 run은 failure가 아니라 **cancelled**로 끝나서 `if: failure()` 스텝이 건너뛰어진다.
+      # 실측(run 43877069167, job-write): `Run job:write: cancelled` / `실패 알림: skipped` /
+      # `Drain pipeline queue: success`(always()라서 돌았다). 그 run은 원고를 저장하고도 검수
+      # 정규식 폭주로 55분을 먹고 죽었는데 사용자는 "준비 중입니다"를 마지막으로 계속 기다렸다.
+      # cancelled()를 함께 걸어 시한 초과와 수동 취소도 알린다 - 조용한 정지가 가장 나쁘다.
       - name: 실패 알림 (트랙 봇)
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         timeout-minutes: 5
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -97,4 +103,6 @@ jobs:
           # 입력값으로 이미 어느 원고인지 안다 - 대기열을 추측하지 않고 이 job만 집는다.
           FAILED_JOB_ID: ${{ inputs.job_id }}
           FAILED_WORKFLOW_FILE: job-translate.yml
+          # failure와 cancelled(시한 초과·수동 취소)를 본문에서 구분한다.
+          FAILED_JOB_STATUS: ${{ job.status }}
         run: node scripts/notifyWorkflowFailure.mjs

@@ -354,4 +354,67 @@ function baseEnv(port: number): Record<string, string> {
   console.log("✅ jobId가 가리키는 job이 없어도 기본 봇으로 가고 jobId가 남는다");
 }
 
+// 12) 시한 초과(job.status=cancelled): "실패"로만 적으면 다시 돌리면 된다고 읽힌다. 원인이
+//     그대로면 또 같은 시간을 먹으므로 본문이 시한 초과임을 말해야 한다(2026-11-17).
+{
+  const stub = await startStub({ rows: [{ id: "job-slow", keyword: "korea bank opening hours", metadata: { track: "kscene" } }] });
+  const cancelled = await runScript({
+    ...baseEnv(stub.port),
+    FAILED_WORKFLOW_FILE: "job-write.yml",
+    GITHUB_WORKFLOW: "job-write",
+    FAILED_JOB_ID: "job-slow",
+    FAILED_JOB_STATUS: "cancelled",
+  });
+  assert(cancelled.code === 0, `스크립트가 실패했다: ${cancelled.stderr}`);
+  assert(stub.sent.length === 1, `1통이어야 한다 - ${stub.sent.length}통`);
+  const cancelledText = stub.sent[0]!.text;
+  assert(cancelledText.includes("시한 초과 또는 취소"), "제목이 시한 초과를 말하지 않는다");
+  assert(cancelledText.includes("강제 종료"), "시한을 넘겨 죽었다는 설명이 없다");
+  assert(cancelledText.includes("원인이 그대로면"), "다시 돌리기 전 경고가 없다");
+  // 집필이 멈췄다는 기존 문구는 그대로 남아야 한다 - 무엇을 기다리고 있었는지가 먼저다.
+  assert(cancelledText.includes("원고 집필 실패"), "워크플로별 문구가 사라졌다");
+
+  // 같은 입력에서 status만 failure면 시한 초과 문구가 붙지 않는다.
+  stub.sent.length = 0;
+  const failed = await runScript({
+    ...baseEnv(stub.port),
+    FAILED_WORKFLOW_FILE: "job-write.yml",
+    GITHUB_WORKFLOW: "job-write",
+    FAILED_JOB_ID: "job-slow",
+    FAILED_JOB_STATUS: "failure",
+  });
+  await stub.close();
+  assert(failed.code === 0, `스크립트가 실패했다: ${failed.stderr}`);
+  const failedText = stub.sent[0]!.text;
+  assert(!failedText.includes("시한 초과"), "보통 실패에 시한 초과 문구가 붙었다 - 거짓 설명이다");
+  assert(failedText.includes("원고 집필 실패"), "워크플로별 문구가 사라졌다");
+  console.log("✅ 시한 초과(cancelled)와 보통 실패(failure)를 본문에서 구분한다");
+}
+
+// 13) 워크플로 쪽 조건 회귀: `if: failure()`만 남은 파일이 하나라도 있으면 그 단계의 시한 초과는
+//     조용히 지나간다. 알림 스크립트가 아무리 맞아도 호출되지 않으면 의미가 없다(2026-11-17).
+{
+  const { readFile } = await import("node:fs/promises");
+  const files = [
+    "job-write.yml",
+    "job-research.yml",
+    "job-revise.yml",
+    "job-translate.yml",
+    "job-publish-prepare.yml",
+    "image-pick.yml",
+  ];
+  for (const file of files) {
+    const yaml = await readFile(new URL(`../../.github/workflows/${file}`, import.meta.url), "utf8");
+    assert(yaml.includes("notifyWorkflowFailure.mjs"), `${file}이 실패 알림을 부르지 않는다`);
+    const alertStep = yaml.slice(yaml.indexOf("- name: 실패 알림 (트랙 봇)"));
+    const condition = alertStep.split("\n").find((line) => line.trim().startsWith("if:")) ?? "";
+    assert(
+      condition.includes("cancelled()"),
+      `${file}의 실패 알림 조건에 cancelled()가 없다 - 시한 초과가 조용히 지나간다 (조건: ${condition.trim()})`
+    );
+    assert(alertStep.includes("FAILED_JOB_STATUS"), `${file}이 job.status를 알림에 넘기지 않는다`);
+  }
+  console.log(`✅ 워크플로 ${files.length}개 모두 시한 초과(cancelled)에도 알림이 걸린다`);
+}
+
 console.log("\n✅ testNotifyWorkflowFailure 전체 통과");

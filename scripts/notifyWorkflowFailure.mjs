@@ -1,5 +1,7 @@
 // 사용자가 결과를 기다리는 워크플로가 실패했을 때 그 트랙 봇으로 텔레그램 한 통을 보낸다.
-// 실행: node scripts/notifyWorkflowFailure.mjs   (워크플로의 `if: failure()` 스텝이 부른다)
+// 실행: node scripts/notifyWorkflowFailure.mjs
+//   (워크플로의 `if: ${{ failure() || cancelled() }}` 스텝이 부른다 - cancelled를 빼면 job 레벨
+//    timeout-minutes로 죽은 run이 조용히 지나간다. 2026-11-17에 여섯 워크플로 모두 고쳤다.)
 //
 // 쓰는 워크플로는 여섯이다 - job-research / job-write / job-translate / job-revise /
 // job-publish-prepare / image-pick. 어느 워크플로인지는 `FAILED_WORKFLOW_FILE`이 말하고, 그에 따라
@@ -150,10 +152,23 @@ function jobLine(job) {
  * 워크플로마다 다르다. jobs가 비면(식별 실패·대기열 없음) reason을 적어 그대로 보낸다 - 무엇이
  * 실패했는지는 job을 몰라도 알려야 한다.
  */
-export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, jobId, unidentifiedReason, now }) {
+export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, jobId, unidentifiedReason, jobStatus, now }) {
   const copy = WORKFLOW_COPY[workflowFile] ?? GENERIC_COPY;
   const stamp = (now ?? new Date()).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
-  const lines = [`🚨 <b>${copy.title}</b> — ${escapeHtml(workflowName || workflowFile)}`, stamp, "", ...copy.what, ""];
+  // cancelled는 "실패"가 아니다. 거의 전부 job 레벨 timeout-minutes 초과이고(수동 취소도 여기로
+  // 온다), 그때는 **다시 돌리기 전에 왜 시한을 넘겼는지부터 봐야 한다** - 원인이 그대로면 다시
+  // 돌려도 또 그 시간을 먹는다. 2026-11-16 job-write 사고가 정확히 그랬다.
+  const timedOut = jobStatus === "cancelled";
+  const title = timedOut ? `${copy.title} (시한 초과 또는 취소)` : copy.title;
+  const what = timedOut
+    ? [
+        ...copy.what,
+        "",
+        "이 run은 <b>시한을 넘겨 강제 종료</b>됐습니다(수동 취소일 수도 있습니다).",
+        "다시 돌리기 전에 run 로그의 마지막 줄을 보세요 - 원인이 그대로면 또 같은 시간을 먹습니다.",
+      ]
+    : copy.what;
+  const lines = [`🚨 <b>${title}</b> — ${escapeHtml(workflowName || workflowFile)}`, stamp, "", ...what, ""];
 
   if (jobs.length > 0) {
     lines.push(`<b>${copy.jobsHeading}</b>`, ...jobs.map(jobLine), "");
@@ -266,6 +281,8 @@ async function main() {
   // 워크플로가 `inputs.job_id`를 넘겨 주면 대기열을 읽지 않는다. 넘기지 않는 워크플로
   // (job-publish-prepare)만 대기열 경로로 떨어진다.
   const jobId = (env.FAILED_JOB_ID ?? "").trim() || undefined;
+  // 워크플로가 `job.status`를 넘긴다. "cancelled"면 시한 초과(또는 수동 취소)다.
+  const jobStatus = (env.FAILED_JOB_STATUS ?? "").trim() || undefined;
 
   let jobs = [];
   let unidentifiedReason;
@@ -293,7 +310,7 @@ async function main() {
   let sent = 0;
   const failures = [];
   for (const [track, trackJobs] of groups) {
-    const message = buildFailureMessage({ workflowFile, workflowName, runUrl, jobs: trackJobs, jobId, unidentifiedReason });
+    const message = buildFailureMessage({ workflowFile, workflowName, runUrl, jobs: trackJobs, jobId, unidentifiedReason, jobStatus });
     try {
       await sendTelegram(track, message, env);
       sent += 1;

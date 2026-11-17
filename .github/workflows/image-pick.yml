@@ -182,8 +182,14 @@ jobs:
 
       # 교체가 실패하면 그 트랙 봇으로 한 통. **의존성 없는 node 직실행**이다 - npm ci나 설치 단계가
       # 흔들린 run에서 알림까지 같이 죽으면 안 된다(그게 알려야 하는 바로 그 실패다).
+      # 2026-11-17: 조건이 `failure()`만이면 **시한 초과를 놓친다.** job 레벨 timeout-minutes로
+      # 죽은 run은 failure가 아니라 **cancelled**로 끝나서 `if: failure()` 스텝이 건너뛰어진다.
+      # 실측(run 43877069167, job-write): `Run job:write: cancelled` / `실패 알림: skipped` /
+      # `Drain pipeline queue: success`(always()라서 돌았다). 그 run은 원고를 저장하고도 검수
+      # 정규식 폭주로 55분을 먹고 죽었는데 사용자는 "준비 중입니다"를 마지막으로 계속 기다렸다.
+      # cancelled()를 함께 걸어 시한 초과와 수동 취소도 알린다 - 조용한 정지가 가장 나쁘다.
       - name: 실패 알림 (트랙 봇)
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         timeout-minutes: 5
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -199,4 +205,6 @@ jobs:
           # 뷰어가 보낸 payload로 어느 원고인지 이미 안다 - 대기열을 추측하지 않는다.
           FAILED_JOB_ID: ${{ github.event.client_payload.jobId }}
           FAILED_WORKFLOW_FILE: image-pick.yml
+          # failure와 cancelled(시한 초과·수동 취소)를 본문에서 구분한다.
+          FAILED_JOB_STATUS: ${{ job.status }}
         run: node scripts/notifyWorkflowFailure.mjs

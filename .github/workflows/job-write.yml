@@ -127,8 +127,14 @@ jobs:
       #
       # 큐 마감(Drain)보다 **앞**에 둔다: 마감이 실패한 것까지 "집필 실패"로 알리면 이미 원고를
       # 받은 사용자에게 거짓 경보가 간다. 마감은 always()라 이 스텝 뒤에도 그대로 돈다.
+      # 2026-11-17: 조건이 `failure()`만이면 **시한 초과를 놓친다.** job 레벨 timeout-minutes로
+      # 죽은 run은 failure가 아니라 **cancelled**로 끝나서 `if: failure()` 스텝이 건너뛰어진다.
+      # 실측(run 43877069167, job-write): `Run job:write: cancelled` / `실패 알림: skipped` /
+      # `Drain pipeline queue: success`(always()라서 돌았다). 그 run은 원고를 저장하고도 검수
+      # 정규식 폭주로 55분을 먹고 죽었는데 사용자는 "준비 중입니다"를 마지막으로 계속 기다렸다.
+      # cancelled()를 함께 걸어 시한 초과와 수동 취소도 알린다 - 조용한 정지가 가장 나쁘다.
       - name: 실패 알림 (트랙 봇)
-        if: failure()
+        if: ${{ failure() || cancelled() }}
         timeout-minutes: 5
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -144,6 +150,8 @@ jobs:
           # 입력값으로 이미 어느 원고인지 안다 - 대기열을 추측하지 않고 이 job만 집는다.
           FAILED_JOB_ID: ${{ inputs.job_id }}
           FAILED_WORKFLOW_FILE: job-write.yml
+          # failure와 cancelled(시한 초과·수동 취소)를 본문에서 구분한다.
+          FAILED_JOB_STATUS: ${{ job.status }}
         run: node scripts/notifyWorkflowFailure.mjs
 
       # job-research.yml과 같은 이유(2026-09-16) - always()로 돌아 큐 행을 마감하고 다음 대기
