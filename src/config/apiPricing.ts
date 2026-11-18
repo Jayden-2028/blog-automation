@@ -8,8 +8,18 @@
 // 오래 남아 나중에 틀린 합계를 만든다. 등록되지 않은 모델은 금액을 null로 남기고(0이 아니다)
 // 대시보드가 "단가 미등록 N건"으로 드러낸다 - 조용히 과소집계되는 것보다 낫다.
 //
-// 출처(2026-09-16 확인):
-// - gpt-image-2: 텍스트 입력 $5 / 이미지 입력 $8 / 이미지 출력 $30 (per 1M tokens)
+// 출처(2026-09-16 확인, 2026-11-18 보강):
+// - gpt-image-2.6-sunburst: 텍스트 입력 $5 / 이미지 입력 $8 / 이미지 출력 $30 (per 1M tokens).
+//   developers.openai.com/api/docs/pricing 기준으로 gpt-image-2와 **토큰 단가는 완전히 같다.**
+//   다만 **장당 비용은 같지 않다** - 같은 1536x864 / quality=low에서 출력 토큰이 120 -> 504로
+//   늘어 장당 $0.0036 -> $0.0151이 된다(2026-11-18 실호출 3건 대조). 단가표는 그대로 두고
+//   토큰 수가 올라가는 형태라, 이 표만 보면 교체가 공짜로 보인다 - 그래서 여기 적어 둔다.
+//   같은 문서가 "캐시 입력 단가는 Responses API로 만든 이미지에만 적용된다"고 적는다. 우리는
+//   /v1/images/generations를 부르므로 캐시 할인은 못 받는다 - 위 단가가 우리 단가다.
+// - gpt-image-2: 같은 토큰 단가이고 **지금 호출하는 건 이쪽이다**(장당 $0.0036). 2027-02-10
+//   종료라 그 전에 2.6으로 옮겨야 한다. 위 2.6 항목은 그날을 위해 **미리 등록해 둔 것**인데,
+//   이 파일의 "실제로 호출하는 모델만 넣는다" 원칙에 대한 예외다 - 원칙이 막으려는 건 검증되지
+//   않은 숫자이고, 저 504토큰은 2026-11-18 실호출로 직접 잰 값이다.
 // - gemini-3.1-flash-lite-image: 입력 $0.25 / 이미지 출력 $30 (ai.google.dev/gemini-api/docs/pricing)
 // - gemini-3.6-flash: 입력 $0.75 / 출력 $3.75, **2027-01-01부터 $1.50 / $7.50으로 인상 예정**
 //   (같은 문서에 명시돼 있다). 인상일을 밴드로 넣어 두지 않으면 새해 첫날부터 실제 지출의 절반만
@@ -38,10 +48,15 @@ export type ApiModelPricing = {
 };
 
 export const API_PRICING: Record<string, ApiModelPricing> = {
+  "gpt-image-2.6-sunburst": {
+    provider: "openai",
+    bands: [{ inputPerMTok: 5, imageInputPerMTok: 8, outputPerMTok: 30 }],
+    note: "이미지 생성(2027-02-10 전 교체 예정). 1536x864 quality=low 실측 504토큰 ≈ $0.0151 - gpt-image-2의 4.2배라 아직 안 옮겼다.",
+  },
   "gpt-image-2": {
     provider: "openai",
     bands: [{ inputPerMTok: 5, imageInputPerMTok: 8, outputPerMTok: 30 }],
-    note: "이미지 생성. 출력 토큰이 곧 이미지다(1536x864 quality=low 실측 120토큰 ≈ $0.0036).",
+    note: "이미지 생성(현역). 1536x864 quality=low 실측 120토큰 ≈ $0.0036. 2027-02-10 종료라 그 전에 2.6으로 옮겨야 한다.",
   },
   "gemini-3.1-flash-lite-image": {
     provider: "gemini",

@@ -2,7 +2,8 @@
 //
 // 이 계산이 틀리면 대시보드가 조용히 거짓말을 한다 - 아무도 즉시 눈치채지 못하는 종류의 버그라
 // 경계 조건(단가 미등록 / usage 누락 / 단가 인상일)을 특히 촘촘히 고정한다.
-import { estimateCostUsd } from "./apiPricing.js";
+import { estimateCostUsd, API_PRICING } from "./apiPricing.js";
+import { GEMINI_IMAGE_MODEL, OPENAI_IMAGE_MODEL } from "../services/images/generateImage.js";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
@@ -70,6 +71,18 @@ async function main(): Promise<void> {
   const tiny = estimateCostUsd({ model: "gpt-image-2", outputTokens: 1 });
   assert(tiny.costUsd === 0.00003, `1토큰 $0.00003이어야 한다 (실제: ${tiny.costUsd})`);
   console.log("✅ 소수점 6자리 보존");
+
+  // 9) **지금 실제로 부르는 이미지 모델이 단가표에 있는가.** 2026-11-18 gpt-image-2 ->
+  //    gpt-image-2.6-sunburst로 바꾸면서 넣은 가드다. 모델 상수만 갈아 끼우고 단가표를 안 고치면
+  //    estimateCostUsd가 null을 돌려주고 대시보드는 "단가 미등록"으로 조용히 넘어간다 - 그러면
+  //    이미지 비용이 몇 주씩 0으로 집계된다. 상수를 직접 읽어 대조해야 그 틈이 막힌다.
+  for (const model of [OPENAI_IMAGE_MODEL, GEMINI_IMAGE_MODEL]) {
+    assert(API_PRICING[model], `호출 중인 이미지 모델 ${model}이 단가표에 없다 - apiPricing.ts에 등록하라`);
+    const probe = estimateCostUsd({ model, outputTokens: 1_000_000 });
+    assert(probe.costUsd !== null, `${model}의 단가가 null이다`);
+  }
+  console.log(`✅ 호출 중인 이미지 모델이 단가표에 등록돼 있다 (${OPENAI_IMAGE_MODEL}, ${GEMINI_IMAGE_MODEL})`);
+
 
   console.log("\n✅ 전체 통과");
 }

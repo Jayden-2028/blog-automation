@@ -91,19 +91,29 @@ export function parseGeminiUsage(usage: {
 const OPENAI_IMAGE_TIMEOUT_MS = 120_000;
 
 /**
- * 2026-09-16 gpt-image-1 -> gpt-image-2 교체. OpenAI 공식 deprecation 문서 기준 gpt-image-1은
- * **2026-12-01 종료**(2026-06-02 공지)이고 권장 대체 모델이 정확히 gpt-image-2다. 그 전에
- * 옮겨야 하는 데다 단가도 더 싸다(출력 $30/1M vs gpt-image-1 $40/1M, 이미지 입력 $8 vs $10).
- * `quality: "low"`는 그대로 지원된다.
+ * ⏳ **2027-02-10까지 gpt-image-2를 쓴다. 그 전에 gpt-image-2.6-sunburst로 옮겨야 한다.**
+ * OpenAI가 2026-11-10 메일로 gpt-image-2 종료일을 그날로 공지했고, 모델 문서에도 이미
+ * `Status: Deprecated`가 붙어 있다. 그래도 지금 안 옮기는 이유는 **돈이다.**
  *
- * (이전 주석에 적혀 있던 "2026-10-23 종료"는 2026-08-28 모델 메타데이터에서 읽은 값인데 공식
- * 문서와 달랐다 - 문서 쪽을 따른다. docs/ai-handoff/*.md의 같은 날짜도 함께 정정했다.)
+ * 2026-11-18 같은 프롬프트·같은 size(1536x864)·같은 quality(low)로 실호출해 재 본 값:
+ *   gpt-image-2            출력 120토큰 = $0.0036   ← 지금 이것
+ *   gpt-image-2.6-sunburst 출력 504토큰 = $0.0151   (4.2배)
+ *   gpt-image-2.6-flare    출력 504토큰 = $0.0151   (4.2배)
+ * 토큰 **단가**는 셋이 같다($30/1M). 2.6 계열이 같은 픽셀을 4.2배 많은 토큰으로 세는 것이다.
+ * `complexity: "low"`를 보내도 504 그대로여서(기본값 high와 차이가 없다) 토큰을 내리는
+ * 손잡이가 아니고, Flare로 바꿔도 같은 504라 변종 선택으로도 줄지 않는다. 규격이 글당 최소
+ * 5장(prompts/writing/rules/images.md §8)이라 글당 $0.018 -> $0.076이 된다.
  *
- * 더 최신 계열로 gpt-image-2.5-flare / gpt-image-2.5-sunburst(2026-09-08)가 있고 단가는 2와
- * 같다(xhigh/max 화질이 추가됨). 품질·속도를 실측한 적이 없어 이번엔 안 올렸다 - 필요하면
- * A/B 비교에 한 칸 끼워 넣어 함께 본다.
+ * 2.6 쪽은 **실호출로 이미 확인해 뒀다**(2026-11-18): size `1536x864` + `quality: "low"`를 그대로
+ * 받고, 응답도 `data[0].b64_json` 그대로이며, 1536x864 PNG가 정확히 그 크기로 왔다. 단가도
+ * apiPricing.ts에 미리 등록해 뒀다. **옮길 때 할 일은 아래 문자열 하나를 바꾸는 것뿐이다.**
+ *
+ * ⚠️ **달력 알림은 없다**(2026-11-18 예약을 시도했으나 생성이 거부됐다). 이 주석과 아래
+ * apiPricing.ts 항목이 유일한 기록이다 - 종료일 전에 반드시 옮긴다.
+ *
+ * (이력) 2026-09-16 gpt-image-1 -> gpt-image-2. gpt-image-1은 2026-10-23 종료됐다.
  */
-const OPENAI_IMAGE_MODEL = "gpt-image-2";
+export const OPENAI_IMAGE_MODEL = "gpt-image-2";
 
 /**
  * 프롬프트가 지시한 비율 -> 실제 요청 크기.
@@ -126,8 +136,9 @@ const OPENAI_IMAGE_MODEL = "gpt-image-2";
  * 비용은 오히려 내려갔다(실측, quality=low): 1024x1024 196토큰($0.0059) -> 1536x864
  * 120토큰($0.0036). 큰 쪽이 더 싼 건 정사각이 총 픽셀이 더 많기 때문이다.
  *
- * gpt-image-2는 `WIDTHxHEIGHT` 커스텀 크기를 받는다(가로·세로 모두 16의 배수, 비율 1:3~3:1,
- * 한 변 3840 이하) - 아래 값은 전부 그 제약을 지킨다.
+ * gpt-image-2도, 옮겨 갈 2.6도 `WIDTHxHEIGHT` 커스텀 크기를 받는다(가로·세로 모두 16의 배수, 비율 1:3~3:1,
+ * 한 변 3840 이하, **총 픽셀 655,360~8,294,400**) - 아래 값은 전부 그 제약을 지킨다(가장 작은
+ * 1280x960이 1,228,800이고 가장 큰 1152x2048이 2,359,296이다).
  *
  * 세로 비율(3:4·9:16)은 디스커버 썸네일 후보가 될 수 없다(가로 요건). 본문용으로만 쓰고,
  * 그래도 너비를 최대한 키워 둔다.
@@ -216,7 +227,7 @@ const GEMINI_IMAGE_TIMEOUT_MS = 120_000;
 // displayName으로 정확한 모델 ID를 확인했다 - "Nano Banana"는 gemini-2.5-flash-image,
 // "Nano Banana Pro"는 gemini-3-pro-image, "Nano Banana 2"는 gemini-3.1-flash-image이고
 // "Nano Banana 2 Lite"가 gemini-3.1-flash-lite-image다.
-const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
+export const GEMINI_IMAGE_MODEL = "gemini-3.1-flash-lite-image";
 
 async function generateWithGemini(input: GenerateImageInput): Promise<GenerateImageResult> {
   const apiKey = process.env.GEMINI_API_KEY;
