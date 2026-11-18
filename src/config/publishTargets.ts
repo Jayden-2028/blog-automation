@@ -24,7 +24,6 @@ export type BloggerConfig = {
   clientId: string | undefined;
   clientSecret: string | undefined;
   refreshToken: string | undefined;
-  blogId: string | undefined;
   /** OAuth 스코프. posts.insert에 이것 하나면 충분하다. */
   scope: string;
   /** 하루 발행 상한(하드 가드). publications에서 오늘 이 채널 발행 수를 세어 초과 시 발행 안 함. */
@@ -57,7 +56,6 @@ export const BLOGGER_CONFIG: BloggerConfig = {
   clientId: process.env.BLOGGER_CLIENT_ID || undefined,
   clientSecret: process.env.BLOGGER_CLIENT_SECRET || undefined,
   refreshToken: process.env.BLOGGER_REFRESH_TOKEN || undefined,
-  blogId: process.env.BLOGGER_BLOG_ID || undefined,
   scope: "https://www.googleapis.com/auth/blogger",
   // 5 -> 20(2026-09-21 사용자 결정). 5는 하루 3건 생산을 전제로 잡은 값이라, 밀린 원고가
   // 겹치면 바로 걸렸다(실측: 더쿠 원고가 6번째라 막혔고, 재시도하는 스케줄이 없어 그대로 묻혔다).
@@ -74,10 +72,13 @@ export const BLOGGER_CONFIG: BloggerConfig = {
 /**
  * 사용설명서 트랙(Korea Plain)의 Blogger blogId(개편3, 2026-10-05 확정. 2026-10-28 맞춤 도메인 www.koreaplain.com 연결 -
  * 구 주소 thekoreamanual.blogspot.com은 Blogger가 301로 넘긴다).
- * whynowissue와 **같은 구글 계정**이라 OAuth refresh token(BLOGGER_REFRESH_TOKEN)은 그대로 쓰고 blogId만 다르다.
+ * 폐쇄된 한국어 블로그(whynowissue)와 **같은 구글 계정**이라 OAuth refresh token(BLOGGER_REFRESH_TOKEN)은 그대로 쓴다.
  *
- * ⚠️ 이 값이 비어 있으면 사용설명서 글은 **발행하지 않는다**(BLOGGER_BLOG_ID로 폴백하지 않는다) - 폴백하면 영어 글이
- * whynowissue(한국어 블로그)에 올라간다. publishArticleToBlogspot.ts가 이 경우 `disabled`로 돌려준다.
+ * ⚠️ 이 값이 비어 있으면 사용설명서 글은 **발행하지 않는다**. publishArticleToBlogspot.ts가 `disabled`로 돌려준다.
+ *
+ * 2026-11-18: 이제 Blogger로 나가는 트랙은 이것 하나다. 옛 한국어 블로그
+ * `whynowissue.blogspot.com`이 2026-10-11 폐쇄되면서(마지막 발행 2026-10-04) `BLOGGER_BLOG_ID`
+ * 폴백 자체를 걷어냈다 - 남겨 두면 승인된 비-사용설명서 글이 **없어진 블로그로 발행을 시도한다.**
  */
 export const KOREAPLAIN_BLOGGER_BLOG_ID: string | undefined = process.env.KSCENE_BLOGGER_BLOG_ID?.trim() || undefined;
 

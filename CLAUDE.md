@@ -98,9 +98,10 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   사회 트랙은 🟠 티스토리, 사용설명서 트랙은 🔵 Blogger 버튼이 뜬다(`job.metadata.track`, 없으면 엔터).
   - Blogspot(`thekoreamanual.blogspot.com` - "Korea Plain", 구 "The Korea Manual", 사용설명서 트랙): 공식 API(Blogger v3).
     GitHub Actions에서 바로 끝난다. 옛 대상 `whynowissue.blogspot.com`은 **2026-10-11 폐쇄**됐고
-    2026-10 개편으로 엔터·사회 버튼에서도 빠졌다. 사용설명서 트랙(개편3, 2026-10-06)만 쓴다 - 트랙 버튼은
-    `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다** -
-    `BLOGGER_BLOG_ID`로 폴백하지 않는다). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
+    2026-10 개편으로 엔터·사회 버튼에서도 빠졌다. **2026-11-18 코드에서도 걷어냈다** - `BLOGGER_BLOG_ID`
+    폴백을 없애서 비-사용설명서 트랙은 Blogger 대상이 아예 없고(`disabled`), 남겨 뒀다면 승인된 글이
+    없어진 블로그로 발행을 시도했을 자리다. 사용설명서 트랙(개편3, 2026-10-06)만 쓴다 - 트랙 버튼은
+    `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다**). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
     자동 승인 → 이미지가 포함된 영어본 → 통합 알림(발행/수정/반려)**이고(2026-10-12부터 영어본 단독 재승인 폐지, 게이트 꺼짐이면 옛 영어본 재승인 ✅ 복귀), 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
     (`docs/ai-handoff/RESTRUCTURE_3_KOREAPLAIN_TRACK.md`).
   - 티스토리(`wooahpapa.tistory.com` - "핫이슈 설명서", 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
@@ -426,8 +427,13 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
 
 ## 측정·분석 운영 규칙 (2026-10-08)
 
-- **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 순서대로: thekoreamanual → 티스토리. whynowissue.blogspot.com은 폐쇄돼 2026-10-11에 제외했다).
-  비면 `GSC_SITE_URL` 단일 폴백. 속성 = `page_url` 호스트라 `search_performance_daily` 구조는 그대로다(migration 없음).
+- **GSC는 속성 목록을 돈다**: repo variable `GSC_SITE_URLS`(콤마 구분, 2026-11-18 현재 두 속성:
+  `sc-domain:koreaplain.com` → `https://wooahpapa.tistory.com/`). 둘 다 GSC에서 **확인 완료**된 속성이다 -
+  확인 안 된 속성(네이버 블로그 등)을 넣으면 403으로 떨어진다. 구 주소 `thekoreamanual.blogspot.com`도
+  확인된 속성이지만 **일부러 뺐다**: 발행 URL이 전부 www.koreaplain.com이라 점검 대상이 홈 1건뿐이고,
+  그 홈이 301 전환 흔적으로 `Redirect error`라 주간 알림에 매주 "고장 1건"만 만든다.
+  **단일 폴백 `GSC_SITE_URL`은 없앴다**(2026-11-18) - 값이 폐쇄된 whynowissue였어서, `GSC_SITE_URLS`가
+  비는 순간 조용히 죽은 블로그를 보게 된다. 속성 = `page_url` 호스트라 `search_performance_daily` 구조는 그대로다(migration 없음).
   새 속성 추가는 변수에 한 항목 덧붙이고 `analytics:search -- --site=<속성> --days=N --apply`로 백필.
 - **주간 리포트**(`analytics:weekly-report`)는 새 Worker cron을 쓰지 않는다 - 주간 `analytics-index-health.yml`에 동승한다.
   주간 슬롯(`0 1 * * 1`)은 표현식이 월요일인데 **실제 발화는 일요일 10:00 KST다**(2026-11-02 실측 - 10/18·10/25·11/01

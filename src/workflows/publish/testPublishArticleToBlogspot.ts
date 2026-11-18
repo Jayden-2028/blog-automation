@@ -8,7 +8,14 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`❌ ${message}`);
 }
 
+/**
+ * 기본은 **사용설명서(kscene) 트랙**이다(2026-11-18). Blogger로 나가는 트랙이 그것뿐이라,
+ * 상한·초안·본문 변환 같은 일반 동작도 이 경로로 검증한다. metadata는 **덮어쓰지 않고 합친다** -
+ * 예전처럼 통째로 갈아 끼우면 `metadata: { draftMeta: ... }`를 넘긴 케이스가 조용히 트랙을 잃고
+ * 발행 대상 없음으로 떨어진다. 비-사용설명서를 보려면 `metadata: { track: "entertainment" }`로 명시한다.
+ */
 function job(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
+  const { metadata, ...rest } = overrides;
   return {
     id: "job-1",
     source_run_id: 1,
@@ -22,10 +29,10 @@ function job(overrides: Partial<ArticleJobRow> = {}): ArticleJobRow {
     status: "approved",
     selected_at: "2026-08-31T00:00:00Z",
     selected_via: "telegram",
-    metadata: {},
     created_at: "2026-08-31T00:00:00Z",
     updated_at: "2026-08-31T00:00:00Z",
-    ...overrides,
+    ...rest,
+    metadata: { track: "kscene", ...((metadata as Record<string, unknown>) ?? {}) },
   } as ArticleJobRow;
 }
 
@@ -45,8 +52,14 @@ function article(overrides: Partial<ArticleRow> = {}): ArticleRow {
   };
 }
 
+// 2026-11-18: Blogger로 나가는 트랙은 사용설명서 하나뿐이라, 일반 동작(상한·초안·본문 변환)도
+// 그 트랙으로 검증한다. 옛 한국어 블로그(whynowissue)가 폐쇄되면서 비-사용설명서 job은
+// blogId가 없어 `disabled`로 떨어진다 - 그 사실 자체는 아래 resolveBloggerTarget 케이스에서 본다.
+const KSCENE_TEST_BLOG_ID = "506709987398630214";
+
 const baseDeps = {
   enabled: true,
+  koreaplainBlogId: KSCENE_TEST_BLOG_ID,
   loadJob: async () => job(),
   loadArticles: async () => [article()],
   loadJobPublications: async () => [] as PublicationRow[],
@@ -254,8 +267,10 @@ async function main(): Promise<void> {
     // 대상 해석(순수)
     const t1 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(koreaplainJob(), "506709987398630214");
     assert(t1.track === "kscene" && t1.blogId === "506709987398630214" && t1.label === "Food & Dining", `사용설명서는 K-Scene blogId와 시드 라벨 (${JSON.stringify(t1)})`);
-    const t2 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "living" }), "506709987398630214");
-    assert(t2.track === "entertainment" && t2.blogId === BLOGGER_CONFIG.blogId && t2.label === "생활정보", "엔터·사회 job은 기존 blogId·한글 라벨 그대로");
+    const t2 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "living", metadata: { track: "entertainment" } }), "506709987398630214");
+    // 2026-11-18: 옛 한국어 블로그(whynowissue)가 폐쇄돼 비-사용설명서 트랙은 Blogger 대상이 없다.
+    // 라벨은 그대로 둔다 - 되살릴 때 쓰고, 지우면 라벨 표가 통째로 죽는다.
+    assert(t2.track === "entertainment" && t2.blogId === undefined && t2.label === "생활정보", "엔터·사회 job은 Blogger 대상 없음(폐쇄) · 라벨은 유지");
     const t3 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(koreaplainJob(), undefined);
     assert(t3.blogId === undefined, "blogId가 없으면 undefined(whynowissue로 폴백하지 않는다)");
     const t4 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "예전 시드", metadata: { track: "kscene" } }), "1");
@@ -346,14 +361,21 @@ async function main(): Promise<void> {
     assert(partial.rehostedBySource["https://sb.example/a/1.webp"] === pages(1) && partial.imagesRehostedAt === undefined, "부분 성공은 대응만 기록하고 imagesRehostedAt은 남기지 않는다");
     console.log("✅ 재발행 멱등 / 새 이미지만 복사 / 실패·부분 성공 시 발행 계속 + 핫링크 보호 유지");
 
-    // 엔터 job은 이미지 복사를 타지 않는다
+    // 엔터·사회 job은 **Blogger로 아예 나가지 않는다**(2026-11-18). 예전에는 옛 한국어 블로그로
+    // 나가되 이미지 복사만 건너뛰었는데, 그 블로그가 2026-10-11 폐쇄돼 폴백 자체를 걷어냈다.
+    // 그러니 여기서 볼 것은 "이미지 복사를 안 탄다"가 아니라 **발행을 시도조차 안 한다**는 것이다.
     let touched = 0;
-    await publishArticleToBlogspot("job-1", {
-      ...baseDeps, loadJob: async () => job({ metadata: { images: imgs } }), asDraft: false,
+    let insertedOther = 0;
+    const other = await publishArticleToBlogspot("job-1", {
+      ...baseDeps,
+      loadJob: async () => job({ metadata: { track: "entertainment", images: imgs } }),
+      asDraft: false,
+      insertPost: async () => { insertedOther += 1; return baseDeps.insertPost(); },
       rehostImages: async ({ images }) => { touched += 1; return { images, rehosted: 0, complete: false, deployed: false, failures: [] }; },
     });
-    assert(touched === 0, "엔터·사회 job은 Supabase URL 그대로(복사 없음)");
-    console.log("✅ 다른 트랙은 이미지 복사를 타지 않는다");
+    assert(other.ok === false && other.reason === "disabled", `엔터·사회 job은 Blogger 대상이 없어 disabled (${JSON.stringify(other)})`);
+    assert(insertedOther === 0 && touched === 0, "발행도 이미지 복사도 시도하지 않는다");
+    console.log("✅ 다른 트랙은 Blogger 발행 자체를 하지 않는다(폐쇄된 블로그로 나가지 않는다)");
 
     // ---- 사용설명서 사이트 구조 보강(2026-10-27): h2·Related(이전 글+All Guides)·All Guides 재생성 ----
     const site = "https://tkm.example.com";

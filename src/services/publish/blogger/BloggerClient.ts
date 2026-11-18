@@ -90,7 +90,9 @@ export class BloggerClient {
     this.clientId = options.clientId ?? BLOGGER_CONFIG.clientId;
     this.clientSecret = options.clientSecret ?? BLOGGER_CONFIG.clientSecret;
     this.refreshToken = options.refreshToken ?? BLOGGER_CONFIG.refreshToken;
-    this.blogId = options.blogId ?? BLOGGER_CONFIG.blogId;
+    // 폴백 없음(2026-11-18): 호출부가 어느 블로그인지 반드시 지정한다. 예전 기본값이던
+    // whynowissue는 2026-10-11 폐쇄됐고, 기본값을 두면 "어디로 나갔는지 모르는 발행"이 생긴다.
+    this.blogId = options.blogId;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 

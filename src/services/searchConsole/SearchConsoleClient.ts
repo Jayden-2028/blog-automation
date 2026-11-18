@@ -138,7 +138,7 @@ export class SearchConsoleClient {
   /** 설정 누락을 호출 전에 거른다 - "토큰 없음"이 401 API 오류로 둔갑하지 않게. */
   missingConfig(): string | null {
     if (!this.serviceAccountJson) return "GSC_SERVICE_ACCOUNT_JSON이 없습니다(서비스 계정 JSON 전문).";
-    if (!this.siteUrl) return "GSC_SITE_URL이 없습니다(예: https://whynowissue.blogspot.com/).";
+    if (!this.siteUrl) return "GSC_SITE_URL이 없습니다(예: sc-domain:koreaplain.com).";
     return null;
   }
 

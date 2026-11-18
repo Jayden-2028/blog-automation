@@ -20,7 +20,7 @@ const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
 async function main(): Promise<void> {
-  const { clientId, clientSecret, scope, blogId } = BLOGGER_CONFIG;
+  const { clientId, clientSecret, scope } = BLOGGER_CONFIG;
   if (!clientId || !clientSecret) {
     console.error(
       "❌ .env에 BLOGGER_CLIENT_ID / BLOGGER_CLIENT_SECRET가 없습니다.\n" +
@@ -120,16 +120,16 @@ async function main(): Promise<void> {
 
   // 발급된 토큰으로 blog 접근을 즉시 검증한다(잘못된 blogId를 setup 단계에서 잡는다).
   let blogCheck = "";
-  if (blogId) {
+  if (process.env.KSCENE_BLOGGER_BLOG_ID) {
     const check = await fetch(
-      `https://www.googleapis.com/blogger/v3/blogs/${blogId}?fields=name,url`,
+      `https://www.googleapis.com/blogger/v3/blogs/${process.env.KSCENE_BLOGGER_BLOG_ID}?fields=name,url`,
       { headers: { Authorization: `Bearer ${tokenJson.access_token}` } }
     );
     if (check.ok) {
       const b = (await check.json()) as { name?: string; url?: string };
       blogCheck = `\n✅ 블로그 확인: "${b.name}" (${b.url})`;
     } else {
-      blogCheck = `\n⚠️ BLOGGER_BLOG_ID(${blogId}) 접근 실패 (${check.status}) - blog ID를 확인하세요.`;
+      blogCheck = `\n⚠️ KSCENE_BLOGGER_BLOG_ID(${process.env.KSCENE_BLOGGER_BLOG_ID}) 접근 실패 (${check.status}) - blog ID를 확인하세요.`;
     }
   }
 

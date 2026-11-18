@@ -154,7 +154,12 @@ export type BingSubmitRecord = {
   skipped?: string;
 };
 
-/** 어느 블로그·라벨로 올릴지. 사용설명서 트랙은 K-Scene blogId와 영문 라벨, 그 밖은 기존(BLOGGER_BLOG_ID·한글 라벨). */
+/**
+ * 어느 블로그·라벨로 올릴지. **Blogger로 나가는 트랙은 사용설명서 하나뿐이다**(2026-11-18).
+ * 그 밖의 트랙은 blogId가 없어 호출부가 `disabled`로 떨어뜨린다 - 옛 한국어 블로그
+ * `whynowissue.blogspot.com`이 2026-10-11 폐쇄됐기 때문이다. 다시 Blogger로 내보내려면
+ * 살아 있는 blogId를 여기서 돌려주게 고친다.
+ */
 export function resolveBloggerTarget(
   job: Pick<ArticleJobRow, "category" | "seed_query" | "metadata">,
   koreaplainBlogId: string | undefined = KOREAPLAIN_BLOGGER_BLOG_ID
@@ -168,7 +173,7 @@ export function resolveBloggerTarget(
       label: KOREAPLAIN_LABEL_BY_SEED[job.seed_query ?? ""] ?? KOREAPLAIN_DEFAULT_LABEL,
     };
   }
-  return { track, blogId: BLOGGER_CONFIG.blogId, label: job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined };
+  return { track, blogId: undefined, label: job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined };
 }
 
 /**
@@ -231,9 +236,14 @@ export async function publishArticleToBlogspot(
   }
 
   target = resolveBloggerTarget(job, "koreaplainBlogId" in options ? options.koreaplainBlogId : KOREAPLAIN_BLOGGER_BLOG_ID);
-  if (target.track === KOREAPLAIN_TRACK && !target.blogId) {
-    // BLOGGER_BLOG_ID로 폴백하지 않는다 - 영어 글이 whynowissue(한국어 블로그)에 올라간다.
-    return { ok: false, reason: "disabled", detail: "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 Korea Plain 블로그 ID가 있어야 발행합니다" };
+  if (!target.blogId) {
+    // 폴백 대상을 두지 않는다. 잘못된 블로그로 나가느니 안 나가는 쪽이 낫고,
+    // 유일한 폴백이던 whynowissue는 2026-10-11 폐쇄돼 더 이상 존재하지도 않는다.
+    const detail =
+      target.track === KOREAPLAIN_TRACK
+        ? "KSCENE_BLOGGER_BLOG_ID 미설정 - 사용설명서 글은 Korea Plain 블로그 ID가 있어야 발행합니다"
+        : `Blogger 발행 대상이 없습니다(track=${target.track}) - 옛 한국어 블로그는 2026-10-11 폐쇄됐습니다`;
+    return { ok: false, reason: "disabled", detail };
   }
 
   const articles = await loadArticles(jobId);
