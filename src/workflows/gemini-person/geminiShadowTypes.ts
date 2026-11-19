@@ -46,6 +46,8 @@ export type GeminiShadow = {
   error?: string;
   /** 제목 줄 형식이 어긋났을 때의 메모(parseGeminiPersonOutput). */
   warning?: string;
+  /** 집필에 보여 준 발행본 예시 수(2026-11-19~). 0이면 zero-base로 쓴 것이다. */
+  exampleCount?: number;
 };
 
 export function readGeminiShadow(metadata: unknown): GeminiShadow | null {

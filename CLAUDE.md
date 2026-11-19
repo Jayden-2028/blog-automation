@@ -334,9 +334,14 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   - **실행기 = 맥미니의 Antigravity CLI(`agy`), 사용자의 Google AI 구독 로그인**이다. API 호출·요금이 없고(비용 원장에도
     쓰지 않는다 - 토큰 수만 `geminiShadow.usage`에 남긴다) Actions에서는 못 돈다(Gemini CLI는 6월에 개인 구독 로그인이
     끊겼다). **로그인은 맥미니에서 한 번 대화형으로 해야 한다.** 설정·launchd 템플릿은 `docs/ai-handoff/GEMINI_PERSON_SHADOW.md`.
-  - **zero-base**: Gemini에게 우리 규격을 주지 않는다. 프롬프트는 `workflows/gemini-person/geminiPersonPrompts.ts`의
-    짧은 두 개(조사 / 집필)뿐이고, `researcher.md`·`writer.md`·`core-rules.md`·`style/*.md`·`rules/*.md`·seo-guide를
-    넣거나 import하면 비교가 오염된다(`npm run test:gemini-person`이 규격 문장 혼입을 대조). 출력 약속은 `# 제목` + 본문 하나.
+  - **우리 규격은 주지 않되, 집필에는 발행본 예시를 보여 준다**(2026-11-19 사용자 결정 - 처음엔 zero-base였다).
+    `researcher.md`·`writer.md`·`core-rules.md`·`style/*.md`·`rules/*.md`·seo-guide는 여전히 넣지 않는다(`npm run test:gemini-person`이
+    규격 문장 혼입을 대조). 집필 프롬프트에만 사용자가 고른 **whyissuenow 인물 발행본 5편**(수지·문가영·한효주·조이현·신민아)을
+    "문체·구성 참고, 사실은 조사 자료만"으로 붙인다(`geminiPersonExamples.ts`). **같은 인물의 발행본은 뺀다**(답을 미리 보지 않게).
+    **글 전문은 저장소에 두지 않는다** - 저장소가 공개라 GitHub 사본이 네이버 원문과 유사문서로 잡힐 수 있다. 글 번호만 두고
+    맥미니가 실행 때 네이버에서 읽어 저장소 밖(`~/.cache/blog-automation/gemini-person-examples/`, 7일)에 캐시한다.
+    목록은 `GEMINI_PERSON_EXAMPLE_POSTS`(콤마 구분 글 번호, `none`이면 zero-base)로 바꾼다. 몇 편을 보여 줬는지는
+    `geminiShadow.exampleCount`. 조사 프롬프트는 짧은 zero-base 그대로다. 출력 약속은 `# 제목` + 본문 하나.
     출처는 응답 본문의 URL에서 뽑는다(agy에는 grounding 메타데이터가 없다).
   - **이미지 보류**: 마커 요청·수집·생성 모두 없다. 뷰어 제미나이 탭은 읽기 전용(제목·본문·출처·조사 노트, 복사 버튼)이다.
   - **흐름**: `dispatchResearch`(조사 발화 단일 지점) 끝에서 `dispatchGeminiPersonShadow`가 `job.metadata.geminiShadow.requestedAt`

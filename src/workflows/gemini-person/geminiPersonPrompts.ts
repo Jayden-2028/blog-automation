@@ -34,13 +34,33 @@ export function buildGeminiPersonResearchPrompt(subject: GeminiPersonSubject): s
   ].join("\n");
 }
 
-/** 호출 2(집필). 조사 노트를 그대로 건넨다. */
-export function buildGeminiPersonWritePrompt(subject: GeminiPersonSubject, researchNotes: string): string {
+/** 발행본 예시 한 편(제목 + 본문). geminiPersonExamples.ts가 네이버에서 읽어 온다. */
+export type GeminiPersonExample = { title: string; body: string };
+
+/**
+ * 호출 2(집필). 조사 노트를 그대로 건넨다. 2026-11-19부터 **이 블로그의 발행본 예시**를 함께 보여 준다
+ * (사용자 결정). 예시는 문체·구성 참고용이고 사실은 조사 자료를 따르게 한다. 예시가 없으면 옛 zero-base와 같다.
+ */
+export function buildGeminiPersonWritePrompt(
+  subject: GeminiPersonSubject,
+  researchNotes: string,
+  examples: readonly GeminiPersonExample[] = []
+): string {
+  const exampleBlock =
+    examples.length === 0
+      ? []
+      : [
+          "",
+          `아래는 이 블로그에 실제로 발행된 인물 글 ${examples.length}편이다. 이 블로그의 글이 어떤 문체와 구성으로 쓰이는지 참고하라.`,
+          "다만 다른 인물의 글이니 내용(사실·작품·수치)은 가져오지 말고, 사실은 아래 조사 자료만 따른다.",
+          ...examples.flatMap((ex, i) => ["", `[발행본 예시 ${i + 1}]`, ex.title ? `제목: ${ex.title}` : "", ex.body].filter((line) => line !== "")),
+        ];
   return [
     `아래는 "${subject.name}"에 대해 조사한 자료다. 이 자료를 바탕으로 이 인물에 대한 한국어 네이버 블로그 글을 써라.${noteLine(subject.requestNote)}`,
     "글의 구성, 분량, 어조는 네가 판단해서 정한다.",
     "",
     "출력 형식은 이것만 지켜라. 첫 줄은 `# 제목`이고, 그 아래부터 마크다운 본문이다. 그 밖의 설명이나 인사말은 붙이지 마라.",
+    ...exampleBlock,
     "",
     "[조사 자료]",
     researchNotes,

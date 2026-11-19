@@ -23,6 +23,7 @@ import type { AgyUsage, RunAgyResult } from "../../services/llm/runAgy.js";
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import type { ArticleJobRow } from "../../types/database.js";
 import { buildGeminiPersonResearchPrompt, buildGeminiPersonWritePrompt } from "./geminiPersonPrompts.js";
+import { loadExamplePosts } from "./geminiPersonExamples.js";
 import type { GeminiPersonSubject } from "./geminiPersonPrompts.js";
 import { parseGeminiPersonOutput } from "./parseGeminiPersonOutput.js";
 import { readGeminiShadow } from "./geminiShadowTypes.js";
@@ -49,6 +50,8 @@ export type GeminiPersonDeps = {
   model?: string;
   extraArgs?: string[];
   timeoutMs?: number;
+  /** 발행본 예시 읽기(2026-11-19). 기본은 네이버에서 읽고 저장소 밖에 캐시한다. */
+  loadExamples?: typeof loadExamplePosts;
 };
 
 export type GeminiPersonResult =
@@ -172,8 +175,10 @@ export async function runGeminiPerson(
     const recordedModel = research.model ?? model;
     if (recordedModel) shadow = { ...shadow, model: recordedModel };
 
-    // ── 호출 2: 집필 ──
-    const write = await agy({ ...base, prompt: buildGeminiPersonWritePrompt(subject, research.text) });
+    // ── 호출 2: 집필(발행본 예시를 함께 보여 준다 - 같은 인물 글은 뺀다) ──
+    const loaded = await (deps.loadExamples ?? loadExamplePosts)(subject.name).catch(() => ({ examples: [], missing: ["전체"], excludedSamePerson: [] }));
+    const exampleWarning = loaded.missing.length > 0 ? `발행본 예시 ${loaded.missing.length}편을 읽지 못해 ${loaded.examples.length}편만 보여 줬습니다.` : null;
+    const write = await agy({ ...base, prompt: buildGeminiPersonWritePrompt(subject, research.text, loaded.examples) });
     if (!write.ok) {
       return await fail(`집필 호출 실패: ${write.error}`, write.authRequired, {
         researchNotes,
@@ -198,7 +203,8 @@ export async function runGeminiPerson(
         { text: parsed.body, via: "body" },
       ]),
       usage,
-      ...(parsed.warning ? { warning: parsed.warning } : {}),
+      exampleCount: loaded.examples.length,
+      ...(parsed.warning || exampleWarning ? { warning: [parsed.warning, exampleWarning].filter(Boolean).join(" ") } : {}),
     };
     await save(done);
 

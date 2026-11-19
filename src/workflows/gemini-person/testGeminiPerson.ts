@@ -192,6 +192,11 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunAgyResult
       if (!next) throw new Error("응답 소진");
       return next;
     }) as GeminiPersonDeps["runAgyImpl"],
+    loadExamples: async () => ({
+      examples: [{ logNo: "1", title: "예시 글 제목", body: "예시 본문 문단입니다." }],
+      missing: [],
+      excludedSamePerson: [],
+    }),
     hasManifestEntry: async () => options.hasEntry ?? false,
     dispatchRefresh: async () => {
       h.refreshes += 1;
@@ -224,6 +229,7 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunAgyResult
   assert((stored.sources ?? []).find((x) => x.url === "https://news.example/a")?.title === "뉴스", "마크다운 링크는 제목도 담는다");
   assert(stored.usage?.research?.thinkingTokens === 1000 && stored.usage.totalTokens === 5000, "토큰만 기록(합계 5000)");
   assert(!JSON.stringify(stored.usage).includes("cost"), "금액 필드가 없다(구독)");
+  assert(stored.exampleCount === 1 && h.prompts[1].includes("[발행본 예시 1]") && !h.prompts[0].includes("발행본 예시"), "예시는 집필에만 들어가고 수가 기록된다");
   assert(h.calls.length === 2 && h.calls.every((c) => c.extraArgs?.join(" ") === "--mode plan" && c.model === "gemini-3.8-flash-high"), "두 호출, 기본 모델 gemini-3.8-flash-high 고정, 추가 인자 전달");
   assert(h.prompts[1].includes("조사 노트") && !h.prompts.join("\n").includes("[IMAGE"), "집필 프롬프트에 노트가 실리고 이미지 마커 요청이 없다");
   assert(h.prompts[0].includes("출처 URL을 남겨라"), "조사 프롬프트는 출처 URL을 요구한다");
@@ -487,6 +493,50 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunAgyResult
   assert(out.plain === "데뷔\n\n그는 무대에서 시작했다.\n둘째 줄\n\n- 항목 하나\n- 항목 둘", `서식 없는 복사: ${JSON.stringify(out.plain)}`);
   assert(out.body.includes('<p class="h">데뷔</p>') && out.body.includes("<li>항목 하나</li>"), "화면 본문 HTML");
   console.log("✅ 뷰어: 제미나이 블록은 있을 때만, 읽기 전용, 복사 버튼, 덧입힘·저장 시 제거");
+}
+
+
+
+// ── 발행본 예시(2026-11-19 사용자 결정) ──
+{
+  const { extractNaverPost, loadExamplePosts, exampleLogNos, DEFAULT_EXAMPLE_LOG_NOS } = await import("./geminiPersonExamples.js");
+  const { buildGeminiPersonWritePrompt } = await import("./geminiPersonPrompts.js");
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const html = `<title>배우 홍길동의 모든 것 : 네이버 블로그</title><div class="se-main-container">
+    <p class="se-text-paragraph se-text-paragraph-align-">첫 문단 &amp; 인사</p>
+    <div class="se-component se-image se-l-default"><div class="se-component-content"><div class="se-section">
+      <img src="x"><div class="se-caption"><p class="se-text-paragraph">사진 캡션은 빠져야 한다</p></div></div></div></div>
+    <p class="se-text-paragraph">둘째 문단&#x27;s</p></div><div class="post_footer_contents">꼬리</div>`;
+  const ex = extractNaverPost(html);
+  assert(ex?.title === "배우 홍길동의 모든 것" && ex.body.includes("첫 문단 & 인사") && ex.body.includes("둘째 문단's"), "네이버 본문 추출");
+  assert(!ex?.body.includes("캡션") && !ex?.body.includes("꼬리"), "사진 캡션·꼬리는 뺀다");
+
+  assert(exampleLogNos(undefined).join() === DEFAULT_EXAMPLE_LOG_NOS.join() && DEFAULT_EXAMPLE_LOG_NOS.length === 5, "기본 예시는 5편");
+  assert(exampleLogNos("none").length === 0 && exampleLogNos("1, 2,x").join() === "1,2", "예시 목록 env 파서(none = zero-base)");
+
+  const pages: Record<string, string> = {
+    "11": html,
+    "22": html.replace("홍길동", "김철수"),
+  };
+  const cacheDir = mkdtempSync(join(tmpdir(), "gp-ex-"));
+  const loaded = await loadExamplePosts("홍길동", ["11", "22", "33"], {
+    cacheDir,
+    fetchHtml: async (url) => pages[url.match(/logNo=(\d+)/)?.[1] ?? ""] ?? null,
+  });
+  assert(loaded.excludedSamePerson.join() === "11", "같은 인물의 발행본은 뺀다(답을 미리 보지 않게)");
+  assert(loaded.examples.length === 1 && loaded.examples[0].title.includes("김철수") && loaded.missing.join() === "33", "못 읽은 글은 missing");
+  const again = await loadExamplePosts("이영희", ["22"], { cacheDir, fetchHtml: async () => null });
+  assert(again.examples.length === 1, "캐시에서 다시 읽는다(네트워크 없이)");
+
+  const withEx = buildGeminiPersonWritePrompt({ name: "홍길동", requestNote: null }, "조사 노트", [{ title: "T", body: "예시 본문" }]);
+  assert(withEx.includes("[발행본 예시 1]") && withEx.includes("예시 본문") && withEx.indexOf("[발행본 예시 1]") < withEx.indexOf("[조사 자료]"), "집필 프롬프트에 예시가 조사 자료 앞에 들어간다");
+  assert(withEx.includes("내용(사실·작품·수치)은 가져오지 말고"), "예시의 사실은 가져오지 말라고 한다");
+  const noEx = buildGeminiPersonWritePrompt({ name: "홍길동", requestNote: null }, "조사 노트");
+  assert(!noEx.includes("발행본 예시"), "예시가 없으면 옛 zero-base 프롬프트와 같다");
+  console.log("✅ 발행본 예시: 추출·캡션 제외·같은 인물 제외·캐시·프롬프트 배치");
 }
 
 console.log("\n✅ 전체 통과");

@@ -31,3 +31,9 @@
 
 ## 끄기
 repo variable `PERSON_GEMINI_SHADOW=false`(큐에 올리는 쪽, telegram-update.yml) - 이미 올라간 대기분까지 멈추려면 맥 `.env`에도 같은 값을 둔다.
+
+## 발행본 예시(2026-11-19)
+
+집필 프롬프트에 whyissuenow 인물 발행본 5편을 "문체·구성 참고" 예시로 붙인다(같은 인물 글은 제외). 글 전문은 공개 저장소에
+두지 않고 맥미니가 네이버에서 읽어 `~/.cache/blog-automation/gemini-person-examples/`에 7일 캐시한다. 목록 변경은 맥미니 `.env`의
+`GEMINI_PERSON_EXAMPLE_POSTS=글번호,글번호`, 예시 없이 돌리려면 `none`.
