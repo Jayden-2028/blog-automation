@@ -691,3 +691,15 @@ const slot = (index: number, description: string, query: string | null = null): 
 }
 
 console.log("\n🎉 키노라이츠 스틸 테스트 통과");
+
+// 비전 표본은 목록 전체에서 고르게(2026-11-19, 「무빙」 155장 중 앞 30장만 보던 문제).
+{
+  const { sampleEvenly } = await import("./kinolightsPersonStills.js");
+  const list = Array.from({ length: 155 }, (_, i) => i);
+  const picked = sampleEvenly(list, 30);
+  if (picked.length !== 30 || picked[0] !== 0 || picked[29] < 140 || new Set(picked).size !== 30) {
+    throw new Error(`❌ sampleEvenly가 전체에 고르게 퍼지지 않는다: ${picked.join(",")}`);
+  }
+  if (sampleEvenly([1, 2, 3], 30).length !== 3) throw new Error("❌ sampleEvenly가 짧은 목록을 그대로 두지 않는다");
+  console.log("✅ 비전 표본이 스틸 목록 전체에 고르게 퍼진다");
+}

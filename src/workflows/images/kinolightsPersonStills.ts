@@ -313,11 +313,22 @@ async function downloadThumb(still: KinolightsStill, dest: string): Promise<bool
   }
 }
 
+/**
+ * 비전에 넣을 스틸을 목록 전체에서 **고르게** 뽑는다(2026-11-19). 앞에서 잘라 쓰면 출연진이 많은 작품
+ * (「무빙」 155장)에서 그 배우가 나오는 컷이 앞 30장 밖에 몰려 있을 때 하나도 못 본다.
+ */
+export function sampleEvenly<T>(items: readonly T[], max: number): T[] {
+  if (items.length <= max) return [...items];
+  const out: T[] = [];
+  for (let i = 0; i < max; i += 1) out.push(items[Math.floor((i * items.length) / max)]);
+  return out;
+}
+
 /** 기본 비전 고르기: 작은 버전을 임시 폴더에 받아 `claude -p`(Read)로 한 번에 판정한다. */
 export async function defaultPickSoloStills(input: PickSoloInput): Promise<PickSoloResult> {
   const dir = await mkdtemp(join(tmpdir(), "kino-solo-"));
   try {
-    const subset = input.stills.slice(0, MAX_VISION_STILLS);
+    const subset = sampleEvenly(input.stills, MAX_VISION_STILLS);
     const loaded: { still: KinolightsStill; file: string }[] = [];
     await mapWithConcurrency(subset, 6, async (still, i) => {
       const file = join(dir, `still-${String(i + 1).padStart(2, "0")}.jpg`);
