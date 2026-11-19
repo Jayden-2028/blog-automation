@@ -78,7 +78,8 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
     const nextStep = yml.indexOf("\n      - name:", start);
     const step = yml.slice(start, nextStep === -1 ? undefined : nextStep);
 
-    assert(/if:\s*failure\(\)/.test(step), `${file} 실패 알림 단계에 if: failure()가 없다`);
+    // 2026-11-17부터 조건이 `${{ failure() || cancelled() }}`다(05bc2ee) - failure()가 들어 있기만 하면 된다.
+    assert(/if:\s*(\$\{\{\s*)?failure\(\)/.test(step), `${file} 실패 알림 단계에 if: failure()가 없다`);
     assert(
       step.includes("node scripts/notifyWorkflowFailure.mjs"),
       `${file} 실패 알림이 node 직실행이 아니다 - npm ci가 흔들린 run에서는 알림도 같이 죽는다`

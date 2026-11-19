@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 제미나이 인물 그림자 폴러(2026-11-19). 템플릿이다 - 아무것도 자동으로 등록하지 않는다.
+     REPO_PATH를 맥미니의 저장소 경로로 바꿔 ~/Library/LaunchAgents/ 에 복사한다(docs/ai-handoff/GEMINI_PERSON_SHADOW.md).
+     install-launchd.sh의 JOBS 목록에는 일부러 넣지 않았다 - 전체 install이 이 폴러를 승인 없이 켜지 않게 하려는 것이다. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.blogautomation.gemini-person-poll</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>REPO_PATH/scripts/macmini/poll-gemini-person.sh</string></array>
+  <key>WorkingDirectory</key><string>REPO_PATH</string>
+  <key>EnvironmentVariables</key><dict>
+    <!-- agy가 있는 폴더가 PATH에 있어야 한다(poll-gemini-person.sh도 같은 PATH를 export한다). -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:HOME_PATH/.local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict></plist>

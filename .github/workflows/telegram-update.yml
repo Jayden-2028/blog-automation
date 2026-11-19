@@ -83,6 +83,9 @@ jobs:
           # Actions는 Claude만 돌릴 수 있으므로(Codex CLI·구독 로그인이 맥에만 있다) 거기서는 항상
           # 기본값 claude여야 한다. 비어 있으면(미설정) claude - 기존 동작 그대로다.
           RESEARCH_PROVIDER: ${{ vars.RESEARCH_PROVIDER }}
+          # 인물 제미나이 그림자 트랙(2026-11-19) 끄는 스위치 - dispatchResearch가 person job마다 job-gemini-person.yml을 쏜다.
+          # 미설정·빈 값 = 켜짐, false = 끔.
+          PERSON_GEMINI_SHADOW: ${{ vars.PERSON_GEMINI_SHADOW }}
           BLOGGER_ENABLED: ${{ vars.BLOGGER_ENABLED }}
           BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
           BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
