@@ -7,7 +7,7 @@
 1. `agy` 설치(공식 문서 https://antigravity.google/docs/cli/headless) 후 `which agy`로 위치 확인.
 2. **한 번만 대화형 로그인**: 터미널에서 `agy`를 열어 구독 계정으로 로그인한다.
 3. 확인: `agy -p "ping" --output-format json` -> `"status":"SUCCESS"`가 나오면 된다.
-   (`agy models`로 모델 목록. 특정 모델을 쓰려면 `.env`에 `GEMINI_PERSON_MODEL=<id>`, 비우면 기본 모델.)
+   (`agy models`로 모델 목록. 기본은 `gemini-3.8-flash-high`이고, 바꾸려면 `.env`에 `GEMINI_PERSON_MODEL=<id>`.)
 4. 맥미니 `.env`(저장소 루트)에 SUPABASE 키는 이미 있다. 추가로 있으면 좋은 것:
    - `GITHUB_TOKEN`, `GITHUB_REPOSITORY`(`owner/repo`) - 있어야 완료 뒤 원고 페이지 갱신을 자동 발화한다. 없으면 텔레그램에 그렇다고 알리고 갱신만 건너뛴다.
    - `CLOUDFLARE_PAGES_PROJECT_NAME` - 텔레그램의 `📄 원고 페이지 열기` 링크용. 텔레그램 봇 토큰은 기존 폴러와 같다.

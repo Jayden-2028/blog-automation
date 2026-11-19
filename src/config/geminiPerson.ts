@@ -5,10 +5,16 @@
 //
 // 실행은 **맥미니의 Antigravity CLI(`agy`)** 가 한다 - 사용자의 Google AI 구독 로그인으로 돌아 API 요금이 없다.
 
-/** `agy --model`에 넘길 값. 비우면 agy의 기본 모델을 쓴다(`agy models`로 목록 확인). */
-export function geminiPersonModel(raw: string | undefined = process.env.GEMINI_PERSON_MODEL): string | undefined {
+/**
+ * `agy --model`에 넘길 값. 기본은 **`gemini-3.8-flash-high`**(2026-11-19 맥미니 `agy models` 실측 - 목록의 Gemini 중
+ * 최상위이고 Pro는 없다). 비워 두면 안 된다: agy 목록에는 Claude·GPT 모델도 있어서 agy 기본값에 맡기면
+ * "제미나이 버전"이 제미나이가 아닐 수 있다. 바꾸려면 맥미니 `.env`의 `GEMINI_PERSON_MODEL`.
+ */
+export const DEFAULT_GEMINI_PERSON_MODEL = "gemini-3.8-flash-high";
+
+export function geminiPersonModel(raw: string | undefined = process.env.GEMINI_PERSON_MODEL): string {
   const value = (raw ?? "").trim();
-  return value || undefined;
+  return value || DEFAULT_GEMINI_PERSON_MODEL;
 }
 
 /** `AGY_EXTRA_ARGS` - 공백으로 나눈 추가 인자(예: `--mode plan`). 따옴표 묶음은 지원하지 않는다. */

@@ -146,7 +146,7 @@ function envelope(over: Record<string, unknown> = {}): string {
   assert(!seen[0].cwd.startsWith(process.cwd()) && seen[0].cwd.includes("agy-person-"), "저장소 밖 빈 임시 폴더에서 실행한다");
   assert(!existsSync(seen[0].cwd), "임시 폴더는 실행 뒤 지운다");
   await runAgy({ prompt: "x", executor: exec({}) });
-  assert(!seen[1].args.includes("--model"), "모델을 안 주면 --model을 넘기지 않는다(agy 기본 모델)");
+  assert(!seen[1].args.includes("--model"), "runAgy 자체는 모델을 안 주면 --model을 넘기지 않는다(호출부가 기본값을 준다)");
 
   const authRun = await runAgy({ prompt: "x", executor: exec({ code: 1, stdout: "", stderr: "authentication required" }) });
   assert(!authRun.ok && authRun.authRequired && authRun.error.includes("맥미니 agy 로그인 필요"), "인증 오류 -> authRequired");
@@ -154,7 +154,7 @@ function envelope(over: Record<string, unknown> = {}): string {
   assert(!timeout.ok && timeout.error.includes("15분"), "타임아웃");
   const noBin = await runAgy({ prompt: "x", executor: exec({ spawnError: "spawn agy ENOENT" }) });
   assert(!noBin.ok && noBin.error.includes("PATH"), "agy가 없으면 PATH 안내");
-  assert(agyExtraArgs(" --mode  plan ").join("|") === "--mode|plan" && agyExtraArgs("").length === 0 && geminiPersonModel("  ") === undefined && geminiPersonModel("m") === "m", "env 파서");
+  assert(agyExtraArgs(" --mode  plan ").join("|") === "--mode|plan" && agyExtraArgs("").length === 0 && geminiPersonModel("  ") === "gemini-3.8-flash-high" && geminiPersonModel(undefined) === "gemini-3.8-flash-high" && geminiPersonModel("m") === "m", "env 파서");
   console.log("✅ agy 러너: 봉투·인자·인증 오류·타임아웃·빈 임시 폴더·권한 우회 없음");
 }
 

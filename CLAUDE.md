@@ -345,7 +345,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     claim(`startedAt`+`claimId` 병합 후 재확인)해 agy를 두 번(조사 -> 집필, 각 15분 상한, 빈 임시 폴더에서 실행,
     `--dangerously-skip-permissions` 없음) 돌린다. 40분 넘게 안 끝난 진행 표식은 1회만 다시 집고 그다음엔 실패로 닫는다.
   - **스위치·옵션**: repo variable `PERSON_GEMINI_SHADOW`(미설정·빈 값 = 켜짐, `false` = 끔 - 맥 `.env`에도 두면 대기분까지
-    멈춘다), `GEMINI_PERSON_MODEL`(`agy --model`, 비우면 agy 기본 모델), `AGY_EXTRA_ARGS`(공백 구분 추가 인자).
+    멈춘다), `GEMINI_PERSON_MODEL`(`agy --model`, 기본 `gemini-3.8-flash-high` - agy 목록에 Claude·GPT도 있어 기본값에 맡기지 않는다), `AGY_EXTRA_ARGS`(공백 구분 추가 인자).
   - **저장·표시**: `job.metadata.geminiShadow`(원자 병합, migration 없음)가 유일한 원본이다. manifest에는 복사하지 않고
     페이지를 쓸 때(`writeManuscriptPages` -> `attachGeminiShadows`) 덧입힌다. 끝나면 manifest 행이 이미 있을 때만
     텔레그램 한 통(`📄 원고 페이지 열기`) + 페이지 갱신(`manuscripts-refresh.yml` 발화 - 맥미니 `.env`에 `GITHUB_TOKEN`·
