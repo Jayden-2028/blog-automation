@@ -20,6 +20,7 @@ import {
 } from "./kinolightsPersonStills.js";
 import type { PersonSlot } from "./kinolightsPersonStills.js";
 import {
+  searchKinolightsLinks,
   searchKinolightsWorkUrls,
 } from "./searchKinolightsStills.js";
 import {
@@ -382,7 +383,7 @@ const slot = (index: number, description: string, query: string | null = null): 
     }
   );
   assert(result.bySlot.size === 0 && vision === 0, "동명 작품 「수지」의 스틸은 쓰지 않는다");
-  assert(queries.length === 2 && queries[1] === "site:kinolights.com 안나", `두 번째 질의는 site: 폴백이다: ${queries.join(" | ")}`);
+  assert(queries.length === 3 && queries[1] === "키노라이츠 안나" && queries[2] === "site:kinolights.com 안나", `질의 순서(플랫폼 언급 없음): ${queries.join(" | ")}`);
   assert(result.failures.some((f) => f.includes("제목 불일치(수지)")), `탈락 사유가 남는다: ${result.failures.join(" | ")}`);
 
   // job 단위 옛 경로도 인물명을 작품으로 인정하지 않는다.
@@ -478,7 +479,7 @@ const slot = (index: number, description: string, query: string | null = null): 
   );
   const firstQueries = queries.filter((q) => q.endsWith("수지 키노"));
   assert(firstQueries.length === 8, `작품 8개까지만 검색한다: ${firstQueries.length}`);
-  assert(queries.length === 16, `작품당 최대 2회 = 최악 16회: ${queries.length}`);
+  assert(queries.length === 24, `작품당 3회(플랫폼 언급 없음) = 24회: ${queries.length}`);
   assert(capped.failures.filter((f) => f.includes("작품 수 상한")).length === 2, "넘친 작품은 사유를 남긴다");
 
   const boom = await collectPersonWorkStills(
@@ -486,7 +487,7 @@ const slot = (index: number, description: string, query: string | null = null): 
     { searchWorkUrls: async () => { throw new Error("네트워크"); } }
   );
   assert(boom.bySlot.size === 0, "검색이 터져도 예외 없음");
-  console.log("✅ [인물] 비전 실패·0장·예외는 빈 결과, 전체 목록 사용, 작품 8개 상한(Serper 최악 16회)");
+  console.log("✅ [인물] 비전 실패·0장·예외는 빈 결과, 전체 목록 사용, 작품 8개 상한(Serper 최악 24~32회)");
 }
 
 // P6) Serper 호출: 작품 URL 전부 돌려주고, 원장에 jobId로 기록한다.
@@ -516,6 +517,101 @@ const slot = (index: number, description: string, query: string | null = null): 
     else process.env.SERPER_API_KEY = prevKey;
   }
   console.log("✅ [인물] Serper 호출 기록(jobId)");
+}
+
+// P8) 2026-11-19 실측 후속: 리뷰 페이지 따라가기 · 질의 순서 · 동명 작품 출연진 가르기 · 감독판 후순위.
+{
+  // 리뷰 페이지가 1위로 오면 거기서 작품 주소를 되찾는다.
+  const fetchedReview: string[] = [];
+  const review = await collectPersonWorkStills(
+    { keyword: "수지", slots: [slot(1, "'안나'에서 유미를 연기한 수지")] },
+    {
+      searchWorkUrls: async () => ["https://kinolights.com/review/137306"],
+      fetchPage: async (url) => {
+        if (url.includes("/review/")) {
+          fetchedReview.push(url);
+          return '<html><a href="https://kinolights.com/season/76275">안나</a></html>';
+        }
+        return url.endsWith("/media") ? stillHtml("안나", 5) : seasonHtml("안나", [{ name: "수지", character: "유미" }]);
+      },
+      loadFullStills: async () => null,
+      pickSoloStills: async (i) => ({ ok: true, picks: i.stills.slice(0, 1) }),
+    }
+  );
+  assert(fetchedReview.length === 1 && review.bySlot.get(1)?.[0].sourcePage.includes("76275"), "리뷰 페이지에서 작품 주소를 되찾아 쓴다");
+
+  // 같은 제목 두 작품(76765 vs 76275)은 출연진으로 가른다. 첫 질의에서 찾으면 다음 질의는 안 쓴다.
+  const queries: string[] = [];
+  const multi = await collectPersonWorkStills(
+    { keyword: "수지", slots: [slot(1, "'안나'에서 유미를 연기한 수지 — 웹 검색")] },
+    {
+      searchWorkUrls: async (q) => {
+        queries.push(q);
+        return ["https://kinolights.com/season/76765", "https://kinolights.com/season/66321/media", "https://kinolights.com/season/76275"];
+      },
+      fetchPage: async (url) => {
+        const other = url.includes("76765") || url.includes("66321");
+        if (url.endsWith("/media")) return stillHtml("안나", 3, other ? "e" : "f");
+        return seasonHtml("안나", [{ name: other ? "다른배우" : "수지", character: "유미" }]);
+      },
+      loadFullStills: async () => null,
+      pickSoloStills: async (i) => ({ ok: true, picks: i.stills.slice(0, 1) }),
+    }
+  );
+  assert(multi.bySlot.get(1)?.[0].sourcePage.includes("76275"), "동명 작품 셋 중 출연진에 수지가 있는 76275를 고른다");
+  assert(queries.length === 1, "통과하면 다음 질의를 쓰지 않는다");
+
+  // 질의 순서(플랫폼 언급 시 4개) - 전부 실패하는 경우.
+  const order: string[] = [];
+  await collectPersonWorkStills(
+    { keyword: "수지", slots: [slot(1, "쿠팡플레이 '안나'의 수지")] },
+    { searchWorkUrls: async (q) => { order.push(q); return []; } }
+  );
+  assert(
+    order.join("|") === "안나 수지 키노|키노라이츠 안나|안나 쿠팡플레이 키노라이츠|site:kinolights.com 안나",
+    `질의 순서: ${order.join(" | ")}`
+  );
+
+  // 감독판은 일반판이 있으면 뒤로 미룬다(설명이 감독판을 말하지 않는 한).
+  const dc = (wants: boolean) =>
+    collectPersonWorkStills(
+      { keyword: "수지", slots: [slot(1, wants ? "'안나 (감독판)'의 수지" : "'안나'의 수지")] },
+      {
+        searchWorkUrls: async () => ["https://kinolights.com/season/112050", "https://kinolights.com/season/76275"],
+        fetchPage: async (url) => {
+          const cut = url.includes("112050");
+          if (url.endsWith("/media")) return stillHtml(cut ? "안나 (감독판)" : "안나", 3);
+          return seasonHtml("안나", [{ name: "수지", character: "유미" }]);
+        },
+        loadFullStills: async () => null,
+        pickSoloStills: async (i) => ({ ok: true, picks: i.stills.slice(0, 1) }),
+      }
+    );
+  assert((await dc(true)).bySlot.get(1)?.[0].sourcePage.includes("112050"), "설명이 감독판이면 감독판을 쓴다");
+
+  // 직접 링크 + goto 링크를 모두 모은다.
+  const prevKey = process.env.SERPER_API_KEY;
+  const prevFetch = globalThis.fetch;
+  process.env.SERPER_API_KEY = "dummy-not-a-real-key";
+  globalThis.fetch = (async (url: string) =>
+    String(url).includes("resolve")
+      ? ({ ok: true, json: async () => ({ links: ["https://kinolights.com/season/76275"] }) } as unknown as Response)
+      : ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            organic: [{ link: "https://kinolights.com/review/137306" }, { link: "https://kinolights.com/season/76765" }, { link: "https://www.google.com/goto?url=x" }, { link: "https://namu.wiki/a" }],
+          }),
+        } as unknown as Response)) as typeof fetch;
+  try {
+    const links = await searchKinolightsLinks("안나 수지 키노", { record: (async () => {}) as never });
+    assert(links.length === 3 && links[0].includes("review") && links[2].includes("76275"), `리뷰·작품·goto 해제 링크를 모두 모은다: ${links.join(",")}`);
+  } finally {
+    globalThis.fetch = prevFetch;
+    if (prevKey === undefined) delete process.env.SERPER_API_KEY;
+    else process.env.SERPER_API_KEY = prevKey;
+  }
+  console.log("✅ [인물] 리뷰 따라가기·질의 순서(≤4)·동명 작품 출연진 가르기·감독판 후순위");
 }
 
 // P7) collectWebImages 배선 - 인물 글은 자리별, 그 외 카테고리는 기존 job 단위 호출 그대로.

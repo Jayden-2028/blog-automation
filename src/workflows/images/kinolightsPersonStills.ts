@@ -36,16 +36,40 @@ import {
   extractStills,
   normalize,
   readWorkTitle,
-  searchKinolightsWorkUrls,
+  REVIEW_URL,
+  findWorkLinkInHtml,
+  searchKinolightsLinks,
   titleMatchesKeyword,
   toMediaUrl,
 } from "./searchKinolightsStills.js";
 import type { KinolightsStill } from "./searchKinolightsStills.js";
 
-/** 한 원고에서 찾아볼 작품 수 상한. **Serper 비용 가드**다(작품당 최대 2건 = 원고당 최악 16건). */
+/** 한 원고에서 찾아볼 작품 수 상한. **Serper 비용 가드**다(작품당 최대 4건 = 원고당 최악 32건, 플랫폼 언급이 없으면 24건). */
 export const MAX_WORKS_PER_ARTICLE = 8;
-/** 작품 하나에서 받아 볼 후보 페이지 수. 질의 두 개가 각각 틀린 페이지를 물어도 여기서 끊긴다. */
-const MAX_PAGES_PER_WORK = 3;
+/** 작품 하나에서 출연진까지 확인해 볼 후보 페이지 수(동명 작품 여럿을 출연진으로 가른다). */
+const MAX_PAGES_PER_WORK = 4;
+/** 작품 하나에서 따라가 볼 리뷰 페이지 수. */
+const MAX_REVIEW_FOLLOWS = 2;
+const PLATFORM_IN_TEXT = /넷플릭스|티빙|쿠팡플레이|디즈니\+|디즈니플러스|웨이브|왓챠|애플tv\+?|tvN|JTBC|KBS|MBC|SBS|ENA/i;
+
+/** 자리 설명에 적힌 플랫폼·방송사(없으면 null). */
+export function platformOf(descriptions: readonly string[]): string | null {
+  for (const text of descriptions) {
+    const m = text.match(PLATFORM_IN_TEXT);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+/** 작품 검색 질의 순서. 플랫폼이 설명에 있을 때만 세 번째가 낀다(최대 4건). */
+export function workQueries(workTitle: string, personName: string, platform: string | null): string[] {
+  return [
+    `${workTitle} ${personName} 키노`,
+    `키노라이츠 ${workTitle}`,
+    ...(platform ? [`${workTitle} ${platform} 키노라이츠`] : []),
+    `site:kinolights.com ${workTitle}`,
+  ];
+}
 /** 비전에 보여 줄 스틸 상한. */
 export const MAX_VISION_STILLS = 30;
 /** 자리마다 앞에 세울 단독컷 상한. */
@@ -151,15 +175,35 @@ type ResolveOutcome = { ok: true; work: ResolvedWork; note: string } | { ok: fal
 async function resolveWork(
   workTitle: string,
   personName: string,
+  opts: { platform: string | null; wantsDirectorsCut: boolean },
   deps: { searchWorkUrls: (query: string) => Promise<string[]>; fetchPage: (url: string) => Promise<string | null> }
 ): Promise<ResolveOutcome> {
   const personKey = normalize(personName);
   const tried = new Set<string>();
   const why: string[] = [];
+  let reviewFollows = 0;
+  /** 감독판이라 미룬 통과 후보. 다른 통과 후보가 없을 때만 쓴다. */
+  let deferred: ResolveOutcome | null = null;
 
-  for (const query of [`${workTitle} ${personName} 키노`, `site:kinolights.com ${workTitle}`]) {
+  for (const query of workQueries(workTitle, personName, opts.platform)) {
     if (tried.size >= MAX_PAGES_PER_WORK) break;
-    const urls = await deps.searchWorkUrls(query).catch(() => [] as string[]);
+    const results = await deps.searchWorkUrls(query).catch(() => [] as string[]);
+
+    // 리뷰 페이지는 작품 주소로 되돌린다.
+    const urls: string[] = [];
+    for (const url of results) {
+      if (REVIEW_URL.test(url) && !/\/(?:season|movie)\//.test(url)) {
+        if (reviewFollows >= MAX_REVIEW_FOLLOWS) continue;
+        reviewFollows += 1;
+        const html = await deps.fetchPage(url).catch(() => null);
+        const work = html ? findWorkLinkInHtml(html) : null;
+        if (work) urls.push(work);
+        else why.push(`${url} 리뷰에서 작품 주소를 못 찾음`);
+      } else {
+        urls.push(url);
+      }
+    }
+
     for (const url of urls) {
       const mediaUrl = toMediaUrl(url);
       if (!mediaUrl || tried.has(mediaUrl)) continue;
@@ -193,13 +237,21 @@ async function resolveWork(
         character = hit.character;
         castCheck = "verified";
       }
-      return {
+      const outcome: ResolveOutcome = {
         ok: true,
         work: { mediaUrl, serverStills: extractStills(mediaHtml, mediaUrl), character, castCheck },
         note: castCheck === "verified" ? "출연진 확인" : "출연진을 읽지 못해 제목만으로 통과",
       };
+      // 감독판은 설명이 감독판을 말할 때만 바로 쓴다. 아니면 일반판을 더 찾아보고, 없으면 이것을 쓴다.
+      if (/감독판/.test(ogTitle) && !opts.wantsDirectorsCut) {
+        deferred ??= outcome;
+        continue;
+      }
+      return outcome;
     }
+    if (deferred) break; // 일반판이 안 나온 채 후보가 소진되면 감독판을 쓴다.
   }
+  if (deferred) return deferred;
   return { ok: false, reason: why.length > 0 ? `작품 페이지 후보 탈락(${why.join("; ")})` : "작품 페이지를 찾지 못함" };
 }
 
@@ -341,7 +393,7 @@ export async function collectPersonWorkStills(input: PersonStillsInput, deps: Pe
   try {
     const personName = input.personName ?? personNameOf(input.keyword);
     const searchWorkUrls =
-      deps.searchWorkUrls ?? ((query: string) => searchKinolightsWorkUrls(query, { jobId: input.jobId, record: input.record }));
+      deps.searchWorkUrls ?? ((query: string) => searchKinolightsLinks(query, { jobId: input.jobId, record: input.record }));
     const fetchPage = deps.fetchPage ?? defaultFetchPage;
     const loadFullStills = deps.loadFullStills ?? ((mediaUrl: string) => loadKinolightsMediaStills(mediaUrl));
     const pickSolo = deps.pickSoloStills ?? defaultPickSoloStills;
@@ -374,7 +426,15 @@ export async function collectPersonWorkStills(input: PersonStillsInput, deps: Pe
       const label = `ℹ️ 키노라이츠 「${group.title}」(${personName})`;
       const slotList = group.slots.map((s) => s.index).join(", ");
       try {
-        const resolved = await resolveWork(group.title, personName, { searchWorkUrls, fetchPage });
+        const resolved = await resolveWork(
+          group.title,
+          personName,
+          {
+            platform: platformOf(group.slots.map((x) => x.description)),
+            wantsDirectorsCut: group.slots.some((x) => /감독판/.test(x.description)),
+          },
+          { searchWorkUrls, fetchPage }
+        );
         if (!resolved.ok) {
           failures.push(`${label}: ${resolved.reason} - 자리 ${slotList}은 일반 검색으로 갑니다.`);
           return;

@@ -44,6 +44,17 @@ const STILL_PATH = /original\/(content_still_cut\/\d{6}\/\d{2}\/[0-9a-f-]{36}\.(
 /** 작품 페이지 URL. `/media`·`/reviews` 같은 하위 경로가 붙어 와도 받는다. */
 const WORK_URL = /https?:\/\/(?:m\.)?kinolights\.com\/(season|movie)\/(\d+)/i;
 
+/** 리뷰 페이지 URL. 작품 페이지가 아니라 리뷰가 검색 1위로 오는 경우가 있다(2026-11-19 실측: `안나 수지 키노`). */
+export const REVIEW_URL = /https?:\/\/(?:m\.)?kinolights\.com\/review\/\d+/i;
+
+/** HTML 안의 첫 작품 링크(`/season|movie/<id>`). 리뷰 페이지에서 작품 주소를 되찾는 데 쓴다. */
+export function findWorkLinkInHtml(html: string): string | null {
+  const matched = html.match(/https?:\/\/(?:m\.)?kinolights\.com\/(?:season|movie)\/\d+|["'(]\/(?:season|movie)\/\d+/i);
+  if (!matched) return null;
+  const raw = matched[0].replace(/^["'(]/, "");
+  return raw.startsWith("/") ? `https://kinolights.com${raw}` : raw;
+}
+
 const SEARCH_ENDPOINT = "https://google.serper.dev/search";
 /**
  * goto 링크를 실제 주소로 되돌리는 엔드포인트(2026-10-30 서퍼 공지 "Changes to Google result links").
@@ -314,6 +325,34 @@ export async function searchKinolightsWorkUrls(query: string, usage: SerperUsage
     return resolved.filter((link) => WORK_URL.test(link));
   } catch {
     // 응답을 못 받은 네트워크 실패만 여기서 기록한다.
+    if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
+    return [];
+  }
+}
+
+/**
+ * 질의 하나의 결과에서 **작품 URL과 리뷰 URL을 전부** 돌려준다(순서 유지). 직접 링크에 더해 goto 링크도 항상 푼다
+ * (0크레딧) - 동명 작품 여럿을 출연진으로 가르려면 후보가 많아야 한다(2026-11-19). 실패는 빈 배열.
+ */
+export async function searchKinolightsLinks(query: string, usage: SerperUsageContext = {}): Promise<string[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+  let responded = false;
+  try {
+    const res = await fetch(SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: query, gl: "kr", hl: "ko", num: 10 }),
+    });
+    responded = true;
+    recordSerperUsage({ endpoint: "search", ok: res.ok, status: res.status, jobId: usage.jobId, record: usage.record });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { organic?: { link?: string }[] };
+    const links = (json.organic ?? []).map((item) => item.link).filter((l): l is string => typeof l === "string");
+    const resolved = await resolveGotoLinks(links.filter((link) => GOTO_LINK.test(link)), key);
+    const keep = (link: string) => WORK_URL.test(link) || REVIEW_URL.test(link);
+    return [...new Set([...links.filter(keep), ...resolved.filter(keep)])];
+  } catch {
     if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
     return [];
   }
