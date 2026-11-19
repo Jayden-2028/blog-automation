@@ -3,7 +3,6 @@
 // 이 계산이 틀리면 대시보드가 조용히 거짓말을 한다 - 아무도 즉시 눈치채지 못하는 종류의 버그라
 // 경계 조건(단가 미등록 / usage 누락 / 단가 인상일)을 특히 촘촘히 고정한다.
 import { estimateCostUsd, API_PRICING } from "./apiPricing.js";
-import { GEMINI_PERSON_MODEL } from "./geminiPerson.js";
 import { GEMINI_IMAGE_MODEL, OPENAI_IMAGE_MODEL } from "../services/images/generateImage.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -84,11 +83,6 @@ async function main(): Promise<void> {
   }
   console.log(`✅ 호출 중인 이미지 모델이 단가표에 등록돼 있다 (${OPENAI_IMAGE_MODEL}, ${GEMINI_IMAGE_MODEL})`);
 
-  // 10) 인물 제미나이 그림자 트랙의 모델도 같은 가드로 막는다(GEMINI_PERSON_MODEL 변수로 바꿔도 단가표가 따라와야 한다).
-  assert(API_PRICING[GEMINI_PERSON_MODEL], `인물 그림자 모델 ${GEMINI_PERSON_MODEL}이 단가표에 없다 - apiPricing.ts에 등록하라`);
-  const personProbe = estimateCostUsd({ model: "gemini-3.1-pro-preview", inputTokens: 1_000_000, outputTokens: 1_000_000 });
-  assert(personProbe.costUsd === 14, `gemini-3.1-pro-preview 입력 1M + 출력 1M = $14여야 한다 (실제: ${personProbe.costUsd})`);
-  console.log(`✅ 인물 그림자 모델이 단가표에 등록돼 있다 (${GEMINI_PERSON_MODEL}, $2 / $12)`);
 
   console.log("\n✅ 전체 통과");
 }

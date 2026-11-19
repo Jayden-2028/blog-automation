@@ -24,11 +24,6 @@
 // - gemini-3.6-flash: 입력 $0.75 / 출력 $3.75, **2027-01-01부터 $1.50 / $7.50으로 인상 예정**
 //   (같은 문서에 명시돼 있다). 인상일을 밴드로 넣어 두지 않으면 새해 첫날부터 실제 지출의 절반만
 //   잡히는데, 그런 오차는 아무도 눈치채지 못한 채 몇 달을 간다.
-// - gemini-3.1-pro-preview: 입력 $2.00 / 출력(thinking 포함) $12.00 per 1M tokens, **프롬프트 200k 토큰 이하 구간**
-//   (ai.google.dev/gemini-api/docs/pricing, 2026-11-19 확인). 200k 초과는 $4 / $18이지만 인물 그림자 트랙의
-//   프롬프트(조사 노트 포함)는 수만 토큰이라 닿지 않는다 - 닿으면 이 표가 과소 집계한다. Google Search
-//   grounding은 월 5,000건 무료 후 1,000건당 $14인데 **토큰이 아니라 쿼리 단위라 이 표에 넣지 못한다**
-//   (금액 대시보드에서 빠진다). 출력 토큰에는 thoughtsTokenCount를 더해 기록한다(runGeminiPerson.ts).
 
 export type ApiUsageProvider = "openai" | "gemini" | "serper";
 
@@ -67,11 +62,6 @@ export const API_PRICING: Record<string, ApiModelPricing> = {
     provider: "gemini",
     bands: [{ inputPerMTok: 0.25, outputPerMTok: 30 }],
     note: "이미지 생성. 이 모델의 텍스트 출력 단가는 $1.50이지만 우리는 이미지만 받으므로 $30으로 본다.",
-  },
-  "gemini-3.1-pro-preview": {
-    provider: "gemini",
-    bands: [{ inputPerMTok: 2, outputPerMTok: 12 }],
-    note: "인물 제미나이 그림자 트랙(PERSON_GEMINI_SHADOW). 프롬프트 200k 이하 단가, thinking 토큰은 출력 단가. 검색 grounding $14/1,000건은 미포함.",
   },
   "gemini-3.6-flash": {
     provider: "gemini",

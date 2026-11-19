@@ -3,18 +3,21 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import { GEMINI_PERSON_MODEL, isGeminiPersonShadowEnabled } from "../../config/geminiPerson.js";
-import { runGeminiResearch } from "../../services/llm/runGeminiResearch.js";
-import type { RunGeminiResearchResult } from "../../services/llm/runGeminiResearch.js";
+import { agyExtraArgs, geminiPersonModel, isGeminiPersonShadowEnabled } from "../../config/geminiPerson.js";
+import { AGY_LOGIN_MESSAGE, isAgyAuthError, parseAgyEnvelope, runAgy } from "../../services/llm/runAgy.js";
+import type { AgyExecutor, RunAgyResult } from "../../services/llm/runAgy.js";
 import type { ArticleJobRow } from "../../types/database.js";
 import { dispatchResearch } from "../research/dispatchResearch.js";
 import { renderManuscriptPage } from "../manuscripts/renderManuscriptPage.js";
 import { withoutGeminiShadow } from "../manuscripts/manuscriptManifest.js";
 import type { ManuscriptManifest, ManuscriptTopicEntry } from "../manuscripts/manuscriptManifest.js";
 import { dispatchGeminiPersonShadow } from "./dispatchGeminiPersonShadow.js";
+import { claimGeminiShadow, closeExhausted, pickDue, STALE_START_MS } from "./geminiShadowQueue.js";
+import type { PendingRow } from "./geminiShadowQueue.js";
+import { pollGeminiPersonOnce } from "../../jobs/geminiPersonPollJob.js";
 import { buildGeminiPersonResearchPrompt, buildGeminiPersonWritePrompt } from "./geminiPersonPrompts.js";
 import { parseGeminiPersonOutput } from "./parseGeminiPersonOutput.js";
-import { buildSources, runGeminiPerson } from "./runGeminiPerson.js";
+import { extractSources, runGeminiPerson } from "./runGeminiPerson.js";
 import type { GeminiPersonDeps } from "./runGeminiPerson.js";
 import { attachGeminiShadows, parseGeminiBody, toGeminiPageView } from "./geminiShadowView.js";
 import type { GeminiShadow } from "./geminiShadowTypes.js";
@@ -104,52 +107,77 @@ function job(overrides: Partial<ArticleJobRow> = {}, metadata: Record<string, un
   console.log("✅ 출력 파싱(제목/본문/펜스/경고/빈 출력)");
 }
 
-// ── 3) 래퍼: 주입한 fetch로 grounding 옵션·사용량 필드 ───────────────────────
+// ── 3) agy 러너: 봉투 파싱·인자·인증 오류·타임아웃·빈 폴더 ──────────────────
+function envelope(over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    conversation_id: "c-1",
+    status: "SUCCESS",
+    response: "응답 본문",
+    duration_seconds: 3,
+    num_turns: 2,
+    usage: { input_tokens: 100, output_tokens: 50, thinking_tokens: 20, cache_read_tokens: 5, total_tokens: 175 },
+    ...over,
+  });
+}
+
 {
-  const bodies: Record<string, unknown>[] = [];
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
-    bodies.push(JSON.parse(String(init?.body)));
-    return new Response(
-      JSON.stringify({
-        candidates: [{ content: { parts: [{ text: "응답" }] }, groundingMetadata: { groundingChunks: [{ web: { uri: "https://a.example/x", title: "a.example" } }] } }],
-        usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 400, thoughtsTokenCount: 200, toolUsePromptTokenCount: 50 },
-      }),
-      { status: 200 }
-    );
-  }) as typeof fetch;
-  try {
-    const grounded = await runGeminiResearch({ prompt: "p", apiKey: "dummy-not-a-real-key" });
-    const plain = await runGeminiResearch({ prompt: "p", apiKey: "dummy-not-a-real-key", grounding: false, temperature: 0.7, maxOutputTokens: 1234 });
-    assert(grounded.ok && plain.ok, "래퍼 호출 성공");
-    assert(Array.isArray(bodies[0].tools) && !("tools" in bodies[1]), "grounding 기본 켜짐, false면 tools 없음");
-    const gen = bodies[1].generationConfig as { temperature: number; maxOutputTokens: number };
-    assert(gen.temperature === 0.7 && gen.maxOutputTokens === 1234, "temperature/maxOutputTokens 전달");
-    assert(grounded.ok && grounded.usage?.thinkingTokens === 200 && grounded.usage.toolUseTokens === 50, "thinking·도구 토큰을 읽는다");
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-  console.log("✅ runGeminiResearch 확장(grounding 토글·temperature·thinking/toolUse 토큰)");
+  const ok = parseAgyEnvelope(`진단 한 줄\n${envelope()}\n`);
+  assert("ok" in ok && ok.ok && ok.text === "응답 본문" && ok.usage.thinkingTokens === 20 && ok.usage.totalTokens === 175 && ok.numTurns === 2, "봉투 파싱(앞 잡음 허용)");
+  const bad = parseAgyEnvelope(envelope({ status: "ERROR", response: "boom" }));
+  assert("error" in bad && bad.error.includes("ERROR") && !bad.authRequired, "SUCCESS가 아니면 사유");
+  const auth1 = parseAgyEnvelope("", "Error: authentication required. Run agy to log in.");
+  assert("error" in auth1 && auth1.authRequired && auth1.error === AGY_LOGIN_MESSAGE, "stderr 인증 오류 -> 로그인 필요");
+  const auth2 = parseAgyEnvelope(envelope({ status: "ERROR", response: "Authentication required" }));
+  assert("error" in auth2 && auth2.authRequired, "봉투 안 인증 오류도 같다");
+  assert("error" in parseAgyEnvelope("그냥 글") && "error" in parseAgyEnvelope(envelope({ response: "  " })), "봉투 없음/빈 응답은 오류");
+  assert(isAgyAuthError("Not logged in") && !isAgyAuthError("rate limit"), "인증 오류 판별");
+
+  const seen: { binary: string; args: string[]; cwd: string }[] = [];
+  const exec = (result: Partial<Awaited<ReturnType<AgyExecutor>>>): AgyExecutor => async (binary, args, o) => {
+    seen.push({ binary, args, cwd: o.cwd });
+    return { code: 0, stdout: envelope(), stderr: "", timedOut: false, ...result };
+  };
+  const r = await runAgy({ prompt: "질문", model: "m-1", extraArgs: ["--mode", "plan"], executor: exec({}) });
+  assert(r.ok && r.text === "응답 본문", "러너 성공");
+  const a = seen[0].args;
+  assert(a[0] === "-p" && a[1] === "질문" && a.includes("--output-format") && a[a.indexOf("--output-format") + 1] === "json", "-p + json 출력");
+  assert(a[a.indexOf("--model") + 1] === "m-1" && a[a.indexOf("--print-timeout") + 1] === "15m" && a.slice(-2).join(" ") === "--mode plan", "모델·타임아웃 15m·추가 인자");
+  assert(!a.includes("--dangerously-skip-permissions"), "권한 우회 플래그를 넘기지 않는다");
+  assert(!seen[0].cwd.startsWith(process.cwd()) && seen[0].cwd.includes("agy-person-"), "저장소 밖 빈 임시 폴더에서 실행한다");
+  assert(!existsSync(seen[0].cwd), "임시 폴더는 실행 뒤 지운다");
+  await runAgy({ prompt: "x", executor: exec({}) });
+  assert(!seen[1].args.includes("--model"), "모델을 안 주면 --model을 넘기지 않는다(agy 기본 모델)");
+
+  const authRun = await runAgy({ prompt: "x", executor: exec({ code: 1, stdout: "", stderr: "authentication required" }) });
+  assert(!authRun.ok && authRun.authRequired && authRun.error.includes("맥미니 agy 로그인 필요"), "인증 오류 -> authRequired");
+  const timeout = await runAgy({ prompt: "x", executor: exec({ timedOut: true, stdout: "" }) });
+  assert(!timeout.ok && timeout.error.includes("15분"), "타임아웃");
+  const noBin = await runAgy({ prompt: "x", executor: exec({ spawnError: "spawn agy ENOENT" }) });
+  assert(!noBin.ok && noBin.error.includes("PATH"), "agy가 없으면 PATH 안내");
+  assert(agyExtraArgs(" --mode  plan ").join("|") === "--mode|plan" && agyExtraArgs("").length === 0 && geminiPersonModel("  ") === undefined && geminiPersonModel("m") === "m", "env 파서");
+  console.log("✅ agy 러너: 봉투·인자·인증 오류·타임아웃·빈 임시 폴더·권한 우회 없음");
 }
 
 // ── 공용 가짜 ───────────────────────────────────────────────────────────────
-function okResult(text: string, withSource = true): RunGeminiResearchResult {
+function okResult(text: string, over: Partial<Extract<RunAgyResult, { ok: true }>> = {}): RunAgyResult {
   return {
     ok: true,
     text,
-    groundingSources: withSource ? [{ title: "news.example", url: "https://news.example/a?utm_source=x" }] : [],
+    model: "agy-model-x",
+    usage: { inputTokens: 1000, outputTokens: 500, thinkingTokens: 1000, cacheReadTokens: 0, totalTokens: 2500 },
     durationMs: 1000,
-    model: "gemini-3.1-pro-preview",
-    usage: { inputTokens: 1000, outputTokens: 500, totalTokens: 2500, thinkingTokens: 1000, toolUseTokens: 200 },
+    numTurns: 3,
+    conversationId: "c",
+    ...over,
   };
 }
 
-type Harness = { deps: GeminiPersonDeps; merges: Record<string, unknown>[]; prompts: string[]; calls: unknown[]; notices: { text: string; pageUrl: string | null }[]; refreshes: number; usage: unknown[] };
+type Harness = { deps: GeminiPersonDeps; merges: Record<string, unknown>[]; prompts: string[]; calls: { model?: string; extraArgs?: string[] }[]; notices: { text: string; pageUrl: string | null }[]; refreshes: number };
 
-function harness(options: { job?: ArticleJobRow | null; responses?: RunGeminiResearchResult[]; hasEntry?: boolean; enabled?: boolean; mergeThrows?: boolean; notifyThrows?: boolean } = {}): Harness {
-  const h: Harness = { deps: {}, merges: [], prompts: [], calls: [], notices: [], refreshes: 0, usage: [] };
-  const responses = [...(options.responses ?? [okResult("조사 노트\n출처: https://wiki.example/홍길동"), okResult("# 홍길동의 길\n\n## 데뷔\n그는 무대에서 시작했다.")])];
-  let current = options.job === undefined ? job() : options.job;
+function harness(options: { job?: ArticleJobRow | null; responses?: RunAgyResult[]; hasEntry?: boolean; enabled?: boolean; mergeThrows?: boolean; notifyThrows?: boolean; refresh?: "dispatched" | "no_token" } = {}): Harness {
+  const h: Harness = { deps: {}, merges: [], prompts: [], calls: [], notices: [], refreshes: 0 };
+  const responses = [...(options.responses ?? [okResult("조사 노트\n출처: https://wiki.example/홍길동 와 [뉴스](https://news.example/a)."), okResult("# 홍길동의 길\n\n## 데뷔\n그는 무대에서 시작했다. https://body.example/z")])];
+  let current = options.job === undefined ? job({}, { geminiShadow: { requestedAt: "2026-11-19T00:00:00Z", startedAt: "2026-11-19T00:59:00Z", claimId: "k", attempts: 1 } }) : options.job;
   h.deps = {
     findJob: async () => current,
     mergeMetadata: async (_id, patch) => {
@@ -157,17 +185,18 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunGeminiRes
       h.merges.push(patch);
       if (current && "geminiShadow" in patch) current = { ...current, metadata: { ...current.metadata, geminiShadow: patch.geminiShadow } };
     },
-    callGemini: (async (opts: { prompt: string }) => {
+    runAgyImpl: (async (opts: { prompt: string; model?: string; extraArgs?: string[] }) => {
       h.prompts.push(opts.prompt);
       h.calls.push(opts);
       const next = responses.shift();
       if (!next) throw new Error("응답 소진");
       return next;
-    }) as GeminiPersonDeps["callGemini"],
-    recordUsage: async (input) => void h.usage.push(input),
-    fetchImpl: (async (url: string) => ({ url: url.includes("grounding-api-redirect") ? "https://resolved.example/page" : url })) as unknown as typeof fetch,
+    }) as GeminiPersonDeps["runAgyImpl"],
     hasManifestEntry: async () => options.hasEntry ?? false,
-    dispatchRefresh: async () => void (h.refreshes += 1),
+    dispatchRefresh: async () => {
+      h.refreshes += 1;
+      return options.refresh ?? "dispatched";
+    },
     notify: async (_job, text, pageUrl) => {
       if (options.notifyThrows) throw new Error("telegram boom");
       h.notices.push({ text, pageUrl });
@@ -175,182 +204,189 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunGeminiRes
     pageUrlFor: () => "https://pages.example/#" + JOB_ID,
     now: () => new Date("2026-11-19T01:00:00Z"),
     isEnabled: () => options.enabled ?? true,
+    model: undefined,
+    extraArgs: ["--mode", "plan"],
   };
   return h;
 }
 
-// ── 4) 정상 실행: 메타데이터 모양·사용량·호출 설정 ───────────────────────────
+// ── 4) 정상 실행: 메타데이터 모양·토큰·호출 설정·원장 없음 ───────────────────
 {
   const h = harness();
   const result = await runGeminiPerson(JOB_ID, {}, h.deps);
   assert(result.status === "done", `정상 실행은 done이어야 한다: ${JSON.stringify(result)}`);
   const stored = h.merges[h.merges.length - 1].geminiShadow as GeminiShadow;
-  assert(h.merges.length === 2 && (h.merges[0].geminiShadow as GeminiShadow).startedAt, "시작 기록과 완료 기록 두 번 병합한다");
-  assert(stored.model === GEMINI_PERSON_MODEL && stored.title === "홍길동의 길" && stored.body?.startsWith("## 데뷔"), "model/title/body");
+  assert(h.merges.length === 2, "시작 기록과 완료 기록 두 번 병합한다");
+  assert(stored.title === "홍길동의 길" && stored.body?.startsWith("## 데뷔") && stored.model === "agy-model-x", "title/body/model(봉투가 알려 준 값)");
   assert(stored.researchNotes?.includes("조사 노트") && stored.requestedAt && stored.startedAt && stored.finishedAt && !stored.error, "researchNotes/시각");
-  assert(Array.isArray(stored.sources) && stored.sources.length >= 2, "출처: grounding + 노트 URL");
-  const urls = stored.sources.map((s) => s.url);
-  assert(urls.includes("https://news.example/a?utm_source=x") || urls.some((u) => u.startsWith("https://news.example")), "grounding 출처");
-  assert(urls.includes("https://wiki.example/홍길동") && stored.sources.some((s) => s.via === "notes"), "조사 노트에 적힌 URL 출처");
-  assert(new Set(urls.map((u) => u.split("?")[0])).size === urls.length, "중복 출처 없음");
-  // 사용량: 입력 = prompt + toolUse, 출력 = candidates + thinking
-  const u = stored.usage;
-  assert(u?.research?.thinkingTokens === 1000 && u.write && u.totalCostUsd != null, "usage 구조");
-  const expectedEach = (1200 * 2 + 1500 * 12) / 1_000_000;
-  assert(Math.abs((u.research?.costUsd ?? 0) - expectedEach) < 1e-9, `호출당 비용 $${expectedEach} (실제 ${u.research?.costUsd})`);
-  assert(h.usage.length === 2, "recordApiUsage가 두 번 불린다");
-  const rec = h.usage[0] as { provider: string; operation: string; jobId: string; usage: { inputTokens: number; outputTokens: number } };
-  assert(rec.provider === "gemini" && rec.jobId === JOB_ID && rec.operation === "gemini-person.research", "원장에 job_id가 붙는다");
-  assert(rec.usage.inputTokens === 1200 && rec.usage.outputTokens === 1500, "원장 토큰은 도구/thinking을 합산한다");
-  // 호출 설정: 둘 다 grounding, 집필 프롬프트에 조사 노트가 들어간다
-  assert((h.calls[0] as { grounding: boolean }).grounding === true && (h.calls[1] as { grounding: boolean }).grounding === true, "두 호출 모두 grounding");
-  assert(h.prompts[1].includes("조사 노트"), "집필 프롬프트에 조사 노트가 실린다");
-  assert(!h.prompts.join("\n").includes("[IMAGE"), "이미지 마커를 요청하지 않는다");
-  // 뷰어 행이 없으면 페이지 갱신·알림이 없다
-  assert(h.refreshes === 0 && h.notices.length === 0 && result.status === "done" && !result.pageRefreshed, "페이지가 아직 없으면 저장만 한다");
-  console.log("✅ 정상 실행: 메타데이터 모양·출처·사용량·원장(job_id)·호출 설정");
+  const urls = (stored.sources ?? []).map((x) => x.url);
+  assert(urls.includes("https://wiki.example/홍길동") && urls.includes("https://news.example/a") && urls.includes("https://body.example/z"), `응답 본문 URL에서 출처를 뽑는다: ${urls.join(",")}`);
+  assert((stored.sources ?? []).find((x) => x.url === "https://news.example/a")?.title === "뉴스", "마크다운 링크는 제목도 담는다");
+  assert(stored.usage?.research?.thinkingTokens === 1000 && stored.usage.totalTokens === 5000, "토큰만 기록(합계 5000)");
+  assert(!JSON.stringify(stored.usage).includes("cost"), "금액 필드가 없다(구독)");
+  assert(h.calls.length === 2 && h.calls.every((c) => c.extraArgs?.join(" ") === "--mode plan" && c.model === undefined), "두 호출, 모델 미지정, 추가 인자 전달");
+  assert(h.prompts[1].includes("조사 노트") && !h.prompts.join("\n").includes("[IMAGE"), "집필 프롬프트에 노트가 실리고 이미지 마커 요청이 없다");
+  assert(h.prompts[0].includes("출처 URL을 남겨라"), "조사 프롬프트는 출처 URL을 요구한다");
+  assert(h.refreshes === 0 && h.notices.length === 0 && result.status === "done" && result.refresh === "no_page", "페이지가 아직 없으면 저장만 한다");
+  const src = readFileSync(join(process.cwd(), "src/workflows/gemini-person/runGeminiPerson.ts"), "utf-8");
+  assert(!/recordApiUsage|apiPricing|estimateCostUsd/.test(src.split("\n").filter((l) => /^\s*import\b/.test(l)).join("\n")), "비용 원장·단가표를 import하지 않는다");
+  console.log("✅ 정상 실행: 메타데이터 모양·출처 추출·토큰만 기록·호출 설정·원장 없음");
 }
 
-// ── 5) 페이지가 이미 있으면 갱신 + 알림 한 통 ────────────────────────────────
+// ── 5) 페이지가 이미 있으면 갱신 + 알림 한 통 / 토큰 없으면 알림에 명시 ───────
 {
   const h = harness({ hasEntry: true });
   const result = await runGeminiPerson(JOB_ID, {}, h.deps);
-  assert(result.status === "done" && result.pageRefreshed, "페이지 갱신 발화");
-  assert(h.refreshes === 1 && h.notices.length === 1 && h.notices[0].pageUrl?.includes(JOB_ID), "갱신 1회 + 텔레그램 1통(📄 링크)");
+  assert(result.status === "done" && result.refresh === "dispatched", "페이지 갱신 발화");
+  assert(h.refreshes === 1 && h.notices.length === 1 && h.notices[0].pageUrl?.includes(JOB_ID) && !h.notices[0].text.includes("GITHUB_TOKEN"), "갱신 1회 + 텔레그램 1통(📄 링크)");
+  const noToken = harness({ hasEntry: true, refresh: "no_token" });
+  const r1 = await runGeminiPerson(JOB_ID, {}, noToken.deps);
+  assert(r1.status === "done" && r1.refresh === "no_token" && noToken.notices[0].text.includes("GITHUB_TOKEN이 없어"), "토큰이 없으면 갱신을 건너뛰고 메시지에 그렇다고 적는다");
   const failing = harness({ hasEntry: true, notifyThrows: true });
-  const r2 = await runGeminiPerson(JOB_ID, {}, failing.deps);
-  assert(r2.status === "done", "알림이 실패해도 결과는 done(저장됨)");
-  console.log("✅ 완료 후 페이지 갱신 1회 + 알림 1통, 알림 실패는 결과를 바꾸지 않는다");
+  assert((await runGeminiPerson(JOB_ID, {}, failing.deps)).status === "done", "알림이 실패해도 결과는 done(저장됨)");
+  console.log("✅ 완료 후 페이지 갱신 + 알림 1통, 토큰 없음 처리, 알림 실패 무영향");
 }
 
-// ── 6) 킬 스위치·멱등·비 person ─────────────────────────────────────────────
+// ── 6) 킬 스위치·표식만 남기는 디스패치·비 person ────────────────────────────
 {
-  assert(isGeminiPersonShadowEnabled(undefined) && isGeminiPersonShadowEnabled("") && isGeminiPersonShadowEnabled("  ") && isGeminiPersonShadowEnabled("true"), "미설정·빈 값·true = 켜짐");
+  assert(isGeminiPersonShadowEnabled(undefined) && isGeminiPersonShadowEnabled("") && isGeminiPersonShadowEnabled("true"), "미설정·빈 값·true = 켜짐");
   assert(!isGeminiPersonShadowEnabled("false") && !isGeminiPersonShadowEnabled(" FALSE ") && !isGeminiPersonShadowEnabled("0") && !isGeminiPersonShadowEnabled("off"), "false/0/off = 꺼짐");
-
   const off = harness({ enabled: false });
   assert((await runGeminiPerson(JOB_ID, {}, off.deps)).status === "skipped" && off.calls.length === 0 && off.merges.length === 0, "스위치 꺼짐: 호출도 기록도 없다");
 
-  let dispatched: number = 0;
-  const count = (): number => dispatched;
-  const base = { hasGithubToken: () => true, dispatch: async () => void (dispatched += 1), now: () => new Date("2026-11-19T01:00:00Z") };
   const merges: Record<string, unknown>[] = [];
-  const mk = (j: ArticleJobRow | null) => ({ ...base, findJob: async () => j, mergeMetadata: async (_: string, p: Record<string, unknown>) => void merges.push(p) });
-
-  assert((await dispatchGeminiPersonShadow(JOB_ID, { ...mk(job()), isEnabled: () => false })).dispatched === false && count() === 0, "디스패치도 스위치를 따른다");
-  const first = await dispatchGeminiPersonShadow(JOB_ID, { ...mk(job()), isEnabled: () => true });
-  assert(first.dispatched && count() === 1 && (merges[0].geminiShadow as { requestedAt: string }).requestedAt, "새 person job: requestedAt을 적고 디스패치");
-  const again = await dispatchGeminiPersonShadow(JOB_ID, { ...mk(job({}, { geminiShadow: { requestedAt: "2026-11-19T00:00:00Z" } })), isEnabled: () => true });
-  assert(!again.dispatched && again.reason === "already_requested" && count() === 1, "멱등: requestedAt이 있으면 다시 쏘지 않는다");
+  const mcount = (): number => merges.length;
+  const mk = (j: ArticleJobRow | null, enabled = true) => ({ isEnabled: () => enabled, findJob: async () => j, mergeMetadata: async (_: string, p: Record<string, unknown>) => void merges.push(p), now: () => new Date("2026-11-19T01:00:00Z") });
+  assert(!(await dispatchGeminiPersonShadow(JOB_ID, mk(job(), false))).dispatched && mcount() === 0, "디스패치도 스위치를 따른다");
+  const prevToken = process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  const first = await dispatchGeminiPersonShadow(JOB_ID, mk(job()));
+  assert(first.dispatched && mcount() === 1 && JSON.stringify(merges[0]) === '{"geminiShadow":{"requestedAt":"2026-11-19T01:00:00.000Z"}}', "GITHUB_TOKEN 없이도 requestedAt 표식만 적는다(워크플로 발화 없음)");
+  if (prevToken !== undefined) process.env.GITHUB_TOKEN = prevToken;
+  const src = readFileSync(join(process.cwd(), "src/workflows/gemini-person/dispatchGeminiPersonShadow.ts"), "utf-8");
+  assert(!/dispatchGithubWorkflow|GITHUB_TOKEN/.test(src.split("\n").filter((l) => /^\s*(import|const|if)\b/.test(l)).join("\n")), "디스패처가 GitHub 발화·토큰을 쓰지 않는다");
+  const again = await dispatchGeminiPersonShadow(JOB_ID, mk(job({}, { geminiShadow: { requestedAt: "2026-11-19T00:00:00Z" } })));
+  assert(!again.dispatched && again.reason === "already_requested" && mcount() === 1, "멱등: 키가 있으면 다시 적지 않는다");
   for (const [label, j, reason] of [
     ["엔터 키워드", job({ category: "entertainment" }), "not_person"],
     ["카테고리 없음", job({ category: null }), "not_person"],
-    ["수정/진행 중(status)", job({ status: "writing" }), "status_writing"],
+    ["진행 중(status)", job({ status: "writing" }), "status_writing"],
     ["조사 재시도", job({}, { forceFreshResearch: true }), "re_research"],
   ] as const) {
-    const r = await dispatchGeminiPersonShadow(JOB_ID, { ...mk(j), isEnabled: () => true });
-    assert(!r.dispatched && r.reason === reason && count() === 1, `${label}: 디스패치 없음(${reason})`);
+    const r = await dispatchGeminiPersonShadow(JOB_ID, mk(j));
+    assert(!r.dispatched && r.reason === reason && mcount() === 1, `${label}: 표식 없음(${reason})`);
   }
-  const mergesBefore: number = merges.length;
-  const noToken = await dispatchGeminiPersonShadow(JOB_ID, { ...mk(job()), isEnabled: () => true, hasGithubToken: () => false });
-  assert(!noToken.dispatched && noToken.reason === "no_github_token" && merges.length === mergesBefore, "토큰이 없으면 키도 적지 않는다(나중에 다시 시도 가능)");
+  const boom = await dispatchGeminiPersonShadow(JOB_ID, { ...mk(job()), mergeMetadata: async () => { throw new Error("db"); } });
+  assert(!boom.dispatched && boom.reason === "error", "저장이 실패해도 던지지 않는다");
 
-  // 디스패치가 실패하면 던지지 않고 키를 지운다.
-  const cleaned: Record<string, unknown>[] = [];
-  const failed = await dispatchGeminiPersonShadow(JOB_ID, {
-    ...mk(job()),
-    isEnabled: () => true,
-    mergeMetadata: async (_: string, p: Record<string, unknown>) => void cleaned.push(p),
-    dispatch: async () => {
-      throw new Error("GitHub 500");
-    },
-  });
-  assert(!failed.dispatched && cleaned.length === 2 && cleaned[1].geminiShadow === null, "디스패치 실패: 던지지 않고 requestedAt을 지운다");
-
-  // 실행 쪽 멱등: 끝난 기록이 있으면 건너뛰고 force면 다시 돈다.
   const doneJob = job({}, { geminiShadow: { requestedAt: "2026-11-19T00:00:00Z", startedAt: "2026-11-19T00:00:10Z", finishedAt: "2026-11-19T00:10:00Z", title: "t", body: "b" } });
   const skip = harness({ job: doneJob });
   assert((await runGeminiPerson(JOB_ID, {}, skip.deps)).status === "skipped" && skip.calls.length === 0, "끝난 기록이 있으면 건너뛴다");
   const forced = harness({ job: doneJob });
   assert((await runGeminiPerson(JOB_ID, { force: true }, forced.deps)).status === "done" && forced.calls.length === 2, "force면 다시 돈다");
-  const running = harness({ job: job({}, { geminiShadow: { requestedAt: "2026-11-19T00:00:00Z", startedAt: "2026-11-19T00:50:00Z" } }) });
-  assert((await runGeminiPerson(JOB_ID, {}, running.deps)).status === "skipped", "30분 안에 시작된 실행이 있으면 건너뛴다");
   const nonPerson = harness({ job: job({ category: "entertainment" }) });
   assert((await runGeminiPerson(JOB_ID, {}, nonPerson.deps)).status === "skipped" && nonPerson.calls.length === 0, "person이 아니면 실행하지 않는다");
-  console.log("✅ 킬 스위치·멱등·비 person·재시도·디스패치 실패 처리");
+  console.log("✅ 킬 스위치·표식만 남기는 디스패치(토큰 불필요)·멱등·비 person·force");
 }
 
-// ── 7) 실패는 던지지 않는다 ─────────────────────────────────────────────────
+// ── 7) 실패는 던지지 않는다(인증 오류 포함) ──────────────────────────────────
 {
-  const apiFail = harness({ responses: [{ ok: false, error: "Gemini API가 429로 응답했습니다", durationMs: 5 }] });
-  const r = await runGeminiPerson(JOB_ID, {}, apiFail.deps);
-  assert(r.status === "failed" && r.shadow.error?.includes("429") && r.shadow.finishedAt, "API 실패: failed + error 기록");
-  assert(apiFail.notices.length === 1 && apiFail.notices[0].text.includes("실패"), "실패 시 텔레그램 한 줄");
-  assert(apiFail.usage.length === 0, "실패한 호출은 원장에 올리지 않는다");
+  const authFail = harness({ responses: [{ ok: false, error: AGY_LOGIN_MESSAGE, authRequired: true, durationMs: 5 }] });
+  const r = await runGeminiPerson(JOB_ID, {}, authFail.deps);
+  assert(r.status === "failed" && r.authRequired && r.shadow.error?.includes("맥미니 agy 로그인 필요") && r.shadow.finishedAt, "인증 오류: error에 로그인 필요");
+  assert(authFail.notices.length === 1 && authFail.notices[0].text.includes("로그인 필요") && authFail.notices[0].text.includes("--force"), "텔레그램 한 줄(재실행 안내)");
 
-  const writeFail = harness({ responses: [okResult("노트"), { ok: false, error: "시간 초과", durationMs: 5 }] });
+  const writeFail = harness({ responses: [okResult("노트"), { ok: false, error: "시간 초과", authRequired: false, durationMs: 5 }] });
   const r2 = await runGeminiPerson(JOB_ID, {}, writeFail.deps);
-  assert(r2.status === "failed" && r2.shadow.researchNotes === "노트" && writeFail.usage.length === 1, "집필 실패: 조사 노트는 남기고 조사 비용만 기록");
-
+  assert(r2.status === "failed" && r2.shadow.researchNotes === "노트", "집필 실패: 조사 노트는 남긴다");
   const thrown = harness();
-  thrown.deps.callGemini = (async () => {
-    throw new Error("네트워크 폭발");
-  }) as GeminiPersonDeps["callGemini"];
+  thrown.deps.runAgyImpl = (async () => {
+    throw new Error("폭발");
+  }) as GeminiPersonDeps["runAgyImpl"];
   assert((await runGeminiPerson(JOB_ID, {}, thrown.deps)).status === "failed", "호출이 던져도 failed로 돌려준다");
-
-  const storeFail = harness({ mergeThrows: true });
-  assert((await runGeminiPerson(JOB_ID, {}, storeFail.deps)).status === "failed", "저장소가 죽어도 던지지 않는다");
-
-  const emptyOut = harness({ responses: [okResult("노트"), okResult("   ")] });
-  assert((await runGeminiPerson(JOB_ID, {}, emptyOut.deps)).status === "failed", "빈 집필 결과는 failed");
-
-  const missing = harness({ job: null });
-  assert((await runGeminiPerson(JOB_ID, {}, missing.deps)).status === "skipped", "job이 없으면 skipped");
-  console.log("✅ 실패 경로: API 실패·집필 실패·예외·저장 실패·빈 결과 모두 던지지 않고 기록한다");
+  assert((await runGeminiPerson(JOB_ID, {}, harness({ mergeThrows: true }).deps)).status === "failed", "저장소가 죽어도 던지지 않는다");
+  assert((await runGeminiPerson(JOB_ID, {}, harness({ responses: [okResult("노트"), okResult("   ")] }).deps)).status === "failed", "빈 집필 결과는 failed");
+  assert((await runGeminiPerson(JOB_ID, {}, harness({ job: null }).deps)).status === "skipped", "job이 없으면 skipped");
+  console.log("✅ 실패 경로: 인증·집필·예외·저장·빈 결과 모두 던지지 않고 기록한다");
 }
 
 // ── 8) dispatchResearch 연결: 기존 흐름이 먼저, 그림자 실패는 영향 없음 ────────
 {
   const order: string[] = [];
-  const result = await dispatchResearch(JOB_ID, {
-    provider: "claude",
-    hasGithubToken: () => true,
-    enqueue: async () => void order.push("research"),
-    dispatchShadow: async () => void order.push("shadow"),
-  });
-  assert(result.route === "actions" && result.queued && order.join(",") === "research,shadow", "조사 발화 뒤에 그림자를 쏜다");
-  const codex = await dispatchResearch(JOB_ID, {
-    provider: "codex",
-    queueLocal: async () => ({ queued: true }),
-    dispatchShadow: async () => void order.push("shadow-codex"),
-  });
-  assert(codex.route === "macmini-codex" && order.includes("shadow-codex"), "조사 제공자가 codex여도 그림자는 독립으로 쏜다");
-  const broken = await dispatchResearch(JOB_ID, {
-    provider: "claude",
-    hasGithubToken: () => true,
-    enqueue: async () => {},
-    dispatchShadow: async () => {
-      throw new Error("shadow boom");
-    },
-  });
+  const result = await dispatchResearch(JOB_ID, { provider: "claude", hasGithubToken: () => true, enqueue: async () => void order.push("research"), dispatchShadow: async () => void order.push("shadow") });
+  assert(result.route === "actions" && order.join(",") === "research,shadow", "조사 발화 뒤에 표식을 남긴다");
+  const codex = await dispatchResearch(JOB_ID, { provider: "codex", queueLocal: async () => ({ queued: true }), dispatchShadow: async () => void order.push("shadow-codex") });
+  assert(codex.route === "macmini-codex" && order.includes("shadow-codex"), "조사 제공자가 codex여도 독립으로 남긴다");
+  const broken = await dispatchResearch(JOB_ID, { provider: "claude", hasGithubToken: () => true, enqueue: async () => {}, dispatchShadow: async () => { throw new Error("shadow boom"); } });
   assert(broken.route === "actions" && broken.queued, "그림자가 던져도 조사 발화 결과는 그대로다");
-  console.log("✅ dispatchResearch: 조사 발화 → 그림자(독립), 그림자 실패는 무영향");
+  console.log("✅ dispatchResearch: 조사 발화 -> 표식(독립), 실패는 무영향");
 }
 
-// ── 9) 출처 해석 ────────────────────────────────────────────────────────────
+// ── 9) 출처 추출 ────────────────────────────────────────────────────────────
 {
-  const sources = await buildSources(
-    [
-      { title: "a.example", url: "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA" },
-      { title: "b.example", url: "https://b.example/x" },
-    ],
-    "참고 https://b.example/x, https://c.example/y).",
-    (async (url: string) => ({ url: url.includes("grounding-api-redirect") ? "https://a.example/real" : url })) as unknown as typeof fetch
-  );
-  const urls = sources.map((s) => s.url);
-  assert(urls.includes("https://a.example/real") && !urls.some((u) => u.includes("grounding-api-redirect")), "grounding 리디렉션을 실제 주소로 푼다");
-  assert(urls.filter((u) => u === "https://b.example/x").length === 1 && urls.includes("https://c.example/y"), "중복 제거 + 본문 URL 끝 구두점 제거");
-  console.log("✅ 출처: 리디렉션 해석·중복 제거·본문 URL 수집");
+  const sources = extractSources([
+    { text: "참고 https://b.example/x, https://c.example/y). [제목](https://d.example/z)", via: "notes" },
+    { text: "again https://b.example/x/ 와 https://위키.example/a_(b)", via: "body" },
+  ]);
+  const urls = sources.map((x) => x.url);
+  assert(urls.filter((u) => u.startsWith("https://b.example/x")).length === 1, "중복 제거(끝 슬래시 무시)");
+  assert(urls.includes("https://c.example/y") && urls.includes("https://d.example/z") && sources.find((x) => x.url === "https://d.example/z")?.title === "제목", "끝 구두점 제거·링크 제목");
+  console.log("✅ 출처 추출: 중복 제거·구두점·마크다운 링크");
+}
+
+// ── 9b) 대기열: claim·stale·소진 ────────────────────────────────────────────
+{
+  const now = new Date("2026-11-19T12:00:00Z");
+  const iso = (minAgo: number): string => new Date(now.getTime() - minAgo * 60_000).toISOString();
+  const rows: PendingRow[] = [
+    { id: "done", shadow: { requestedAt: iso(300), startedAt: iso(290), finishedAt: iso(280) } },
+    { id: "running", shadow: { requestedAt: iso(200), startedAt: iso(10), attempts: 1 } },
+    { id: "newer", shadow: { requestedAt: iso(20) } },
+    { id: "older", shadow: { requestedAt: iso(100) } },
+  ];
+  const due = pickDue(rows, now);
+  assert(due?.kind === "fresh" && due.id === "older", "가장 오래된 대기 1건(끝난 것·진행 중인 것은 건너뜀)");
+  assert(pickDue([rows[0], rows[1]], now) === null, "진행 중(40분 이내)이면 집지 않는다");
+  const stale = pickDue([{ id: "s", shadow: { requestedAt: iso(300), startedAt: iso(STALE_START_MS / 60_000 + 1), attempts: 1 } }], now);
+  assert(stale?.kind === "stale", "40분 넘은 진행 표식은 잔재로 보고 다시 집는다");
+  const exhausted = pickDue([{ id: "x", shadow: { requestedAt: iso(300), startedAt: iso(100), attempts: 2 } }], now);
+  assert(exhausted?.kind === "exhausted", "두 번 집은 잔재는 소진 - 실패로 닫는다");
+
+  // claim: 병합 뒤 다시 읽어 내 claimId가 맞아야 한다.
+  let stored: Record<string, unknown> = { geminiShadow: { requestedAt: iso(5) } };
+  const q = { findJob: async () => ({ metadata: stored }), mergeMetadata: async (_: string, p: Record<string, unknown>) => void (stored = { ...stored, ...p }), now: () => now, newClaimId: () => "me" };
+  assert(await claimGeminiShadow("j", q), "정상 claim");
+  const claimed = stored.geminiShadow as GeminiShadow;
+  assert(claimed.claimId === "me" && claimed.startedAt === now.toISOString() && claimed.attempts === 1 && claimed.requestedAt, "startedAt·claimId·attempts 기록");
+  // 다른 폴러가 사이에 덮어쓰면 진다.
+  let racing: Record<string, unknown> = { geminiShadow: { requestedAt: iso(5) } };
+  const lost = await claimGeminiShadow("j", {
+    findJob: async () => ({ metadata: racing }),
+    mergeMetadata: async () => void (racing = { geminiShadow: { requestedAt: iso(5), startedAt: iso(0), claimId: "other", attempts: 1 } }),
+    now: () => now,
+    newClaimId: () => "me",
+  });
+  assert(!lost, "다른 폴러의 claimId가 남아 있으면 claim에 진다");
+  assert(!(await claimGeminiShadow("j", { findJob: async () => ({ metadata: { geminiShadow: { requestedAt: "x", finishedAt: "y" } } }), mergeMetadata: async () => {} })), "끝난 건은 집지 않는다");
+  stored = { geminiShadow: { requestedAt: iso(300), startedAt: iso(100), claimId: "old", attempts: 1 } };
+  await claimGeminiShadow("j", q);
+  assert((stored.geminiShadow as GeminiShadow).attempts === 2, "stale 재집기는 attempts가 2가 된다");
+  stored = { geminiShadow: { requestedAt: iso(300), startedAt: iso(100), claimId: "old", attempts: 2 } };
+  await closeExhausted("j", q);
+  assert((stored.geminiShadow as GeminiShadow).finishedAt && (stored.geminiShadow as GeminiShadow).error?.includes("두 번"), "소진은 error와 함께 닫힌다");
+
+  // 폴러: 한 주기에 1건, 스위치, 잃은 claim
+  const ran: string[] = [];
+  const base = { now: () => now, loadRows: async () => rows, claim: async () => true, run: async (id: string) => { ran.push(id); return { status: "skipped", reason: "t" } as const; } };
+  const out = await pollGeminiPersonOnce(base);
+  assert(out.picked && out.jobId === "older" && ran.length === 1, "한 주기에 가장 오래된 1건만 돌린다");
+  assert(!(await pollGeminiPersonOnce({ ...base, isEnabled: () => false })).picked && ran.length === 1, "스위치 꺼짐이면 아무것도 집지 않는다");
+  assert((await pollGeminiPersonOnce({ ...base, claim: async () => false })).picked && ran.length === 1, "claim에 지면 돌리지 않는다");
+  assert(!(await pollGeminiPersonOnce({ ...base, loadRows: async () => [] })).picked, "대기가 없으면 조용히 끝난다");
+  const closed: string[] = [];
+  const ex = await pollGeminiPersonOnce({ ...base, loadRows: async () => [{ id: "x", shadow: { requestedAt: iso(300), startedAt: iso(100), attempts: 2 } }], closeStale: async (id) => void closed.push(id) });
+  assert(ex.picked && ex.status === "closed_exhausted" && closed[0] === "x" && ran.length === 1, "소진 잔재는 닫기만 한다");
+  console.log("✅ 대기열: 가장 오래된 1건·claim 재확인·stale 1회 재시도·소진 닫기·스위치");
 }
 
 // ── 10) 뷰어 ────────────────────────────────────────────────────────────────
@@ -363,8 +399,8 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunGeminiRes
     title: "홍길동의 길",
     body: "## 데뷔\n그는 무대에서 시작했다.\n둘째 줄\n\n- 항목 하나\n- 항목 둘",
     researchNotes: "노트",
-    sources: [{ title: "news.example", url: "https://news.example/a", via: "grounding" }],
-    usage: { research: null, write: null, totalCostUsd: 0.12 },
+    sources: [{ title: "news.example", url: "https://news.example/a", via: "notes" }],
+    usage: { research: null, write: null, totalTokens: 12345 },
   };
   const topic = (jobId: string, category: string, extra: Partial<ManuscriptTopicEntry["manuscript"]> = {}): ManuscriptTopicEntry => ({
     jobId,
@@ -400,7 +436,7 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunGeminiRes
 
   // 렌더: 있을 때만 데이터에 gemini가 실린다
   const html = renderManuscriptPage(attached);
-  const data = JSON.parse(html.match(/<script id="manuscript-data" type="application\/json">([\s\S]*?)<\/script>/)![1]) as { jobId: string; gemini: { title: string; sources: unknown[]; blocks: unknown[]; costUsd: number } | null }[];
+  const data = JSON.parse(html.match(/<script id="manuscript-data" type="application\/json">([\s\S]*?)<\/script>/)![1]) as { jobId: string; gemini: { title: string; sources: unknown[]; blocks: unknown[]; totalTokens: number } | null }[];
   const byId = Object.fromEntries(data.map((t) => [t.jobId, t]));
   assert(byId["p-1"].gemini?.title === "홍길동의 길" && byId["p-1"].gemini.sources.length === 1 && byId["p-1"].gemini.blocks.length === 3, "제미나이 블록이 있는 원고에 데이터가 실린다");
   assert(byId["p-2"].gemini === null && byId["e-1"].gemini === null, "없는 원고는 gemini=null(탭이 뜨지 않는다)");

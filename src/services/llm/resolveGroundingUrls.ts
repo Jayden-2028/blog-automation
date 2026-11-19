@@ -69,7 +69,7 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_CONCURRENCY = 5;
 
 /** 리디렉션 한 건을 따라가 최종 주소를 얻는다. 실패하면 null. */
-export async function resolveOne(url: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<string | null> {
+async function resolveOne(url: string, fetchImpl: typeof fetch, timeoutMs: number): Promise<string | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

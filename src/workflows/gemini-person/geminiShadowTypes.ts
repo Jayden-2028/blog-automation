@@ -4,29 +4,27 @@
 export type GeminiShadowSource = {
   title: string | null;
   url: string;
-  /** grounding 메타데이터에서 왔는지, 조사 노트 본문에 적힌 URL인지. */
-  via: "grounding" | "notes";
+  /** 조사 노트 본문에서 뽑았는가, 집필 결과 본문에서 뽑았는가(agy는 grounding 메타데이터가 없다). */
+  via: "notes" | "body";
 };
 
 export type GeminiShadowCallUsage = {
-  model: string;
+  /** agy 봉투가 알려 준 모델. 안 알려 주면 null(기본 모델을 썼다는 뜻일 수 있다). */
+  model: string | null;
   inputTokens: number | null;
   outputTokens: number | null;
-  /** thinking 토큰(출력 단가로 청구). 응답에 없으면 null. */
   thinkingTokens: number | null;
-  /** grounding이 프롬프트에 끼운 토큰(입력 단가로 청구). 응답에 없으면 null. */
-  toolUseTokens: number | null;
+  cacheReadTokens: number | null;
   totalTokens: number | null;
   durationMs: number;
-  /** 토큰 단가만으로 계산한 금액(검색 grounding 쿼리 요금 제외). 단가 미등록이면 null. */
-  costUsd: number | null;
+  numTurns: number | null;
 };
 
+/** 구독으로 돌아 금액은 없다 - 토큰 수만 남긴다(비용 원장에도 기록하지 않는다). */
 export type GeminiShadowUsage = {
   research: GeminiShadowCallUsage | null;
   write: GeminiShadowCallUsage | null;
-  /** 두 호출의 costUsd 합(둘 중 하나라도 null이면 null). */
-  totalCostUsd: number | null;
+  totalTokens: number | null;
 };
 
 export type GeminiShadow = {
@@ -34,6 +32,10 @@ export type GeminiShadow = {
   requestedAt: string;
   model?: string;
   startedAt?: string;
+  /** 맥미니 폴러가 이 job을 집은 표식(claim 확인용 난수). */
+  claimId?: string;
+  /** 집은 횟수. 40분 넘게 안 끝난 잔재는 1회만 다시 집는다. */
+  attempts?: number;
   finishedAt?: string;
   title?: string;
   body?: string;

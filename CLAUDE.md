@@ -329,23 +329,29 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
     `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
 - **인물 제미나이 그림자 트랙**(2026-11-19, A/B 비교용). 새 person job마다 기존 흐름(Claude 조사+집필, 그대로)과
-  **별도로·병렬로** Gemini가 조사부터 집필까지 혼자 쓴 글을 만들어 원고 페이지에 나란히 둔다. **어느 쪽이 인물 글을
+  **별도로** Gemini가 조사부터 집필까지 혼자 쓴 글을 만들어 원고 페이지에 나란히 둔다. **어느 쪽이 인물 글을
   쓸지는 사용자가 비교한 뒤 정한다(결정 대기)** - 그 전에는 제미나이 쪽을 기본 경로로 바꾸지 않는다.
+  - **실행기 = 맥미니의 Antigravity CLI(`agy`), 사용자의 Google AI 구독 로그인**이다. API 호출·요금이 없고(비용 원장에도
+    쓰지 않는다 - 토큰 수만 `geminiShadow.usage`에 남긴다) Actions에서는 못 돈다(Gemini CLI는 6월에 개인 구독 로그인이
+    끊겼다). **로그인은 맥미니에서 한 번 대화형으로 해야 한다.** 설정·launchd 템플릿은 `docs/ai-handoff/GEMINI_PERSON_SHADOW.md`.
   - **zero-base**: Gemini에게 우리 규격을 주지 않는다. 프롬프트는 `workflows/gemini-person/geminiPersonPrompts.ts`의
     짧은 두 개(조사 / 집필)뿐이고, `researcher.md`·`writer.md`·`core-rules.md`·`style/*.md`·`rules/*.md`·seo-guide를
     넣거나 import하면 비교가 오염된다(`npm run test:gemini-person`이 규격 문장 혼입을 대조). 출력 약속은 `# 제목` + 본문 하나.
+    출처는 응답 본문의 URL에서 뽑는다(agy에는 grounding 메타데이터가 없다).
   - **이미지 보류**: 마커 요청·수집·생성 모두 없다. 뷰어 제미나이 탭은 읽기 전용(제목·본문·출처·조사 노트, 복사 버튼)이다.
-  - **발화**: `dispatchResearch`(조사 발화 단일 지점) 끝에서 `dispatchGeminiPersonShadow`가 `job-gemini-person.yml`을
-    **직접** 쏜다(heavy-pipeline 큐를 타지 않는다). person·status=selected·`geminiShadow.requestedAt` 없음일 때만이라
-    수정·조사 재시도(`forceFreshResearch`)는 건너뛴다. 수동 재실행: `gh workflow run job-gemini-person.yml -f job_id=<uuid> -f force=true`.
-  - **스위치·모델**: repo variable `PERSON_GEMINI_SHADOW`(미설정·빈 값 = 켜짐, `false` = 끔), `GEMINI_PERSON_MODEL`
-    (기본 `gemini-3.1-pro-preview`, 단가는 `config/apiPricing.ts` - 모델을 바꾸면 단가표도 같이 등록해야
-    `test:api-pricing`이 통과한다). secret `GEMINI_API_KEY`가 필요하다.
+  - **흐름**: `dispatchResearch`(조사 발화 단일 지점) 끝에서 `dispatchGeminiPersonShadow`가 `job.metadata.geminiShadow.requestedAt`
+    **표식만** 남긴다(워크플로를 쏘지 않는다). person·status=selected·키 없음일 때만이라 수정·조사 재시도(`forceFreshResearch`)는
+    건너뛴다. 맥미니 폴러 `npm run job:gemini-person-poll`(launchd 120초, **등록은 사용자 승인 사항**)이 가장 오래된 대기 1건을
+    claim(`startedAt`+`claimId` 병합 후 재확인)해 agy를 두 번(조사 -> 집필, 각 15분 상한, 빈 임시 폴더에서 실행,
+    `--dangerously-skip-permissions` 없음) 돌린다. 40분 넘게 안 끝난 진행 표식은 1회만 다시 집고 그다음엔 실패로 닫는다.
+  - **스위치·옵션**: repo variable `PERSON_GEMINI_SHADOW`(미설정·빈 값 = 켜짐, `false` = 끔 - 맥 `.env`에도 두면 대기분까지
+    멈춘다), `GEMINI_PERSON_MODEL`(`agy --model`, 비우면 agy 기본 모델), `AGY_EXTRA_ARGS`(공백 구분 추가 인자).
   - **저장·표시**: `job.metadata.geminiShadow`(원자 병합, migration 없음)가 유일한 원본이다. manifest에는 복사하지 않고
     페이지를 쓸 때(`writeManuscriptPages` -> `attachGeminiShadows`) 덧입힌다. 끝나면 manifest 행이 이미 있을 때만
-    `manuscripts-refresh.yml` 발화 + 트랙 봇 텔레그램 한 통(`📄 원고 페이지 열기`). 실패는 `geminiShadow.error` + 텔레그램 한 줄,
-    기존 파이프라인에는 영향이 없다. 비용: 호출 둘 다 `recordApiUsage`(`gemini-person.research/.write`, job_id 첨부)이고
-    **검색 grounding 쿼리 요금($14/1,000건, 월 5,000건 무료)은 토큰 단가표에 없어 대시보드에서 빠진다.**
+    텔레그램 한 통(`📄 원고 페이지 열기`) + 페이지 갱신(`manuscripts-refresh.yml` 발화 - 맥미니 `.env`에 `GITHUB_TOKEN`·
+    `GITHUB_REPOSITORY`가 있을 때만, 없으면 메시지에 그렇다고 적는다).
+  - **로그아웃 알아채기**: `geminiShadow.error`와 텔레그램에 **"맥미니 agy 로그인 필요"** 가 뜬다(헤드리스는 캐시된 로그인이
+    없으면 "authentication required"로 끝난다). 재로그인 뒤 `npm run job:gemini-person-poll -- <jobId> --force`.
 
 ## 키워드 수집·알림 스케줄 (2026-10-11 개편)
 

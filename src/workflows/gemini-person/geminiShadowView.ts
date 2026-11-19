@@ -23,7 +23,7 @@ export type GeminiPageView = {
   charCount: number;
   sources: GeminiShadowSource[];
   researchNotes: string;
-  costUsd: number | null;
+  totalTokens: number | null;
   warning: string | null;
   /** 실패한 실행이면 사유(제목·본문이 없을 수 있다). */
   error: string | null;
@@ -66,7 +66,7 @@ export function toGeminiPageView(shadow: GeminiShadow | null | undefined): Gemin
     charCount: body.replace(/\s/g, "").length,
     sources: shadow.sources ?? [],
     researchNotes: shadow.researchNotes ?? "",
-    costUsd: shadow.usage?.totalCostUsd ?? null,
+    totalTokens: shadow.usage?.totalTokens ?? null,
     warning: shadow.warning ?? null,
     error: shadow.error ?? null,
   };

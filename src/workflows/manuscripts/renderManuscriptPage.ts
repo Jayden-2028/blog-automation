@@ -1341,9 +1341,9 @@ export function renderManuscriptPage(
       history.replaceState(null, "", "#" + topic.jobId);
 
       var h = shadowTabsHtml(topic, "gemini");
-      h += '<div class="shadow-note">🤖 <b>제미나이 단독 버전</b> — 우리 작성 규칙 없이 Gemini가 조사부터 집필까지 혼자 쓴 글입니다. 기존 원고와 비교용이며 이미지·수정·발행은 없습니다.'
+      h += '<div class="shadow-note">🤖 <b>제미나이 단독 버전</b> — 우리 작성 규칙 없이 Gemini(Antigravity)가 조사부터 집필까지 혼자 쓴 글입니다. 기존 원고와 비교용이며 이미지·수정·발행은 없습니다.'
         + (g.model ? ' · 모델 ' + esc(g.model) : '') + (g.finishedAt ? ' · ' + esc(kstTime(g.finishedAt)) : '')
-        + (g.costUsd != null ? ' · 토큰 비용 약 $' + g.costUsd.toFixed(2) : '') + '</div>';
+        + (g.totalTokens != null ? ' · ' + g.totalTokens.toLocaleString('en-US') + ' 토큰' : '') + '</div>';
       if (g.error) h += '<div class="shadow-err">⚠️ 이 실행은 끝까지 가지 못했습니다 — ' + esc(g.error) + '</div>';
       if (g.warning) h += '<div class="shadow-note">' + esc(g.warning) + '</div>';
 

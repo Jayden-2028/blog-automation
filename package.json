@@ -266,7 +266,7 @@
     "job:entertainment-keyword": "tsx src/jobs/entertainmentKeywordJob.ts",
     "job:entertainment-hot-star": "tsx src/jobs/entertainmentHotStarJob.ts",
     "job:kscene-topic": "tsx src/jobs/koreaplainTopicJob.ts",
-    "job:gemini-person": "tsx src/workflows/gemini-person/runGeminiPersonCli.ts",
+    "job:gemini-person-poll": "tsx src/jobs/geminiPersonPollJob.ts",
     "job:translate": "tsx src/workflows/translation/runTranslateJobCli.ts",
     "test:translation": "tsx src/workflows/translation/testTranslation.ts",
     "test:kscene-approval": "tsx src/notifications/testKoreaplainApproval.ts",
