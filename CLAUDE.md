@@ -328,6 +328,24 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   - `TISTORY_PUBLISH_MODE` - `draft`(기본, 임시저장까지만) / `publish`(옛 자동 발행). 2026-11-05 신설.
   - `BLOGGER_AUTO_PUBLISH`는 **존재하지 않는다** - 예전 이 문서에 적혀 있었으나 코드·워크플로우·
     `.env.example` 어디에도 없는 이름이다. 찾지 말 것.
+- **인물 제미나이 그림자 트랙**(2026-11-19, A/B 비교용). 새 person job마다 기존 흐름(Claude 조사+집필, 그대로)과
+  **별도로·병렬로** Gemini가 조사부터 집필까지 혼자 쓴 글을 만들어 원고 페이지에 나란히 둔다. **어느 쪽이 인물 글을
+  쓸지는 사용자가 비교한 뒤 정한다(결정 대기)** - 그 전에는 제미나이 쪽을 기본 경로로 바꾸지 않는다.
+  - **zero-base**: Gemini에게 우리 규격을 주지 않는다. 프롬프트는 `workflows/gemini-person/geminiPersonPrompts.ts`의
+    짧은 두 개(조사 / 집필)뿐이고, `researcher.md`·`writer.md`·`core-rules.md`·`style/*.md`·`rules/*.md`·seo-guide를
+    넣거나 import하면 비교가 오염된다(`npm run test:gemini-person`이 규격 문장 혼입을 대조). 출력 약속은 `# 제목` + 본문 하나.
+  - **이미지 보류**: 마커 요청·수집·생성 모두 없다. 뷰어 제미나이 탭은 읽기 전용(제목·본문·출처·조사 노트, 복사 버튼)이다.
+  - **발화**: `dispatchResearch`(조사 발화 단일 지점) 끝에서 `dispatchGeminiPersonShadow`가 `job-gemini-person.yml`을
+    **직접** 쏜다(heavy-pipeline 큐를 타지 않는다). person·status=selected·`geminiShadow.requestedAt` 없음일 때만이라
+    수정·조사 재시도(`forceFreshResearch`)는 건너뛴다. 수동 재실행: `gh workflow run job-gemini-person.yml -f job_id=<uuid> -f force=true`.
+  - **스위치·모델**: repo variable `PERSON_GEMINI_SHADOW`(미설정·빈 값 = 켜짐, `false` = 끔), `GEMINI_PERSON_MODEL`
+    (기본 `gemini-3.1-pro-preview`, 단가는 `config/apiPricing.ts` - 모델을 바꾸면 단가표도 같이 등록해야
+    `test:api-pricing`이 통과한다). secret `GEMINI_API_KEY`가 필요하다.
+  - **저장·표시**: `job.metadata.geminiShadow`(원자 병합, migration 없음)가 유일한 원본이다. manifest에는 복사하지 않고
+    페이지를 쓸 때(`writeManuscriptPages` -> `attachGeminiShadows`) 덧입힌다. 끝나면 manifest 행이 이미 있을 때만
+    `manuscripts-refresh.yml` 발화 + 트랙 봇 텔레그램 한 통(`📄 원고 페이지 열기`). 실패는 `geminiShadow.error` + 텔레그램 한 줄,
+    기존 파이프라인에는 영향이 없다. 비용: 호출 둘 다 `recordApiUsage`(`gemini-person.research/.write`, job_id 첨부)이고
+    **검색 grounding 쿼리 요금($14/1,000건, 월 5,000건 무료)은 토큰 단가표에 없어 대시보드에서 빠진다.**
 
 ## 키워드 수집·알림 스케줄 (2026-10-11 개편)
 

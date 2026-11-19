@@ -24,6 +24,8 @@ import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "./parseManuscriptBlocks.js";
 import { topicTrack } from "./manuscriptManifest.js";
 import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry, ViewerEditRecord, ImagePickRecord } from "./manuscriptManifest.js";
+import { toGeminiPageView } from "../gemini-person/geminiShadowView.js";
+import type { GeminiPageView } from "../gemini-person/geminiShadowView.js";
 import { DEFAULT_TRACK } from "../../notifications/telegramTracks.js";
 import { TISTORY_CONFIG } from "../../config/publishTargets.js";
 import type { Track } from "../../notifications/telegramTracks.js";
@@ -90,6 +92,11 @@ type PageTopic = {
   viewerEdit: ViewerEditRecord | null;
   /** 마지막 후보 클릭 교체 결과(2026-10-07). 없으면 null. */
   imagePick: ImagePickRecord | null;
+  /**
+   * 인물 제미나이 그림자 버전(2026-11-19). 있을 때만 "기존 | 제미나이" 탭이 뜬다. 이미지·수정·저장·발행은 없다 -
+   * 비교용 읽기 전용 화면이다(workflows/gemini-person).
+   */
+  gemini: GeminiPageView | null;
   // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
   // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
@@ -259,6 +266,7 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     charCount: m.body.replace(/\s/g, "").length,
     viewerEdit: m.viewerEdit ?? null,
     imagePick: m.imagePick ?? null,
+    gemini: toGeminiPageView(m.geminiShadow),
   };
 }
 
@@ -440,6 +448,19 @@ export function renderManuscriptPage(
   .prompt-inline{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.6;
                  background:var(--card);border:1px solid var(--line);border-radius:6px;
                  padding:8px 10px;margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere;color:#6B6259}
+
+  /* 인물 제미나이 비교 탭(2026-11-19) - 기존 원고와 Gemini 단독 원고를 같은 자리에서 오간다. 읽기 전용이다. */
+  .shadow-tabs{display:flex;gap:6px;margin:0 0 16px}
+  .shadow-tab{border:1px solid var(--line);background:#fff;color:var(--fg);border-radius:999px;padding:6px 16px;
+              font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .shadow-tab.on{background:var(--pen);border-color:var(--pen);color:#fff}
+  .shadow-note{background:var(--pen-soft);border-radius:8px;padding:9px 12px;font-size:12.5px;line-height:1.6;margin:0 0 14px;color:var(--fg)}
+  .shadow-err{background:#FBEAEA;border:1px solid #E5B5B5;border-radius:8px;padding:9px 12px;font-size:13px;margin:0 0 14px;color:#7A2B2B}
+  .shadow-body p{margin:0 0 14px;font-size:15px;line-height:1.85;white-space:pre-wrap}
+  .shadow-body p.h{font-size:19px;font-weight:800;margin:26px 0 8px;line-height:1.5}
+  .shadow-body ul{margin:0 0 14px;padding-left:22px;font-size:15px;line-height:1.85}
+  .shadow-src{font-size:13px;line-height:1.7;word-break:break-all}
+  .shadow-notes{white-space:pre-wrap;font-size:12.5px;line-height:1.7}
 
   h2.sec{font-size:15px;margin:34px 0 12px;letter-spacing:-.025em}
   table{border-collapse:collapse;width:100%;font-size:13px}
@@ -1257,10 +1278,119 @@ export function renderManuscriptPage(
       });
     }
 
+    // ---- 제미나이 비교 탭(2026-11-19) ----
+    // 같은 주제의 Gemini 단독 원고. 읽기 전용 - 이미지·수정·저장·발행이 없다. 탭 선택은 이 브라우저 메모리에만 둔다.
+    var viewMode = {};
+
+    function shadowTabsHtml(topic, mode) {
+      if (!topic.gemini) return "";
+      return '<div class="shadow-tabs">'
+        + '<button type="button" class="shadow-tab' + (mode === "orig" ? " on" : "") + '" data-mode="orig">기존</button>'
+        + '<button type="button" class="shadow-tab' + (mode === "gemini" ? " on" : "") + '" data-mode="gemini">제미나이</button>'
+        + '</div>';
+    }
+
+    function wireShadowTabs(topic) {
+      wrap.querySelectorAll(".shadow-tab").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          viewMode[topic.jobId] = btn.getAttribute("data-mode");
+          render(topic.jobId);
+        });
+      });
+    }
+
+    function geminiPlain(g) {
+      var parts = [];
+      g.blocks.forEach(function (b) {
+        if (b.type === "heading") parts.push(b.text);
+        else parts.push(b.lines.join("\\n"));
+      });
+      return parts.join("\\n\\n");
+    }
+
+    function geminiRichHtml(g) {
+      var parts = [];
+      g.blocks.forEach(function (b) {
+        if (b.type === "heading") parts.push('<p style="font-size:' + HEADING_PX + 'px"><b>' + inlineHtml(b.text) + "</b></p>");
+        else parts.push(linesToHtml(b.lines));
+        parts.push(SPACER);
+      });
+      parts.pop();
+      return parts.join("\\n");
+    }
+
+    function geminiBodyHtml(g) {
+      return g.blocks.map(function (b) {
+        if (b.type === "heading") return '<p class="h">' + inlineHtml(b.text) + '</p>';
+        if (b.lines.length > 0 && b.lines.every(isListLine)) {
+          return '<ul>' + b.lines.map(function (l) { return "<li>" + inlineHtml(stripListMarker(l)) + "</li>"; }).join("") + '</ul>';
+        }
+        return '<p>' + b.lines.map(inlineHtml).join("<br>") + '</p>';
+      }).join("");
+    }
+
+    function geminiSourceLines(g) {
+      return g.sources.map(function (s) { return (s.title ? s.title + " - " : "") + s.url; }).join("\\n");
+    }
+
+    function renderGemini(topic) {
+      var g = topic.gemini;
+      document.querySelectorAll(".navbtn").forEach(function (b) {
+        b.classList.toggle("active", b.getAttribute("data-job-id") === topic.jobId);
+      });
+      history.replaceState(null, "", "#" + topic.jobId);
+
+      var h = shadowTabsHtml(topic, "gemini");
+      h += '<div class="shadow-note">🤖 <b>제미나이 단독 버전</b> — 우리 작성 규칙 없이 Gemini가 조사부터 집필까지 혼자 쓴 글입니다. 기존 원고와 비교용이며 이미지·수정·발행은 없습니다.'
+        + (g.model ? ' · 모델 ' + esc(g.model) : '') + (g.finishedAt ? ' · ' + esc(kstTime(g.finishedAt)) : '')
+        + (g.costUsd != null ? ' · 토큰 비용 약 $' + g.costUsd.toFixed(2) : '') + '</div>';
+      if (g.error) h += '<div class="shadow-err">⚠️ 이 실행은 끝까지 가지 못했습니다 — ' + esc(g.error) + '</div>';
+      if (g.warning) h += '<div class="shadow-note">' + esc(g.warning) + '</div>';
+
+      if (g.title) h += '<div class="doc-title">' + esc(g.title) + '</div>';
+      h += '<div class="doc-sub">' + esc(topic.date) + ' · 본문 ' + g.charCount + '자(공백 제외) · <code>' + esc(topic.jobId.slice(0, 8)) + '</code></div>';
+
+      if (g.blocks.length > 0) {
+        h += '<div class="toolbar">';
+        h += '<button class="btn primary" id="g-body">📋 본문 복사 (서식 유지)</button>';
+        h += '<button class="btn" id="g-body-plain">📋 본문 복사 (서식 없음)</button>';
+        if (g.title) h += '<button class="btn" id="g-title">📋 제목 복사</button>';
+        h += '</div>';
+        h += '<div class="shadow-body" id="g-preview">' + geminiBodyHtml(g) + '</div>';
+      }
+
+      h += '<h2 class="sec">출처 ' + g.sources.length + '건</h2>';
+      if (g.sources.length > 0) {
+        h += '<div class="toolbar"><button class="btn" id="g-src">📋 출처 복사</button></div><div class="shadow-src">'
+          + g.sources.map(function (s) {
+              return '<div>' + (s.title ? esc(s.title) + ' — ' : '') + '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.url) + '</a></div>';
+            }).join("") + '</div>';
+      } else {
+        h += '<div class="empty">출처가 기록되지 않았습니다.</div>';
+      }
+
+      if (g.researchNotes) {
+        h += '<h2 class="sec">조사 노트</h2><div class="toolbar"><button class="btn" id="g-notes">📋 조사 노트 복사</button></div>'
+          + '<details><summary>펼치기</summary><div class="shadow-notes">' + esc(g.researchNotes) + '</div></details>';
+      }
+
+      wrap.innerHTML = h;
+      wireShadowTabs(topic);
+      var on = function (id, fn) { var el = document.getElementById(id); if (el) el.addEventListener("click", fn); };
+      on("g-body", function () { copyRich(geminiRichHtml(g), geminiPlain(g)); });
+      on("g-body-plain", function () { copyText(geminiPlain(g)); });
+      on("g-title", function () { copyText(g.title); });
+      on("g-src", function () { copyText(geminiSourceLines(g)); });
+      on("g-notes", function () { copyText(g.researchNotes); });
+      document.getElementById("main").scrollTop = 0;
+      window.scrollTo(0, 0);
+    }
+
 ${publishButton ? publishScript(publishButton) : ""}
     function render(jobId) {
       var topic = findTopic(jobId);
       if (!topic) return;
+      if (topic.gemini && viewMode[jobId] === "gemini") { renderGemini(topic); return; }
 
       document.querySelectorAll(".navbtn").forEach(function (b) {
         b.classList.toggle("active", b.getAttribute("data-job-id") === jobId);
@@ -1281,7 +1411,7 @@ ${publishButton ? publishScript(publishButton) : ""}
         : '<span class="bad">이미지 자리 없음</span>');
       sub.push("<code>" + esc(topic.jobId.slice(0, 8)) + "</code>");
 
-      var h = "";
+      var h = shadowTabsHtml(topic, "orig");
       h += '<div class="cat-badge">' + esc(topic.categoryLabel) + '</div>';
       if (topic.sourceTag === "instagram") {
         h += '<a class="src-badge" href="' + esc(topic.sourceUrl || "#") + '" target="_blank" rel="noopener">'
@@ -1402,6 +1532,7 @@ ${publishButton ? publishBarScript(publishButton) : ""}
     }
 
     function wire(topic) {
+      wireShadowTabs(topic);
       wrap.querySelectorAll("[data-copy]").forEach(function (b) {
         b.addEventListener("click", function () { copyText(b.getAttribute("data-copy")); });
       });

@@ -24,6 +24,9 @@ on:
       - "src/workflows/manuscripts/manuscriptManifest.ts"
       - "src/workflows/manuscripts/buildManuscriptPageCli.ts"
       - "src/workflows/manuscripts/deployManuscriptsPage.ts"
+      - "src/workflows/manuscripts/writeManuscriptPages.ts"
+      # 인물 제미나이 비교 탭(2026-11-19)이 읽는 덧입힘 코드.
+      - "src/workflows/gemini-person/geminiShadowView.ts"
       # 뷰어 "수정본 반영" API(Pages Function). 배포할 때 함께 묶여 올라가므로 바뀌면 다시 배포해야 한다.
       - "functions/**"
       - "cloudflare/manuscripts-pages/**"

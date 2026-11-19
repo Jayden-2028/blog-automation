@@ -1,0 +1,93 @@
+# 인물 제미나이 그림자 트랙(2026-11-19). person job마다 Gemini가 조사부터 집필까지 혼자 쓴 글을 만들어
+# job.metadata.geminiShadow에 저장한다 - 기존 원고(Claude)와 원고 페이지의 "제미나이" 탭에서 나란히 비교하려는 용도다.
+# 발화: dispatchResearch(workflows/research/dispatchResearch.ts)가 새 person job의 자료조사를 쏠 때 함께 쏜다.
+# 수동 재실행: gh workflow run job-gemini-person.yml -f job_id=<uuid> [-f force=true]
+#
+# heavy-pipeline 큐(pipelineQueue)를 타지 않는다: API만 부르는 가벼운 job이라 조사·집필 줄에 세우면 서로를 막는다.
+# job별 concurrency 그룹으로 **같은 job의 중복 실행만** 직렬화한다(job-translate.yml과 같은 이유).
+#
+# 끄기: repo variable PERSON_GEMINI_SHADOW=false (미설정·빈 값 = 켜짐). 모델: repo variable GEMINI_PERSON_MODEL
+# (미설정 = gemini-3.1-pro-preview, 단가는 src/config/apiPricing.ts에 등록돼 있어야 한다).
+#
+# 필요한 repo secret: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN/CHAT_ID(엔터 봇 -
+# person job은 track이 없어 메인봇으로 간다), SOCIAL_/KSCENE_ 봇(실패 알림이 트랙을 고를 때), CLOUDFLARE_PAGES_PROJECT_NAME(📄 링크).
+name: job-gemini-person
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "article_jobs.id (UUID)"
+        required: true
+        type: string
+      force:
+        description: "이미 끝났거나 진행 기록이 있어도 다시 돈다(true). 실패 뒤 수동 재실행용"
+        required: false
+        default: "false"
+        type: string
+
+permissions:
+  contents: read
+  actions: write # 끝난 뒤 manuscripts-refresh.yml을 발화한다
+
+concurrency:
+  group: job-gemini-person-${{ inputs.job_id }}
+  cancel-in-progress: false
+
+jobs:
+  gemini-person:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run job:gemini-person
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_PERSON_MODEL: ${{ vars.GEMINI_PERSON_MODEL }}
+          PERSON_GEMINI_SHADOW: ${{ vars.PERSON_GEMINI_SHADOW }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          # `📄 원고 페이지 열기` 링크(buildReadyKeyboard와 같은 주소 규칙)와 페이지 갱신 발화에 쓴다.
+          CLOUDFLARE_PAGES_PROJECT_NAME: ${{ secrets.CLOUDFLARE_PAGES_PROJECT_NAME }}
+          GITHUB_TOKEN: ${{ github.token }}
+          JOB_ID: ${{ inputs.job_id }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            npm run job:gemini-person -- "$JOB_ID" --force
+          else
+            npm run job:gemini-person -- "$JOB_ID"
+          fi
+
+      # 이 스텝은 **Node가 시작조차 못 했거나 시한·취소로 죽은** 경우만 잡는다. Gemini 호출 실패 같은 처리된 실패는
+      # CLI가 geminiShadow.error에 적고 텔레그램 한 줄을 이미 보냈다(종료 코드 0) - 같은 알림이 두 번 가지 않게 한다.
+      - name: 실패 알림 (트랙 봇)
+        if: ${{ failure() || cancelled() }}
+        timeout-minutes: 5
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SOCIAL_TELEGRAM_BOT_TOKEN: ${{ secrets.SOCIAL_TELEGRAM_BOT_TOKEN }}
+          SOCIAL_TELEGRAM_CHAT_ID: ${{ secrets.SOCIAL_TELEGRAM_CHAT_ID }}
+          KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
+          KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
+          FAILED_JOB_ID: ${{ inputs.job_id }}
+          FAILED_WORKFLOW_FILE: job-gemini-person.yml
+          FAILED_JOB_STATUS: ${{ job.status }}
+        run: node scripts/notifyWorkflowFailure.mjs

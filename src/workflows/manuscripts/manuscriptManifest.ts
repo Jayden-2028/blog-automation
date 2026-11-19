@@ -24,6 +24,7 @@ import { supabase } from "../../services/supabase/client.js";
 import type { ArticleJobRow, ManuscriptManifestTopicRow } from "../../types/database.js";
 import { DEFAULT_TRACK, parseTrack } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
+import type { GeminiShadow } from "../gemini-person/geminiShadowTypes.js";
 
 /** 자동 생성된 이미지 1장. index는 본문 [IMAGE: ] 마커 순서(1부터)와 일치한다. */
 export type ManuscriptImage = {
@@ -116,6 +117,12 @@ export type ManuscriptEntry = {
   viewerEdit?: ViewerEditRecord | null;
   /** 마지막 "후보 이미지 클릭 교체" 결과(2026-10-07). 실패 사유도 여기 남아 뷰어가 보여준다. */
   imagePick?: ImagePickRecord | null;
+  /**
+   * 인물 제미나이 그림자 버전(2026-11-19, workflows/gemini-person). **저장하지 않는다** - 원본은
+   * job.metadata.geminiShadow 하나이고, 페이지를 쓰는 순간(writeManuscriptPages -> attachGeminiShadows)에만
+   * 메모리에서 덧입는다. saveManifest가 떼어 내므로 manifest 행에는 남지 않는다.
+   */
+  geminiShadow?: GeminiShadow | null;
 };
 
 /** 후보 클릭 교체 1건의 처리 결과. */
@@ -224,6 +231,12 @@ export async function loadManifest(): Promise<ManuscriptManifest> {
  * 이 함수는 그 행을 모른 채 자기가 아는 행만 upsert하므로 지우지 않는다 - 전체 겹어쓰기(overwrite)
  * 방식이었다면 재현됐을 유실을 원천적으로 막는다.
  */
+export function withoutGeminiShadow(entry: ManuscriptEntry): ManuscriptEntry {
+  if (!("geminiShadow" in entry)) return entry;
+  const { geminiShadow: _dropped, ...rest } = entry;
+  return rest;
+}
+
 export async function saveManifest(manifest: ManuscriptManifest): Promise<void> {
   if (manifest.topics.length === 0) return;
   const now = new Date().toISOString();
@@ -233,7 +246,8 @@ export async function saveManifest(manifest: ManuscriptManifest): Promise<void> 
     category: topic.category,
     date: topic.date,
     ready_at: topic.readyAt,
-    channels: [topic.manuscript],
+    // geminiShadow는 job.metadata가 원본이다 - 복사본을 남기면 job 쪽이 갱신돼도 낡은 값이 굳는다.
+    channels: [withoutGeminiShadow(topic.manuscript)],
     updated_at: now,
   }));
   const { error } = await supabase.from("manuscript_manifest_topics").upsert(rows, { onConflict: "job_id" });

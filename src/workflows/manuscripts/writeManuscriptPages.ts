@@ -10,6 +10,8 @@ import type { Track } from "../../notifications/telegramTracks.js";
 import { topicTrack } from "./manuscriptManifest.js";
 import type { ManuscriptManifest } from "./manuscriptManifest.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
+import { attachGeminiShadows } from "../gemini-person/geminiShadowView.js";
+import type { LoadShadows } from "../gemini-person/geminiShadowView.js";
 
 /**
  * 엔터 페이지(index.html)는 원고가 없어도 항상 쓴다(기존 동작). 다른 트랙은 원고가 있을 때만 쓴다 -
@@ -18,8 +20,11 @@ import { renderManuscriptPage } from "./renderManuscriptPage.js";
  */
 export async function writeManuscriptPages(
   manifest: ManuscriptManifest,
-  generatedAt: Date = new Date()
+  generatedAt: Date = new Date(),
+  options: { loadShadows?: LoadShadows } = {}
 ): Promise<string[]> {
+  // 인물 제미나이 그림자 버전은 job.metadata가 원본이라 여기서 덧입힌다(실패해도 원고 페이지는 그대로 나간다).
+  manifest = await attachGeminiShadows(manifest, options.loadShadows);
   const written: string[] = [];
   for (const track of TRACKS as readonly Track[]) {
     const hasTopics = manifest.topics.some((topic) => topicTrack(topic) === track);

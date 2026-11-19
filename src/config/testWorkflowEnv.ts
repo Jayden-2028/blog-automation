@@ -26,6 +26,7 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
     "manuscripts-refresh.yml",
     "manuscript-edit.yml",
     "image-pick.yml", // 교체 완료 알림에 📄 버튼이 붙는다
+    "job-gemini-person.yml", // 제미나이 버전 완료 알림에 📄 버튼이 붙는다(2026-11-19)
   ];
   for (const file of needPagesUrl) {
     assert(
@@ -66,6 +67,8 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
     { file: "job-translate.yml", jobId: INPUT_JOB_ID },
     { file: "job-revise.yml", jobId: INPUT_JOB_ID },
     { file: "job-publish-prepare.yml" },
+    // 2026-11-19: 인물 제미나이 그림자 트랙. 처리된 실패는 CLI가 알리고, 이 스텝은 시작 못 한/시한 초과만 잡는다.
+    { file: "job-gemini-person.yml", jobId: INPUT_JOB_ID },
     // 2026-11-12 추가. 11/11 apt 장애 때 run 10개가 죽었는데 알림이 한 통도 없었고, 사용자는
     // 교체가 오는 줄 알고 계속 기다렸다. 되살리는 길은 명령이 아니라 "후보를 한 번 더 누르기"다.
     { file: "image-pick.yml", jobId: "${{ github.event.client_payload.jobId }}" },
@@ -78,7 +81,8 @@ const read = (file: string): string => readFileSync(join(WORKFLOWS, file), "utf-
     const nextStep = yml.indexOf("\n      - name:", start);
     const step = yml.slice(start, nextStep === -1 ? undefined : nextStep);
 
-    assert(/if:\s*failure\(\)/.test(step), `${file} 실패 알림 단계에 if: failure()가 없다`);
+    // 2026-11-17부터 조건이 `${{ failure() || cancelled() }}`다(05bc2ee) - failure()가 들어 있기만 하면 된다.
+    assert(/if:\s*(\$\{\{\s*)?failure\(\)/.test(step), `${file} 실패 알림 단계에 if: failure()가 없다`);
     assert(
       step.includes("node scripts/notifyWorkflowFailure.mjs"),
       `${file} 실패 알림이 node 직실행이 아니다 - npm ci가 흔들린 run에서는 알림도 같이 죽는다`

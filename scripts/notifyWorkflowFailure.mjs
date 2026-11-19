@@ -3,8 +3,8 @@
 //   (워크플로의 `if: ${{ failure() || cancelled() }}` 스텝이 부른다 - cancelled를 빼면 job 레벨
 //    timeout-minutes로 죽은 run이 조용히 지나간다. 2026-11-17에 여섯 워크플로 모두 고쳤다.)
 //
-// 쓰는 워크플로는 여섯이다 - job-research / job-write / job-translate / job-revise /
-// job-publish-prepare / image-pick. 어느 워크플로인지는 `FAILED_WORKFLOW_FILE`이 말하고, 그에 따라
+// 쓰는 워크플로는 일곱이다 - job-research / job-write / job-translate / job-revise /
+// job-publish-prepare / image-pick / job-gemini-person. 어느 워크플로인지는 `FAILED_WORKFLOW_FILE`이 말하고, 그에 따라
 // **무엇이 멈췄는지와 어떻게 되살리는지**가 달라진다(WORKFLOW_COPY). 다섯은 jobId를 알고 있어
 // (`inputs.job_id`, image-pick은 `client_payload.jobId`) `FAILED_JOB_ID`로 받으면 대기열을 추측하지
 // 않고 그 job만 집는다 - 더 정확하고 조회가 한 번이다.
@@ -112,6 +112,18 @@ const WORKFLOW_COPY = {
       "다시 하기: <b>뷰어에서 그 후보를 한 번 더 누릅니다.</b>",
       "(누른 요청은 DB 큐에 남아 있어, 다음 run이 남은 자리까지 같이 처리합니다)",
     ],
+  },
+  // 인물 제미나이 그림자 트랙(2026-11-19). 기존 원고에는 영향이 없다 - 비교용 제미나이 버전만 안 온다.
+  // Gemini 호출 실패 같은 "처리된 실패"는 CLI가 텔레그램 한 줄을 이미 보냈으므로 이 알림은 Node가 못 뜨거나 시한으로 죽은 경우만 간다.
+  "job-gemini-person.yml": {
+    title: "제미나이 버전 생성 실패",
+    what: [
+      "인물 원고와 비교할 제미나이 버전이 만들어지지 않았습니다.",
+      "기존 원고는 <b>영향이 없습니다</b> - 원고 페이지에 \"제미나이\" 탭만 뜨지 않습니다.",
+    ],
+    jobsHeading: "제미나이 버전이 없는 원고",
+    rerun: (jobId) => `gh workflow run job-gemini-person.yml -f job_id=${jobId} -f force=true`,
+    rerunNote: "(조사부터 다시 돌고, 끝나면 원고 페이지가 갱신됩니다)",
   },
   "job-publish-prepare.yml": {
     title: "원고 준비 실패",

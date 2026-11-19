@@ -26,6 +26,15 @@ export type RunGeminiResearchOptions = {
   model?: string;
   apiKey?: string;
   timeoutMs?: number;
+  /**
+   * Google Search grounding 사용 여부. 기본 true(기존 자료조사 호출은 그대로다).
+   * 인물 제미나이 그림자 트랙(workflows/gemini-person)이 집필 호출에서 켜고 끄는 데 쓴다.
+   */
+  grounding?: boolean;
+  /** 기본 0.2(자료조사용). 집필처럼 문장을 쓰는 호출은 더 높게 줄 수 있다. */
+  temperature?: number;
+  /** 기본 16000. 3.x 모델은 thinking 토큰도 이 한도를 먹으므로 긴 글은 넉넉히 준다. */
+  maxOutputTokens?: number;
 };
 
 export type GeminiGroundingSource = { title: string | null; url: string };
@@ -38,6 +47,13 @@ export type GeminiResearchUsage = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  /**
+   * thinking 토큰(`thoughtsTokenCount`). **출력 단가로 청구된다**(ai.google.dev "Output price (including
+   * thinking tokens)") - candidatesTokenCount에는 들어 있지 않아 따로 받는다. 응답에 없으면 undefined.
+   */
+  thinkingTokens?: number | null;
+  /** grounding 도구가 프롬프트에 끼워 넣은 토큰(`toolUsePromptTokenCount`). 입력 단가로 청구된다. */
+  toolUseTokens?: number | null;
 };
 
 export type RunGeminiResearchResult =
@@ -53,7 +69,13 @@ export type RunGeminiResearchResult =
   | { ok: false; error: string; durationMs: number };
 
 type GeminiGenerateContentResponse = {
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+    thoughtsTokenCount?: number;
+    toolUsePromptTokenCount?: number;
+  };
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
     finishReason?: string;
@@ -84,8 +106,8 @@ export async function runGeminiResearch(
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: options.prompt }] }],
-        tools: [{ google_search: {} }],
-        generationConfig: { temperature: 0.2, maxOutputTokens: 16000 },
+        ...(options.grounding === false ? {} : { tools: [{ google_search: {} }] }),
+        generationConfig: { temperature: options.temperature ?? 0.2, maxOutputTokens: options.maxOutputTokens ?? 16000 },
       }),
       signal: controller.signal,
     });
@@ -120,6 +142,8 @@ export async function runGeminiResearch(
           inputTokens: data.usageMetadata.promptTokenCount ?? null,
           outputTokens: data.usageMetadata.candidatesTokenCount ?? null,
           totalTokens: data.usageMetadata.totalTokenCount ?? null,
+          ...(data.usageMetadata.thoughtsTokenCount != null ? { thinkingTokens: data.usageMetadata.thoughtsTokenCount } : {}),
+          ...(data.usageMetadata.toolUsePromptTokenCount != null ? { toolUseTokens: data.usageMetadata.toolUsePromptTokenCount } : {}),
         }
       : null;
 

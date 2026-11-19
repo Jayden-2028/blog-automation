@@ -17,6 +17,7 @@ import { RESEARCH_PROVIDER } from "../../config/researchProvider.js";
 import type { ResearchProvider } from "../../config/researchProvider.js";
 import { enqueueAndMaybeDispatch } from "../../services/github/pipelineQueue.js";
 import { requestLocalResearch } from "./localResearchQueue.js";
+import { dispatchGeminiPersonShadow } from "../gemini-person/dispatchGeminiPersonShadow.js";
 
 export type ResearchRoute =
   /** GitHub Actions job-research.yml (claude·gemini). */
@@ -35,9 +36,21 @@ export type DispatchResearchDeps = {
   queueLocal?: (jobId: string) => Promise<{ queued: boolean; reason?: string }>;
   spawnLocal?: (jobId: string) => void;
   warnFallback?: (jobId: string) => Promise<void>;
+  /**
+   * 인물 제미나이 그림자 발화(2026-11-19). 기본은 실제 발화(person·selected·미요청 job만, 스위치
+   * PERSON_GEMINI_SHADOW). 자료조사 결과와 무관하게 독립으로 돈다 - 조사 경로가 무엇이든(claude/gemini/codex) 같다.
+   */
+  dispatchShadow?: (jobId: string) => Promise<unknown>;
 };
 
 export async function dispatchResearch(jobId: string, deps: DispatchResearchDeps = {}): Promise<DispatchResearchResult> {
+  const result = await dispatchResearchRoute(jobId, deps);
+  // 조사 발화가 끝난 **뒤에** 그림자를 쏜다 - 기존 흐름이 먼저고, 그림자는 절대 던지지 않는다(dispatchGeminiPersonShadow).
+  await (deps.dispatchShadow ?? ((id: string) => dispatchGeminiPersonShadow(id)))(jobId).catch(() => {});
+  return result;
+}
+
+async function dispatchResearchRoute(jobId: string, deps: DispatchResearchDeps): Promise<DispatchResearchResult> {
   const provider = deps.provider ?? RESEARCH_PROVIDER;
 
   if (provider === "codex") {
