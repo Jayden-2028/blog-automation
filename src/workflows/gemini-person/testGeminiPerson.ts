@@ -224,7 +224,7 @@ function harness(options: { job?: ArticleJobRow | null; responses?: RunAgyResult
   assert((stored.sources ?? []).find((x) => x.url === "https://news.example/a")?.title === "뉴스", "마크다운 링크는 제목도 담는다");
   assert(stored.usage?.research?.thinkingTokens === 1000 && stored.usage.totalTokens === 5000, "토큰만 기록(합계 5000)");
   assert(!JSON.stringify(stored.usage).includes("cost"), "금액 필드가 없다(구독)");
-  assert(h.calls.length === 2 && h.calls.every((c) => c.extraArgs?.join(" ") === "--mode plan" && c.model === undefined), "두 호출, 모델 미지정, 추가 인자 전달");
+  assert(h.calls.length === 2 && h.calls.every((c) => c.extraArgs?.join(" ") === "--mode plan" && c.model === "gemini-3.8-flash-high"), "두 호출, 기본 모델 gemini-3.8-flash-high 고정, 추가 인자 전달");
   assert(h.prompts[1].includes("조사 노트") && !h.prompts.join("\n").includes("[IMAGE"), "집필 프롬프트에 노트가 실리고 이미지 마커 요청이 없다");
   assert(h.prompts[0].includes("출처 URL을 남겨라"), "조사 프롬프트는 출처 URL을 요구한다");
   assert(h.refreshes === 0 && h.notices.length === 0 && result.status === "done" && result.refresh === "no_page", "페이지가 아직 없으면 저장만 한다");
