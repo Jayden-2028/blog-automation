@@ -19,6 +19,18 @@
 // 스틸이 들어간 것은 4건뿐이었고, 그 4건은 전부 작품명이 키워드 맨 앞이었다. 그래서 ① 후보는 키워드의
 // 모든 연속 구간에서 만들고 ② 검증은 구간 일치로 하며 ③ 검증에 떨어지면 다음 후보로 이어 붙인다.
 // 후보 필터(경계 노이즈)는 Serper 호출을 몇 번 아끼는 용도일 뿐 맞는 작품을 가려내지 않는다.
+//
+// 2026-11-19 - 인물 글(category=person)은 이 경로로 못 푼다(진단과 새 경로).
+//   이 모듈의 전제는 "job 키워드에 작품명이 들어 있다"인데, 인물 글의 키워드는 **인물 이름**이다. 실측:
+//   문가영·한효주·신민아는 0장이었고, **수지는 작품명이 「수지」인 다른 작품**(season/81768)이 og:title 검증을
+//   통과해 다른 배우의 스틸이 '안나' 공식 스틸이라는 캡션으로 발행됐다(검증이 "키워드 구간 = 작품명"이라 이름이
+//   같으면 통과한다). 인물 글은 작품 6~8개를 다루고 자리 하나가 작품 하나다.
+//   -> 새 경로: kinolightsPersonStills.ts가 **자리마다** 작품명을 뽑아(`'…'`·`「…」` 등) `작품명 배우명 키노`로
+//      검색하고(없으면 `site:kinolights.com 작품명`), og:title을 **작품명과** 맞추고, 작품 페이지 출연진으로
+//      동명 작품을 거르고, 미디어 탭을 브라우저로 끝까지 불러(loadKinolightsMediaStills.ts) 그 배우의 단독컷
+//      2~3장을 비전으로 고른다. 이 모듈은 거기서 작품 URL 검색(`searchKinolightsWorkUrls`)과 페이지 읽기 도구를
+//      빌려 주고, job 단위 호출에는 `excludeWorkTitles`(인물명과 같은 제목 거부)를 더했다.
+//      ott·entertainment 경로는 바뀌지 않았다.
 
 import { parse } from "node-html-parser";
 
@@ -68,6 +80,11 @@ export type SearchKinolightsOptions = {
   jobId?: string | null;
   /** 테스트 주입. 기본은 실제 원장 기록. */
   record?: typeof recordApiUsage;
+  /**
+   * 작품 제목으로 **인정하지 않을** 이름들(2026-11-19). 인물 글의 키워드는 인물명이라, 같은 이름의 작품
+   * (`수지` -> 「수지」, season/81768)이 og:title 검증을 통과해 엉뚱한 배우의 스틸이 발행됐다.
+   */
+  excludeWorkTitles?: readonly string[];
 };
 
 /** `https://m.kinolights.com/season/152343/media`처럼 미디어 탭 주소로 정규화한다. */
@@ -91,7 +108,7 @@ export function cleanKeyword(keyword: string): string {
 }
 
 /** 비교용 정규화 - 공백·문장부호를 없애고 소문자로. */
-function normalize(text: string): string {
+export function normalize(text: string): string {
   return text.replace(/[\s'"“”‘’<>《》「」()[\]]/g, "").toLowerCase();
 }
 
@@ -263,52 +280,62 @@ export async function resolveGotoLinks(
   }
 }
 
+/** Serper 사용 기록에 필요한 것. */
+export type SerperUsageContext = { jobId?: string | null; record?: typeof recordApiUsage };
+
+/**
+ * 질의 하나로 Serper 웹 검색을 돌려 **키노라이츠 작품 페이지 URL을 모두** 돌려준다(순서 유지, 중복 제거).
+ * 상위 3개는 실제 주소고, 못 찾았을 때만 goto 링크를 풀어서(0크레딧) 다시 본다. 실패는 빈 배열이다.
+ * 2026-11-19: 인물 글의 작품별 수집이 같은 호출을 쓰려고 `findWorkUrlForTitle`에서 떼어 냈다.
+ */
+export async function searchKinolightsWorkUrls(query: string, usage: SerperUsageContext = {}): Promise<string[]> {
+  const key = process.env.SERPER_API_KEY;
+  if (!key) return [];
+
+  let responded = false;
+  try {
+    const res = await fetch(SEARCH_ENDPOINT, {
+      method: "POST",
+      headers: { "X-API-KEY": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: query, gl: "kr", hl: "ko", num: 10 }),
+    });
+    responded = true;
+    recordSerperUsage({ endpoint: "search", ok: res.ok, status: res.status, jobId: usage.jobId, record: usage.record });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { organic?: { link?: string }[] };
+    const links = (json.organic ?? []).map((item) => item.link).filter((l): l is string => typeof l === "string");
+
+    // 먼저 그대로 본다(상위 3개는 이미 실제 주소다). 여기서 걸리면 추가 호출이 없다.
+    const direct = links.filter((link) => WORK_URL.test(link));
+    if (direct.length > 0) return direct;
+
+    // 못 찾았으면 goto 링크만 풀어서 다시 본다(0크레딧).
+    const resolved = await resolveGotoLinks(links.filter((link) => GOTO_LINK.test(link)), key);
+    return resolved.filter((link) => WORK_URL.test(link));
+  } catch {
+    // 응답을 못 받은 네트워크 실패만 여기서 기록한다.
+    if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
+    return [];
+  }
+}
+
 /**
  * 제목으로 작품 페이지를 찾는다. Serper 웹 검색을 쓴다.
  *
  * `site:` 한정을 먼저 걸고, 결과가 없으면 `키노라이츠 <제목>`으로 한 번 더 본다 - 색인에 따라
  * 한쪽만 걸리는 경우가 있다(실측 두 질의 모두 같은 작품을 찾았다).
  */
-async function findWorkUrlForTitle(
-  title: string,
-  usage: { jobId?: string | null; record?: typeof recordApiUsage } = {}
-): Promise<string | null> {
-  const key = process.env.SERPER_API_KEY;
-  if (!key) return null;
-
+async function findWorkUrlForTitle(title: string, usage: SerperUsageContext = {}): Promise<string | null> {
   for (const q of [`site:kinolights.com ${title}`, `키노라이츠 ${title}`]) {
-    let responded = false;
-    try {
-      const res = await fetch(SEARCH_ENDPOINT, {
-        method: "POST",
-        headers: { "X-API-KEY": key, "Content-Type": "application/json" },
-        body: JSON.stringify({ q, gl: "kr", hl: "ko", num: 10 }),
-      });
-      responded = true;
-      recordSerperUsage({ endpoint: "search", ok: res.ok, status: res.status, jobId: usage.jobId, record: usage.record });
-      if (!res.ok) continue;
-      const json = (await res.json()) as { organic?: { link?: string }[] };
-      const links = (json.organic ?? []).map((item) => item.link).filter((l): l is string => typeof l === "string");
-
-      // 먼저 그대로 본다(상위 3개는 이미 실제 주소다). 여기서 걸리면 추가 호출이 없다.
-      const direct = links.find((link) => WORK_URL.test(link));
-      if (direct) return direct;
-
-      // 못 찾았으면 goto 링크만 풀어서 다시 본다(0크레딧).
-      const resolved = await resolveGotoLinks(links.filter((link) => GOTO_LINK.test(link)), key);
-      const found = resolved.find((link) => WORK_URL.test(link));
-      if (found) return found;
-    } catch {
-      // 한 질의가 실패해도 다음 질의로 넘어간다. 응답을 못 받은 네트워크 실패만 여기서 기록한다.
-      if (!responded) recordSerperUsage({ endpoint: "search", ok: false, status: 0, jobId: usage.jobId, record: usage.record });
-    }
+    const urls = await searchKinolightsWorkUrls(q, usage);
+    if (urls[0]) return urls[0];
   }
   return null;
 }
 
-async function defaultFetchPage(url: string): Promise<string | null> {
+export async function defaultFetchPage(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, { headers: { "User-Agent": MOBILE_UA } });
+    const res = await fetch(url, { headers: { "User-Agent": MOBILE_UA }, signal: AbortSignal.timeout(20_000) });
     if (!res.ok) return null;
     return await res.text();
   } catch {
@@ -401,6 +428,7 @@ export async function searchKinolightsStills(
     options.findWorkUrl ?? ((candidate: string) => findWorkUrlForTitle(candidate, { jobId: options.jobId, record: options.record }));
   const fetchPage = options.fetchPage ?? defaultFetchPage;
 
+  const excluded = new Set((options.excludeWorkTitles ?? []).map(normalize));
   const triedPages = new Set<string>();
   let fetched = 0;
   for (const candidate of workTitleCandidates(trimmed)) {
@@ -421,6 +449,7 @@ export async function searchKinolightsStills(
     // **이 작품이 맞는지 확인하고 쓴다.** 아니면 다음 후보로 - 틀린 작품의 스틸은 빈 자리보다 나쁘다.
     const workTitle = readWorkTitle(html);
     if (!workTitle || !titleMatchesKeyword(workTitle, trimmed)) continue;
+    if (excluded.has(normalize(workTitle))) continue;
 
     return extractStills(html, mediaUrl);
   }

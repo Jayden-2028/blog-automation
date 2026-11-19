@@ -39,6 +39,7 @@ import { CROP_TRIGGER_RATIO, cropTallImageWithFocus } from "./cropTallImage.js";
 import type { ImageCandidate, SearchImages } from "./searchNaverImages.js";
 import { ImageDeduper } from "./imageFingerprint.js";
 import { describeSearchPools, expandQueriesForPools } from "./imageSearchPools.js";
+import { collectPersonWorkStills, personNameOf } from "./kinolightsPersonStills.js";
 import { searchKinolightsStills } from "./searchKinolightsStills.js";
 import { searchNaverImages } from "./searchNaverImages.js";
 import { groupShotsAllowed } from "../../config/imageGroupShots.js";
@@ -321,6 +322,12 @@ export type CollectWebImagesOptions = {
    * false면 건너뛴다(테스트 - 외부 HTTP를 타면 안 된다).
    */
   searchKinolights?: false | typeof searchKinolightsStills;
+  /**
+   * 인물 글(category=person)의 **작품별** 공식 스틸 수집(2026-11-19, kinolightsPersonStills.ts). 자리의 작품명으로
+   * 작품 페이지를 찾아 그 배우의 단독컷을 고른다. `searchKinolights: false`면 이것도 건너뛴다(외부 HTTP 금지).
+   * false를 직접 주면 이 경로만 끄고 옛 job 키워드 경로로 돌아간다(테스트용).
+   */
+  collectPersonStills?: false | typeof collectPersonWorkStills;
   /** referer는 그 이미지가 실린 페이지다 - 핫링크 차단을 넘기려면 필요하다(실측: 403 3건). */
   fetchImage?: (input: {
     url: string;
@@ -996,8 +1003,49 @@ export async function collectWebImages(
   // 자리마다 부르지 않는다 - 작품은 하나고 스틸 목록도 하나다. 한 번만 받아 공유한다.
   const kinolights = options.searchKinolights === undefined ? searchKinolightsStills : options.searchKinolights;
   let officialStills: ImageCandidate[] = [];
-  if (kinolights && ARTWORK_CATEGORIES.has(options.category ?? "")) {
-    const stills = await kinolights(input.keyword, { jobId: options.jobId }).catch(() => []);
+
+  // 인물 글은 **자리마다 작품이 다르다**(2026-11-19). job 키워드는 인물 이름이라 작품 검증이 성립하지 않는다 -
+  // 문가영·한효주·신민아 0장, 수지는 동명 작품 「수지」의 다른 배우 스틸이 '안나' 공식 스틸로 나갔다.
+  // 그래서 자리의 작품명으로 찾아 그 작품에서 이 배우의 단독컷을 고른다(kinolightsPersonStills.ts).
+  // 작품명이 없는 자리만 아래 job 단위 호출(옛 동작)을 그대로 쓴다.
+  const personStills = new Map<number, ImageCandidate[]>();
+  const collectPerson = options.collectPersonStills === undefined ? collectPersonWorkStills : options.collectPersonStills;
+  const personPath = !!kinolights && !!collectPerson && options.category === "person";
+  let jobLevelSlots: ReadonlySet<number> | null = null; // null = 모든 자리(인물 경로 아님)
+  if (personPath && collectPerson) {
+    const person = await collectPerson({
+      keyword: input.keyword,
+      slots: input.slots,
+      researchText: options.researchText ?? null,
+      jobId: options.jobId,
+    }).catch(() => null);
+    if (person) {
+      failures.push(...person.failures);
+      for (const [index, stills] of person.bySlot) {
+        personStills.set(
+          index,
+          stills.map((still) => ({
+            title: `${input.keyword} 공식 스틸컷(작품 단독컷)`,
+            link: still.imageUrl,
+            thumbnail: still.imageUrl,
+            width: null,
+            height: null,
+            sourcePage: still.sourcePage,
+          }))
+        );
+      }
+      jobLevelSlots = new Set(person.titleless);
+    }
+  }
+
+  // job 단위 호출은 인물 경로에서 **작품명 없는 자리가 있을 때만** 쓴다(Serper를 아낀다). 인물 이름과 같은
+  // 제목의 작품은 인정하지 않는다.
+  const needJobLevel = !!kinolights && ARTWORK_CATEGORIES.has(options.category ?? "") && (jobLevelSlots === null || jobLevelSlots.size > 0);
+  if (kinolights && needJobLevel) {
+    const stills = await kinolights(input.keyword, {
+      jobId: options.jobId,
+      ...(options.category === "person" ? { excludeWorkTitles: [personNameOf(input.keyword)] } : {}),
+    }).catch(() => []);
     officialStills = stills.map((still) => ({
       title: `${input.keyword} 공식 스틸컷`,
       link: still.imageUrl,
@@ -1017,7 +1065,7 @@ export async function collectWebImages(
   // **스틸이 있으면 쓰지 않는다.** 스틸은 3000x2000 원본이고 프레임은 1280x720이다 - 더 나은
   // 것이 손에 있는데 굳이 섞으면 §8-7의 "공식 스틸이 있으면 공식 스틸을 고른다"와 부딪힌다.
   let trailerFrames: ImageCandidate[] = [];
-  if (ARTWORK_CATEGORIES.has(options.category ?? "") && officialStills.length === 0 && options.researchText) {
+  if (ARTWORK_CATEGORIES.has(options.category ?? "") && officialStills.length === 0 && personStills.size === 0 && options.researchText) {
     const videoIds = extractYoutubeVideoIds(options.researchText);
     if (videoIds.length > 0) {
       const fetchFrames = options.fetchTrailerFrames ?? fetchTrailerFrameCandidates;
@@ -1089,7 +1137,9 @@ export async function collectWebImages(
         // 공식 스틸을 **맨 앞에** 둔다 - 이게 이 카테고리의 1순위 서치풀이다(§8-7).
         // 단 방송 화면 캡처를 원하는 자리는 빼 둔다(2026-10-02) - 공식 스틸이 끼면 "공식 스틸이 이긴다"
         // 규칙과 무관하게도 판정자가 그쪽으로 끌린다(이혼숙려캠프 1번 자리가 그렇게 포스터와 같은 스틸이 됐다).
-        const slotStills = slot.broadcastCapture ? [] : officialStills;
+        // 인물 글: 작품명이 있는 자리는 그 작품의 단독컷만, 없는 자리는 job 단위 스틸(있다면)을 쓴다.
+        const ownStills = jobLevelSlots === null ? officialStills : (personStills.get(slot.index) ?? (jobLevelSlots.has(slot.index) ? officialStills : []));
+        const slotStills = slot.broadcastCapture ? [] : ownStills;
         const slotFrames = slot.broadcastCapture ? [] : trailerFrames;
         const withOfficial = [...slotStills, ...slotFrames, ...quality];
         if (withOfficial.length > 0) {
