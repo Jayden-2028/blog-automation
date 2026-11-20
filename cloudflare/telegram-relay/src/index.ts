@@ -26,7 +26,7 @@
 // 임시 cron으로 실제 dispatch 성공까지 확인한 뒤 이 파일의 실 스케줄로 되돌렸다.
 
 import { catchUpTargets, resolveScheduled, type ScheduledDispatch } from "./schedule.js";
-import { forwardsPlainMessages, trackFromPath, type RelayTrack } from "./track.js";
+import { forwardsCaptionMessages, forwardsPlainMessages, trackFromPath, type RelayTrack } from "./track.js";
 
 export interface Env {
   TELEGRAM_WEBHOOK_SECRET: string;
@@ -232,10 +232,10 @@ export default {
 
     // 인스타 봇은 링크가 일반 메시지로 오므로 글자가 있는 메시지는 전부 넘긴다(2026-10-06). 다른 봇은 그대로다.
     // 사진·영상에 캡션으로 붙어 온 링크도 받는다(`caption`, 2026-10-06 개편2.5 C-1) - text만 보면 유실된다.
-    const isTextMessage =
-      Boolean(message) &&
-      typeof message === "object" &&
-      (typeof (message as { text?: unknown }).text === "string" || typeof (message as { caption?: unknown }).caption === "string");
+    // 사회 봇(2026-11-21, scenepick 주제 접수)은 **글자(text)만** 넘긴다 - 사진 캡션은 주제로 받지 않으므로 Actions를 깨울 이유가 없다.
+    const hasText = Boolean(message) && typeof message === "object" && typeof (message as { text?: unknown }).text === "string";
+    const hasCaption = Boolean(message) && typeof message === "object" && typeof (message as { caption?: unknown }).caption === "string";
+    const isTextMessage = hasText || (forwardsCaptionMessages(track) && hasCaption);
     if (!isCallbackQuery && !isReplyMessage && !(forwardsPlainMessages(track) && isTextMessage)) {
       return new Response("OK", { status: 200 });
     }

@@ -133,7 +133,7 @@ async function main(): Promise<void> {
   for (const [iso, files, round] of [
     ["2026-11-04T09:00:00Z", ["entertainment-keyword.yml"], "evening"],
     ["2026-11-04T10:00:00Z", ["entertainment-hot-star.yml"], undefined],
-    ["2026-11-04T11:00:00Z", ["social-issue-keyword.yml"], undefined],
+    // 20시(11 UTC) 사회 키워드 수집은 2026-11-21 사용자 결정으로 멈췄다 - 아래에서 따로 본다.
     ["2026-11-04T12:00:00Z", ["kscene-topic.yml", "watchdog.yml"], undefined],
   ] as const) {
     const r = await run({ iso });
@@ -145,7 +145,12 @@ async function main(): Promise<void> {
     assert(body.ref === "main", `${iso}의 ref는 main이어야 한다`);
     assert(body.inputs?.round === round, `${iso}의 round 입력은 ${round}여야 한다 (실제: ${r.dispatches[0].body})`);
   }
-  console.log("  ✅ 18시=엔터(evening), 19시=핫이슈 스타, 20시=사회, 21시=사용설명서+watchdog");
+  // 11 UTC는 깨어나되 할 일이 없다(빈 배열) - 오류로 던지지 않아야 한다(null이면 "모르는 시각"으로 던진다).
+  const socialOff = await run({ iso: "2026-11-04T11:00:00Z" });
+  assert(socialOff.dispatches.filter((d) => d.workflow === "social-issue-keyword.yml").length === 0, "11 UTC 사회 수집은 멈춤(2026-11-21)");
+  assert(socialOff.outcome === "ok" && !socialOff.threw, "할 일 없는 시각은 던지지 않아야 한다");
+  assert(socialOff.logs.some((l) => l.includes("(할 일 없음)")), "할 일 없음이 [cron] 줄에 남아야 한다");
+  console.log("  ✅ 18시=엔터(evening), 19시=핫이슈 스타, 20시=(멈춤), 21시=사용설명서+watchdog");
 
   // 3) 흔들리는 실패는 다시 던져본다(2026-11-04 GitHub 장애). 첫 호출만 500이면 두 번째에 성공한다.
   const flaky = await run({ dispatch: async (n) => (n === 1 ? new Response("boom", { status: 500 }) : new Response(null, { status: 204 })) });
@@ -186,20 +191,21 @@ async function main(): Promise<void> {
 
   // 7) 따라잡기: 앞 시각 run이 다 있으면 조회만 하고 아무것도 깨우지 않는다.
   const quiet = await run({ iso: "2026-11-04T12:00:00Z" });
-  assert(quiet.lists.join(",") === "entertainment-keyword.yml,entertainment-hot-star.yml,social-issue-keyword.yml",
-    `21시 발화는 앞 세 시각을 묻는다 (실제: ${quiet.lists.join(",")})`);
+  assert(quiet.lists.join(",") === "entertainment-keyword.yml,entertainment-hot-star.yml",
+    `21시 발화는 앞 시각의 수집(멈춘 사회 제외)을 묻는다 (실제: ${quiet.lists.join(",")})`);
   assert(!quiet.lists.includes("watchdog.yml"), "watchdog은 따라잡기 대상이 아니다(catchUp: false)");
   assert(quiet.dispatches.length === 2, `앞 시각이 다 돌았으면 이 시각 2건만 dispatch한다 (실제 ${quiet.dispatches.length})`);
   console.log("  ✅ 앞 시각이 다 돌았으면 조회만 하고 끝");
 
-  // 8) 2026-11-04 재현: 10·11 UTC가 빠진 채 12 UTC가 깨어나면 그 둘을 따라잡는다.
+  // 8) 2026-11-04 재현: 10 UTC가 빠진 채 12 UTC가 깨어나면 그 회차를 따라잡는다.
+  // (11 UTC 사회 수집은 2026-11-21에 멈췄다 - 따라잡기 대상도 아니다.)
   const recover = await run({ iso: "2026-11-04T12:00:00Z", runsToday: { "entertainment-hot-star.yml": 0, "social-issue-keyword.yml": 0 } });
   const caught = recover.dispatches.map((d) => d.workflow);
-  assert(caught.includes("entertainment-hot-star.yml") && caught.includes("social-issue-keyword.yml"),
-    `빠진 두 회차를 다시 깨워야 한다 (실제: ${caught.join(",")})`);
+  assert(caught.includes("entertainment-hot-star.yml"), `빠진 회차를 다시 깨워야 한다 (실제: ${caught.join(",")})`);
+  assert(!caught.includes("social-issue-keyword.yml"), "멈춘 사회 수집은 따라잡지 않는다(2026-11-21)");
   assert(!caught.includes("entertainment-keyword.yml"), "이미 돈 회차는 다시 깨우지 않는다");
-  assert(recover.dispatches.length === 4, `이 시각 2건 + 따라잡기 2건 = 4건 (실제 ${recover.dispatches.length})`);
-  assert(recover.logs.some((l) => l.includes("[catch-up]") && l.includes("social-issue-keyword.yml")), "따라잡은 사실이 로그에 남아야 한다");
+  assert(recover.dispatches.length === 3, `이 시각 2건 + 따라잡기 1건 = 3건 (실제 ${recover.dispatches.length})`);
+  assert(recover.logs.some((l) => l.includes("[catch-up]") && l.includes("entertainment-hot-star.yml")), "따라잡은 사실이 로그에 남아야 한다");
   console.log("  ✅ 빠진 앞 회차만 골라 다시 깨움 + 기록");
 
   // 9) 엔터는 회차 입력(round=evening)을 유지한 채 따라잡는다 - 입력이 빠지면 시각 추정으로 다른 회차가 된다.

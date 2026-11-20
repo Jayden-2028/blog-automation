@@ -13,7 +13,7 @@ import type { TelegramInlineKeyboardButton, TelegramOutgoingMessage } from "../.
 import { manuscriptIndexPagePath } from "../../config/pipelinePaths.js";
 import { cloudflarePagesUrl } from "../../config/manuscriptsPageTargets.js";
 import { manuscriptPagePath, viewerPageLink } from "../../config/manuscriptViewerPages.js";
-import { TRACK_LABEL, trackOfJob } from "../../notifications/telegramTracks.js";
+import { TRACK_LABEL, TRACK_PUBLISH_CHANNELS, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { Track } from "../../notifications/telegramTracks.js";
 import { isManualPublishOnly, isPublishActionPaused } from "../publish/manualPublishOnly.js";
 import { buildPublishDecisionCallbackData } from "../../notifications/publishDecisionCallbackData.js";
@@ -112,7 +112,9 @@ export function buildReadyKeyboard(
     // person(인물 백과)은 발행 버튼이 없다 - 뷰어에서 복사해 네이버에 직접 붙여넣는다(2026-10-14 사용자 결정).
     // 네이버 버튼은 일시 해제 상태일 수 있다(2026-10-16 미스클릭 방지) - 사회·TKM 버튼은 그대로다.
     const paused = publishButton.callback_data === buildPublishDecisionCallbackData(jobId, "naver") && isPublishActionPaused("naver");
-    if (!isManualPublishOnly(job) && !paused) rows.push([publishButton]);
+    // 트랙에 발행 채널이 하나도 없으면(2026-11-21 티스토리 운영 중단 뒤의 사회) 버튼을 붙이지 않는다 - 눌러도 서버가 거절한다.
+    const trackHasChannel = TRACK_PUBLISH_CHANNELS[track].length > 0;
+    if (!isManualPublishOnly(job) && !paused && trackHasChannel) rows.push([publishButton]);
   } catch {
     // jobId가 UUID가 아니면(옛 데이터·테스트) 발행 줄을 뺀다 - 여기서 던지면 알림 전체가 사라진다.
   }
@@ -155,7 +157,10 @@ function withLeadingBlank(lines: string[]): string[] {
 
 /** 사회 트랙의 발행 안내. 🟠 티스토리 발행 버튼을 누르면 맥미니가 올리므로, 누르기 전에 할 일(수정본 저장)을 문구로 알린다. */
 const SOCIAL_MANUAL_PUBLISH_GUIDE =
-  TISTORY_CONFIG.publishMode === "draft"
+  // 2026-11-21 사용자 결정으로 티스토리 운영을 멈췄다 - 발행 버튼이 없으므로 안내도 뷰어 복사로 바꾼다.
+  TRACK_PUBLISH_CHANNELS.social.length === 0
+    ? "티스토리 운영이 중단돼(2026-11-21) 발행 버튼이 없습니다. 필요하면 원고 페이지에서 복사해 직접 올려 주세요."
+    : TISTORY_CONFIG.publishMode === "draft"
     ? "🟠 티스토리 임시저장을 누르면 맥미니가 티스토리에 임시저장하고 링크를 보냅니다 - 발행은 직접 해주세요(캡차 회피). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요."
     : "🟠 티스토리 발행을 누르면 맥미니가 올립니다(첫 운영은 비공개). 뷰어에서 고쳤다면 먼저 '💾 수정본 저장'을 누르세요.";
 

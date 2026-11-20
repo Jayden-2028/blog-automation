@@ -142,17 +142,10 @@ main().catch((error) => {
   if (rows[0]?.[0]?.url !== `https://pages.example.dev/social.html#${JOB}`) {
     throw new Error(`❌ 원고 페이지 링크는 social.html 딥링크여야 한다 (${rows[0]?.[0]?.url})`);
   }
-  if (!all.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼이 있어야 한다");
-  if (!msg.text.includes("티스토리")) throw new Error("❌ 티스토리 발행 안내가 있어야 한다");
-  // 2026-11-05: 버튼 문구는 모드를 따른다. 임시저장 모드에서 "발행"이라고 적으면 거짓말이 된다.
-  // env에 기대지 않고 설정값과 맞는지만 본다 - 모드를 되돌려도 이 단정이 따라온다.
-  {
-    const expected = TISTORY_CONFIG.publishMode === "draft" ? "🟠 티스토리 임시저장" : "🟠 티스토리 발행";
-    const button = all.find((b) => b.callback_data === `publish:tistory:${JOB}`)!;
-    if (button.text !== expected) throw new Error(`❌ 버튼 문구가 모드와 맞아야 한다(기대 "${expected}", 실제 "${button.text}")`);
-    const guide = TISTORY_CONFIG.publishMode === "draft" ? "임시저장" : "맥미니가 올립니다";
-    if (!msg.text.includes(guide)) throw new Error(`❌ 안내 문구도 모드를 따라야 한다(기대 "${guide}")`);
-  }
+  // 2026-11-21 사용자 결정으로 티스토리 운영을 멈췄다 - 사회 알림에는 발행 버튼이 없고 안내도 뷰어 복사로 바뀐다.
+  if (all.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼이 없어야 한다(운영 중단)");
+  if (!msg.text.includes("티스토리 운영이 중단돼")) throw new Error("❌ 티스토리 중단 안내가 있어야 한다");
+  void TISTORY_CONFIG;
   if (msg.text.includes("🟢 네이버")) throw new Error("❌ 사회 알림에 네이버 표기가 있으면 안 된다");
 
   // 엔터 job(트랙 값이 없으면 엔터) - 네이버 버튼은 일시 해제 토글을 따른다(2026-10-16).
@@ -164,7 +157,7 @@ main().catch((error) => {
   if (ent.replyMarkup?.inline_keyboard[0][0].url !== `https://pages.example.dev/#${JOB}`) {
     throw new Error("❌ 엔터 딥링크는 기존 루트 그대로여야 한다");
   }
-  console.log("✅ 사회 트랙 - 네이버·블로그 버튼 없음, 티스토리 버튼, social.html 딥링크 (엔터는 불변)");
+  console.log("✅ 사회 트랙 - 네이버·블로그·티스토리 버튼 없음(2026-11-21 중단), social.html 딥링크 (엔터는 불변)");
 }
 
 // --- 사용설명서 트랙(2026-10-06, 개편3): 영어본 -> 🔵 Blogger 발행 버튼만, kscene.html 딥링크 -------------------------------
@@ -224,11 +217,11 @@ main().catch((error) => {
   } else if (!entAll.some((b) => b.callback_data === `publish:naver:${JOB}`)) throw new Error("❌ 네이버 발행 버튼이 있어야 한다");
   if (!entAll.some((b) => b.callback_data === `publish:images:${JOB}`)) throw new Error("❌ 이미지 수정 버튼은 그대로여야 한다");
 
-  // 사회: 티스토리 발행 + 같은 줄.
+  // 사회: 수정·반려 줄은 그대로, 티스토리 발행 버튼은 없다(2026-11-21 운영 중단).
   const soc = buildManuscriptReadyMessage(successResult(job(JOB, { ...auto, track: "social" })), "https://pages.example.dev");
   const socAll = rowsOf(soc).flat();
   if (!socAll.some((b) => b.callback_data === `review:edit:${JOB}`) || !socAll.some((b) => b.callback_data === `review:discard:${JOB}`)) throw new Error("❌ 사회 트랙도 수정 요청·반려 버튼이 있어야 한다");
-  if (!socAll.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼은 그대로");
+  if (socAll.some((b) => b.callback_data === `publish:tistory:${JOB}`)) throw new Error("❌ 티스토리 발행 버튼은 없어야 한다(2026-11-21 중단)");
 
   // 옛 흐름(수동 ✅로 승인된 job): 버튼 구성이 예전 그대로다.
   const legacy = buildManuscriptReadyMessage(successResult(job(JOB)), "https://pages.example.dev");

@@ -106,7 +106,7 @@ export function evaluateWatchdog(
  */
 export const WATCHED_JOBS = [
   { kind: "entertainment", round: "evening", label: "엔터(18시)" },
-  { kind: "social_issue", label: "사회" },
+  // 사회(kind=social_issue)는 2026-11-21 사용자 결정으로 수집을 멈춰 뺐다(티스토리 운영 중단). 남겨 두면 매일 거짓 경보가 난다.
   { kind: "kscene_topic", label: "사용설명서(21시, 전날분)", dayOffset: -1 },
 ] as const satisfies readonly { kind: string; round?: string; label: string; dayOffset?: number }[];
 

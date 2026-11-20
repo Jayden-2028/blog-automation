@@ -12,6 +12,8 @@ export const VIEWER_PAGE_FILE: Readonly<Record<Track, string>> = {
   entertainment: "index.html",
   social: "social.html",
   kscene: "kscene.html",
+  // 네이버 scenepick(2026-11-21). 같은 Pages 프로젝트의 파일이라 Access 게이트를 그대로 상속한다.
+  scenepick: "scenepick.html",
 };
 
 export function manuscriptPagePath(track: Track = DEFAULT_TRACK): string {

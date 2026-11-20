@@ -93,7 +93,8 @@ function zipEntries(buf: Buffer): { name: string; bytes: Buffer; flags: number }
 
 async function main(): Promise<void> {
   // ①③ - 정적 HTML만 봐도 판단된다.
-  for (const track of ["entertainment", "social", "kscene"] as const) {
+  // scenepick(2026-11-21)은 네이버 수동 발행이라 ZIP·낱장 받기가 핵심 동선이다.
+  for (const track of ["entertainment", "social", "kscene", "scenepick"] as const) {
     const html = page(IMAGES, track);
     assert(html.includes('id="dl-zip"') && html.includes("🗂 이미지 ZIP("), `${track} 페이지에 ZIP 버튼이 있어야 한다`);
     assert(html.includes('id="dl-images"'), `${track} 페이지에 낱장 저장 버튼이 그대로 있어야 한다`);
@@ -101,7 +102,10 @@ async function main(): Promise<void> {
     assert(!html.includes("jszip") && !html.includes("<script src="), `${track} 페이지는 외부 스크립트를 싣지 않는다`);
   }
   assert(!page(IMAGES, "entertainment").includes("/api/publish-request"), "엔터 페이지에 발행 요청 코드가 들어오지 않아야 한다");
-  assert(page(IMAGES, "social").includes('id="publish-tistory"'), "사회 페이지 발행 버튼은 그대로여야 한다");
+  // 2026-11-21 티스토리 운영 중단 - 사회 페이지 발행 버튼은 빠졌다. 사용설명서 버튼은 그대로다.
+  assert(!page(IMAGES, "social").includes('id="publish-tistory"'), "사회 페이지 티스토리 버튼은 빠져야 한다(운영 중단)");
+  assert(page(IMAGES, "kscene").includes('id="publish-blogspot"'), "사용설명서 페이지 발행 버튼은 그대로여야 한다");
+  assert(!page(IMAGES, "scenepick").includes("/api/publish-request"), "scenepick 페이지에 발행 요청 코드가 없어야 한다");
   assert(page(IMAGES, "kscene").includes('id="publish-blogspot"'), "사용설명서 페이지 발행 버튼은 그대로여야 한다");
   console.log("✅ ZIP 버튼은 전 트랙에, 낱장 버튼·발행 버튼 구조는 그대로");
 

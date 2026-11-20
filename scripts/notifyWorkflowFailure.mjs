@@ -44,8 +44,10 @@ const TRACK_ENV_KEYS = {
   entertainment: { botToken: "TELEGRAM_BOT_TOKEN", chatId: "TELEGRAM_CHAT_ID" },
   social: { botToken: "SOCIAL_TELEGRAM_BOT_TOKEN", chatId: "SOCIAL_TELEGRAM_CHAT_ID" },
   kscene: { botToken: "KSCENE_TELEGRAM_BOT_TOKEN", chatId: "KSCENE_TELEGRAM_CHAT_ID" },
+  // scenepick(2026-11-21)은 사회 봇을 같이 쓴다(telegramTracks.ts와 같은 표).
+  scenepick: { botToken: "SOCIAL_TELEGRAM_BOT_TOKEN", chatId: "SOCIAL_TELEGRAM_CHAT_ID" },
 };
-const TRACK_LABEL = { entertainment: "엔터", social: "사회 이슈", kscene: "사용설명서" };
+const TRACK_LABEL = { entertainment: "엔터", social: "사회 이슈", kscene: "사용설명서", scenepick: "씬픽(네이버)" };
 
 // 워크플로마다 **사용자가 무엇을 기다리고 있었는지**가 다르다. "준비 실패"라고만 적으면 재작성을
 // 기다리던 사람은 자기 답장이 날아간 줄 모른다. 다시 돌리는 명령도 워크플로마다 인자가 다르다.

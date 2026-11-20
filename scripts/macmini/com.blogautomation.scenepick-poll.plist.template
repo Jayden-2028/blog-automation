@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- scenepick 폴러(2026-11-21). 템플릿이다 - 아무것도 자동으로 등록하지 않는다.
+     REPO_PATH·HOME_PATH를 맥미니 경로로 바꿔 ~/Library/LaunchAgents/ 에 복사한다(docs/ai-handoff/SCENEPICK_CODEX.md).
+     install-launchd.sh의 JOBS 목록에는 일부러 넣지 않았다 - 전체 install이 이 폴러를 승인 없이 켜지 않게 하려는 것이다.
+     CODEX_CLI_PATH·SCENEPICK_WORKSPACE가 필요하면 아래 EnvironmentVariables에 더한다(.env에 둬도 된다 - dotenv가 읽는다). -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.blogautomation.scenepick-poll</string>
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>REPO_PATH/scripts/macmini/poll-scenepick.sh</string></array>
+  <key>WorkingDirectory</key><string>REPO_PATH</string>
+  <key>EnvironmentVariables</key><dict>
+    <!-- codex가 있는 폴더가 PATH에 있어야 한다(poll-scenepick.sh도 같은 PATH를 export한다). -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:HOME_PATH/.local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>/dev/null</string>
+</dict></plist>

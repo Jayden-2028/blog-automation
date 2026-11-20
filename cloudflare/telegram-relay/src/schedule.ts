@@ -32,7 +32,11 @@ const KEYWORD_BY_UTC_HOUR: Record<number, ScheduledDispatch[]> = {
   // 19:00 KST 핫이슈 스타 Top 5(§B 신설). 18시 회차 수집(09 UTC, ~10분)이 끝난 뒤라 그날 데이터가 가장
   // 신선하다. **알림 전용**이라 Go/제작 버튼이 없고 discovery_runs에는 kind=entertainment-hot-star로 남는다.
   10: [{ workflow: "entertainment-hot-star.yml" }],
-  11: [{ workflow: "social-issue-keyword.yml" }], // 20:00 KST 사회(2순위에서 데일리 리포트로 개편)
+  // 20:00 KST 사회 키워드 수집 - **2026-11-21 사용자 결정으로 멈췄다**(티스토리 운영 중단, 사회 봇은 scenepick 주제 접수용으로
+  // 바뀜). 키를 지우지 않고 빈 배열로 둔다: 키가 없으면 resolveScheduled가 null을 돌려 "모르는 시각" 오류 로그가 매일 남는다.
+  // cron 문자열(wrangler.toml)은 그대로다 - 9·10·12 UTC 회차가 같은 표현식을 쓴다. 되살리기 = 아래 줄 복원 1커밋.
+  //   11: [{ workflow: "social-issue-keyword.yml" }],
+  11: [],
   // 21:00 KST 사용설명서(kscene) 주제 수집 + watchdog(개편3). watchdog은 원래 GitHub 네이티브 cron
   // (`0 12 * * *`)이었는데 10/5에 발화하지 않았다(알려진 지연·누락) - Worker 슬롯으로 옮겼다. 두 워크플로는
   // 동시에 깨어나므로 watchdog은 **이 시각의 kscene run을 기다리지 않는다**(watchdogJob.ts WATCHED_JOBS의
@@ -48,7 +52,8 @@ const SINGLE_CRONS: Record<string, ScheduledDispatch[]> = {
   "30 0 * * *": [
     { workflow: "analytics-search.yml" },
     { workflow: "kscene-image-health.yml" },
-    { workflow: "tistory-inventory.yml" },
+    // tistory-inventory.yml(티스토리 발행본 적립)은 2026-11-21 티스토리 운영 중단으로 뺐다. 워크플로 파일은 남아 있어
+    // 수동 dispatch로는 돈다(블로그는 그대로 남으므로 필요하면 한 번 돌릴 수 있다).
   ],
   // **일요일** 10:00 KST - 색인 건강 점검 + 네이버 문체 학습(style-learn, 2026-10-29). 새 cron 슬롯을
   // 쓰지 않고 동승한다
