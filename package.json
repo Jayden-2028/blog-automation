@@ -311,6 +311,7 @@
     "test:entertainment-picks": "tsx src/workflows/keyword-discovery/testEntertainmentPicksOfDay.ts",
     "test:social-report": "tsx src/config/testSocialReportSections.ts",
     "test:gemini-person": "tsx src/workflows/gemini-person/testGeminiPerson.ts",
+    "test:topic-intake": "tsx src/workflows/topic-intake/testTopicIntake.ts",
     "test:scenepick": "tsx src/workflows/scenepick/testScenepick.ts",
     "test:manuscript-track-pages": "tsx src/workflows/manuscripts/testManuscriptTrackPages.ts",
     "test:keyword-round": "tsx src/config/testKeywordRound.ts",

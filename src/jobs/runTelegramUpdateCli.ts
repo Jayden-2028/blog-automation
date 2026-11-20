@@ -34,6 +34,26 @@ import { dispatchResearch } from "../workflows/research/dispatchResearch.js";
 import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
 import { handleScenepickTopic } from "../workflows/scenepick/scenepickIntake.js";
 import { findScenepickJobByMessageId } from "../workflows/scenepick/scenepickQueue.js";
+import { handleTopicMessage, handleTopicPick } from "../workflows/topic-intake/topicIntake.js";
+import type { TopicIntakeDeps, TopicIntakeOutcome } from "../workflows/topic-intake/topicIntake.js";
+import { editTopicPrompt, findTopicJobByMessageId, sendTopicPrompt } from "../workflows/topic-intake/topicIntakeIo.js";
+import { triggerResearchForJob } from "../workflows/instagram-capture/triggerResearch.js";
+
+async function runTopicIntake(update: TelegramUpdate, track: "entertainment" | "kscene"): Promise<TopicIntakeOutcome> {
+  const deps: TopicIntakeDeps = {
+    bot: track,
+    allowedChatId: (track === "kscene" ? process.env.KSCENE_TELEGRAM_CHAT_ID : process.env.TELEGRAM_CHAT_ID) || null,
+    createJob: async (fields) => (await ArticleJobRepository.createManual(fields)).job,
+    findByMessageId: (bot, messageId) => findTopicJobByMessageId(bot, messageId),
+    triggerResearch: (jobId) => triggerResearchForJob(jobId),
+    sendPrompt: (text, replyTo) => sendTopicPrompt(track, text, replyTo),
+    reply: (text) => TelegramNotifier.fromEnv(track).sendMessages([{ text }]),
+    editPromptMessage: (chatId, messageId, text) => editTopicPrompt(track, chatId, messageId, text),
+  };
+  // 엔터 봇만 버튼이 있다. 국제 봇은 글자 메시지만 본다.
+  if (update.callback_query) return track === "entertainment" ? handleTopicPick(update, deps) : { handled: false };
+  return handleTopicMessage(update as Parameters<typeof handleTopicMessage>[0], deps);
+}
 
 async function main(): Promise<void> {
   const raw = process.env.TELEGRAM_UPDATE_JSON;
@@ -96,6 +116,18 @@ async function main(): Promise<void> {
     });
     if (scenepick.handled) {
       console.log(`✅ [telegram-update] scenepick 주제 접수: ${JSON.stringify(scenepick)}`);
+      return;
+    }
+  }
+
+  // 엔터·국제 봇의 주제 직접 입력(2026-11-21 사용자 결정, topic-intake/topicIntake.ts): 엔터 봇은 일반 글자 메시지에 [엔터][인물]
+  // 버튼을 묻고 누르면 job을 만들며, 국제 봇은 바로 국제 job을 만든다. 둘 다 변환기와 같은 job 규칙·자료조사 발화를 쓴다.
+  // 답장(수정 피드백)·기존 버튼은 handled=false라 아래 TelegramBot으로 그대로 간다.
+  if (track === "entertainment" || track === "kscene") {
+    const topicTrack = track;
+    const outcome = await runTopicIntake(update, topicTrack);
+    if (outcome.handled) {
+      console.log(`✅ [telegram-update] ${topicTrack} 주제 입력: ${JSON.stringify(outcome)}`);
       return;
     }
   }

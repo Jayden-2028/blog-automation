@@ -31,8 +31,8 @@ for (const track of TRACKS) {
   assert(RELAY_BOT_TOKEN_KEYS[track as RelayTrack] === TRACK_ENV_KEYS[track].botToken, `${track} 봇 토큰 이름이 Worker와 본 코드에서 다르다`);
 }
 assert(trackFromPath("/webhook/scenepick") === null, "scenepick은 새 webhook 경로가 없다(사회 봇 /webhook/social로 들어온다)");
-assert(forwardsPlainMessages("social") && forwardsPlainMessages("instagram") && !forwardsPlainMessages("kscene") && !forwardsPlainMessages("entertainment"), "일반 메시지는 인스타·사회 봇만");
-assert(forwardsCaptionMessages("instagram") && !forwardsCaptionMessages("social"), "캡션 메시지는 인스타 봇만");
+assert(RELAY_TRACKS.every((t) => forwardsPlainMessages(t)), "일반 글자 메시지는 인스타·사회·엔터·국제 봇 모두 넘긴다(엔터·국제는 2026-11-21 주제 직접 입력)");
+assert(forwardsCaptionMessages("instagram") && !forwardsCaptionMessages("social") && !forwardsCaptionMessages("entertainment") && !forwardsCaptionMessages("kscene"), "캡션 메시지는 인스타 봇만");
 assert(trackFromPath("/webhook/instagram") === "instagram" && RELAY_BOT_TOKEN_KEYS.instagram === "INSTAGRAM_BOT_TOKEN", "instagram 봇 경로");
 console.log("✅ Worker 사본이 telegramTracks.ts와 일치 (+instagram 봇 경로)");
 

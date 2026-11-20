@@ -13,7 +13,10 @@ export type InputJobFields = {
   metadata: Record<string, unknown>;
 };
 
-export function inputJobFields(entry: InstagramQueueEntry): InputJobFields {
+// 변환기 큐 항목뿐 아니라 봇 주제 직접 입력(topic-intake/topicIntake.ts)도 같은 규칙으로 job을 만든다 - 필요한 필드만 받는다(2026-11-21).
+export type InputJobSource = Pick<InstagramQueueEntry, "userTopic" | "sourceText" | "sourceUrl" | "track">;
+
+export function inputJobFields(entry: InputJobSource): InputJobFields {
   const topic = (entry.userTopic ?? "").trim();
   return {
     // 질문형 주제는 가공 없이 그대로 keyword가 된다(researcher가 질문을 푼다).
