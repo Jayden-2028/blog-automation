@@ -37,9 +37,11 @@ export const RELAY_BOT_TOKEN_KEYS: Readonly<Record<RelayTrack, string>> = {
  * 이 경로는 답장이 아닌 일반 메시지(링크)도 GitHub Actions로 넘긴다.
  * 사회 봇(2026-11-21 사용자 결정): 일반 메시지 = scenepick 새 주제 발주다(runTelegramUpdateCli -> handleScenepickTopic).
  * scenepick은 사회 봇을 같이 쓰므로 별도 경로(/webhook/scenepick)를 만들지 않는다.
+ * 엔터·국제 봇(2026-11-21 사용자 결정): 일반 글자 메시지 = 새 주제 직접 입력(runTelegramUpdateCli -> topic-intake). 엔터 봇은 [엔터][인물]
+ * 버튼을 묻고, 국제 봇은 바로 국제 원고를 발주한다. 모든 봇이 글자 메시지를 넘기게 된다(사진·영상 등 글자 없는 update는 index.ts가 버린다).
  */
 export function forwardsPlainMessages(track: RelayTrack): boolean {
-  return track === "instagram" || track === "social";
+  return track === "instagram" || track === "social" || track === "entertainment" || track === "kscene";
 }
 
 /** 사진·영상에 캡션으로 붙은 글자도 넘기는가. 인스타 봇만(링크가 캡션으로 온다 - 개편2.5 C-1). 사회 봇은 글자 메시지만 주제다. */

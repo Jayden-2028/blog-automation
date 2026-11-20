@@ -108,6 +108,9 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     네이버 "scenepick"(수동 발행) 트랙을 연다.** 사회 봇에 보낸 일반 메시지 = 새 주제 → 맥미니 Codex가 조사·원고·이미지를
     직접 만들고 `scenepick.html`에 올린다(우리 researcher/writer 미사용). 흐름·상태·맥미니 설정·제외 선택:
     `docs/ai-handoff/SCENEPICK_CODEX.md`. 아래 티스토리 문단은 중단 전 구조 기록이다.
+  - **봇 주제 직접 입력(2026-11-21)**: 엔터 봇에 일반 글자 메시지를 보내면 `[엔터][인물]` 버튼을 묻고(누르면 job 생성 + 자료조사),
+    국제(koreaplain) 봇은 글자 메시지를 바로 국제 원고로 발주한다. 변환기와 같은 job 규칙(`inputJobFields`)·`triggerResearchForJob`을
+    쓴다. Worker `forwardsPlainMessages`가 전 봇 true이므로 **Worker 재배포가 필요**하다. 설계·배포: `docs/ai-handoff/BOT_TOPIC_INPUT.md`.
   - 티스토리(`wooahpapa.tistory.com` - "핫이슈 설명서", 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
     Playwright(TinyMCE)로 **임시저장**한다(2026-11-05부터 - 아래 `TISTORY_PUBLISH_MODE`). 로그인 풀림은
