@@ -8,7 +8,10 @@
 #   · 수동 실행의 apply 입력 = true
 #   · repo 변수 STORAGE_CLEANUP_APPLY = true (주간 cron도 지우게 된다 - 사용자 승인 뒤에 켠다)
 #
-# 발화는 Cloudflare Worker 크론(일요일 03:00 KST). 같은 상태를 두 번 처리해도 안전하다(이미 지운 객체는 목록에 없다).
+# 2026-11-21 사용자 결정: 뷰어 이미지가 Storage URL을 직접 쓰므로 지우면 뷰어 이미지가 깨진다. 그래서 보존 기간을
+# 발행·반려 후 90일(3개월)로 늘리고 실삭제를 켰다(repo 변수 STORAGE_CLEANUP_APPLY=true).
+#
+# 발화는 Cloudflare Worker 크론(실제 발화는 토요일 03:00 KST). 같은 상태를 두 번 처리해도 안전하다(이미 지운 객체는 목록에 없다).
 
 name: storage-cleanup
 
@@ -51,7 +54,7 @@ jobs:
           APPLY_VAR: ${{ vars.STORAGE_CLEANUP_APPLY }}
         run: |
           if [ "$APPLY_INPUT" = "true" ] || [ "$APPLY_VAR" = "true" ]; then
-            npm run storage:cleanup -- --apply --notify
+            npm run storage:cleanup -- --apply --notify --days=90 --rejected-days=90
           else
-            npm run storage:cleanup -- --notify
+            npm run storage:cleanup -- --notify --days=90 --rejected-days=90
           fi
