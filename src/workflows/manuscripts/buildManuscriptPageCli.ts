@@ -55,7 +55,8 @@ async function buildOne(jobId: string): Promise<void> {
   }
 
   const manifest = upsertTopicEntry(await loadManifest(), result.topic);
-  await saveManifest(manifest);
+  // 이 job 한 행만 저장한다. 전체(600행+)를 한 번에 upsert하면 PostgREST 8초 시한(57014)에 걸린다(2026-11-20).
+  await saveManifest({ topics: [result.topic] });
   await writeManuscriptPages(manifest);
   await ArticleJobRepository.mergeMetadata(job.id, { channelManuscriptsReadyAt: result.topic.readyAt });
 
