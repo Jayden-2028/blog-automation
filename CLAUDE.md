@@ -104,6 +104,10 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
     `🔵 Blogger 발행`이고 대상은 `thekoreamanual.blogspot.com`(`KSCENE_BLOGGER_BLOG_ID`, **비면 발행하지 않는다**). 사용설명서 원고는 **한글 초고 → 한글 ✅ → 영어본(`job-translate`) →
     자동 승인 → 이미지가 포함된 영어본 → 통합 알림(발행/수정/반려)**이고(2026-10-12부터 영어본 단독 재승인 폐지, 게이트 꺼짐이면 옛 영어본 재승인 ✅ 복귀), 발행 시 이미지를 공개 Cloudflare Pages로 복사해 본문 URL을 치환한다
     (`docs/ai-handoff/RESTRUCTURE_3_KOREAPLAIN_TRACK.md`).
+  - **2026-11-21 사용자 결정: 티스토리 운영 중단(블로그는 남긴다)·사회 키워드 수집/경보 중단(코드는 꺼 두기만 했다), 대신
+    네이버 "scenepick"(수동 발행) 트랙을 연다.** 사회 봇에 보낸 일반 메시지 = 새 주제 → 맥미니 Codex가 조사·원고·이미지를
+    직접 만들고 `scenepick.html`에 올린다(우리 researcher/writer 미사용). 흐름·상태·맥미니 설정·제외 선택:
+    `docs/ai-handoff/SCENEPICK_CODEX.md`. 아래 티스토리 문단은 중단 전 구조 기록이다.
   - 티스토리(`wooahpapa.tistory.com` - "핫이슈 설명서", 사회 트랙): 공식 API가 없어 네이버와 같은 구조다 -
     클라우드는 `job.metadata.tistoryPublish` 큐에 요청만 남기고 **맥미니 폴러**(`tistory-poll`)가
     Playwright(TinyMCE)로 **임시저장**한다(2026-11-05부터 - 아래 `TISTORY_PUBLISH_MODE`). 로그인 풀림은
@@ -537,6 +541,7 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
 - SEO/AEO/GEO 규칙집: `docs/seo-guide.md` (2026-09-22에 근거 없는 규칙 7가지를 걷어냈다 -
   취소선 항목은 "이미 확인해서 뺀 통설"이니 다시 가져오지 않는다. 문서 제목은 네이버 기준이지만
   구글 기준이 먼저다)
+- scenepick(네이버, 맥미니 Codex 발주 트랙, 2026-11-21): `docs/ai-handoff/SCENEPICK_CODEX.md`, 상시 지침 `codex/scenepick/AGENTS.md`
 - Codex 위임 양식: `docs/ai-handoff/CODEX_TASK_TEMPLATE.md`
 - Codex 위임 스킬: `.claude/skills/delegate-codex/SKILL.md`
 

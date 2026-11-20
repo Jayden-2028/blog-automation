@@ -31,6 +31,9 @@ import { generateTitleSuggestions } from "../workflows/keyword-notification/gene
 import { dispatchGithubWorkflow } from "../services/github/dispatchWorkflow.js";
 import { enqueueAndMaybeDispatch } from "../services/github/pipelineQueue.js";
 import { dispatchResearch } from "../workflows/research/dispatchResearch.js";
+import { ArticleJobRepository } from "../repositories/ArticleJobRepository.js";
+import { handleScenepickTopic } from "../workflows/scenepick/scenepickIntake.js";
+import { findScenepickJobByMessageId } from "../workflows/scenepick/scenepickQueue.js";
 
 async function main(): Promise<void> {
   const raw = process.env.TELEGRAM_UPDATE_JSON;
@@ -79,6 +82,22 @@ async function main(): Promise<void> {
   const track = rawTrack === undefined ? DEFAULT_TRACK : parseTrack(rawTrack);
   if (!track) {
     throw new Error(`알 수 없는 track: ${JSON.stringify(rawTrack)}`);
+  }
+
+  // scenepick 주제 접수(2026-11-21 사용자 결정): 사회 봇 채팅의 일반 글자 메시지(답장·명령 아님)는 전부 새 주제다. job을 만들고
+  // 맥미니 Codex 대기열에 올린 뒤 끝낸다 - triggerResearch를 부르지 않는다(조사·집필·이미지 전부 Codex 몫). 답장·버튼은 아래
+  // TelegramBot으로 그대로 간다. 사회 봇의 일반 메시지는 Worker가 이날부터 넘긴다(track.ts forwardsPlainMessages).
+  if (track === "social") {
+    const scenepick = await handleScenepickTopic(update as Parameters<typeof handleScenepickTopic>[0], {
+      allowedChatId: process.env.SOCIAL_TELEGRAM_CHAT_ID || null,
+      createJob: async (fields) => (await ArticleJobRepository.createManual(fields)).job,
+      findByMessageId: (messageId) => findScenepickJobByMessageId(messageId),
+      reply: (text) => TelegramNotifier.fromEnv("social").sendMessages([{ text }]),
+    });
+    if (scenepick.handled) {
+      console.log(`✅ [telegram-update] scenepick 주제 접수: ${JSON.stringify(scenepick)}`);
+      return;
+    }
   }
 
   const pendingDispatches: Promise<void>[] = [];

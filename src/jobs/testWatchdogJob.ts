@@ -100,8 +100,9 @@ async function main(): Promise<void> {
     },
   });
   assert(okResult.verdict.ok && okResult.alerted === false && okSends.length === 0, "세 job이 다 돌았으면 알림 없음");
-  assert(okResult.verdict.checks.length === 3, "감시 대상은 엔터 저녁 + 사회 + 사용설명서 = 3개");
-  console.log("  ✅ 엔터(18시) + 사회 + 사용설명서(전날분) 모두 정상 → 발송 없음");
+  assert(okResult.verdict.checks.length === 2, "감시 대상은 엔터 저녁 + 사용설명서 = 2개(사회는 2026-11-21 수집 중단으로 제외)");
+  assert(!(WATCHED_JOBS as readonly { kind: string }[]).some((job) => job.kind === "social_issue"), "멈춘 사회 수집이 감시 목록에 남으면 매일 거짓 경보가 난다");
+  console.log("  ✅ 엔터(18시) + 사용설명서(전날분) 모두 정상 → 발송 없음(사회는 감시하지 않음)");
 
   // 5-2) **2026-10-11 개편 회귀**: 오전·오후 회차가 없어도 경보가 나지 않아야 한다(폐지된 회차).
   const retiredSends: string[] = [];
@@ -129,7 +130,7 @@ async function main(): Promise<void> {
   });
   assert(!noEvening.verdict.ok && noEvening.alerted === true && noEveningSends.length === 1, "저녁 회차가 빠지면 알려야 한다");
   assert(noEvening.verdict.failed.length === 1 && noEvening.verdict.failed[0].job.label === "엔터(18시)", "안 돈 job은 엔터(18시) 하나여야 한다");
-  assert(noEveningSends[0].includes("❌ 엔터(18시)") && noEveningSends[0].includes("✅ 사회"), "job별 상태 줄이 보여야 한다");
+  assert(noEveningSends[0].includes("❌ 엔터(18시)") && noEveningSends[0].includes("✅ 사용설명서"), "job별 상태 줄이 보여야 한다");
   console.log("  ✅ 유일 회차가 빠지면 그 이름을 붙여 발송 (오전·오후 run은 가려 주지 못한다)");
 
   // 6-2) 핫이슈 스타(kind=entertainment-hot-star)는 kind가 달라 엔터 저녁 판정에 섞이지 않는다.
@@ -162,8 +163,8 @@ async function main(): Promise<void> {
 
   // 10) 기록이 아예 없으면 전부 no_completed_run
   const none = evaluateWatchdogByJob([], JOB_NOW);
-  assert(none.failed.length === 3 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
-  console.log("  ✅ 기록 없음 → 세 job 모두 no_completed_run");
+  assert(none.failed.length === 2 && none.checks.every((c) => !c.verdict.ok && c.verdict.reason === "no_completed_run"), "기록이 없으면 전부 실패여야 한다");
+  console.log("  ✅ 기록 없음 → 두 job 모두 no_completed_run");
 
   // 10-2) 사용설명서(dayOffset -1): 오늘 run이 있어도(watchdog이 늦게 돌 때) 전날 run이 없어도 안 되고,
   //       전날 run이 없고 이틀 전 run뿐이면 경보여야 한다. 실패한 전날 run도 돌았다고 치지 않는다.

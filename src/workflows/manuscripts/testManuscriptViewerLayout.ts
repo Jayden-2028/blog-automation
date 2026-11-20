@@ -313,12 +313,13 @@ async function main(): Promise<void> {
     assert(confirmText.includes("저장합니다") && confirmText.includes("발행되지 않습니다") && confirmText.includes("텔레그램"), `저장 확인창 문구 (${confirmText})`);
     console.log("✅ 브라우저 - 저장은 저장만: 발행 버튼 없음·텔레그램 안내·확인창 문구");
 
-    // ⑨ 사회 트랙 발행(임시저장) 버튼(2026-11-05 사용자 요청). 눈에 띄게 다르고, 누르면 같은 큐로 간다.
+    // ⑨ 뷰어 발행 버튼(2026-11-05 사용자 요청). 눈에 띄게 다르고, 누르면 텔레그램 버튼과 같은 경로로 간다.
+    // 2026-11-21 티스토리 운영 중단으로 사회 버튼이 빠져 **사용설명서(🔵 Blogger) 버튼**으로 같은 성질을 본다.
     {
       const socialHtml = renderManuscriptPage(
-        { topics: [{ ...manifest.topics[0], manuscript: { ...manifest.topics[0].manuscript, track: "social" } }] },
+        { topics: [{ ...manifest.topics[0], manuscript: { ...manifest.topics[0].manuscript, track: "kscene" } }] },
         new Date(),
-        { track: "social" }
+        { track: "kscene" }
       );
       const soc = await browser.newPage();
       const pubPosted: string[] = [];
@@ -335,7 +336,7 @@ async function main(): Promise<void> {
       await soc.goto("https://viewer.test/", { waitUntil: "load" });
 
       const look = (await soc.evaluate(`(() => {
-        const b = document.querySelector("#publish-tistory");
+        const b = document.querySelector("#publish-blogspot");
         if (!b) return { found: false };
         const cs = getComputedStyle(b), r = b.getBoundingClientRect();
         const other = document.querySelector(".toolbar .btn");
@@ -344,24 +345,56 @@ async function main(): Promise<void> {
                  font: parseFloat(cs.fontSize), ofont: parseFloat(ocs.fontSize), h: r.height, oh: orect.height };
       })()`)) as { found: boolean; text: string; disabled: boolean; bg: string; obg: string; font: number; ofont: number; h: number; oh: number };
 
-      assert(look.found, "사회 페이지에는 발행 버튼이 있어야 한다");
+      assert(look.found, "사용설명서 페이지에는 발행 버튼이 있어야 한다");
       assert(!look.disabled, "저장할 수정이 없으면 누를 수 있어야 한다");
-      assert(look.text.includes("티스토리"), `버튼 문구에 채널이 보여야 한다 (${look.text})`);
+      assert(look.text.includes("Blogger"), `버튼 문구에 채널이 보여야 한다 (${look.text})`);
       // "크게, 다른 버튼과 구분되는 색상과 크기"가 요청이었다 - 눈대중이 아니라 실제 치수로 지킨다.
       assert(look.bg !== look.obg, `발행 버튼 색이 다른 버튼과 달라야 한다 (둘 다 ${look.bg})`);
       assert(look.font > look.ofont && look.h > look.oh, `발행 버튼이 더 커야 한다 (${look.font}px/${look.h} vs ${look.ofont}px/${look.oh})`);
 
       let pubConfirm = "";
       soc.on("dialog", (dialog) => { pubConfirm = dialog.message(); void dialog.accept(); });
-      await soc.click("#publish-tistory");
-      await soc.waitForFunction("document.querySelector('#publish-tistory').textContent.indexOf('요청됨') >= 0");
-      assert(pubConfirm.includes("티스토리"), `확인창이 떠야 한다 (${pubConfirm})`);
+      await soc.click("#publish-blogspot");
+      await soc.waitForFunction("document.querySelector('#publish-blogspot').textContent.indexOf('요청됨') >= 0");
+      assert(pubConfirm.includes("Blogger"), `확인창이 떠야 한다 (${pubConfirm})`);
       assert(pubPosted.length === 1, `발행 요청을 한 번 보내야 한다 (${pubPosted.length}회)`);
       const sent = JSON.parse(pubPosted[0]) as { jobId: string; channel: string };
-      assert(sent.channel === "tistory" && sent.jobId === manifest.topics[0].jobId, `요청 내용 (${pubPosted[0]})`);
+      assert(sent.channel === "blogspot" && sent.jobId === manifest.topics[0].jobId, `요청 내용 (${pubPosted[0]})`);
       await soc.close();
-      console.log("✅ 브라우저 - 사회 발행 버튼: 더 크고 다른 색, 확인창, 같은 큐로 1회 요청");
+      console.log("✅ 브라우저 - 뷰어 발행 버튼(사용설명서): 더 크고 다른 색, 확인창, 같은 경로로 1회 요청");
     }
+
+    // ⑩ 사회(2026-11-21 티스토리 중단)·scenepick 페이지: 발행 버튼이 없고, 스크립트가 오류 없이 돈다(캡션·출처 칸 포함).
+    for (const track of ["social", "scenepick"] as const) {
+      const first = manifest.topics[0];
+      const html = renderManuscriptPage(
+        {
+          topics: [{
+            ...first,
+            manuscript: {
+              ...first.manuscript,
+              track,
+              images: first.manuscript.images.map((img) => ({ ...img, caption: "AI 생성 이미지입니다." })),
+              sources: [{ title: "출처 A", url: "https://example.org/a" }],
+            },
+          }],
+        },
+        new Date(),
+        { track }
+      );
+      const pg = await browser.newPage();
+      pg.on("pageerror", (error) => pageErrors.push(`[${track}] ${String(error)}`));
+      await pg.route("**/*", (route) =>
+        route.request().url() === "https://viewer.test/" ? route.fulfill({ body: html, contentType: "text/html" }) : route.fulfill({ status: 404, body: "" })
+      );
+      await pg.goto("https://viewer.test/", { waitUntil: "load" });
+      const seen = (await pg.evaluate(`({ pub: !!document.querySelector(".btn-publish"), copy: !!document.querySelector("#c-body"),
+        src: !!document.querySelector(".src-list"), cap: document.querySelectorAll(".cap-note").length })`)) as { pub: boolean; copy: boolean; src: boolean; cap: number };
+      assert(!seen.pub, `${track} 페이지에는 발행 버튼이 없어야 한다`);
+      assert(seen.copy && seen.src, `${track} 페이지: 본문 복사 버튼·출처 칸 (${JSON.stringify(seen)})`);
+      await pg.close();
+    }
+    console.log("✅ 브라우저 - 사회·scenepick 페이지: 발행 버튼 없음, 복사·출처 칸, 스크립트 오류 없음");
 
     assert(pageErrors.length === 0, `뷰어 스크립트 오류가 없어야 한다 (${pageErrors.join(" / ")})`);
   } finally {

@@ -15,7 +15,8 @@ export function isManualPublishOnly(job: { category?: string | null; metadata?: 
   // 종합 키워드 입력 툴의 일상·테크 트랙(2026-10-19): 뷰어 복붙. 일상은 category가 기존 living과 같아서 category로는 못 가르고
   // metadata.track으로 잡는다 - 트렌드 경로의 living job은 계속 발행 버튼이 붙는다.
   const track = job.metadata && typeof job.metadata === "object" ? (job.metadata as Record<string, unknown>).track : null;
-  return track === "living" || track === "tech";
+  // scenepick(2026-11-21): 네이버 scenepick은 수동 발행뿐이다(뷰어 복사 + 이미지 받기). 발행 진입점 전부가 이 판정을 보므로 여기 둔다.
+  return track === "living" || track === "tech" || track === "scenepick";
 }
 
 /**

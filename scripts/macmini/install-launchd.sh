@@ -16,6 +16,9 @@ AGENTS="$HOME/Library/LaunchAgents"; UID_="$(id -u)"; PFX="com.blogautomation"
 # 17:30은 18시 저녁 회차용(2026-10-01에 07:30에서 옮김), **08:30은 09시 오전 회차용**(2026-10-05 개편,
 # RESTRUCTURE-PLAN-2026-10.md §2.3). 13시 오후 회차는 08:30 값을 쓴다(TTL 24시간).
 # tistory-poll(2026-10-06, TISTORY_AUTO_PUBLISH_DESIGN.md): 사회 트랙 티스토리 발행. headless라 naver-poll과 겹쳐도 된다.
+#   ⚠️ 2026-11-21 티스토리 운영 중단(사용자 결정) - 맥미니에서 `install-launchd.sh uninstall tistory-poll`로 내린다.
+#   목록에서 빼지 않은 이유: 빼면 위 uninstall 명령이 그 이름을 못 찾아 아무 일도 안 한다. **전체 install(인자 없음)은
+#   tistory-poll을 다시 켠다** - 개별 이름으로만 install한다(아래 ONLY 주석과 같은 원칙).
 # research-poll(2026-11-01): RESEARCH_PROVIDER=codex일 때만 할 일이 있다(그 밖에는 대기열이 비어 조용히 끝난다).
 #   **등록은 사용자 승인 사항이다** - 승인 전에는 이 항목이 목록에 있어도 install을 돌리지 않는다.
 #   개별 등록: install-launchd.sh install research-poll

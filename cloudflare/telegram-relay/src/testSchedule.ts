@@ -10,10 +10,11 @@ assert(resolveScheduled(KEYWORD_CRON, at(0)) === null, "00 UTC(엔터 오전)는
 assert(resolveScheduled(KEYWORD_CRON, at(4)) === null, "04 UTC(엔터 오후)는 폐지 - 아무것도 안 깨운다");
 assert(JSON.stringify(wf(KEYWORD_CRON, 9)) === '["entertainment-keyword.yml:evening"]', "09 UTC 엔터 저녁(유일 회차)");
 assert(JSON.stringify(wf(KEYWORD_CRON, 10)) === '["entertainment-hot-star.yml"]', "10 UTC 핫이슈 스타 Top 5(알림 전용)");
-assert(JSON.stringify(wf(KEYWORD_CRON, 11)) === '["social-issue-keyword.yml"]', "11 UTC 사회");
+// 2026-11-21 사회 키워드 수집 중단: 11 UTC는 빈 배열(null이면 "모르는 시각" 오류 로그가 매일 남는다).
+assert(JSON.stringify(wf(KEYWORD_CRON, 11)) === '[]', "11 UTC 사회 수집은 멈춤(빈 배열)");
 assert(JSON.stringify(wf(KEYWORD_CRON, 12)) === '["kscene-topic.yml","watchdog.yml"]', "12 UTC 사용설명서 수집 + watchdog 동시 발화(개편3)");
 assert(resolveScheduled(KEYWORD_CRON, at(5)) === null, "등록 안 된 시각은 null");
-assert(JSON.stringify(wf("30 0 * * *", 0)) === '["analytics-search.yml","kscene-image-health.yml"]', "analytics-search + 이미지 점검");
+assert(JSON.stringify(wf("30 0 * * *", 0)) === '["analytics-search.yml","kscene-image-health.yml"]', "analytics-search + 이미지 점검(티스토리 적립은 2026-11-21 중단)");
 assert(JSON.stringify(wf("0 1 * * 1", 1)) === '["analytics-index-health.yml","style-learn.yml"]', "주간 슬롯: index-health + style-learn 동승(표현식은 월요일, 실제 발화는 일요일 - schedule.ts 주석)");
 assert(JSON.stringify(wf("0 18 * * 6", 18)) === '["storage-cleanup.yml"]', "storage-cleanup(주 1회, 개편2.5 D)");
 assert(resolveScheduled("0 9 * * *", at(9)) === null, "옛 cron 문자열은 알 수 없음");

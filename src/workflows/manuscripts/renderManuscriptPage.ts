@@ -43,13 +43,21 @@ const TRACK_PAGE_COPY: Record<Track, { title: string; heading: string; meta: str
     title: "원고 뷰어", heading: "왜지금 NAVER &amp; Blogger", meta: "원고 확인 → 텔레그램 버튼으로 발행", hint: "발행은 텔레그램의 🟢 네이버 발행 버튼으로만 됩니다",
     pen: "#1B5E3A", penSoft: "#E4F0E8",
   },
+  // 2026-11-21 사용자 결정으로 티스토리 운영을 멈췄다. 페이지는 보관용으로 남기고 발행 버튼(PUBLISH_BUTTONS.social)은 뺐다.
   social: {
-    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리", meta: "원고 확인 → 🟠 티스토리 버튼으로 발행", hint: "발행은 아래 🟠 티스토리 버튼 또는 텔레그램 버튼으로 됩니다(같은 큐 - 둘 다 눌러도 한 번만 올라갑니다)",
+    title: "사회 이슈 원고 뷰어", heading: "사회 이슈 · 티스토리(보관)", meta: "티스토리 운영 중단(2026-11-21) — 보관용 페이지", hint: "티스토리 발행은 2026-11-21에 중단됐습니다. 필요하면 복사해 직접 올리세요",
     pen: "#1F3A68", penSoft: "#E7ECF5",
   },
   kscene: {
     title: "사용설명서 원고 뷰어", heading: "Korea Plain", meta: "원고 확인 → 🔵 Blogger 버튼으로 발행", hint: "발행은 아래 🔵 Blogger 버튼 또는 텔레그램 버튼으로 됩니다(같은 경로 - 되돌릴 수 없습니다)",
     pen: "#E8590C", penSoft: "#FDF0E6",
+  },
+  // 네이버 scenepick(2026-11-21): 맥미니 Codex가 쓰고 그린 원고. 발행 버튼이 없다 - 본문 복사 + 이미지 받기로 직접 올린다.
+  // 강조색은 다른 세 페이지(그린·네이비·오렌지)와 겹치지 않는 보라로 둔다.
+  scenepick: {
+    title: "scenepick 원고 뷰어", heading: "scenepick · 네이버", meta: "네이버 블로그 scenepick 수동 발행용 — 본문 복사 + 이미지 받기",
+    hint: "발행 버튼이 없습니다 — 본문을 복사하고 이미지를 받아 네이버 scenepick에 직접 올리세요(수정은 복사에만 적용, 저장 미지원)",
+    pen: "#5B3A8C", penSoft: "#EFE8F7",
   },
 };
 
@@ -97,6 +105,8 @@ type PageTopic = {
    * 비교용 읽기 전용 화면이다(workflows/gemini-person).
    */
   gemini: GeminiPageView | null;
+  /** 근거 자료(scenepick, 2026-11-21). 본문 밖에만 보여준다 - 복사 대상이 아니다. 없으면 빈 배열. */
+  sources: { title: string; url: string; publishedAt: string | null }[];
   // 네이버 배리에이션(manifest의 naver 필드)은 뷰어에 싣지 않는다 - 배리에이션 단계는 2026-09-30에
   // 폐지됐고(generateNaverVariant 삭제) 새 원고는 전부 null이라 버튼이 영원히 "없음"으로만 떴다(2026-10-03).
 };
@@ -135,19 +145,25 @@ type PublishButtonSpec = {
   doneExpr: string;
 };
 
-const PUBLISH_BUTTONS: Partial<Record<Track, PublishButtonSpec>> = {
+/** 티스토리 뷰어 버튼(2026-11-05 복원). **2026-11-21 티스토리 운영 중단으로 쓰지 않는다** - 지우지 않고 남긴다. */
+export const SOCIAL_TISTORY_BUTTON: PublishButtonSpec = {
   // 티스토리는 맥미니 폴러가 올린다(큐). 임시저장 모드(TISTORY_PUBLISH_MODE=draft)면 문구가 전부 바뀐다.
-  social: {
-    channel: "tistory",
-    id: "publish-tistory",
-    mark: "🟠",
-    labelExpr: "TISTORY_DRAFT_ONLY ? '🟠 티스토리 임시저장' : '🟠 티스토리 발행'",
-    noteExpr:
-      "TISTORY_DRAFT_ONLY ? '맥미니가 티스토리에 임시저장하고 글 관리 링크를 텔레그램으로 보냅니다 — 발행은 직접 해주세요' : '맥미니가 티스토리에 올리고 결과를 텔레그램으로 보냅니다'",
-    askExpr:
-      'TISTORY_DRAFT_ONLY ? "이 원고를 티스토리에 임시저장합니다.\\n맥미니가 올린 뒤 글 관리 링크를 텔레그램(사회 봇)으로 보냅니다.\\n발행은 직접 해주세요. 계속할까요?" : "이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 결과를 텔레그램(사회 봇)으로 알립니다. 계속할까요?"',
-    doneExpr: 'TISTORY_DRAFT_ONLY ? "🟠 임시저장 요청됨" : "🟠 발행 요청됨"',
-  },
+  channel: "tistory",
+  id: "publish-tistory",
+  mark: "🟠",
+  labelExpr: "TISTORY_DRAFT_ONLY ? '🟠 티스토리 임시저장' : '🟠 티스토리 발행'",
+  noteExpr:
+    "TISTORY_DRAFT_ONLY ? '맥미니가 티스토리에 임시저장하고 글 관리 링크를 텔레그램으로 보냅니다 — 발행은 직접 해주세요' : '맥미니가 티스토리에 올리고 결과를 텔레그램으로 보냅니다'",
+  askExpr:
+    'TISTORY_DRAFT_ONLY ? "이 원고를 티스토리에 임시저장합니다.\\n맥미니가 올린 뒤 글 관리 링크를 텔레그램(사회 봇)으로 보냅니다.\\n발행은 직접 해주세요. 계속할까요?" : "이 원고를 티스토리에 발행 요청합니다.\\n맥미니가 올리고 결과를 텔레그램(사회 봇)으로 알립니다. 계속할까요?"',
+  doneExpr: 'TISTORY_DRAFT_ONLY ? "🟠 임시저장 요청됨" : "🟠 발행 요청됨"',
+};
+
+const PUBLISH_BUTTONS: Partial<Record<Track, PublishButtonSpec>> = {
+  // 사회(티스토리) 버튼은 2026-11-21 사용자 결정(티스토리 운영 중단)으로 뺐다. social.html은 보관용으로 남는다.
+  // 되살리기 = `social: SOCIAL_TISTORY_BUTTON,` 한 줄 + telegramTracks.ts의 사회 채널 복원.
+  // scenepick은 처음부터 버튼이 없다(네이버 수동 발행 - 본문 복사 + 이미지 받기).
+  //
   // Blogger는 맥미니를 거치지 않는다 - GitHub Actions가 Blogger API로 그 자리에서 올린다(텔레그램
   // 🔵 버튼과 같은 경로). 임시저장 모드가 없으므로 문구도 하나뿐이다.
   kscene: {
@@ -267,6 +283,9 @@ function toPageTopic(entry: ManuscriptTopicEntry): PageTopic {
     viewerEdit: m.viewerEdit ?? null,
     imagePick: m.imagePick ?? null,
     gemini: toGeminiPageView(m.geminiShadow),
+    sources: (m.sources ?? [])
+      .filter((source) => source && typeof source.url === "string" && /^https?:\/\//i.test(source.url))
+      .map((source) => ({ title: String(source.title ?? ""), url: source.url, publishedAt: source.publishedAt ?? null })),
   };
 }
 
@@ -460,6 +479,9 @@ export function renderManuscriptPage(
   .shadow-body p.h{font-size:19px;font-weight:800;margin:26px 0 8px;line-height:1.5}
   .shadow-body ul{margin:0 0 14px;padding-left:22px;font-size:15px;line-height:1.85}
   .shadow-src{font-size:13px;line-height:1.7;word-break:break-all}
+  .src-list{margin:10px 0 4px;font-size:13px}
+  .src-list summary{cursor:pointer;color:var(--muted)}
+  figure.cut .cap-note{font-size:12.5px;color:var(--muted);margin-top:6px;text-align:center}
   .shadow-notes{white-space:pre-wrap;font-size:12.5px;line-height:1.7}
 
   h2.sec{font-size:15px;margin:34px 0 12px;letter-spacing:-.025em}
@@ -1150,6 +1172,8 @@ export function renderManuscriptPage(
       }
 
       var inner;
+      // 독자용 이미지 설명(scenepick의 meta.images[].caption, 2026-11-21) - 그림 아래 한 줄. 다른 트랙 이미지에는 없다.
+      var capNote = usable[0].caption ? '<div class="cap-note">' + esc(usable[0].caption) + '</div>' : '';
       if (usable.length === 1) {
         inner = '<img src="' + esc(usable[0].url) + '" alt="' + esc(caption) + '" loading="lazy">';
       } else {
@@ -1159,7 +1183,7 @@ export function renderManuscriptPage(
             + '<img src="' + esc(s.url) + '" alt="' + esc(caption) + '" loading="lazy"></div>';
         }).join("") + '</div>';
       }
-      return '<figure class="cut">' + inner + figcaption + '</figure>';
+      return '<figure class="cut">' + inner + capNote + figcaption + '</figure>';
     }
 
     // ---- 수정본 반영(2026-10-03) ----
@@ -1444,6 +1468,14 @@ ${publishButton ? publishScript(publishButton) : ""}
       if (topic.slug) h += metaRow("슬러그", topic.slug);
       if (topic.tags && topic.tags.length) h += metaRow("태그", topic.tags.join(", "));
       h += '</div>';
+      // 근거 자료(scenepick, 2026-11-21) - 사실 확인용이다. 본문 복사에 섞이지 않게 본문 밖에 접어 둔다.
+      if (topic.sources && topic.sources.length > 0) {
+        h += '<details class="src-list"><summary>출처 ' + topic.sources.length + '건 (확인용 · 본문 복사에 들어가지 않음)</summary><div class="shadow-src">'
+          + topic.sources.map(function (s) {
+              return '<div>' + (s.title ? esc(s.title) + ' — ' : '') + '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.url) + '</a>'
+                + (s.publishedAt ? ' <span style="color:var(--muted)">(' + esc(s.publishedAt) + ')</span>' : '') + '</div>';
+            }).join("") + '</div></details>';
+      }
 
       h += '<div class="toolbar">';
       h += '<button class="btn primary" id="c-body">📋 본문 복사 (서식 유지)</button>';

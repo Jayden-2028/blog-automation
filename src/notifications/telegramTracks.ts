@@ -11,7 +11,10 @@
 //
 // credential은 절대 로그로 출력하지 않는다.
 
-export const TRACKS = ["entertainment", "social", "kscene"] as const;
+// scenepick(2026-11-21 사용자 결정): 네이버 블로그 "scenepick"(몽상가N의 쓸데없는 궁금증들) 원고 트랙. **봇은 사회 봇을 같이 쓴다**
+// (환경변수 키가 social과 같다) - 사용자가 사회 봇에 주제를 보내면 맥미니 Codex가 원고·이미지를 만들고 scenepick.html에 올린다
+// (workflows/scenepick). 봇이 같으므로 webhook도 /webhook/social 하나다 - Worker에 scenepick 경로를 만들지 않는다.
+export const TRACKS = ["entertainment", "social", "kscene", "scenepick"] as const;
 export type Track = (typeof TRACKS)[number];
 
 /** 메인봇. 개편 전 모든 동작이 이 트랙이다. */
@@ -24,6 +27,9 @@ export const TRACK_ENV_KEYS: Readonly<Record<Track, TrackEnvKeys>> = {
   social: { botToken: "SOCIAL_TELEGRAM_BOT_TOKEN", chatId: "SOCIAL_TELEGRAM_CHAT_ID" },
   // 환경변수 이름은 옛 코드명 그대로다(GitHub 시크릿에 등록된 이름이라 바꾸면 발행이 끊긴다).
   kscene: { botToken: "KSCENE_TELEGRAM_BOT_TOKEN", chatId: "KSCENE_TELEGRAM_CHAT_ID" },
+  // 사회 봇과 같은 봇·같은 채팅(2026-11-21). 새 봇을 만들지 않은 이유: 사용자가 이미 쓰는 사회 봇 채팅에 주제를 보내면 되고,
+  // 티스토리 운영 중단으로 사회 봇이 할 일이 비었다.
+  scenepick: { botToken: "SOCIAL_TELEGRAM_BOT_TOKEN", chatId: "SOCIAL_TELEGRAM_CHAT_ID" },
 };
 
 /** 알림 문구에 쓰는 사람이 읽는 이름. */
@@ -31,6 +37,7 @@ export const TRACK_LABEL: Readonly<Record<Track, string>> = {
   entertainment: "엔터",
   social: "사회 이슈",
   kscene: "사용설명서",
+  scenepick: "씬픽(네이버)",
 };
 
 export function isTrack(value: unknown): value is Track {
@@ -51,6 +58,7 @@ export function trackOfJob(job: { metadata?: unknown } | null | undefined): Trac
   const metadata = job?.metadata;
   if (metadata && typeof metadata === "object") {
     const raw = (metadata as Record<string, unknown>).track;
+    // scenepick도 TRACKS에 있으므로 parseTrack이 그대로 잡는다(metadata.track === "scenepick" -> scenepick).
     const track = parseTrack(raw);
     if (track) return track;
     // 종합 키워드 입력 툴의 일상(living)·테크(tech) 트랙(2026-10-19 사용자 결정): 알림·뷰어는 **사회**로 간다.
@@ -68,8 +76,12 @@ export type PublishChannel = "blogspot" | "naver" | "tistory";
  */
 export const TRACK_PUBLISH_CHANNELS: Readonly<Record<Track, readonly PublishChannel[]>> = {
   entertainment: ["naver"],
-  social: ["tistory"],
+  // 2026-11-21 사용자 결정: 티스토리 운영 중단(블로그는 남긴다). 사회 원고에는 발행 버튼이 붙지 않는다 - 뷰어에서 복사한다.
+  // 되살리기 = ["tistory"] 복원(아래 TRACK_ALLOWED_CHANNELS도 함께).
+  social: [],
   kscene: ["blogspot"],
+  // 네이버 scenepick은 수동 발행뿐이다(사용자가 뷰어에서 본문 복사 + 이미지 받기). 버튼이 가리킬 곳이 없다.
+  scenepick: [],
 };
 
 /**
@@ -78,8 +90,11 @@ export const TRACK_PUBLISH_CHANNELS: Readonly<Record<Track, readonly PublishChan
  */
 const TRACK_ALLOWED_CHANNELS: Readonly<Record<Track, readonly PublishChannel[]>> = {
   entertainment: ["naver", "blogspot"],
-  social: ["tistory"],
+  // 2026-11-21 티스토리 운영 중단: 옛 알림에 남은 🟠 버튼·뷰어 요청도 받지 않는다. 받아 주면 큐에 쌓이기만 하고(맥미니
+  // tistory-poll을 내린다) 아무도 처리하지 않는다 - 조용히 묵히는 것보다 거절 안내가 낫다.
+  social: [],
   kscene: ["blogspot"],
+  scenepick: [],
 };
 
 /** 요청 채널이 job 트랙에 맞는가. 서버 측 검증(텔레그램 콜백·publishRequestCli)이 쓴다. */

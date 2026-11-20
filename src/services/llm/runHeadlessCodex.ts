@@ -18,7 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 /** codex 실행 파일. PATH가 로그인 셸과 다른 환경(launchd 등)을 대비해 흔한 설치 위치를 직접 본다. */
-function resolveCodexBinary(): string {
+export function resolveCodexBinary(): string {
   const fromEnv = process.env.CODEX_CLI_PATH;
   if (fromEnv) return fromEnv;
 

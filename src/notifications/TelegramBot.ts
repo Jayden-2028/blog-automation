@@ -1156,7 +1156,10 @@ export class TelegramBot {
             "🚫 <b>이 원고는 그 채널로 발행할 수 없습니다</b>",
             "",
             `<b>${escapeTelegramHtml(job.keyword)}</b>`,
-            `${TRACK_LABEL[jobTrack]} 트랙 원고는 ${TRACK_PUBLISH_CHANNELS[jobTrack].map((c) => PUBLISH_RETRY_LABEL[c]).join(" / ")} 버튼으로만 발행합니다.`,
+            // 채널이 하나도 없는 트랙(2026-11-21 티스토리 중단 뒤의 사회, scenepick)은 뷰어 복사가 유일한 길이다.
+            TRACK_PUBLISH_CHANNELS[jobTrack].length > 0
+              ? `${TRACK_LABEL[jobTrack]} 트랙 원고는 ${TRACK_PUBLISH_CHANNELS[jobTrack].map((c) => PUBLISH_RETRY_LABEL[c]).join(" / ")} 버튼으로만 발행합니다.`
+              : `${TRACK_LABEL[jobTrack]} 트랙은 발행 버튼이 없습니다(티스토리 운영 중단, 2026-11-21). 원고 페이지에서 복사해 직접 올려 주세요.`,
           ].join("\n"),
         };
       }

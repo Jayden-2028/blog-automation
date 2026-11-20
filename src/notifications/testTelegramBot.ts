@@ -1353,12 +1353,13 @@ main().catch((error) => {
     }
     console.log("✅ 네이버는 예약만 / 이미지도 발행 안 함 / blogspot은 옛 형식도 동작");
     // 서버 측 트랙-채널 검증(개편2.5 B-2): 사회 job을 네이버·블로그스팟으로, 엔터 job을 티스토리로 못 올린다.
-    for (const [jobTrack, action] of [["social", "naver"], ["social", "blogspot"], ["entertainment", "tistory"]] as const) {
+    // 2026-11-21: 사회 job의 티스토리(운영 중단)와 scenepick job의 네이버(수동 발행 전용)도 거부한다.
+    for (const [jobTrack, action] of [["social", "naver"], ["social", "blogspot"], ["social", "tistory"], ["scenepick", "naver"], ["entertainment", "tistory"]] as const) {
       let touched = 0;
       const bot = new TelegramBot({
         botToken: "test-token",
         chatId: CHAT_ID,
-        loadJobById: async () => ({ id: JOB, keyword: "트랙 불일치", metadata: jobTrack === "social" ? { track: "social" } : {} }) as never,
+        loadJobById: async () => ({ id: JOB, keyword: "트랙 불일치", metadata: jobTrack === "entertainment" ? {} : { track: jobTrack } }) as never,
         publishToBlogspot: (async () => { touched += 1; return {} as never; }) as never,
         requestNaverPublish: async () => { touched += 1; return { queued: true }; },
         requestTistoryPublish: async () => { touched += 1; return { queued: true }; },
@@ -1366,11 +1367,17 @@ main().catch((error) => {
         answerCallbackQuery: async () => {},
       } as never);
       const out = await bot.handlePublishDecisionCallback(query(`publish:${action}:${JOB}`));
-      assert(out.outcome.status === "channel_mismatch", `${jobTrack} job의 ${action} 요청은 거부해야 한다 (${JSON.stringify(out.outcome)})`);
+      // scenepick은 수동 발행 전용(isManualPublishOnly), 네이버는 버튼 일시 해제(NAVER_PUBLISH_BUTTON_PAUSED)라 채널 검증보다 먼저
+      // manual_only로 거절될 수 있다 - 어느 쪽이든 큐에 닿지 않으면 된다.
+      assert(
+        out.outcome.status === "channel_mismatch" || ((jobTrack === "scenepick" || action === "naver") && out.outcome.status === "manual_only"),
+        `${jobTrack} job의 ${action} 요청은 거부해야 한다 (${JSON.stringify(out.outcome)})`
+      );
       assert(touched === 0, `${jobTrack} job의 ${action} 요청이 큐/발행에 닿으면 안 된다`);
     }
     // 수정 반영·이미지 교체가 진행 중이면 어느 채널이든 큐에 넣지 않는다(2026-10-07). 끝났거나 10분 넘게 묵었으면 통과한다.
-    for (const [action, track] of [["naver", {}], ["tistory", { track: "social" }], ["blogspot", { track: "kscene" }]] as const) {
+    // 티스토리(사회)는 2026-11-21 운영 중단으로 채널 검증에서 먼저 거절되므로 이 경합 점검에서 뺐다.
+    for (const [action, track] of [["naver", {}], ["blogspot", { track: "kscene" }]] as const) {
       const nowIso = new Date().toISOString();
       const longAgo = new Date(Date.now() - 30 * 60_000).toISOString();
       for (const [label, metadata, blocked] of [
@@ -1400,7 +1407,7 @@ main().catch((error) => {
       }
     }
     console.log("✅ 수정 반영·이미지 교체 진행 중에는 발행 콜백을 거부한다(stale·완료면 통과)");
-    // 맞는 조합은 통과한다.
+    // 옛 알림에 남은 🟠 티스토리 버튼(2026-11-21 운영 중단): 큐에 넣지 않고 "발행 버튼이 없다"고 안내한다.
     {
       let queued = 0;
       const bot = new TelegramBot({
@@ -1412,12 +1419,13 @@ main().catch((error) => {
         answerCallbackQuery: async () => {},
       } as never);
       const out = await bot.handlePublishDecisionCallback(query(`publish:tistory:${JOB}`));
-      assert(out.outcome.status === "queued" && queued === 1, "사회 job의 티스토리 요청은 통과");
+      assert(out.outcome.status === "channel_mismatch" && queued === 0, "사회 job의 티스토리 요청은 거절(운영 중단)");
+      assert(out.message.includes("발행 버튼이 없습니다"), `중단 안내 문구 (${out.message})`);
     }
-    console.log("✅ 트랙-채널 서버 검증 - 불일치 거부 / 일치 통과");
+    console.log("✅ 트랙-채널 서버 검증 - 불일치 거부 / 티스토리 중단 안내");
     // 대체 키보드 + 예약 라벨(개편2.5 B-2): 원본 키보드를 잃어도 트랙 구성으로 되살리고, 티스토리 예약은 🟠.
+    // 사회(🟠 티스토리) 줄은 2026-11-21 운영 중단으로 뺐다 - 사회 봇 키보드에는 발행 채널이 없다.
     for (const [botTrack, action, want, notWant, label] of [
-      ["social", "tistory", "publish:tistory:", "publish:naver:", "🟠 예약됨"],
       ["entertainment", "naver", "publish:naver:", "publish:tistory:", "🟢 예약됨"],
     ] as const) {
       const edits: Record<string, unknown>[] = [];
@@ -1425,7 +1433,7 @@ main().catch((error) => {
         botToken: "test-token",
         chatId: CHAT_ID,
         track: botTrack,
-        loadJobById: async () => ({ id: JOB, keyword: "키보드", metadata: botTrack === "social" ? { track: "social" } : {} }) as never,
+        loadJobById: async () => ({ id: JOB, keyword: "키보드", metadata: {} }) as never,
         requestNaverPublish: async () => ({ queued: true }),
         requestTistoryPublish: async () => ({ queued: true }),
         sendTelegramRequest: async (method: string, body: Record<string, unknown>) => {

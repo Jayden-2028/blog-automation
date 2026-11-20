@@ -18,6 +18,7 @@ assert(trackOfJob({ metadata: { track: "unknown" } }) === DEFAULT_TRACK, "모르
 // 종합 키워드 입력 툴(2026-10-19 사용자 결정): 일상·테크는 사회 봇·사회 뷰어로 간다.
 assert(trackOfJob({ metadata: { track: "living" } }) === "social", "입력 툴 일상 -> 사회");
 assert(trackOfJob({ metadata: { track: "tech" } }) === "social", "입력 툴 테크 -> 사회");
+assert(trackOfJob({ metadata: { track: "scenepick" } }) === "scenepick" && parseTrack("scenepick") === "scenepick", "metadata.track=scenepick -> scenepick(2026-11-21)");
 assert(trackOfJob(null) === DEFAULT_TRACK && trackOfJob(undefined) === DEFAULT_TRACK, "job이 없어도 엔터");
 console.log("✅ trackOfJob - 하위 호환");
 
@@ -72,10 +73,13 @@ console.log("✅ pickJobForTrack - 답장 매칭 트랙 분기");
 
 // 4-c) 트랙-채널 검증·대체 키보드(개편2.5 B-2)
 assert(isChannelAllowedForTrack("entertainment", "naver") && !isChannelAllowedForTrack("entertainment", "tistory"), "엔터: 네이버 허용, 티스토리 거부");
-assert(isChannelAllowedForTrack("social", "tistory") && !isChannelAllowedForTrack("social", "naver") && !isChannelAllowedForTrack("social", "blogspot"), "사회: 티스토리만");
-const flat = (t: "entertainment" | "social" | "kscene") => publishActionRowsForTrack(t).flat();
+// 2026-11-21 티스토리 운영 중단: 사회는 어떤 채널도 받지 않는다(옛 🟠 버튼도 거절). scenepick은 처음부터 수동 발행.
+assert(!isChannelAllowedForTrack("social", "tistory") && !isChannelAllowedForTrack("social", "naver") && !isChannelAllowedForTrack("social", "blogspot"), "사회: 발행 채널 없음(티스토리 중단)");
+assert(!isChannelAllowedForTrack("scenepick", "naver") && !isChannelAllowedForTrack("scenepick", "tistory") && !isChannelAllowedForTrack("scenepick", "blogspot"), "scenepick: 발행 채널 없음");
+const flat = (t: "entertainment" | "social" | "kscene" | "scenepick") => publishActionRowsForTrack(t).flat();
 assert(flat("entertainment").includes("naver") && !flat("entertainment").includes("blogspot") && !flat("entertainment").includes("tistory"), "엔터 키보드 = 네이버만(블로그스팟·티스토리 없음)");
-assert(flat("social").includes("tistory") && !flat("social").includes("naver") && !flat("social").includes("blogspot"), "사회 키보드 = 티스토리만");
+assert(!flat("social").includes("tistory") && !flat("social").includes("naver") && !flat("social").includes("blogspot"), "사회 키보드 = 발행 버튼 없음(2026-11-21)");
+assert(!flat("scenepick").some((a) => a === "naver" || a === "tistory" || a === "blogspot"), "scenepick 키보드 = 발행 버튼 없음");
 assert(flat("social").includes("images") && flat("social").includes("export"), "공통 버튼 유지");
 console.log("✅ 트랙-채널 검증 / 트랙별 대체 키보드");
 
@@ -83,6 +87,9 @@ console.log("✅ 트랙-채널 검증 / 트랙별 대체 키보드");
 for (const track of TRACKS) {
   assert(TRACK_ENV_KEYS[track].botToken && TRACK_ENV_KEYS[track].chatId, `${track} env 키 누락`);
 }
-console.log("✅ 모든 트랙에 env 키 정의");
+// scenepick은 사회 봇을 같이 쓴다(2026-11-21) - 같은 봇 토큰·같은 채팅. 새 봇을 만들지 않는다.
+assert(JSON.stringify(TRACK_ENV_KEYS.scenepick) === JSON.stringify(TRACK_ENV_KEYS.social), "scenepick = 사회 봇");
+assert(resolveTrackCredentials("scenepick", env).botToken === "social-token", "scenepick 알림은 사회 봇으로");
+console.log("✅ 모든 트랙에 env 키 정의(scenepick은 사회 봇 공유)");
 
 console.log("\n✅ testTelegramTracks 전체 통과");

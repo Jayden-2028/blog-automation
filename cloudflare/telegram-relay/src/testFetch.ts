@@ -103,16 +103,21 @@ try {
   const plain = { update_id: 2, message: { message_id: 11, chat: { id: 99 }, text: "https://www.instagram.com/p/ABC/" } };
   res = await post("/webhook/instagram", plain);
   assert(res.status === 200 && dispatchOf().client_payload.track === "instagram", "인스타 일반 메시지는 dispatch(track=instagram)");
+  // 사회 봇(2026-11-21): 일반 글자 메시지 = scenepick 새 주제 - 넘긴다(track=social, 새 webhook 경로 없음).
   res = await post("/webhook/social", plain);
-  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "사회 봇의 일반 메시지는 그대로 무시");
-  console.log("✅ 인스타 봇만 일반 메시지(링크) 전달");
+  assert(res.status === 200 && dispatchOf().client_payload.track === "social", "사회 봇의 일반 메시지는 dispatch(track=social, scenepick 주제)");
+  res = await post("/webhook/kscene", plain);
+  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "사용설명서 봇의 일반 메시지는 그대로 무시");
+  res = await post("/webhook/entertainment", plain);
+  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "엔터 봇의 일반 메시지는 그대로 무시");
+  console.log("✅ 인스타·사회 봇만 일반 메시지 전달");
 
   // 8) 사진+캡션으로 온 링크(text 없이 caption만)도 인스타 봇은 넘긴다(개편2.5 C-1). 다른 봇은 그대로 무시.
   const captioned = { update_id: 3, message: { message_id: 12, chat: { id: 99 }, photo: [{ file_id: "f" }], caption: "사회 https://www.instagram.com/p/ABC/" } };
   res = await post("/webhook/instagram", captioned);
   assert(res.status === 200 && dispatchOf().client_payload.track === "instagram", "인스타: caption만 있는 메시지도 dispatch");
   res = await post("/webhook/social", captioned);
-  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "사회 봇의 caption 메시지는 그대로 무시");
+  assert(res.status === 200 && !calls.some((c) => c.url.endsWith("/dispatches")), "사회 봇의 caption 메시지는 그대로 무시(주제는 글자 메시지만)");
   console.log("✅ 인스타 봇 caption 메시지 전달");
 
   console.log("\n✅ testFetch 전체 통과");

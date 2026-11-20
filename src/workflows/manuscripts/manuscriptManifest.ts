@@ -55,6 +55,20 @@ export type ManuscriptImage = {
    */
   width?: number | null;
   height?: number | null;
+  /**
+   * 독자에게 보일 이미지 아래 짧은 설명(2026-11-21, scenepick). Codex가 납품하는 `meta.images[].caption`
+   * (예: "AI 생성 이미지입니다.")이다. description은 alt·뷰어 캡션으로 이미 쓰이므로 따로 둔다 - 뷰어가 그림 아래 한 줄로 보여준다.
+   * 다른 트랙 이미지에는 없다.
+   */
+  caption?: string | null;
+};
+
+/** 원고의 근거 자료 1건(2026-11-21, scenepick). 사용자 사실 확인용이다 - **본문(body)에 넣지 않는다**(복사 대상이 아니다). */
+export type ManuscriptSource = {
+  title: string;
+  url: string;
+  publishedAt?: string | null;
+  checkedAt?: string | null;
 };
 
 export type ManuscriptEntry = {
@@ -123,6 +137,11 @@ export type ManuscriptEntry = {
    * 메모리에서 덧입는다. saveManifest가 떼어 내므로 manifest 행에는 남지 않는다.
    */
   geminiShadow?: GeminiShadow | null;
+  /**
+   * 근거 자료 목록(2026-11-21, scenepick). 뷰어가 본문 밖 "출처" 칸에 보여준다 - 본문 복사·이미지 받기에 섞이지 않게
+   * body와 따로 둔다(네이버에 붙여넣는 글에는 참고 링크를 넣지 않는다). 다른 트랙은 비어 있다.
+   */
+  sources?: ManuscriptSource[] | null;
 };
 
 /** 후보 클릭 교체 1건의 처리 결과. */
