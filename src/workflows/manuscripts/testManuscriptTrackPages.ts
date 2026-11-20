@@ -70,4 +70,18 @@ assert(viewerPageLink("https://p.dev", "entertainment", "j1") === "https://p.dev
 assert(viewerPageLink("https://p.dev", "social", "j1") === "https://p.dev/social.html#j1", "사회 링크는 social.html");
 console.log("✅ viewerPageLink");
 
+
+// 뷰어에는 "참고 자료" 목록을 보이지 않는다(2026-11-20, 전 트랙). 해시태그는 남는다.
+{
+  const { stripViewerReferences } = await import("./writeManuscriptPages.js");
+  const body = "본문 문단입니다.\n\n**참고 자료**\n- [MTN](https://news.mtn.co.kr/a)\n- [엘르](https://www.elle.co.kr/b)\n\n#영화폭설 #김윤석";
+  const topic = { ...manifest.topics[0], manuscript: { ...manifest.topics[0].manuscript, body, naver: { title: "n", body, tags: [] } } };
+  const stripped = stripViewerReferences({ topics: [topic] });
+  const out = stripped.topics[0].manuscript;
+  if (out.body.includes("참고 자료") || out.body.includes("mtn.co.kr") || out.naver?.body.includes("참고 자료")) throw new Error("❌ 뷰어 본문에 참고 자료가 남았다");
+  if (!out.body.includes("본문 문단입니다.") || !out.body.includes("#영화폭설")) throw new Error("❌ 참고 자료를 빼면서 본문·해시태그까지 지웠다");
+  if (!topic.manuscript.body.includes("참고 자료")) throw new Error("❌ 원본 manifest를 건드렸다(뷰어 렌더용 사본만 바꿔야 한다)");
+  console.log("✅ 뷰어 본문에서 참고 자료를 뺀다(전 트랙, 원본은 그대로)");
+}
+
 console.log("\n✅ testManuscriptTrackPages 전체 통과");

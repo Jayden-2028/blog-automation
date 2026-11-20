@@ -162,7 +162,7 @@ Claude가 직접 진행할 수 있는 작업은 **사용자에게 승인을 요�
   하나는 남기는 설계라 관계없는 글이 붙었다(11/16 기안84↔유홍준, 남주혁·한소희 드라마↔백제금동대향로).
   **koreaplain(영문 사용설명서)은 그대로다** - 번역본은 platform=blogspot 행이라 준비 단계의 "배리에이션
   재사용" 분기로 가고, `Related Guides`는 `tkmPostStructure`가 따로 만든다. 발행된 글에 이미 들어간 블록은
-  지우지 않고, 티스토리 소급 백필(`tistory:backfill-links`)은 **더 돌리지 않는다**. **배리에이션(채널별 재작성) 단계는 2026-09-30에 폐지**했다 - 채널은 아래
+  지우지 않고, 티스토리 소급 백필(`tistory:backfill-links`)은 **더 돌리지 않는다**. **뷰어에는 "참고 자료" 링크 목록을 보이지 않는다**(2026-11-20 사용자 지시, 전 트랙) - 렌더 직전 `stripViewerReferences`(`writeManuscriptPages.ts`)가 빼므로 옛 원고에도 적용되고, DB 원문·발행 경로(티스토리는 남김, 네이버는 원래 뺌)는 그대로다. **배리에이션(채널별 재작성) 단계는 2026-09-30에 폐지**했다 - 채널은 아래
   버튼으로 사람이 고르므로 채널별 중복 원고가 없다. 발행 메타(검색 설명·slug·폴더 이름·태그)는 writer가
   frontmatter로 남긴다(`rules/output-format.md` §9). 트리거는 폴링이 아니라 **승인 콜백 직후 이벤트 기반**이다
   (2026-09-14, `docs/ai-handoff/CLOUD_MIGRATION.md` Phase 4) - GitHub Actions
