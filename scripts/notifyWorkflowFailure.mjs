@@ -27,6 +27,7 @@
 //
 // 자격증명은 어떤 경우에도 로그로 출력하지 않는다.
 
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const TELEGRAM_API_BASE = process.env.TELEGRAM_API_BASE ?? "https://api.telegram.org";
@@ -140,6 +141,41 @@ function escapeHtml(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+
+// 뷰어 목록 저장부터는 job이 이미 "준비 완료"로 표시된 뒤다(markPrepared가 먼저). 이 단계 이후에
+// 죽으면 원고·이미지는 저장돼 있고 뷰어·발행 버튼만 낡은 채 남는다(2026-11-20 사고).
+const STAGES_AFTER_MARKED = new Set(["뷰어 목록 저장", "페이지 생성", "페이지 배포", "준비 완료 알림"]);
+
+/** 고장 원인을 평이한 한국어로. 모르는 것은 메시지 앞 150자를 그대로(이스케이프) 보인다. */
+export function describeError(error) {
+  const code = String(error?.code ?? "").trim();
+  const message = String(error?.message ?? "").trim();
+  const haystack = `${code} ${message}`;
+  if (code === "57014" || /statement timeout/i.test(message)) {
+    return "DB 응답 시간 초과(statement timeout, 57014)";
+  }
+  if (/^PGRST/i.test(code) || /\bHTTP 5\d\d\b/.test(haystack) || /^5\d\d$/.test(code)) {
+    return `DB 서버 오류(${escapeHtml(code || message.slice(0, 40))})`;
+  }
+  if (/fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(haystack)) {
+    return "네트워크 끊김";
+  }
+  return escapeHtml(message.slice(0, 150) || code || "원인 미상");
+}
+
+/** publish-poll이 남긴 상태 파일. 없거나 깨졌거나 jobs가 비면 null(큐 조회로 폴백). */
+export function readPollState(env = process.env) {
+  const path = env.PUBLISH_POLL_STATE_FILE;
+  if (!path) return null;
+  try {
+    const state = JSON.parse(readFileSync(path, "utf8"));
+    if (!state || !Array.isArray(state.jobs) || state.jobs.length === 0) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
 /** 사람이 알아볼 제목. keyword가 비면 job id만 남는다. */
 function jobLine(job) {
   const title = typeof job.keyword === "string" && job.keyword.trim() ? job.keyword.trim() : "(제목 없음)";
@@ -152,7 +188,7 @@ function jobLine(job) {
  * 워크플로마다 다르다. jobs가 비면(식별 실패·대기열 없음) reason을 적어 그대로 보낸다 - 무엇이
  * 실패했는지는 job을 몰라도 알려야 한다.
  */
-export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, jobId, unidentifiedReason, jobStatus, now }) {
+export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, jobId, unidentifiedReason, jobStatus, now, diag }) {
   const copy = WORKFLOW_COPY[workflowFile] ?? GENERIC_COPY;
   const stamp = (now ?? new Date()).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
   // cancelled는 "실패"가 아니다. 거의 전부 job 레벨 timeout-minutes 초과이고(수동 취소도 여기로
@@ -168,9 +204,28 @@ export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, 
         "다시 돌리기 전에 run 로그의 마지막 줄을 보세요 - 원인이 그대로면 또 같은 시간을 먹습니다.",
       ]
     : copy.what;
-  const lines = [`🚨 <b>${title}</b> — ${escapeHtml(workflowName || workflowFile)}`, stamp, "", ...what, ""];
+  const lines = [`🚨 <b>${title}</b> — ${escapeHtml(workflowName || workflowFile)}`, stamp, ""];
 
-  if (jobs.length > 0) {
+  // 상태 파일이 있으면 무엇이·어디서·왜 멈췄는지를 맨 위에 둔다(2026-11-20). 길고 일반적인 설명보다
+  // 이 세 줄이 먼저 읽혀야 한다.
+  const hasDiag = !!diag && jobs.length > 0;
+  if (hasDiag) {
+    for (const job of jobs) {
+      const name = typeof job.keyword === "string" && job.keyword.trim() ? job.keyword.trim() : "(제목 없음)";
+      lines.push(`원고: ${escapeHtml(name)}`);
+    }
+    if (diag.stage) lines.push(`멈춘 단계: ${escapeHtml(diag.stage)}`);
+    if (diag.error) lines.push(`고장: ${describeError(diag.error)}`);
+    if (diag.stage && STAGES_AFTER_MARKED.has(diag.stage)) {
+      lines.push("원고·이미지는 저장됐지만 뷰어와 발행 버튼은 갱신되지 않았습니다.");
+    }
+    lines.push("");
+  }
+  lines.push(...what, "");
+
+  if (hasDiag) {
+    lines.push(...jobs.map((job) => `<code>jobId ${escapeHtml(typeof job.id === "string" ? job.id : "?")}</code>`), "");
+  } else if (jobs.length > 0) {
     lines.push(`<b>${copy.jobsHeading}</b>`, ...jobs.map(jobLine), "");
   } else {
     lines.push(`<b>job 식별 실패</b> — ${escapeHtml(unidentifiedReason ?? "대기 중인 원고를 확인하지 못했습니다")}`);
@@ -187,7 +242,7 @@ export function buildFailureMessage({ workflowFile, workflowName, runUrl, jobs, 
     : [`다시 돌리기: <code>${escapeHtml(copy.rerun(rerunId))}</code>`, copy.rerunNote];
   lines.push(
     `실패한 run: ${escapeHtml(runUrl)}`,
-    "어느 단계에서 죽었는지는 위 run 로그에서 봅니다.",
+    ...(hasDiag && diag.stage ? [] : ["어느 단계에서 죽었는지는 위 run 로그에서 봅니다."]),
     "",
     ...recoveryLines
   );
@@ -286,7 +341,22 @@ async function main() {
 
   let jobs = [];
   let unidentifiedReason;
-  if (jobId) {
+  let diag;
+  // publish-poll이 남긴 상태 파일이 있으면 큐 대신 그 job들을 쓴다. 이미 준비 완료로 표시된 job은
+  // 큐 조건(channelManuscriptsReadyAt is null)에서 빠져 있어 큐로는 못 찾는다(2026-11-20).
+  const state = jobId ? null : readPollState(env);
+  if (state) {
+    diag = { stage: state.stage, error: state.error };
+    for (const stateJob of state.jobs) {
+      let fresh = null;
+      try {
+        fresh = await loadJobById(stateJob.id, env);
+      } catch {
+        // 조회 실패는 상태 파일 값으로 대신한다.
+      }
+      jobs.push(fresh ?? stateJob);
+    }
+  } else if (jobId) {
     try {
       const job = await loadJobById(jobId, env);
       if (job) jobs = [job];
@@ -310,7 +380,7 @@ async function main() {
   let sent = 0;
   const failures = [];
   for (const [track, trackJobs] of groups) {
-    const message = buildFailureMessage({ workflowFile, workflowName, runUrl, jobs: trackJobs, jobId, unidentifiedReason, jobStatus });
+    const message = buildFailureMessage({ workflowFile, workflowName, runUrl, jobs: trackJobs, jobId, unidentifiedReason, jobStatus, diag });
     try {
       await sendTelegram(track, message, env);
       sent += 1;

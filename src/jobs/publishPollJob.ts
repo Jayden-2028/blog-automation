@@ -17,6 +17,7 @@ import { resolve } from "node:path";
 import { acquireSingleInstanceLock } from "./lib/singleInstanceLock.js";
 import { prepareApprovedManuscripts } from "../workflows/manuscripts/prepareApprovedManuscripts.js";
 import { notifyManuscriptsReady } from "../workflows/manuscripts/notifyManuscriptsReady.js";
+import { recordPublishPollError, recordPublishPollStage } from "./lib/publishPollState.js";
 import { notifySerperOutage } from "../workflows/images/notifySerperOutage.js";
 
 const MAX_JITTER_MS = 90_000;
@@ -28,7 +29,9 @@ async function main(): Promise<void> {
   // 랜덤 지터. 이전 실행이 락으로 걸러진 뒤라 여기서 자도 겹치지 않는다.
   await new Promise((r) => setTimeout(r, Math.floor(Math.random() * MAX_JITTER_MS)));
 
-  const results = await prepareApprovedManuscripts();
+  const results = await prepareApprovedManuscripts({
+    onStage: (stage, jobs) => recordPublishPollStage(stage, jobs),
+  });
   if (results.length === 0) return; // 대기열 없음 - 조용히 종료
 
   console.log(`▶ [publish-poll] approved job ${results.length}건 처리`);
@@ -42,6 +45,7 @@ async function main(): Promise<void> {
     }
   }
 
+  recordPublishPollStage("준비 완료 알림");
   await notifyManuscriptsReady(results);
 
   // 구글 이미지 검색이 멈췄으면 여기서 한 번 알린다. 수집은 네이버만으로 조용히 계속 돌기 때문에,
@@ -61,6 +65,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
+  // 실패 알림이 읽는 상태 파일에 원인을 남긴다(2026-11-20). 기록 실패는 삼킨다.
+  recordPublishPollError(error);
   console.error("❌ [publish-poll] 실패:", error instanceof Error ? error.message : error);
   process.exit(1);
 });

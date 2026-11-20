@@ -16,7 +16,7 @@ import { isAutoApproved } from "../../config/pipelineGate.js";
 import { prepareManuscript } from "./prepareManuscript.js";
 import type { PrepareManuscriptResult } from "./prepareManuscript.js";
 import { loadManifest, saveManifest, upsertTopicEntry } from "./manuscriptManifest.js";
-import type { ManuscriptManifest } from "./manuscriptManifest.js";
+import type { ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import { renderManuscriptPage } from "./renderManuscriptPage.js";
 import { writeManuscriptPages } from "./writeManuscriptPages.js";
 import { deployManuscriptsPage } from "./deployManuscriptsPage.js";
@@ -50,6 +50,11 @@ export type PrepareApprovedManuscriptsOptions = {
   writeCostSnapshot?: () => Promise<WriteCostSnapshotResult>;
   /** job당 처리 상한(배리에이션 LLM 호출이 오래 걸리므로). 기본 3. */
   maxJobsPerRun?: number;
+  /**
+   * 진행 단계 보고(2026-11-20). 실패 알림이 "어느 원고가 어느 단계에서 멈췄는지"를 말하도록
+   * publishPollJob이 파일로 남긴다. jobs는 첫 호출(준비 시작)에만 온다. 던져도 준비를 막지 않는다.
+   */
+  onStage?: (stage: string, jobs?: ArticleJobRow[]) => void;
 };
 
 export async function prepareApprovedManuscripts(
@@ -83,8 +88,21 @@ export async function prepareApprovedManuscripts(
   const approved = await loadApprovedJobs();
   const pending = approved.filter((job) => !job.metadata?.channelManuscriptsReadyAt).slice(0, maxJobsPerRun);
 
+  const reportStage = (stage: string, jobs?: ArticleJobRow[]) => {
+    try {
+      options.onStage?.(stage, jobs);
+    } catch {
+      // 진행 기록은 보조다.
+    }
+  };
+  if (pending.length > 0) reportStage("원고·이미지 준비", pending);
+
   const results: JobManuscriptsResult[] = [];
   let manifest: ManuscriptManifest | null = null;
+  // 이번 run이 새로 만든·갱신한 topic만 저장한다. manifest는 페이지를 그리려고 전체를 읽지만,
+  // 전체(618행, ~4.7MB)를 한 번에 upsert하면 PostgREST 8초 statement_timeout(57014)에 걸린다 -
+  // 2026-11-20 run 44688103846이 정확히 거기서 죽어 뷰어·알림이 갱신되지 않았다.
+  const touched: ManuscriptTopicEntry[] = [];
 
   for (const job of pending) {
     const result = await prepareJob(job);
@@ -97,6 +115,7 @@ export async function prepareApprovedManuscripts(
     if (result.status === "success") {
       manifest ??= await loadManifestFn();
       manifest = upsertTopicEntry(manifest, result.topic);
+      touched.push(result.topic);
       await markPrepared(job.id, { channelManuscriptsReadyAt: result.topic.readyAt });
       // 이미지 실패는 원고 준비를 막지 않는다 - 로그로만 남겨 뒤에 사람이 알 수 있게 한다.
       for (const failure of result.imageFailures) {
@@ -112,8 +131,11 @@ export async function prepareApprovedManuscripts(
   }
 
   if (manifest) {
-    await saveManifestFn(manifest);
+    reportStage("뷰어 목록 저장");
+    await saveManifestFn({ topics: touched });
+    reportStage("페이지 생성");
     await writePages(manifest);
+    reportStage("페이지 배포");
     // 비용 스냅샷은 배포 직전에 같은 디렉터리로 떨군다(배포 단위가 디렉터리 하나라 여기서 써야
     // 같이 올라간다). 실패해도 원고 준비·배포에는 영향이 없다.
     const costSnapshot = await writeCostSnapshotFn();

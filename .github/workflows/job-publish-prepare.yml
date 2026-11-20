@@ -77,6 +77,9 @@ jobs:
 
       - name: Run job:publish-poll
         env:
+          # 어느 원고·단계에서 무엇 때문에 멈췄는지를 실패 알림에 넘기는 상태 파일(2026-11-20).
+          # 아래 실패 알림 스텝과 같은 경로여야 한다.
+          PUBLISH_POLL_STATE_FILE: ${{ runner.temp }}/publish-poll-state.json
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -163,6 +166,8 @@ jobs:
           KSCENE_TELEGRAM_BOT_TOKEN: ${{ secrets.KSCENE_TELEGRAM_BOT_TOKEN }}
           KSCENE_TELEGRAM_CHAT_ID: ${{ secrets.KSCENE_TELEGRAM_CHAT_ID }}
           FAILED_WORKFLOW_FILE: job-publish-prepare.yml
+          # publish-poll이 남긴 진행 상태. 이미 준비 완료로 표시돼 큐에서 빠진 job도 이 파일로 찾는다.
+          PUBLISH_POLL_STATE_FILE: ${{ runner.temp }}/publish-poll-state.json
           # failure와 cancelled(시한 초과·수동 취소)를 본문에서 구분한다.
           FAILED_JOB_STATUS: ${{ job.status }}
         run: node scripts/notifyWorkflowFailure.mjs

@@ -417,4 +417,68 @@ function baseEnv(port: number): Record<string, string> {
   console.log(`✅ 워크플로 ${files.length}개 모두 시한 초과(cancelled)에도 알림이 걸린다`);
 }
 
+// 14) 상태 파일(publish-poll이 남긴 진행 기록): 이미 "준비 완료"로 표시돼 큐에서 빠진 job도 찾고,
+//     원고·멈춘 단계·고장 원인을 평이한 말로 적는다(2026-11-20, run 44688103846).
+{
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "poll-state-"));
+  const stateFile = join(dir, "publish-poll-state.json");
+  try {
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        jobs: [{ id: "job-state-1", keyword: "배우 최대훈의 모든 것", category: "person", metadata: { track: "social" } }],
+        stage: "뷰어 목록 저장",
+        error: { code: "57014", message: "canceling statement due to statement timeout" },
+      })
+    );
+    const stub = await startStub({ rows: [{ id: "job-state-1", keyword: "배우 최대훈의 모든 것", metadata: { track: "social" } }] });
+    const result = await runScript({ ...baseEnv(stub.port), PUBLISH_POLL_STATE_FILE: stateFile });
+    await stub.close();
+
+    assert(result.code === 0, `스크립트가 실패했다: ${result.stderr}`);
+    assert(stub.sent.length === 1, `알림이 1통이어야 한다 - ${stub.sent.length}통`);
+    const [message] = stub.sent;
+    assert(message!.token === DUMMY_TOKENS.SOCIAL_TELEGRAM_BOT_TOKEN, "상태 파일의 job 트랙(사회) 봇으로 가야 한다");
+    assert(message!.text.includes("원고: 배우 최대훈의 모든 것"), "원고 제목 줄이 없다");
+    assert(message!.text.includes("멈춘 단계: 뷰어 목록 저장"), "멈춘 단계 줄이 없다");
+    assert(message!.text.includes("DB 응답 시간 초과"), "고장 원인이 평이한 말로 적혀야 한다");
+    assert(message!.text.includes("원고·이미지는 저장됐지만 뷰어와 발행 버튼은 갱신되지 않았습니다."), "준비 표시 이후 단계 안내가 없다");
+    assert(!message!.text.includes("job 식별 실패"), "상태 파일이 있는데 식별 실패로 나갔다");
+    assert(message!.text.includes("actions/runs/43040388380"), "run 주소가 없다");
+    assert(message!.text.includes("gh workflow run job-publish-prepare.yml"), "다시 돌리는 줄이 없다");
+    assert(stub.queries.every((q) => !q.includes("is.null")), "상태 파일이 있으면 대기열 조회를 하지 않아야 한다");
+
+    // 조회가 죽어도 상태 파일 값으로 보낸다. 앞 단계(준비 전)면 "저장됐지만" 줄은 없다.
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        jobs: [{ id: "job-state-2", keyword: "조회 실패 원고", category: null, metadata: {} }],
+        stage: "원고·이미지 준비",
+        error: { code: "", message: "fetch failed" },
+      })
+    );
+    const stub2 = await startStub({ restStatus: 500 });
+    const result2 = await runScript({ ...baseEnv(stub2.port), PUBLISH_POLL_STATE_FILE: stateFile });
+    await stub2.close();
+    assert(result2.code === 0, `조회 실패 케이스 스크립트가 실패했다: ${result2.stderr}`);
+    const [m2] = stub2.sent;
+    assert(m2!.text.includes("원고: 조회 실패 원고") && m2!.text.includes("네트워크 끊김"), "조회 실패 시 상태 파일 값으로 보내야 한다");
+    assert(!m2!.text.includes("원고·이미지는 저장됐지만"), "준비 전 단계에는 저장 안내가 붙으면 안 된다");
+
+    // 상태 파일이 없는 경로(env는 있으나 파일 없음)는 옛 대기열 경로 그대로다.
+    const stub3 = await startStub({ rows: [{ id: "job-q-1", keyword: "큐 원고", metadata: {} }] });
+    const result3 = await runScript({ ...baseEnv(stub3.port), PUBLISH_POLL_STATE_FILE: join(dir, "없는파일.json") });
+    await stub3.close();
+    assert(result3.code === 0, `파일 없음 케이스가 실패했다: ${result3.stderr}`);
+    assert(stub3.queries.length === 1 && decodeURIComponent(stub3.queries[0]!).includes("channelManuscriptsReadyAt=is.null"), "상태 파일이 없으면 대기열 조회로 가야 한다");
+    assert(stub3.sent[0]!.text.includes("큐 원고") && !stub3.sent[0]!.text.includes("멈춘 단계"), "옛 큐 경로 본문이 바뀌었다");
+    console.log("✅ 상태 파일: 원고·멈춘 단계·고장(57014 → DB 응답 시간 초과) 표시, 파일 없으면 옛 큐 경로 그대로");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 console.log("\n✅ testNotifyWorkflowFailure 전체 통과");

@@ -423,6 +423,52 @@ async function main(): Promise<void> {
   assert(deployCalled, "페이지를 새로 썼으면 배포도 호출돼야 한다");
   console.log("✅ prepareApprovedManuscripts - 준비 완료 job 건너뛰기 + manifest/페이지 갱신 + 배포 호출");
 
+  // 11-b) 이미 manifest에 있던 topic은 다시 저장하지 않는다 - 새로 준비한 topic만 saveManifest로 간다.
+  //       전체(618행, ~4.7MB)를 한 번에 upsert하다 statement timeout(57014)으로 죽은 2026-11-20 사고의 회귀 방지.
+  //       페이지는 전체 manifest로 그려야 하므로 writePages에는 기존 topic도 함께 간다.
+  {
+    const existingTopic = {
+      jobId: "old-1",
+      keyword: "예전 키워드",
+      category: "living",
+      date: "2026-09-01",
+      readyAt: "2026-09-01T00:00:00Z",
+      manuscript: { title: "옛 제목", searchDescription: null, slug: null, tags: [], body: "옛 본문", imagePrompts: [], images: [], filePath: "old" },
+    };
+    let savedOnly: ManuscriptManifest | null = null;
+    let pagesManifest: ManuscriptManifest | null = null;
+    const stages: string[] = [];
+    await prepareApprovedManuscripts({
+      writeCostSnapshot: noCostSnapshot,
+      deploy: async () => ({ status: "skipped", reason: "test" }),
+      loadApprovedJobs: async () => [job("fresh", "living")],
+      prepareJob: async (j) => ({
+        status: "success",
+        imageFailures: [],
+        topic: { ...existingTopic, jobId: j.id, keyword: j.keyword, date: "2026-11-20", readyAt: "2026-11-20T00:00:00Z" },
+      }),
+      markPrepared: async () => {},
+      loadManifest: async () => ({ topics: [existingTopic] }),
+      saveManifest: async (m) => {
+        savedOnly = m;
+      },
+      writePages: async (m) => {
+        pagesManifest = m;
+      },
+      onStage: (stage) => stages.push(stage),
+    });
+    const saved = savedOnly as ManuscriptManifest | null;
+    const pages = pagesManifest as ManuscriptManifest | null;
+    assert(saved !== null && saved.topics.length === 1 && saved.topics[0]!.jobId === "fresh", "saveManifest는 새로 준비한 topic만 받아야 한다");
+    assert(!saved!.topics.some((t) => t.jobId === "old-1"), "기존 topic이 saveManifest로 다시 저장됐다");
+    assert(pages !== null && pages.topics.length === 2, "페이지는 기존 topic을 포함한 전체 manifest로 그려야 한다");
+    assert(
+      stages.join(">") === "원고·이미지 준비>뷰어 목록 저장>페이지 생성>페이지 배포",
+      `진행 단계 보고 순서가 다르다: ${stages.join(">")}`
+    );
+    console.log("✅ manifest 저장은 이번에 준비한 topic만(기존 topic 제외) + 페이지는 전체로 + 단계 보고");
+  }
+
   // 12) maxJobsPerRun 제한 + 전부 실패하면 페이지 갱신도 배포도 안 함
   let deployCalledOnAllFailure = false;
   const r12 = await prepareApprovedManuscripts({
