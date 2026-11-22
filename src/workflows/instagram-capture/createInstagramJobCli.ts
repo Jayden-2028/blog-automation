@@ -104,6 +104,10 @@ async function main(): Promise<void> {
 
   // 여기서부터는 기존 파이프라인이 알아서 간다: 조사 -> (자동) 집필 -> 초안 알림 -> 승인 ->
   // 최종본 -> 발행 버튼. 사람이 다시 개입하는 첫 지점은 초안 검수다.
+  if (result.scenepick) {
+    console.log("\n⏭ 💡 상식(scenepick) job이라 자료조사를 발화하지 않습니다 - 맥미니 scenepick 폴러가 Codex에 발주합니다.");
+    return;
+  }
   console.log("\n▶ 자료조사로 자동 연결 중...");
   // createInstagramJob과 같은 이유로 동적 import다 - pipelineQueue가 supabase 클라이언트를 끌고
   // 오고, 그 모듈은 로드 시점에 자격증명이 없으면 throw한다(--dry-run이 못 돌게 된다).

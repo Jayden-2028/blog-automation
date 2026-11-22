@@ -126,6 +126,10 @@ async function main(): Promise<void> {
   console.log(`✅ job ${created.jobId}`);
   console.log("   원고 이미지는 집필 후 기존 파이프라인이 채웁니다(웹 검색 + 주제에 따라 AI 생성).");
 
+  if (created.scenepick) {
+    console.log("\n⏭ 💡 상식(scenepick) job이라 자료조사를 발화하지 않습니다 - 맥미니 scenepick 폴러가 Codex에 발주합니다.");
+    return;
+  }
   console.log("\n▶ 자료조사로 자동 연결 중...");
   const { triggerResearchForJob } = await import("./triggerResearch.js");
   await triggerResearchForJob(created.jobId);

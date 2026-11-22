@@ -136,7 +136,7 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
   const createInput =
     deps.createInput ?? (async (entry) => (await import("./createInstagramJob.js")).createInputJob(entry));
   const createJob =
-    deps.createJob ?? (async (capture) => (await import("./createInstagramJob.js")).createInstagramJob(capture));
+    deps.createJob ?? (async (capture, options) => (await import("./createInstagramJob.js")).createInstagramJob(capture, options));
   const triggerResearch =
     deps.triggerResearch ?? (async (jobId) => (await import("./triggerResearch.js")).triggerResearchForJob(jobId));
   const checkLogin = deps.checkLogin ?? (async () => (await import("./checkInstagramLogin.js")).checkInstagramLogin());
@@ -204,6 +204,8 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
         const created = await createInput(entry);
         result.created += 1;
         mark(entry.id, { attempts, ...clearDefer(entry) });
+        // 💡 상식: scenepick Codex 대기열 job이다 - 맥미니 scenepick 폴러가 집는다. 자료조사를 발화하지 않는다.
+        if (created.scenepick) continue;
         await triggerResearch(created.jobId).catch((error) => {
           result.messages.push(
             `⚠️ job ${created.jobId}는 만들었지만 자료조사 발화에 실패했습니다: ${error instanceof Error ? error.message : error}\n   이어서: npm run job:research -- ${created.jobId}`
@@ -280,10 +282,15 @@ export async function processPendingCaptures(deps: ProcessDeps = {}): Promise<Pr
 
     // parseCaptureFile은 규격 필드만 다시 조립하므로 track이 떨어진다(2026-10-06 실측: 사회로 골랐는데 job에 track이 없었다).
     // 큐 항목의 트랙을 여기서 다시 붙인다.
-    const created = await createJob({ ...parsed.capture, ...(entry.track ? { track: entry.track } : {}) });
+    // 💡 상식이면 createInstagramJob이 캡션·이미지 속 글자·원 링크·같이 보낸 말(rawCaption)을 묶어 scenepick job으로 만든다.
+    const created = await createJob(
+      { ...parsed.capture, ...(entry.track ? { track: entry.track } : {}) },
+      { userNote: entry.rawCaption, telegramMessageId: entry.telegramMessageId }
+    );
     result.created += 1;
     // createInstagramJob이 큐 항목을 done으로 바꾼다. attempts는 기록용으로 남긴다.
     mark(entry.id, { attempts, ...clearDefer(entry) });
+    if (created.scenepick) continue; // 상식: 자료조사 발화 없음(맥미니 scenepick 폴러 몫)
 
     await triggerResearch(created.jobId).catch((error) => {
       // job은 이미 만들어졌다 - 조사 발화만 실패한 것이라 수동으로 이어 돌릴 수 있다.

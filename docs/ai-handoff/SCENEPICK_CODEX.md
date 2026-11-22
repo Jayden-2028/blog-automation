@@ -42,6 +42,20 @@ GitHub Actions telegram-update.yml -> runTelegramUpdateCli
            로그인 만료면 원인이 "맥미니 codex 로그인 필요"(재시도 없이 즉시)
 ```
 
+## 변환기 💡 상식 접수 (2026-11-22)
+
+인스타 포스팅 변환기 봇의 트랙 버튼이 **4개**가 됐다(직접 입력·링크 공통): `🎬 엔터 / 👤 인물 / 💡 상식 / 🌏 국제`(2+2).
+사회·일상·테크는 새 버튼에서 빠졌고, 옛 콜백·"사회/일상/테크" 단어 답장은 그대로 받는다(하위 호환). 상식 단어: 상식·일상상식·몽상가.
+
+- **💡 상식 = 이 트랙**: 맥 폴러(`instagram-capture-poll`)가 `createInputJob`/`createInstagramJob`에서 갈라 위와 같은 모양의 job을 만든다
+  (`inputJobFields.scenepickConverterJobFields`·`scenepickCaptureJobFields` → `scenepickJobFields`). **triggerResearch를 부르지 않는다.**
+- `inputTopic`(4KB) = 주제 한 줄(첫 줄 = keyword) + 같이 보낸 말 + `원 링크:` + 소스 본문(붙여넣은 글 / 블로그·뉴스 추출 본문 /
+  인스타 캡션·이미지 속 글자). 캡처 이미지는 넘기지 않는다. 인스타는 캡처가 끝난 뒤 분기한다.
+- 출처 구분: `metadata.scenepickOrigin = "converter"`, `converterQueueId`(수신함 행 id), `converterMessageId`. **`scenepickMessageId`는 남기지 않는다** -
+  사회 봇 접수 중복 키(`findScenepickJobByMessageId`)라서 변환기 메시지 번호가 사회 봇 번호와 겹치면 사회 봇의 새 주제가 "중복"으로 버려진다.
+- 완료·실패 알림은 출처와 무관하게 **사회 봇**으로 간다(reply_to 없음). 변환기 봇은 고를 때 "완료 알림은 사회 봇으로 갑니다"라고 안내한다.
+- 맥미니 반영: `instagram-capture-poll`(새 분기)·`scenepick-poll`(변경 없음 - 같은 대기열 조건으로 집는다) 저장소 pull. Worker 재배포 불필요.
+
 ## 상태 (`job.metadata.scenepickCodex`)
 
 | status | 뜻 | job.status |

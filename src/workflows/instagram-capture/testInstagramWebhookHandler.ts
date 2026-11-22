@@ -24,19 +24,19 @@ function harness(allowedChatId: string | null = "99") {
 }
 
 async function main(): Promise<void> {
-  // 1) 링크만 → 수신함 link + 버튼 2개(엔터/사회)
+  // 1) 링크만 → 수신함 link + 버튼 4개(2026-11-22: 엔터/인물/상식/국제, 2+2)
   {
     const h = harness();
     const out = await handleInstagramUpdate({ update_id: 10, message: { message_id: 5, chat: { id: 99 }, text: "https://www.instagram.com/p/ABC/ 이거" } }, h.deps);
     assert(out.handled === "link" && out.queueId === "tg-10" && out.track === null, `링크 접수 (${JSON.stringify(out)})`);
     assert(h.rows[0].kind === "link" && h.rows[0].id === "tg-10" && h.rows[0].instagramUrl === "https://www.instagram.com/p/ABC/" && h.rows[0].rawCaption === "이거", "수신함 link 행");
     const rows = h.sent[0].markup?.inline_keyboard ?? [];
-    const buttons = rows[0] ?? [];
-    assert(buttons.length === 3 && buttons[0].callback_data === "igtrack:tg-10:entertainment" && buttons[1].callback_data === "igtrack:tg-10:social", `트랙 버튼 (${JSON.stringify(buttons)})`);
-    // 2026-10-29 🌏 국제 추가 - 6개 버튼이 2행(3+3)에 들어간다.
-    assert(rows.length === 2 && rows.flat().map((b) => b.callback_data).join(",") === ["entertainment", "social", "living", "tech", "person", "global"].map((t) => `igtrack:tg-10:${t}`).join(","), `6트랙 2행 (${JSON.stringify(rows)})`);
-    assert(rows[1][2].text === "🌏 국제", "국제 버튼 라벨");
-    console.log("✅ 링크 → 수신함 + 6트랙 버튼(2행)");
+    assert(rows.length === 2 && rows.every((row) => row.length === 2), `2+2 배치 (${JSON.stringify(rows)})`);
+    assert(rows.flat().map((b) => b.callback_data).join(",") === ["entertainment", "person", "scenepick", "global"].map((t) => `igtrack:tg-10:${t}`).join(","), `4트랙 (${JSON.stringify(rows)})`);
+    assert(rows.flat().map((b) => b.text).join(",") === "🎬 엔터,👤 인물,💡 상식,🌏 국제", "버튼 라벨");
+    assert(rows.flat().every((b) => Buffer.byteLength(b.callback_data ?? "") <= 64), "callback_data 64바이트 이하");
+    assert(Buffer.byteLength(buildTrackCallbackData("tg-999999999999", "scenepick")) <= 64, "긴 update_id도 64바이트 이하");
+    console.log("✅ 링크 → 수신함 + 4트랙 버튼(2+2)");
   }
 
   // 2) 링크 + "사회" → 버튼 없이 트랙 확정 답장, 캡션은 그대로(맥이 떼어 낸다)
@@ -89,6 +89,25 @@ async function main(): Promise<void> {
     assert(reply.handled === "reply" && h.rows.at(-1)!.replyText === "영문", "'영문' 답장은 트랙 답으로 수신함에");
     assert(parseTrackCallbackData("igtrack:tg-1:global")?.track === "global", "국제 콜백 파서");
     console.log("✅ 🌏 국제 - 버튼/단어/답장");
+  }
+
+  // 6) 💡 상식 - 버튼(사회 봇 알림 안내 한 줄 추가)·같은 메시지 단어·직접 입력 버튼. 옛 사회/일상/테크 콜백도 계속 받는다(하위 호환).
+  {
+    const h = harness();
+    const pick = await handleInstagramUpdate({ update_id: 30, callback_query: { id: "cb", data: buildTrackCallbackData("tg-10", "scenepick"), message: { message_id: 7, chat: { id: 99 } } } }, h.deps);
+    assert(pick.handled === "track_pick" && pick.track === "scenepick" && parseTrackPick(h.rows[0].replyText)?.track === "scenepick", "상식 버튼 → track:tg-10:scenepick");
+    assert(h.edited[0].markup.inline_keyboard[0][0].text.includes("💡 상식"), "✅ 상식 선택됨 표시");
+    assert(h.sent.length === 1 && h.sent[0].text.includes("사회 봇") && !h.sent[0].markup, `상식 안내(완료 알림은 사회 봇) (${h.sent[0]?.text})`);
+    const word = await handleInstagramUpdate({ update_id: 31, message: { message_id: 8, chat: { id: 99 }, text: "상식 https://www.instagram.com/p/SCN/" } }, h.deps);
+    assert(word.handled === "link" && word.track === "scenepick" && !h.sent.at(-1)?.markup && h.sent.at(-1)!.text.includes("💡 상식") && h.sent.at(-1)!.text.includes("사회 봇"), "링크 + 상식 → 바로 확정");
+    const input = await handleInstagramUpdate({ update_id: 32, message: { message_id: 9, chat: { id: 99 }, text: "전자레인지에 금속을 넣으면 왜 불꽃이 튈까" } }, h.deps);
+    const inputRows = h.sent.at(-1)!.markup?.inline_keyboard ?? [];
+    assert(input.handled === "input" && inputRows.flat().map((b) => b.callback_data).join(",") === ["entertainment", "person", "scenepick", "global"].map((t) => `igtrack:tg-32:${t}`).join(","), `직접 입력 4버튼 (${JSON.stringify(inputRows)})`);
+    assert(h.sent.at(-1)!.text.includes("엔터/인물/상식/국제"), "직접 입력 접수 문구 4개");
+    for (const old of ["social", "living", "tech"]) {
+      assert(parseTrackCallbackData(`igtrack:tg-1:${old}`)?.track === old, `옛 ${old} 콜백 하위 호환`);
+    }
+    console.log("✅ 💡 상식 - 버튼/단어/직접 입력 버튼, 옛 콜백 호환");
   }
 
   assert(parseTrackCallbackData("igtrack:tg-1:entertainment")?.track === "entertainment" && parseTrackCallbackData("publish:x:y") === null, "콜백 파서");

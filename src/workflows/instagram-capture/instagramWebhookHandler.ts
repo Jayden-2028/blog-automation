@@ -17,7 +17,17 @@ import type { TelegramReplyMarkup } from "../../notifications/TelegramNotifier.j
 import { classifyUrl, directInputAck, extractFirstUrl, interpretDirectInput, UNSUPPORTED_URL_REPLY } from "./directInput.js";
 import { encodeLinkSource, linkSourceAck, resolveLinkSource } from "./linkInput.js";
 import type { ExtractResult } from "../input-extract/extractLinkSource.js";
-import { ackMessage, encodeTrackPick, isBareTrackWord, isInstagramTrack, splitTrackWord, TRACK_LABEL } from "./instagramTrack.js";
+import {
+  ackMessage,
+  encodeTrackPick,
+  isBareTrackWord,
+  isInstagramTrack,
+  isScenepickTrack,
+  NEW_INPUT_TRACKS,
+  SCENEPICK_PICKED_NOTE,
+  splitTrackWord,
+  TRACK_LABEL,
+} from "./instagramTrack.js";
 import type { InstagramTrack } from "./instagramTrack.js";
 
 /** 버튼 callback_data. `igtrack:<큐 id>:<트랙>`. 큐 id는 `tg-<update_id>`(수신함 행 id와 같다). */
@@ -37,15 +47,15 @@ export function parseTrackCallbackData(data: string | undefined | null): { queue
   return { queueId: parts[1], track: parts[2] };
 }
 
-/** 트랙 버튼 6개를 2행(3+3)으로 - 2026-10-29 🌏 국제 추가(5→6개, 3행 2-2-1에서 2행으로 정리). */
+/**
+ * 트랙 버튼 4개를 2행(2+2)으로 - 2026-11-22 사용자 지시: 🎬 엔터 / 👤 인물 / 💡 상식 / 🌏 국제(직접 입력·링크 공통).
+ * 사회·일상·테크는 새 버튼에서 빠졌다(옛 6버튼 콜백은 parseTrackCallbackData가 그대로 받는다 - 하위 호환).
+ * callback_data는 `igtrack:tg-<update_id>:scenepick`이 가장 길어도 40바이트 안쪽이다(텔레그램 한도 64).
+ */
 export function trackButtons(queueId: string): TelegramReplyMarkup {
   const button = (track: InstagramTrack) => ({ text: TRACK_LABEL[track], callback_data: buildTrackCallbackData(queueId, track) });
-  return {
-    inline_keyboard: [
-      [button("entertainment"), button("social"), button("living")],
-      [button("tech"), button("person"), button("global")],
-    ],
-  };
+  const [a, b, c, d] = NEW_INPUT_TRACKS;
+  return { inline_keyboard: [[button(a), button(b)], [button(c), button(d)]] };
 }
 
 export type InstagramWebhookUpdate = {
@@ -115,6 +125,8 @@ export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps
         inline_keyboard: [[{ text: `✅ ${TRACK_LABEL[parsed.track]} 선택됨`, callback_data: "noop" }]],
       })
       .catch(() => {});
+    // 상식은 결과 알림이 이 봇이 아니라 사회 봇으로 간다 - 고른 자리에서 한 번 알려 둔다.
+    if (isScenepickTrack(parsed.track)) await deps.sendMessage(chatId, `${TRACK_LABEL[parsed.track]} — ${SCENEPICK_PICKED_NOTE}`).catch(() => {});
     return { handled: "track_pick", queueId: parsed.queueId, track: parsed.track };
   }
 
@@ -152,7 +164,10 @@ export async function handleInstagramUpdate(update: InstagramWebhookUpdate, deps
       replyText: null,
       receivedAt: now().toISOString(),
     });
-    if (payload.track) await deps.sendMessage(chatId, `${linkSourceAck(payload).split(" — ")[0]} → ${TRACK_LABEL[payload.track]} 트랙.`).catch(() => {});
+    if (payload.track) {
+      const note = isScenepickTrack(payload.track) ? ` ${SCENEPICK_PICKED_NOTE}` : "";
+      await deps.sendMessage(chatId, `${linkSourceAck(payload).split(" — ")[0]} → ${TRACK_LABEL[payload.track]} 트랙.${note}`).catch(() => {});
+    }
     else await deps.sendMessage(chatId, linkSourceAck(payload), trackButtons(rowId)).catch(() => {});
     return { handled: "source", queueId: rowId, track: payload.track ?? null };
   }

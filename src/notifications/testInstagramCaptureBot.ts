@@ -75,7 +75,7 @@ async function testPlainTextBecomesDirectInput(): Promise<void> {
   const result = await bot.pollOnce();
   assert(result.enqueued === 1 && result.ignored === 0, "일반 글은 직접 입력으로 적재된다");
   assert(enqueued[0].source === "text" && enqueued[0].status === "needs_track" && enqueued[0].userTopic === "민찌는 무슨 고기일까?", "질문형은 그대로 주제, 트랙 대기");
-  assert(replies[0].includes("접수: 주제") && replies[0].includes("일상"), "접수 답장에 해석 결과와 4트랙 안내");
+  assert(replies[0].includes("접수: 주제") && replies[0].includes("엔터/인물/상식/국제"), "접수 답장에 해석 결과와 4트랙 안내");
   console.log("✅ URL 없는 일반 글은 직접 입력으로 접수된다");
 }
 

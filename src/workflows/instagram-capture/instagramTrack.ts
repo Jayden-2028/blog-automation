@@ -23,7 +23,19 @@ import type { InstagramQueueEntry } from "./types.js";
 // global(🌏 국제, 2026-10-29 사용자 지시 "국제를 누르면 블로그스팟용 영문 원고")은 **사용설명서(koreaplain) 트랙 재사용**이다:
 // 새 트랙·새 봇 없이 category="kscene" + metadata.track="kscene"으로 job을 만들면 kscene-topic Go 버튼이 만든 job과 같은
 // 길(한글 초안 → koreaplain 봇 "✅ 한글 승인 → 영어본" → job-translate → Blogspot 🔵 발행)을 탄다. 내부 이름만 global이다.
-export type InstagramTrack = "entertainment" | "social" | "living" | "tech" | "person" | "global";
+// scenepick(💡 상식, 2026-11-22 사용자 지시)은 **사회 봇 scenepick과 같은 맥미니 Codex 발주 job**을 만든다(workflows/scenepick) -
+// 우리 researcher/writer를 타지 않는다(triggerResearch 없음). 주제·같이 보낸 말·원 링크·확보한 소스 본문(블로그·뉴스 추출 본문,
+// 인스타 캡처 캡션·이미지 속 글자)을 글자로 묶어 metadata.inputTopic에 싣는다(inputJobFields.scenepickConverterJobFields).
+//
+// 2026-11-22부터 새로 보내는 버튼은 4개다(🎬 엔터 / 👤 인물 / 💡 상식 / 🌏 국제 - NEW_INPUT_TRACKS). 사회·일상·테크는 버튼에서
+// 빠졌지만 **타입·단어·콜백 해석은 남긴다** - 수신함·큐에 남은 옛 버튼과 "사회"/"일상"/"테크" 답장이 깨지지 않게(하위 호환).
+export type InstagramTrack = "entertainment" | "social" | "living" | "tech" | "person" | "global" | "scenepick";
+
+/** 새 메시지에 붙이는 트랙 버튼(직접 입력·링크 공통, 2026-11-22). 순서가 곧 버튼 순서다(2+2). */
+export const NEW_INPUT_TRACKS: readonly InstagramTrack[] = ["entertainment", "person", "scenepick", "global"];
+
+/** 안내 문구 속 트랙 이름(답장 단어). */
+export const NEW_INPUT_TRACK_WORDS = "엔터 / 인물 / 상식 / 국제";
 
 /** 변환기(종합 키워드 입력 툴)가 만든 job의 metadata.source 값. 조사 프롬프트가 "한글 입력일 수 있다"를 판단하는 근거다. */
 export const CONVERTER_JOB_SOURCES: readonly string[] = ["instagram_manual", "keyword_input"];
@@ -47,6 +59,8 @@ export function jobMetadataForTrack(track: InstagramTrack | undefined): Record<s
   if (isInputOnlyTrack(track)) return { track };
   if (track === "person") return {}; // 인물 백과 선례: metadata.track 없음(엔터 기본), category=person이 전부를 가른다.
   if (track === "global") return trackJobMetadata("kscene"); // 국제 = 사용설명서 봇·뷰어·Blogspot(telegramTracks의 koreaplain Go와 같은 모양).
+  // 상식은 이 함수로 job을 만들지 않는다(scenepickConverterJobFields가 scenepickCodex 대기열 모양으로 만든다). 혹시 불려도 트랙은 남긴다.
+  if (track === "scenepick") return trackJobMetadata("scenepick");
   return trackJobMetadata(track ?? "entertainment");
 }
 
@@ -55,11 +69,25 @@ export function jobMetadataForTrack(track: InstagramTrack | undefined): Record<s
  * 조사 koreaplain 분기·Blogger 라벨 판정이 category를 본다). 그 외는 null(호출자가 쓰던 값 유지).
  */
 export function categoryForTrack(track: InstagramTrack | undefined): "living" | "tech" | "person" | "kscene" | null {
-  return track === "living" ? "living" : track === "tech" ? "tech" : track === "person" ? "person" : track === "global" ? "kscene" : null;
+  // 상식(scenepick)도 living - 사회 봇 scenepick 접수(SCENEPICK_JOB_CATEGORY)와 같은 값이다.
+  if (track === "living" || track === "scenepick") return "living";
+  return track === "tech" ? "tech" : track === "person" ? "person" : track === "global" ? "kscene" : null;
+}
+
+/** 상식(scenepick)이면 job을 scenepick Codex 대기열로 만들고 자료조사를 발화하지 않는다. */
+export function isScenepickTrack(track: unknown): track is "scenepick" {
+  return track === "scenepick";
 }
 
 export function isInstagramTrack(value: unknown): value is InstagramTrack {
-  return value === "entertainment" || value === "social" || value === "person" || value === "global" || isInputOnlyTrack(value);
+  return (
+    value === "entertainment" ||
+    value === "social" ||
+    value === "person" ||
+    value === "global" ||
+    value === "scenepick" ||
+    isInputOnlyTrack(value)
+  );
 }
 
 /** 단어 → 트랙. 사용자가 실제로 쓸 법한 말을 넓게 받는다(네이버/티스토리는 채널 이름으로 트랙을 뜻한다). */
@@ -71,6 +99,8 @@ const TRACK_WORDS: ReadonlyArray<[RegExp, InstagramTrack]> = [
   [/^(인물|인물백과|프로필|person)$/i, "person"],
   // 국제: 해외 독자용 영문 원고(Blogspot). "영문"/"영어"/"블로그스팟"은 결과물·채널 이름으로 트랙을 뜻한다.
   [/^(국제|글로벌|영문|영어|블로그스팟|blogspot|global|kscene)$/i, "global"],
+  // 상식(scenepick, 2026-11-22). "몽상가"는 블로그 이름(몽상가N의 쓸데없는 궁금증들)이다. "일상" 한 단어는 위 living 그대로다(하위 호환).
+  [/^(상식|일상\s?상식|몽상가|몽상가n|scenepick)$/i, "scenepick"],
 ];
 
 export function trackFromWord(word: string): InstagramTrack | null {
@@ -105,24 +135,28 @@ export const TRACK_LABEL: Readonly<Record<InstagramTrack, string>> = {
   tech: "💻 테크",
   person: "👤 인물",
   global: "🌏 국제",
+  scenepick: "💡 상식",
 };
+
+/** 상식을 골랐을 때 덧붙이는 안내. 원고는 이 봇이 아니라 사회 봇으로 알린다(scenepick 트랙의 봇 = 사회 봇, telegramTracks.ts). */
+export const SCENEPICK_PICKED_NOTE = "맥미니 Codex에 원고·이미지를 발주합니다(보통 15~30분). 완료 알림은 사회 봇으로 갑니다.";
 
 /** 클라우드 접수 답장. 트랙이 정해졌으면 그 사실을, 아니면 어떻게 고르는지를 한 줄로. */
 export function ackMessage(track: InstagramTrack | null): string {
+  if (isScenepickTrack(track)) return `링크 접수했습니다 → ${TRACK_LABEL[track]} 트랙. ${SCENEPICK_PICKED_NOTE}`;
   if (track) return `링크 접수했습니다 → ${TRACK_LABEL[track]} 트랙. 원고 초안이 준비되면 알려드립니다.`;
   return [
     "링크 접수했습니다. 어느 트랙으로 쓸까요?",
-    "이 메시지에 **엔터** / **사회** / **일상** / **테크** / **인물** / **국제**라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
-    "· 엔터 → 네이버 원고·네이버 뷰어   · 사회 → 티스토리 원고·티스토리 뷰어",
-    "· 일상·테크 → 사회 규격 원고·사회 뷰어 복붙   · 인물 → 인물 백과 원고·엔터 뷰어 복붙",
-    "· 국제 → 블로그스팟 영문 원고·사용설명서 봇",
+    "이 메시지에 **엔터** / **인물** / **상식** / **국제**라고 답장해 주세요 (그냥 그 단어만 보내도 됩니다).",
+    "· 엔터 → 네이버 원고·네이버 뷰어   · 인물 → 인물 백과 원고·엔터 뷰어 복붙",
+    "· 상식 → 맥미니 Codex 원고·이미지(scenepick 뷰어, 완료 알림은 사회 봇)   · 국제 → 블로그스팟 영문 원고·사용설명서 봇",
   ].join("\n");
 }
 
 /** 맥 폴러가 답을 못 붙여 다시 물을 때(기다리는 링크가 여럿이라 어느 것인지 모를 때). */
 export function trackQuestion(entry: Pick<InstagramQueueEntry, "instagramUrl" | "userTopic">): string {
   const subject = entry.instagramUrl || entry.userTopic || "";
-  return ["📌 어느 트랙으로 쓸까요? 이 메시지에 엔터 / 사회 / 일상 / 테크 / 인물 / 국제로 답장해 주세요.", "", subject].join("\n");
+  return [`📌 어느 트랙으로 쓸까요? 이 메시지에 ${NEW_INPUT_TRACK_WORDS}로 답장해 주세요.`, "", subject].join("\n");
 }
 
 /** 버튼 선택을 수신함 topic_reply 행의 reply_text에 담는 형식. 수신함 모양을 안 바꾸려고 글자로 싣는다. */

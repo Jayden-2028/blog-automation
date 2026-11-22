@@ -10,13 +10,34 @@
 
 import { ArticleJobRepository } from "../../repositories/ArticleJobRepository.js";
 import { markEntry } from "./instagramQueue.js";
-import { inputJobFields } from "./inputJobFields.js";
-import { categoryForTrack, jobMetadataForTrack } from "./instagramTrack.js";
+import { inputJobFields, scenepickCaptureJobFields, scenepickConverterJobFields } from "./inputJobFields.js";
+import { categoryForTrack, isScenepickTrack, jobMetadataForTrack } from "./instagramTrack.js";
 import type { InstagramCaptureResult, InstagramQueueEntry } from "./types.js";
 
-export type CreateInstagramJobResult = { jobId: string };
+/**
+ * scenepick=true면 💡 상식 job이다(맥미니 scenepick 폴러가 metadata.scenepickCodex=requested를 집는다).
+ * **호출자는 자료조사를 발화하지 않는다** - 이 트랙은 우리 researcher/writer를 쓰지 않는다.
+ */
+export type CreateInstagramJobResult = { jobId: string; scenepick?: true };
 
-export async function createInstagramJob(capture: InstagramCaptureResult): Promise<CreateInstagramJobResult> {
+export type CreateInstagramJobOptions = {
+  /** 사용자가 링크와 같이 보낸 말(큐 항목 rawCaption). 상식 job의 inputTopic에 싣는다. */
+  userNote?: string | null;
+  telegramMessageId?: number;
+  now?: Date;
+};
+
+export async function createInstagramJob(capture: InstagramCaptureResult, options: CreateInstagramJobOptions = {}): Promise<CreateInstagramJobResult> {
+  if (isScenepickTrack(capture.track)) {
+    const fields = scenepickCaptureJobFields(capture, {
+      now: options.now ?? new Date(),
+      userNote: options.userNote,
+      telegramMessageId: options.telegramMessageId,
+    });
+    const { job } = await ArticleJobRepository.createManual(fields);
+    markEntry(capture.queueEntryId, { status: "done", jobId: job.id });
+    return { jobId: job.id, scenepick: true };
+  }
   const { job } = await ArticleJobRepository.createManual({
     keyword: capture.searchKeyword,
     headline: capture.caption.slice(0, 120) || null,
@@ -41,6 +62,11 @@ export async function createInstagramJob(capture: InstagramCaptureResult): Promi
  * 그 본문이 metadata.sourceText로 간다(조사 프롬프트의 "사용자 제공 소스 텍스트" 절, buildResearchPrompt).
  */
 export async function createInputJob(entry: InstagramQueueEntry): Promise<CreateInstagramJobResult> {
+  if (isScenepickTrack(entry.track)) {
+    const { job } = await ArticleJobRepository.createManual(scenepickConverterJobFields(entry, new Date()));
+    markEntry(entry.id, { status: "done", jobId: job.id });
+    return { jobId: job.id, scenepick: true };
+  }
   const { job } = await ArticleJobRepository.createManual(inputJobFields(entry));
 
   markEntry(entry.id, { status: "done", jobId: job.id });

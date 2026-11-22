@@ -20,7 +20,12 @@ import {
   sourceOfUrl,
   stripCommandTail,
 } from "./directInput.js";
-import { inputJobFields, SOURCE_TEXT_MAX_BYTES } from "./inputJobFields.js";
+import { inputJobFields, scenepickCaptureJobFields, scenepickConverterJobFields, SOURCE_TEXT_MAX_BYTES } from "./inputJobFields.js";
+import { ackMessage, trackQuestion } from "./instagramTrack.js";
+import { queueFieldsForLinkSource, linkSourceAck } from "./linkInput.js";
+import { INPUT_TOPIC_MAX_BYTES } from "../scenepick/scenepickIntake.js";
+import { pickScenepickDue } from "../scenepick/scenepickQueue.js";
+import { isScenepickJob, readScenepickState } from "../scenepick/scenepickTypes.js";
 import { handleInstagramUpdate } from "./instagramWebhookHandler.js";
 import type { InstagramWebhookDeps } from "./instagramWebhookHandler.js";
 import { categoryForTrack, jobMetadataForTrack, parseTrackPick, resolveTrackReply, trackFromWord } from "./instagramTrack.js";
@@ -79,7 +84,7 @@ assert.deepEqual(queueFieldsForDirectInput("테슬라 신형"), { source: "text"
 const longFields = queueFieldsForDirectInput(longBody);
 assert.equal(longFields.status, "needs_topic");
 assert.equal(longFields.sourceText, longBody.trim());
-assert.ok(directInputAck({ kind: "topic", topic: "민찌는 무슨 고기일까?" }).startsWith('접수: 주제 "민찌는 무슨 고기일까?" — 트랙을 답해주세요 (엔터/사회/일상/테크/인물/국제)'));
+assert.ok(directInputAck({ kind: "topic", topic: "민찌는 무슨 고기일까?" }).startsWith('접수: 주제 "민찌는 무슨 고기일까?" — 트랙을 답해주세요 (엔터/인물/상식/국제)'));
 console.log("✅ 짧은 글=주제 / 긴 글=소스 본문(needs_topic) / 접수 문구");
 
 // ---- 4) 트랙 단어 4종 ----
@@ -212,9 +217,10 @@ const msg = (id: number, text: string, extra: object = {}) => ({ update_id: id, 
   assert.equal(row.instagramUrl, null);
   assert.equal(row.rawCaption, "민찌는 무슨 고기일까? 원고 써줘", "원문은 그대로 수신함, 해석은 맥이 같은 규칙으로");
   const ack = h.sent.at(-1)!;
-  assert.ok(ack.text.includes('접수: 주제 "민찌는 무슨 고기일까?"') && ack.text.includes("엔터/사회/일상/테크/인물/국제"));
+  assert.ok(ack.text.includes('접수: 주제 "민찌는 무슨 고기일까?"') && ack.text.includes("엔터/인물/상식/국제"));
   const buttons = (ack.markup?.inline_keyboard ?? []).flat().map((b) => b.callback_data);
-  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:social", "igtrack:tg-5:living", "igtrack:tg-5:tech", "igtrack:tg-5:person", "igtrack:tg-5:global"], "6트랙 버튼");
+  // 2026-11-22: 직접 입력 버튼은 4개(엔터/인물/상식/국제, 2+2).
+  assert.deepEqual(buttons, ["igtrack:tg-5:entertainment", "igtrack:tg-5:person", "igtrack:tg-5:scenepick", "igtrack:tg-5:global"], "4트랙 버튼");
   assert.equal((ack.markup?.inline_keyboard ?? []).length, 2, "2행");
 
   const longOut = await handleInstagramUpdate(msg(6, longBody), h.deps);
@@ -335,5 +341,105 @@ console.log("✅ 처리: 직접 입력 → createInput(캡처 없음) / 실패 �
   assert.equal(inputJobFields(baseEntry({ track: "social", userTopic: "t" })).metadata.track, "social");
 }
 console.log("✅ 🌏 국제: category=kscene·track=kscene → koreaplain 봇·한글 승인 버튼·koreaplain.md·Blogger 발행·조사/집필 보강 / Go job·타 트랙 불변");
+
+// ---- 13) 💡 상식(scenepick, 2026-11-22): 사회 봇 scenepick과 같은 Codex 발주 job, 자료조사 없음 ----
+{
+  // 단어: 상식/일상상식/몽상가 → scenepick, "일상"은 living 그대로(하위 호환), 옛 사회/테크도 그대로 받는다
+  for (const w of ["상식", "일상상식", "일상 상식", "몽상가", "몽상가N", "scenepick"]) assert.equal(trackFromWord(w), "scenepick", `상식 단어: ${w}`);
+  assert.equal(trackFromWord("일상"), "living");
+  assert.equal(trackFromWord("사회"), "social");
+  assert.equal(trackFromWord("상식적"), null, "합성어는 트랙 단어가 아니다");
+  assert.deepEqual(parseTrackPick("track:tg-1:scenepick"), { queueId: "tg-1", track: "scenepick" });
+  assert.equal(categoryForTrack("scenepick"), "living");
+
+  // 안내 문구: 4개 기준
+  assert.ok(ackMessage(null).includes("**엔터** / **인물** / **상식** / **국제**") && !ackMessage(null).includes("티스토리"), "링크 접수 안내 4개");
+  assert.ok(ackMessage("scenepick").includes("💡 상식") && ackMessage("scenepick").includes("사회 봇"), "링크+상식 확정 안내");
+  assert.ok(trackQuestion({ instagramUrl: "", userTopic: "주제" }).includes("엔터 / 인물 / 상식 / 국제"), "다시 묻기 4개");
+  assert.ok(linkSourceAck({ url: "https://n.news/1", title: "제목", text: "본문", note: "", via: "web" }).includes("(엔터/인물/상식/국제)"), "링크 추출 접수 4개");
+
+  const now = new Date("2026-11-22T01:00:00Z");
+  const expectQueueShape = (fields: { category: string; metadata: Record<string, unknown> }, label: string) => {
+    // 맥미니 scenepick 폴러의 조회 조건(loadScenepickRows: metadata->>track = scenepick, scenepickCodex.status in requested/running,
+    // requestedAt 있음)과 사회 봇 접수(scenepickJobFields) 모양을 그대로 맞춘다.
+    assert.equal(fields.category, "living", `${label}: category`);
+    assert.equal(fields.metadata.track, "scenepick", `${label}: track`);
+    assert.equal(fields.metadata.source, "scenepick_input", `${label}: source`);
+    const state = readScenepickState(fields.metadata);
+    assert.ok(state && state.status === "requested" && state.attempts === 0 && state.requestedAt === now.toISOString(), `${label}: scenepickCodex requested`);
+    assert.deepEqual(pickScenepickDue([{ id: "j", state: state! }], now), { kind: "fresh", id: "j" }, `${label}: 폴러가 집는다`);
+    assert.ok(isScenepickJob({ metadata: fields.metadata }) && trackOfJob({ metadata: fields.metadata }) === "scenepick", `${label}: 사회 봇 알림·scenepick 뷰어`);
+    assert.equal(isManualPublishOnly({ category: fields.category, metadata: fields.metadata }), true, `${label}: 발행 버튼 없음`);
+    // 사회 봇 접수 중복 키(scenepickMessageId)를 남기지 않는다 - 변환기 메시지 번호가 사회 봇 번호와 겹치면 새 주제가 버려진다.
+    assert.ok(!("scenepickMessageId" in fields.metadata), `${label}: scenepickMessageId 없음`);
+    assert.equal(fields.metadata.scenepickOrigin, "converter", `${label}: 출처 converter`);
+  };
+
+  // 직접 입력(짧은 주제)
+  const direct = scenepickConverterJobFields(baseEntry({ id: "tg-40", telegramMessageId: 77, track: "scenepick", userTopic: "전자레인지에 금속을 넣으면 왜 불꽃이 튈까" }), now);
+  expectQueueShape(direct, "직접 입력");
+  assert.equal(direct.keyword, "전자레인지에 금속을 넣으면 왜 불꽃이 튈까");
+  assert.equal(direct.metadata.inputTopic, "전자레인지에 금속을 넣으면 왜 불꽃이 튈까");
+  assert.deepEqual({ q: direct.metadata.converterQueueId, m: direct.metadata.converterMessageId }, { q: "tg-40", m: 77 });
+
+  // 긴 글 붙여넣기(주제는 답장으로 받은 한 줄)
+  const pasted = scenepickConverterJobFields(baseEntry({ track: "scenepick", userTopic: "빨래 쉰내", sourceText: "카페 본문" }), now);
+  expectQueueShape(pasted, "긴 글");
+  assert.equal(pasted.keyword, "빨래 쉰내", "keyword는 주제 첫 줄");
+  assert.ok(String(pasted.metadata.inputTopic).startsWith("빨래 쉰내\n\n사용자가 붙여넣은 글") && String(pasted.metadata.inputTopic).includes("카페 본문"));
+
+  // 링크 자동 추출(블로그·뉴스) + 같이 보낸 말: 주제 + 원 링크 + 읽은 본문(4KB 상한, 앞쪽 주제·링크는 남는다)
+  const linkFields = queueFieldsForLinkSource({ url: "https://blog.naver.com/a/1", title: "블로그 제목", text: "가".repeat(10000), note: "이거 왜 그런지", via: "web", track: "scenepick" });
+  assert.equal(linkFields.status, "pending");
+  const linked = scenepickConverterJobFields({ ...baseEntry({ id: "tg-41" }), ...linkFields }, now);
+  expectQueueShape(linked, "링크 추출");
+  const linkedTopic = String(linked.metadata.inputTopic);
+  assert.ok(linkedTopic.startsWith("이거 왜 그런지\n\n원 링크: https://blog.naver.com/a/1\n\n링크에서 읽은 본문"), `링크 inputTopic 머리 (${linkedTopic.slice(0, 80)})`);
+  assert.ok(Buffer.byteLength(linkedTopic) <= INPUT_TOPIC_MAX_BYTES, "4KB 상한");
+
+  // 인스타 캡처: 캡션 + 이미지 속 글자 + 원 링크 + 같이 보낸 말
+  const ig = scenepickCaptureJobFields(
+    { queueEntryId: "tg-42", instagramUrl: "https://www.instagram.com/p/SCN/", caption: "캡션 본문", burnedInText: ["슬라이드1 글자", "슬라이드2 글자"], searchKeyword: "고양이 골골송" },
+    { now, userNote: "이거 써줘", telegramMessageId: 9 }
+  );
+  expectQueueShape(ig, "인스타");
+  assert.equal(ig.keyword, "고양이 골골송");
+  for (const needle of ["같이 보낸 말: 이거 써줘", "원 링크: https://www.instagram.com/p/SCN/", "캡션 본문", "슬라이드2 글자"]) assert.ok(String(ig.metadata.inputTopic).includes(needle), `인스타 inputTopic: ${needle}`);
+  assert.equal(ig.metadata.converterQueueId, "tg-42");
+
+  // 처리: 상식 job은 만들되 자료조사는 발화하지 않는다(직접 입력·인스타 두 갈래 모두)
+  const researched: string[] = [];
+  const createdInput: InstagramQueueEntry[] = [];
+  const r1 = await processPendingCaptures({
+    listPending: () => [baseEntry({ id: "S", track: "scenepick", userTopic: "주제" }), baseEntry({ id: "E", track: "entertainment", userTopic: "엔터 주제" })],
+    createInput: async (e) => { createdInput.push(e); return e.track === "scenepick" ? { jobId: "job-S", scenepick: true } : { jobId: "job-E" }; },
+    runSession: async () => { throw new Error("캡처하면 안 된다"); },
+    mark: () => {},
+    triggerResearch: async (id) => { researched.push(id); },
+    checkLogin: async () => "logged_in" as never,
+  });
+  assert.equal(r1.created, 2);
+  assert.deepEqual(researched, ["job-E"], "상식 job은 자료조사 없음, 엔터는 그대로");
+  assert.deepEqual(r1.messages, [], "성공은 알림 없음");
+
+  const igCalls: Array<{ track?: string; userNote?: string | null }> = [];
+  const igResearched: string[] = [];
+  const r2 = await processPendingCaptures({
+    listPending: () => [{ ...baseEntry({ id: "tg-43", track: "scenepick", rawCaption: "이거 써줘" }), source: "instagram", instagramUrl: "https://www.instagram.com/p/SCN2/" }],
+    runSession: async (entry) => ({
+      status: "ready",
+      slidesRead: 1,
+      capture: { queueEntryId: entry.id, instagramUrl: entry.instagramUrl, caption: "캡션", burnedInText: ["글자"], searchKeyword: "골골송", category: null },
+    }),
+    createJob: async (capture, options) => { igCalls.push({ track: capture.track, userNote: options?.userNote }); return { jobId: "job-IG", scenepick: true }; },
+    mark: () => {},
+    triggerResearch: async (id) => { igResearched.push(id); },
+    checkLogin: async () => "logged_in" as never,
+  });
+  assert.equal(r2.created, 1, JSON.stringify(r2));
+  assert.deepEqual(igCalls, [{ track: "scenepick", userNote: "이거 써줘" }], "캡처 뒤 createJob에 트랙·같이 보낸 말이 간다");
+  assert.deepEqual(igResearched, [], "인스타 상식도 자료조사 없음");
+}
+console.log("✅ 💡 상식: 단어·안내 4개 / 직접 입력·긴 글·링크·인스타 → scenepick 대기열 모양(폴러가 집음, scenepickMessageId 없음) / 자료조사 없음");
 
 console.log("\n✅ testKeywordInput(A부) 전체 통과");
