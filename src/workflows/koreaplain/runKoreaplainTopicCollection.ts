@@ -8,11 +8,15 @@
 // 실패로 끝낸다(watchdog이 전날분 run을 확인하므로 조용히 completed로 남기지 않는다).
 
 import {
+  KOREAPLAIN_FOOD_SEEDS,
   KOREAPLAIN_LABEL_BY_SEED,
-  KOREAPLAIN_SEEDS,
+  KOREAPLAIN_LEGACY_SEEDS,
+  KOREAPLAIN_SUBLABEL_BY_SEED,
   KOREAPLAIN_TOPIC_CONFIG,
+  type KoreaplainFoodSubLabel,
   type KoreaplainLabel,
   type KoreaplainSeed,
+  type KoreaplainTopicMode,
 } from "../../config/koreaplainSeeds.js";
 import { fetchAutocompleteSuggestions } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import { fetchGoogleTrends } from "../../services/search/providers/googleTrends/GoogleTrendsProvider.js";
@@ -52,6 +56,8 @@ export type RunKoreaplainTopicCollectionOptions = {
   /** 오늘 날짜(일 단위 시드 회전 기준). 테스트 주입. */
   now?: Date;
   seeds?: readonly KoreaplainSeed[];
+  /** 선정 모드(2026-11-25). 생략하면 KOREAPLAIN_TOPIC_CONFIG.topicMode(KSCENE_TOPIC_MODE, 기본 food). 시드 기본값도 이 모드를 따른다. */
+  mode?: KoreaplainTopicMode;
   seedsPerRun?: number;
   topicsPerRun?: number;
   /** 요청 사이 대기(ms). 테스트에서는 0. */
@@ -234,24 +240,34 @@ export async function runKoreaplainTopicCollection(
   const save = options.save ?? saveRankingHistory;
   const notify = options.notify ?? sendKeywordNotification;
 
+  const mode = options.mode ?? KOREAPLAIN_TOPIC_CONFIG.topicMode;
+
   // 1) 시드 선정 + (선택) 급상승 한국 관련어를 K-Wave Context 시드로 보강
-  const baseSeeds = pickSeedsForDay(options.seeds ?? KOREAPLAIN_SEEDS, dayIndex, options.seedsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.seedsPerRun);
+  //    음식 모드(2026-11-25)는 음식 시드만 돌리고 급상승어 보강을 하지 않는다 - K-pop·드라마 급상승어는 음식 주제가 아니다.
+  const activeSeeds = options.seeds ?? (mode === "food" ? KOREAPLAIN_FOOD_SEEDS : KOREAPLAIN_LEGACY_SEEDS);
+  const baseSeeds = pickSeedsForDay(activeSeeds, dayIndex, options.seedsPerRun ?? KOREAPLAIN_TOPIC_CONFIG.seedsPerRun);
   const labelBySeed: Record<string, KoreaplainLabel> = { ...KOREAPLAIN_LABEL_BY_SEED };
-  for (const seed of options.seeds ?? []) labelBySeed[seed.query] = seed.label;
+  const subLabelBySeed: Record<string, KoreaplainFoodSubLabel> = { ...KOREAPLAIN_SUBLABEL_BY_SEED };
+  for (const seed of options.seeds ?? []) {
+    labelBySeed[seed.query] = seed.label;
+    if (seed.subLabel) subLabelBySeed[seed.query] = seed.subLabel;
+  }
 
   const trendSeeds: string[] = [];
-  try {
-    const terms = await fetchTrendTerms();
-    for (const term of terms) {
-      if (trendSeeds.length >= MAX_TREND_SEEDS) break;
-      if (TREND_KOREA_PATTERN.test(term)) {
-        const query = term.toLowerCase();
-        trendSeeds.push(query);
-        labelBySeed[query] = "K-Wave Context";
+  if (mode !== "food") {
+    try {
+      const terms = await fetchTrendTerms();
+      for (const term of terms) {
+        if (trendSeeds.length >= MAX_TREND_SEEDS) break;
+        if (TREND_KOREA_PATTERN.test(term)) {
+          const query = term.toLowerCase();
+          trendSeeds.push(query);
+          labelBySeed[query] = "K-Wave Context";
+        }
       }
+    } catch (error) {
+      log(`⚠️ 구글 트렌드(US) 조회 실패(비치명적): ${error instanceof Error ? error.message : String(error)}`);
     }
-  } catch (error) {
-    log(`⚠️ 구글 트렌드(US) 조회 실패(비치명적): ${error instanceof Error ? error.message : String(error)}`);
   }
 
   const seedQueries = [...baseSeeds.map((seed) => seed.query), ...trendSeeds];
@@ -295,7 +311,7 @@ export async function runKoreaplainTopicCollection(
   }
 
   // 4) 후보 -> 중복 제거 -> 선정
-  const autocompleteCandidates = buildCandidates(observations, labelBySeed);
+  const autocompleteCandidates = buildCandidates(observations, labelBySeed, { mode, subLabelBySeed });
   const candidates = redditTitles.length > 0 ? attachRedditSupport(autocompleteCandidates, redditTitles) : autocompleteCandidates;
   let existing: string[] = [];
   let existingTopicsLoaded = true;
@@ -320,6 +336,7 @@ export async function runKoreaplainTopicCollection(
     topN: requestedTopicCount,
     existingTopics: existing,
     similarity: KOREAPLAIN_TOPIC_CONFIG.duplicateSimilarity,
+    mode,
   });
 
   // 중복을 다 걸러내면 5건을 못 채우는 날이 온다(시드 241개는 유한하다). **조용히 적게 보내지 않는다** -
@@ -381,7 +398,7 @@ export async function runKoreaplainTopicCollection(
     track: "kscene",
     runId: saved.runId,
     topN: selected.length,
-    headerTitle: "🌏 <b>사용설명서 주제 제안</b>",
+    headerTitle: mode === "food" ? "🌏 <b>사용설명서 주제 제안 · 한국 음식</b>" : "🌏 <b>사용설명서 주제 제안</b>",
     evergreen: true,
     ...(notes.length > 0 ? { headerNote: notes.join("\n") } : {}),
   });

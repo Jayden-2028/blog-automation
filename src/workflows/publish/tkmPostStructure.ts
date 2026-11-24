@@ -20,6 +20,7 @@
 // 단 호스트는 normalizeTkmUrl로 공개 주소(KSCENE_PUBLIC_ORIGIN, 2026-10-28 www.koreaplain.com)에 맞춘다 - 맞춤 도메인 전환 뒤에도
 // API·발행 기록에 옛 blogspot 주소가 섞여 들어온다. 경로는 그대로다.
 
+import { KOREAPLAIN_LABELS } from "../../config/koreaplainSeeds.js";
 import { normalizeTkmUrl } from "../../config/publishTargets.js";
 
 /**
@@ -373,13 +374,15 @@ function formatDate(iso: string): string {
 
 /**
  * All Guides 페이지 본문. 라벨(주제)별로 묶고, 묶음 안은 최신순, 글 제목이 앵커 텍스트다.
- * 라벨 순서는 글이 많은 주제부터(같으면 이름순). 라벨이 여럿인 글은 첫 라벨에만 둔다.
+ * 라벨 순서는 글이 많은 주제부터(같으면 이름순). 라벨이 여럿인 글은 **상위 라벨 5개 중 첫 것**에 둔다 - 2026-11-25부터 음식 글은
+ * "Food & Dining" + 하위 라벨(Korean Dishes 등) 두 개를 달고, Blogger가 돌려주는 라벨 순서를 믿지 않는다. 상위 라벨이 없으면 첫 라벨.
  */
 export function buildAllGuidesHtml(posts: readonly TkmPost[], fallbackLabel = "More Guides"): string {
   const groups = new Map<string, TkmPost[]>();
+  const primary = new Set<string>(KOREAPLAIN_LABELS);
   for (const post of posts) {
     if (!post.url || !post.title) continue;
-    const label = post.labels[0] ?? fallbackLabel;
+    const label = post.labels.find((item) => primary.has(item)) ?? post.labels[0] ?? fallbackLabel;
     groups.set(label, [...(groups.get(label) ?? []), post]);
   }
   const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));

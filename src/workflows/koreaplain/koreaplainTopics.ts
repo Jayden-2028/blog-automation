@@ -45,11 +45,44 @@
 //   가점 축 OPERATIONAL_TERMS(+15)와 감점 축 MEANING_SATURATED_TERMS(-10)를 더했다. 양수 가중치 합이 115가 되므로 총점은
 //   100에서 자른다 - 점수 구성은 고정 배점표가 아니라 "큰 쪽이 위로 가는" 순위 신호다.
 //
+// 📌 **한국 음식 소개 모드**(2026-11-25, docs/ai-handoff/KOREAPLAIN-FOOD-PIVOT-2026-11.md): 애드센스 "가치 없는 콘텐츠" 반려 후
+//   사용자 결정으로 새 주제를 **한국 음식(요리·메뉴 단위) 소개**로 좁힌다. `mode`(기본 KOREAPLAIN_TOPIC_CONFIG.topicMode = food)가
+//   `food`이면 위 규칙 중 생활정보 축을 끄고 음식 축으로 바꾼다. `legacy`면 위 규칙 그대로다(되돌리기 = KSCENE_TOPIC_MODE=legacy).
+//   · **음식 게이트**: 음식 이름(로마자·영어)이나 음식 일반어(food·dish·eat…)가 없는 후보는 버린다(isFoodTopic).
+//   · **제외 3종**: 혐오 식품(AVERSIVE_FOOD_TERMS) · 식재료·양념(gochujang·sesame oil·"… sauce") ·
+//     레시피 의도(recipe·how to make·ingredients). 배달·케이터링·잡음(발음·리뷰·해외 가게) 질의도 뺀다. 어휘표는 config/koreaplainFoodTerms.ts 한 곳이다.
+//   · **로컬 우위 = 지역 향토 음식**(+15): 지역명(jeonju·chuncheon·busan…)이나 지역 고유 음식명(milmyeon·gwamegi·hodu gwaja), 또는
+//     한국인의 먹는 때·자리(hangover·with soju·boknal). 하한(localEdgeFloor)은 topN/3(5건이면 2건)이다.
+//   · **운영 정보 축(+15) 대신 음식 각도 축(+15)**: 글 각도(무엇인지·어떻게 먹나·무엇과·어디서·가격·차이·맵기·유래)를 묻는 질의.
+//   · **초포화 음식 감점(-10)**: kimchi·bibimbap·bulgogi·korean bbq 일반형 - **지역 변형이면 감점 없음**("jeonju bibimbap"은 +15).
+//     관광 포화(-10)는 음식 모드에서 쓰지 않는다(jeju·busan이 향토 음식에서 감점되면 안 된다). 의미 포화(-10)는 그대로다.
+//   · **실용 하한(practicalFloor) 끔**, 라벨 상한은 **하위 라벨**(Korean Dishes / Regional Food / Street Food & Desserts) 기준이다.
+//   · 모양: 음식 이름이 든 2단어("busan milmyeon")도 받는다(생활 모드는 3단어 이상).
+//
 // 이 트랙의 선정은 LLM 프롬프트가 아니라 이 파일의 결정 규칙이 전부다 - 기준은 여기 적는다.
 // 점수는 한국 키워드 파이프라인의 6-factor가 아니다(그건 뉴스·트렌드 기반이라 에버그린에는 안 맞는다) -
 // 같은 이름의 컬럼(keyword_rankings.*_score)에 채워 넣어 Go/Pass 알림·job 생성 경로를 그대로 쓸 뿐이다.
 
-import { KOREAPLAIN_DEFAULT_LABEL, KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, type KoreaplainLabel, type KoreaplainSeed } from "../../config/koreaplainSeeds.js";
+import {
+  KOREAPLAIN_DEFAULT_LABEL,
+  KOREAPLAIN_LABEL_BY_SEED,
+  KOREAPLAIN_LABELS,
+  KOREAPLAIN_SUBLABEL_BY_SEED,
+  KOREAPLAIN_TOPIC_MODE,
+  type KoreaplainFoodSubLabel,
+  type KoreaplainLabel,
+  type KoreaplainSeed,
+  type KoreaplainTopicMode,
+} from "../../config/koreaplainSeeds.js";
+import {
+  FOOD_SEED_GENERIC_WORDS,
+  foodTopicRejection,
+  hasDishTerm,
+  hasFoodAngle,
+  hasFoodLocalOccasion,
+  isRegionalFoodTopic,
+  isSaturatedFoodTopic,
+} from "../../config/koreaplainFoodTerms.js";
 import type { RankedKeyword } from "../../types/keywordScoring.js";
 
 const STOPWORDS = new Set([
@@ -366,22 +399,44 @@ export function isExcludedTopic(topic: string): boolean {
   return [...EXCLUDED_TERMS, ...LOW_VALUE_TERMS].some((term) => containsTerm(normalized, term)) || isOverseasLocalTopic(normalized);
 }
 
-/** 단어 수·길이가 글 주제로 쓸 만한가(너무 짧으면 막연하고 너무 길면 질문 한 줄이다). */
-export function hasUsableShape(topic: string): boolean {
-  const words = normalizeTopic(topic).split(" ").filter(Boolean);
-  return words.length >= 3 && words.length <= 10 && normalizeTopic(topic).length >= 12;
+/**
+ * 단어 수·길이가 글 주제로 쓸 만한가(너무 짧으면 막연하고 너무 길면 질문 한 줄이다).
+ * 음식 모드(2026-11-25)는 **음식 이름이 든 2단어**도 받는다 - "busan milmyeon"·"andong jjimdak"은 그 자체가 글 주제다.
+ */
+export function hasUsableShape(topic: string, mode: KoreaplainTopicMode = "legacy"): boolean {
+  const normalized = normalizeTopic(topic);
+  const words = normalized.split(" ").filter(Boolean);
+  if (mode === "food" && words.length === 2) return normalized.length >= 10 && hasDishTerm(normalized);
+  return words.length >= 3 && words.length <= 10 && normalized.length >= 12;
+}
+
+/**
+ * 음식 모드 게이트(2026-11-25): 혐오 식품·음식 아님·식재료·레시피·배달 질의를 버린다. 어휘는 config/koreaplainFoodTerms.ts.
+ * 통과면 true.
+ */
+export function passesFoodTopicRules(topic: string): boolean {
+  return foodTopicRejection(normalizeTopic(topic)) === null;
 }
 
 // ---------- 시드 선정 ----------
 
 /**
  * 오늘 돌릴 시드를 고른다. 날짜(일 단위 정수)로 시작점을 돌려 전체 시드가 며칠 안에 한 바퀴 돈다.
- * 라벨이 섞이도록 라벨별로 번갈아 뽑는다.
+ * 라벨이 섞이도록 라벨별로 번갈아 뽑는다. 음식 시드는 상위 라벨이 하나("Food & Dining")라 **하위 라벨**로 묶어 번갈아 뽑는다
+ * (2026-11-25 - Korean Dishes / Regional Food / Street Food & Desserts가 매일 고르게 섞인다).
  */
 export function pickSeedsForDay(seeds: readonly KoreaplainSeed[], dayIndex: number, count: number): KoreaplainSeed[] {
-  const byLabel = new Map<KoreaplainLabel, KoreaplainSeed[]>();
-  for (const seed of seeds) byLabel.set(seed.label, [...(byLabel.get(seed.label) ?? []), seed]);
-  const labels = KOREAPLAIN_LABELS.filter((label) => byLabel.has(label));
+  const byLabel = new Map<string, KoreaplainSeed[]>();
+  for (const seed of seeds) {
+    const key = seed.subLabel ?? seed.label;
+    byLabel.set(key, [...(byLabel.get(key) ?? []), seed]);
+  }
+  // 상위 라벨 순서(KOREAPLAIN_LABELS) → 같은 상위 라벨 안에서는 처음 나온 순서. 이전 시드는 예전과 같은 순서가 된다.
+  const labelOrder = (key: string) => {
+    const first = byLabel.get(key)![0];
+    return KOREAPLAIN_LABELS.indexOf(first.label);
+  };
+  const labels = [...byLabel.keys()].sort((a, b) => labelOrder(a) - labelOrder(b));
   if (labels.length === 0) return [];
 
   const picked: KoreaplainSeed[] = [];
@@ -433,6 +488,8 @@ export type TopicCandidate = {
   topic: string;
   seed: string;
   label: KoreaplainLabel;
+  /** 음식 하위 라벨(음식 시드에서 나온 후보만, 2026-11-25). 라벨 상한은 이 값이 있으면 이 값으로 센다. */
+  subLabel?: KoreaplainFoodSubLabel;
   /** 이 주제가 관찰된 횟수(시드·변형 질의를 가로질러). */
   hits: number;
   /** 관찰된 가장 앞선 위치. */
@@ -455,7 +512,7 @@ const INTENT_EXTRA_TERMS = [
  * 의도어는 **시드 밖의 낱말**에서만 센다(10/28 dry-run: 시드 "korean school culture"의 변형이 낸
  * "green mountain korean culture school"이 시드 낱말 culture로 통과했다 - 미국 한글학교 이름이다).
  */
-export function hasIntentSignal(topic: string, seed = ""): boolean {
+export function hasIntentSignal(topic: string, seed = "", mode: KoreaplainTopicMode = "legacy"): boolean {
   const seedWords = new Set(normalizeTopic(seed).split(" "));
   const normalized = normalizeTopic(topic)
     .split(" ")
@@ -463,32 +520,58 @@ export function hasIntentSignal(topic: string, seed = ""): boolean {
     .join(" ");
   const words = new Set(normalized.split(" "));
   if (QUESTION_STARTERS.some((starter) => words.has(starter))) return true;
+  // 음식 모드(2026-11-25): 시드 밖 낱말에 음식 각도(가격·유래·차이·맛)·지역명·다른 음식 이름이 있으면 글이 될 질의다
+  // ("jeonju bibimbap history", "korean street food busan"). 목록 밖 해외 소도시("… tulsa")는 여기서도 안 걸린다.
+  if (mode === "food" && normalized && (hasFoodAngle(normalized) || isRegionalFoodTopic(normalized) || hasDishTerm(normalized))) return true;
   return [...GUIDE_WORDS, ...PRACTICAL_TERMS, ...INTENT_EXTRA_TERMS].some((term) => containsTerm(normalized, term));
 }
 
 /** 시드와 한 토큰도 안 겹치는 제안(자동완성이 엉뚱한 곳으로 샌 경우)은 버린다. */
-function sharesSeedToken(suggestion: string, seed: string): boolean {
-  const seedTokens = new Set(topicTokens(seed));
+function sharesSeedToken(suggestion: string, seed: string, mode: KoreaplainTopicMode = "legacy"): boolean {
+  let seedTokens = new Set(topicTokens(seed));
+  if (mode === "food") {
+    // 음식 모드(2026-11-25): food·bread 같은 범용어 하나로 이어진 엉뚱한 제안을 막는다 - 시드 고유 낱말이 있어야 한다.
+    const distinctive = [...seedTokens].filter((token) => !FOOD_SEED_GENERIC_TOKENS.has(token));
+    if (distinctive.length > 0) seedTokens = new Set(distinctive);
+  }
   return topicTokens(suggestion).some((token) => seedTokens.has(token));
 }
 
-export function buildCandidates(observations: readonly SuggestionObservation[], labelBySeed: Readonly<Record<string, KoreaplainLabel>> = KOREAPLAIN_LABEL_BY_SEED): TopicCandidate[] {
+const FOOD_SEED_GENERIC_TOKENS = new Set(FOOD_SEED_GENERIC_WORDS.flatMap((word) => topicTokens(word)));
+
+export type BuildCandidatesOptions = {
+  /** 선정 모드. 생략하면 KOREAPLAIN_TOPIC_MODE(KSCENE_TOPIC_MODE, 기본 food). */
+  mode?: KoreaplainTopicMode;
+  /** 시드 -> 음식 하위 라벨. 생략하면 KOREAPLAIN_SUBLABEL_BY_SEED. */
+  subLabelBySeed?: Readonly<Record<string, KoreaplainFoodSubLabel>>;
+};
+
+export function buildCandidates(
+  observations: readonly SuggestionObservation[],
+  labelBySeed: Readonly<Record<string, KoreaplainLabel>> = KOREAPLAIN_LABEL_BY_SEED,
+  options: BuildCandidatesOptions = {}
+): TopicCandidate[] {
+  const mode = options.mode ?? KOREAPLAIN_TOPIC_MODE;
+  const subLabelBySeed = options.subLabelBySeed ?? KOREAPLAIN_SUBLABEL_BY_SEED;
   const byKey = new Map<string, TopicCandidate>();
 
   for (const obs of observations) {
     const topic = normalizeTopic(obs.suggestion);
-    if (!hasUsableShape(topic) || isExcludedTopic(topic) || !sharesSeedToken(topic, obs.seed)) continue;
-    if (obs.source === "autocomplete_variant" && !hasIntentSignal(topic, obs.seed)) continue;
+    if (!hasUsableShape(topic, mode) || isExcludedTopic(topic) || !sharesSeedToken(topic, obs.seed, mode)) continue;
+    if (mode === "food" && !passesFoodTopicRules(topic)) continue;
+    if (obs.source === "autocomplete_variant" && !hasIntentSignal(topic, obs.seed, mode)) continue;
 
     const existing = byKey.get(topic);
     if (existing) {
       existing.hits += 1;
       existing.bestPosition = Math.min(existing.bestPosition, obs.position);
     } else {
+      const subLabel = subLabelBySeed[obs.seed];
       byKey.set(topic, {
         topic,
         seed: obs.seed,
         label: labelBySeed[obs.seed] ?? KOREAPLAIN_DEFAULT_LABEL,
+        ...(subLabel ? { subLabel } : {}),
         hits: 1,
         bestPosition: obs.position,
       });
@@ -514,13 +597,17 @@ export type TopicScore = {
   operational: number;
   /** 의미·호칭 포화 감점(0 또는 10, 양수로 기록하고 total에서 뺀다). 2026-11-09. */
   meaningSaturation: number;
+  /** 음식 각도 가산(0 또는 15, 음식 모드만 - 운영 정보 축 자리). 2026-11-25. */
+  foodAngle: number;
+  /** 이 점수를 낸 모드. saturation이 관광 포화(legacy)인지 초포화 음식(food)인지 가른다. */
+  mode: KoreaplainTopicMode;
 };
 
 /**
  * 점수 구성: 기본 5 + 수요 35 + 교차 15 + 구체성 15 + 의도 15 + 로컬 우위 15 + 운영 정보 15 = 115, 총점은 100에서 자른다.
  * 감점은 관광 포화 -10, 의미 포화 -10(하한 0). 로컬 우위와 운영 정보를 함께 가진 후보가 흔하지 않아 자르기로 충분하다.
  */
-export const SCORE_WEIGHTS = { base: 5, demand: 35, crossSignal: 15, specificity: 15, intent: 15, localEdge: 15, operational: 15, saturation: 10, meaningSaturation: 10 } as const;
+export const SCORE_WEIGHTS = { base: 5, demand: 35, crossSignal: 15, specificity: 15, intent: 15, localEdge: 15, operational: 15, saturation: 10, meaningSaturation: 10, foodAngle: 15 } as const;
 
 // ---------- 레딧 교차 신호(2026-10-28, C) ----------
 
@@ -574,31 +661,43 @@ export function attachRedditSupport(candidates: readonly TopicCandidate[], title
  * 교차 신호 = 자동완성 반복 관찰(0/8/15) + 레딧 질문 뒷받침(1건 5, 2건 이상 10), 합쳐 15가 상한이다(C).
  * 로컬 질문형 레딧 제목이 뒷받침하면 그 후보의 레딧 뒷받침을 2건으로 센다(2026-10-30).
  */
-export function scoreTopic(candidate: TopicCandidate): TopicScore {
+export function scoreTopic(candidate: TopicCandidate, mode: KoreaplainTopicMode = KOREAPLAIN_TOPIC_MODE): TopicScore {
   const demand = Math.round(Math.max(0, 10 - candidate.bestPosition) / 10 * SCORE_WEIGHTS.demand);
   const repeat = Math.round((Math.min(candidate.hits, 3) - 1) / 2 * SCORE_WEIGHTS.crossSignal);
   const redditHits = candidate.redditLocalQuestion ? Math.max(candidate.redditHits ?? 0, 2) : candidate.redditHits ?? 0;
   const crossSignal = Math.min(SCORE_WEIGHTS.crossSignal, repeat + Math.min(redditHits, 2) * 5);
 
   const wordCount = candidate.topic.split(" ").length;
-  const specificity = wordCount >= 4 && wordCount <= 7 ? SCORE_WEIGHTS.specificity : wordCount === 3 || wordCount === 8 ? 8 : 4;
+  // 음식 모드: 음식 주제는 짧다("busan milmyeon history") - 3~6단어가 만점, 2단어(음식 이름이 든 것만 통과)·7~8단어는 8.
+  const specificity =
+    mode === "food"
+      ? wordCount >= 3 && wordCount <= 6 ? SCORE_WEIGHTS.specificity : wordCount === 2 || wordCount === 7 || wordCount === 8 ? 8 : 4
+      : wordCount >= 4 && wordCount <= 7 ? SCORE_WEIGHTS.specificity : wordCount === 3 || wordCount === 8 ? 8 : 4;
 
   const normalized = candidate.topic;
   const isQuestion = QUESTION_STARTERS.some((starter) => normalized.startsWith(`${starter} `));
   const hasGuideWord = GUIDE_WORDS.some((word) => containsTerm(normalized, word));
   const intent = isQuestion ? SCORE_WEIGHTS.intent : hasGuideWord ? 10 : 0;
 
-  const localEdge = hasLocalEdge(candidate.topic) ? SCORE_WEIGHTS.localEdge : 0;
-  const saturation = isTouristSaturated(candidate.topic) ? SCORE_WEIGHTS.saturation : 0;
+  // 음식 모드(2026-11-25): 로컬 우위 = 지역 향토 음식·한국인의 먹는 때, 운영 정보 대신 음식 각도, 관광 포화 대신 초포화 음식(일반형만).
+  const localEdge =
+    mode === "food"
+      ? isRegionalFoodTopic(candidate.topic) || hasFoodLocalOccasion(candidate.topic) ? SCORE_WEIGHTS.localEdge : 0
+      : hasLocalEdge(candidate.topic) ? SCORE_WEIGHTS.localEdge : 0;
+  const saturation =
+    mode === "food"
+      ? isSaturatedFoodTopic(candidate.topic) ? SCORE_WEIGHTS.saturation : 0
+      : isTouristSaturated(candidate.topic) ? SCORE_WEIGHTS.saturation : 0;
 
-  const operational = hasOperationalEdge(candidate.topic) ? SCORE_WEIGHTS.operational : 0;
+  const operational = mode === "food" ? 0 : hasOperationalEdge(candidate.topic) ? SCORE_WEIGHTS.operational : 0;
+  const foodAngle = mode === "food" && hasFoodAngle(candidate.topic) ? SCORE_WEIGHTS.foodAngle : 0;
   const meaningSaturation = isMeaningSaturated(candidate.topic) ? SCORE_WEIGHTS.meaningSaturation : 0;
 
   const total = Math.max(
     0,
-    Math.min(100, SCORE_WEIGHTS.base + demand + crossSignal + specificity + intent + localEdge + operational - saturation - meaningSaturation)
+    Math.min(100, SCORE_WEIGHTS.base + demand + crossSignal + specificity + intent + localEdge + operational + foodAngle - saturation - meaningSaturation)
   );
-  return { total, demand, crossSignal, specificity, intent, localEdge, saturation, operational, meaningSaturation };
+  return { total, demand, crossSignal, specificity, intent, localEdge, saturation, operational, meaningSaturation, foodAngle, mode };
 }
 
 /** 체류 실용 정보 하한의 기본값(2026-10-11, §C). topN=8이면 3건 - 라벨 상한(3)과 같은 크기다. */
@@ -609,6 +708,16 @@ export function defaultPracticalFloor(topN: number): number {
 /** 로컬 우위 하한의 기본값(2026-10-30). topN=8이면 2건. 실용 하한과 겹쳐도 된다. */
 export function defaultLocalEdgeFloor(topN: number): number {
   return Math.min(topN, Math.max(1, Math.round(topN / 4)));
+}
+
+/** 음식 모드의 로컬 우위(지역 향토 음식) 하한(2026-11-25). topN=5면 2건 - 하위 라벨 상한(2)과 같은 크기다. */
+export function defaultRegionalFoodFloor(topN: number): number {
+  return Math.min(topN, Math.max(1, Math.round(topN / 3)));
+}
+
+/** 라벨 상한을 세는 칸: 음식 후보는 하위 라벨, 그 밖은 상위 라벨. */
+function labelBucket(candidate: Pick<TopicCandidate, "label" | "subLabel">): string {
+  return candidate.subLabel ?? candidate.label;
 }
 
 /**
@@ -632,12 +741,15 @@ export function selectTopics(
     perLabelCap?: number;
     /** 체류 실용 정보 최소 건수. 생략하면 defaultPracticalFloor(topN). 0을 주면 하한을 끈다. */
     practicalFloor?: number;
-    /** 로컬 우위 최소 건수. 생략하면 defaultLocalEdgeFloor(topN). 0을 주면 하한을 끈다. */
+    /** 로컬 우위 최소 건수. 생략하면 defaultLocalEdgeFloor(topN)(음식 모드는 defaultRegionalFoodFloor). 0을 주면 하한을 끈다. */
     localEdgeFloor?: number;
+    /** 선정 모드. 생략하면 KOREAPLAIN_TOPIC_MODE. 음식 모드는 실용 하한 기본값이 0이고 라벨 상한을 하위 라벨로 센다. */
+    mode?: KoreaplainTopicMode;
   }
 ): { selected: (TopicCandidate & { score: TopicScore })[]; droppedAsDuplicate: number } {
+  const mode = options.mode ?? KOREAPLAIN_TOPIC_MODE;
   const scored = candidates
-    .map((candidate) => ({ ...candidate, score: scoreTopic(candidate) }))
+    .map((candidate) => ({ ...candidate, score: scoreTopic(candidate, mode) }))
     .sort((a, b) => b.score.total - a.score.total || a.topic.localeCompare(b.topic));
 
   const kept: typeof scored = [];
@@ -655,12 +767,13 @@ export function selectTopics(
   }
 
   const cap = options.perLabelCap ?? Math.max(2, Math.ceil(options.topN / 3));
-  const floor = options.practicalFloor ?? defaultPracticalFloor(options.topN);
-  const perLabel = new Map<KoreaplainLabel, number>();
+  // 음식 모드는 생활정보 실용 하한을 끈다(2026-11-25) - 음식 소개 글에는 "체류 실용" 축이 없다.
+  const floor = options.practicalFloor ?? (mode === "food" ? 0 : defaultPracticalFloor(options.topN));
+  const perLabel = new Map<string, number>();
   const selected: typeof kept = [];
 
   const take = (candidate: (typeof kept)[number]): void => {
-    perLabel.set(candidate.label, (perLabel.get(candidate.label) ?? 0) + 1);
+    perLabel.set(labelBucket(candidate), (perLabel.get(labelBucket(candidate)) ?? 0) + 1);
     selected.push(candidate);
   };
 
@@ -668,17 +781,20 @@ export function selectTopics(
   for (const candidate of kept) {
     if (selected.length >= Math.min(floor, options.topN)) break;
     if (!isPracticalTopic(candidate.topic, candidate.label)) continue;
-    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    if ((perLabel.get(labelBucket(candidate)) ?? 0) >= cap) continue;
     take(candidate);
   }
 
   // 1b) 로컬 우위 하한. 실용 하한으로 이미 뽑힌 로컬 우위 후보도 센다. 라벨 상한은 지킨다.
-  const localFloor = Math.min(options.localEdgeFloor ?? defaultLocalEdgeFloor(options.topN), options.topN);
+  const localFloor = Math.min(
+    options.localEdgeFloor ?? (mode === "food" ? defaultRegionalFoodFloor(options.topN) : defaultLocalEdgeFloor(options.topN)),
+    options.topN
+  );
   for (const candidate of kept) {
     if (selected.filter((item) => item.score.localEdge > 0).length >= localFloor) break;
     if (selected.length >= options.topN) break;
     if (candidate.score.localEdge === 0 || selected.includes(candidate)) continue;
-    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    if ((perLabel.get(labelBucket(candidate)) ?? 0) >= cap) continue;
     take(candidate);
   }
 
@@ -686,7 +802,7 @@ export function selectTopics(
   for (const candidate of kept) {
     if (selected.length >= options.topN) break;
     if (selected.includes(candidate)) continue;
-    if ((perLabel.get(candidate.label) ?? 0) >= cap) continue;
+    if ((perLabel.get(labelBucket(candidate)) ?? 0) >= cap) continue;
     take(candidate);
   }
 
@@ -715,14 +831,14 @@ export function toRankedKeywords(selected: readonly (TopicCandidate & { score: T
       contentDemand: item.score.demand,
       freshness: 0,
       crossSourceSignal: item.score.crossSignal,
-      // keyword_rankings.score_breakdown은 6컬럼 고정(migration 없음) - 로컬 우위·운영 정보는 clickPotential에 합산하고 포화 감점은 reason에 남긴다.
-      clickPotential: item.score.intent + item.score.specificity + item.score.localEdge + item.score.operational,
+      // keyword_rankings.score_breakdown은 6컬럼 고정(migration 없음) - 로컬 우위·운영 정보·음식 각도는 clickPotential에 합산하고 포화 감점은 reason에 남긴다.
+      clickPotential: item.score.intent + item.score.specificity + item.score.localEdge + item.score.operational + item.score.foodAngle,
       total: item.score.total,
     },
     trendDirection: "unknown",
     relatedCount: item.hits,
     sources: (item.redditHits ?? 0) > 0 ? ["google_autocomplete", "reddit"] : ["google_autocomplete"],
     latestPublishedAt: null,
-    reason: `${item.label} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}${item.score.localEdge > 0 ? " · 로컬 우위 +15" : ""}${item.score.operational > 0 ? " · 운영 정보 +15" : ""}${item.score.saturation > 0 ? " · 관광 포화 -10" : ""}${item.score.meaningSaturation > 0 ? " · 의미 포화 -10" : ""}`,
+    reason: `${item.label}${item.subLabel ? ` › ${item.subLabel}` : ""} · 자동완성 ${item.bestPosition + 1}번째 · ${item.hits}회 관찰${(item.redditHits ?? 0) > 0 ? ` · 레딧 질문 ${item.redditHits}건` : ""}${item.score.localEdge > 0 ? (item.score.mode === "food" ? " · 향토·로컬 +15" : " · 로컬 우위 +15") : ""}${item.score.operational > 0 ? " · 운영 정보 +15" : ""}${item.score.foodAngle > 0 ? " · 음식 각도 +15" : ""}${item.score.saturation > 0 ? (item.score.mode === "food" ? " · 초포화 음식 -10" : " · 관광 포화 -10") : ""}${item.score.meaningSaturation > 0 ? " · 의미 포화 -10" : ""}`,
   }));
 }

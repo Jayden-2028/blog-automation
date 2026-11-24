@@ -273,7 +273,7 @@
     "test:kscene-approval": "tsx src/notifications/testKoreaplainApproval.ts",
     "test:rehost-images": "tsx src/services/images/testRehostImagesToPages.ts",
     "test:image-health": "tsx src/workflows/images/testPagesImageHealth.ts",
-    "test:kscene-topics": "tsx src/workflows/koreaplain/testKoreaplainTopics.ts",
+    "test:kscene-topics": "tsx src/workflows/koreaplain/testKoreaplainTopics.ts && tsx src/workflows/koreaplain/testKoreaplainFoodTopics.ts",
     "test:person-write-gate": "tsx src/workflows/writing/testPersonWriteGate.ts",
     "test:hot-star": "tsx src/workflows/hot-star/testHotStarSelection.ts",
     "job:community-keyword": "tsx src/jobs/communityKeywordJob.ts",
