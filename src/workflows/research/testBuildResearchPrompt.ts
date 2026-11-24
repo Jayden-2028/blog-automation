@@ -174,5 +174,8 @@ try {
   assert(koreaplainConverter.includes("현지 관행 조사"), "변환기 job에도 현지 관행 지시가 붙는다");
   const nonKoreaplain = buildResearchPrompt({ ...koreaplainBase, job: { ...koreaplainBase.job, category: "incident" } });
   assert(!nonKoreaplain.includes("현지 관행 조사") && !nonKoreaplain.includes("local_practice_rows"), "koreaplain이 아니면 현지 관행 지시가 없다");
+  // 한국 음식 소개 전환(2026-11-25): koreaplain job에 음식 체크리스트·레시피 미수집 지시가 붙고, 다른 트랙에는 없다.
+  assert(koreaplainGo.includes("음식 소개 주제(researcher.md §4-2a") && koreaplainGo.includes("레시피는 모으지 않는다"), "koreaplain 음식 소개 지시");
+  assert(!nonKoreaplain.includes("음식 소개 주제"), "koreaplain이 아니면 음식 소개 지시가 없다");
   console.log("✅ koreaplain 분기 + 🌏 국제(변환기) 한글 입력 보강 + 현지 관행 §12");
 }

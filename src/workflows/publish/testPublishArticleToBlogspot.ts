@@ -274,8 +274,14 @@ async function main(): Promise<void> {
     const t3 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(koreaplainJob(), undefined);
     assert(t3.blogId === undefined, "blogId가 없으면 undefined(whynowissue로 폴백하지 않는다)");
     const t4 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "예전 시드", metadata: { track: "kscene" } }), "1");
-    assert(t4.label === "Living in Korea", "시드를 모르는 옛 job은 기본 라벨");
-    console.log("✅ koreaplain 대상 해석 - K-Scene blogId·영문 라벨, 다른 트랙은 불변, 폴백 없음");
+    assert(t4.label === "Living in Korea" && t4.labels.join() === "Living in Korea", "시드를 모르는 옛 job은 기본 라벨");
+    // 2026-11-25 한국 음식 전환: 음식 시드 글은 상위 라벨 + 하위 라벨 두 개(상위가 첫 번째), 이전 시드 글은 라벨 하나 그대로.
+    assert(t1.labels.join() === "Food & Dining", `이전 시드(korean bbq) 글은 라벨 하나 그대로 (${t1.labels.join()})`);
+    const t5 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "chuncheon dakgalbi", metadata: { track: "kscene" } }), "1");
+    assert(t5.label === "Food & Dining" && t5.labels.join("|") === "Food & Dining|Regional Food", `음식 시드는 상위+하위 라벨 (${t5.labels.join("|")})`);
+    const t6 = (await import("./publishArticleToBlogspot.js")).resolveBloggerTarget(job({ category: "kscene", seed_query: "hotteok", metadata: { track: "kscene" } }), "1");
+    assert(t6.labels.join("|") === "Food & Dining|Street Food & Desserts", `길거리·디저트 하위 라벨 (${t6.labels.join("|")})`);
+    console.log("✅ koreaplain 대상 해석 - K-Scene blogId·영문 라벨(음식 시드는 상위+하위), 다른 트랙은 불변, 폴백 없음");
 
     // blogId 미설정이면 발행 호출 없이 disabled
     let called = 0;

@@ -21,7 +21,7 @@
 //    변환 전에 substituteConfirmedImages로 마커를 실제 `![설명](url)`로 바꿔 넣는다. A/B 비교로
 //    후보가 2장이라 아직 사람이 고르지 않았으면(또는 전부 실패했으면) 마커를 그대로 둔다.
 
-import { KOREAPLAIN_DEFAULT_LABEL, KOREAPLAIN_LABEL_BY_SEED } from "../../config/koreaplainSeeds.js";
+import { koreaplainLabelsFor } from "../../config/koreaplainSeeds.js";
 import { loadKoreaplainImagesConfig } from "../../config/koreaplainImages.js";
 import { BLOGGER_CONFIG, BLOGSPOT_LABEL_BY_INTERNAL, KOREAPLAIN_BLOGGER_BLOG_ID, normalizeTkmUrl } from "../../config/publishTargets.js";
 import { trackOfJob } from "../../notifications/telegramTracks.js";
@@ -161,19 +161,22 @@ export type BingSubmitRecord = {
  * 살아 있는 blogId를 여기서 돌려주게 고친다.
  */
 export function resolveBloggerTarget(
-  job: Pick<ArticleJobRow, "category" | "seed_query" | "metadata">,
+  job: Pick<ArticleJobRow, "category" | "seed_query" | "metadata"> & { keyword?: string | null },
   koreaplainBlogId: string | undefined = KOREAPLAIN_BLOGGER_BLOG_ID
-): { track: ReturnType<typeof trackOfJob>; blogId: string | undefined; label: string | undefined } {
+): { track: ReturnType<typeof trackOfJob>; blogId: string | undefined; label: string | undefined; labels: string[] } {
   const track = trackOfJob(job);
   if (track === KOREAPLAIN_TRACK) {
-    return {
-      track,
-      blogId: koreaplainBlogId,
-      // 라벨은 글을 낳은 시드가 정한다(koreaplainSeeds.ts) - 시드가 바뀐 옛 job은 기본 라벨.
-      label: KOREAPLAIN_LABEL_BY_SEED[job.seed_query ?? ""] ?? KOREAPLAIN_DEFAULT_LABEL,
-    };
+    // 라벨은 글을 낳은 시드가 정한다(koreaplainSeeds.ts) - 시드가 바뀐 옛 job은 기본 라벨. 2026-11-25부터 음식 시드는
+    // 상위 라벨 "Food & Dining" + 하위 라벨(Korean Dishes 등) 두 개이고, 시드 없는 봇 직접 입력 음식 글도 같은 두 개를 단다.
+    const labels = koreaplainLabelsFor({
+      seedQuery: job.seed_query,
+      keyword: job.keyword ?? null,
+      directInput: (job.metadata as { source?: unknown } | null | undefined)?.source === "keyword_input",
+    });
+    return { track, blogId: koreaplainBlogId, label: labels[0], labels };
   }
-  return { track, blogId: undefined, label: job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined };
+  const label = job.category ? BLOGSPOT_LABEL_BY_INTERNAL[job.category] : undefined;
+  return { track, blogId: undefined, label, labels: label ? [label] : [] };
 }
 
 /**
@@ -252,7 +255,8 @@ export async function publishArticleToBlogspot(
     return { ok: false, reason: "base_article_not_found", detail: `job에 연결된 기준 원고가 없습니다: ${jobId}` };
   }
 
-  const label = target.label;
+  // 상위 라벨이 첫 번째다(All Guides가 첫 라벨로 묶는다). 음식 글은 하위 라벨이 하나 더 붙는다(2026-11-25).
+  const labels = target.labels;
   // JSON-LD description용 영어 검색 설명(번역 산출물, channelMeta.blogspot). draftMeta는 한글이라 쓰지 않는다.
   const englishSearchDescription =
     ((job.metadata?.channelMeta as ChannelMetaMap | undefined)?.[BLOGSPOT_PLATFORM]?.searchDescription as string | null | undefined) ?? null;
@@ -355,14 +359,14 @@ export async function publishArticleToBlogspot(
     if (!tkmSite) return html;
     const site = await loadTkmSiteContext(tkmSite);
     if (!site) return html;
-    const related = pickTkmRelated({ ...self, labels: label ? [label] : [] }, site.posts, site.allGuidesUrl);
+    const related = pickTkmRelated({ ...self, labels }, site.posts, site.allGuidesUrl);
     return applyTkmStructure(html, { related, jsonLd: null }).html;
   };
   const finalizeTkm = async (input: { postId: string; url: string; title: string; published: string; html: string }): Promise<string | null> => {
     if (!tkmSite || !input.postId || !input.url) return null;
     const result = await finalizeTkmPost(
       tkmSite,
-      { ...input, labels: label ? [label] : [], searchDescription: englishSearchDescription },
+      { ...input, labels, searchDescription: englishSearchDescription },
       input.html
     );
     for (const warning of result.warnings) console.warn(`⚠️ [tkm] ${warning}`);
@@ -423,7 +427,7 @@ export async function publishArticleToBlogspot(
       const refreshed = await updatePost(postId, {
         title: refreshTitle,
         contentHtml: refreshHtml,
-        labels: label ? [label] : undefined,
+        labels: labels.length > 0 ? labels : undefined,
       });
       if (!refreshed.ok) {
         return { ok: false, reason: "blogger_failed", detail: `[${refreshed.stage}] ${refreshed.error}`, stage: refreshed.stage };
@@ -496,7 +500,7 @@ export async function publishArticleToBlogspot(
   const inserted = await insertPost({
     title: postTitle,
     contentHtml,
-    labels: label ? [label] : undefined,
+    labels: labels.length > 0 ? labels : undefined,
     searchDescription,
     isDraft,
   });

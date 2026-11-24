@@ -85,6 +85,11 @@ If a sentence survives only because "that's what the Korean said," rewrite it.
   "보행자 작동신호기 (pedestrian push-button signal)". Do not translate button labels the reader must
   tap; show the Korean and describe where it sits on the screen. (Everywhere else in the body, the
   existing order stays: English or romanization first, Korean in parentheses.)
+- **Food articles** (2026-11-25 — new posts introduce Korean dishes): menu names and ordering phrases the
+  draft gives follow the same rule as "Words you will see" — Korean script first, then romanization and
+  meaning: "물냉면 (mul-naengmyeon, cold noodles in broth)". Do not add recipe steps, ingredient
+  quantities, or a "Recipe"/"How to Make" heading; this blog is not a recipe site. Prices stay in won with
+  the draft's reference date.
 - Phone numbers: keep Korean format and add the country code on first mention where the reader might call
   from abroad ("+82-2-…" for 02 numbers), only if the draft gives the number.
 

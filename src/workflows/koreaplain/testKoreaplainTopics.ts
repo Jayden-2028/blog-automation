@@ -1,8 +1,12 @@
 // 사용설명서 주제 수집 테스트 - 네트워크·DB 없음(전부 주입).
+//
+// 📌 2026-11-25 한국 음식 전환 이후 이 파일은 **이전(생활 가이드) 모드 = 되돌리기 경로**와 두 모드가 같이 쓰는 기계(중복 판정·
+// 해외 지명·레딧·저장/알림 계약)를 지킨다. 그래서 모드를 `legacy`로 **명시해서** 부른다(아래 래퍼) - 환경변수 KSCENE_TOPIC_MODE와
+// 무관하게 같은 결과가 나와야 한다. 음식 모드(기본값)의 규칙은 testKoreaplainFoodTopics.ts가 본다.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, KOREAPLAIN_SEEDS, KOREAPLAIN_TOPIC_CONFIG } from "../../config/koreaplainSeeds.js";
+import { KOREAPLAIN_LABEL_BY_SEED, KOREAPLAIN_LABELS, KOREAPLAIN_LEGACY_SEEDS as KOREAPLAIN_SEEDS, KOREAPLAIN_TOPIC_CONFIG } from "../../config/koreaplainSeeds.js";
 import { buildAutocompleteUrl, parseAutocompleteResponse } from "../../services/search/providers/googleAutocomplete/fetchAutocomplete.js";
 import {
   KOREAPLAIN_SUBREDDITS,
@@ -30,7 +34,7 @@ import {
   isMeaningSaturated,
   isTouristSaturated,
   autocompleteQueriesForSeed,
-  buildCandidates,
+  buildCandidates as buildCandidatesAnyMode,
   hasIntentSignal,
   isOverseasLocalTopic,
   redditTitleSupports,
@@ -40,14 +44,21 @@ import {
   isPracticalTopic,
   normalizeTopic,
   pickSeedsForDay,
-  scoreTopic,
-  selectTopics,
+  scoreTopic as scoreTopicAnyMode,
+  selectTopics as selectTopicsAnyMode,
   toRankedKeywords,
   topicContainment,
   topicSimilarity,
 } from "./koreaplainTopics.js";
 import { KOREAPLAIN_RUN_KIND, koreaplainJobTopics, koreaplainProposalRuns } from "./koreaplainExistingTopics.js";
-import { KOREAPLAIN_JOB_KIND, dayIndexOf, redditQueryForSeed, runKoreaplainTopicCollection } from "./runKoreaplainTopicCollection.js";
+import { KOREAPLAIN_JOB_KIND, dayIndexOf, redditQueryForSeed, runKoreaplainTopicCollection as runAnyMode } from "./runKoreaplainTopicCollection.js";
+
+// 이전(생활 가이드) 모드로 고정한 래퍼(2026-11-25) - 머리글 참조.
+const scoreTopic = (candidate: Parameters<typeof scoreTopicAnyMode>[0]) => scoreTopicAnyMode(candidate, "legacy");
+const selectTopics = (candidates: Parameters<typeof selectTopicsAnyMode>[0], options: Parameters<typeof selectTopicsAnyMode>[1]) =>
+  selectTopicsAnyMode(candidates, { mode: "legacy", ...options });
+const buildCandidates = (observations: Parameters<typeof buildCandidatesAnyMode>[0]) => buildCandidatesAnyMode(observations, undefined, { mode: "legacy" });
+const runKoreaplainTopicCollection = (options: Parameters<typeof runAnyMode>[0] = {}) => runAnyMode({ mode: "legacy", ...options });
 
 function assert(c: unknown, m: string): asserts c {
   if (!c) throw new Error(`❌ ${m}`);
