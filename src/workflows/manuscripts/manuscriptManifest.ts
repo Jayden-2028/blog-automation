@@ -283,8 +283,38 @@ export async function removeManifestTopic(jobId: string): Promise<void> {
 }
 
 /** 같은 jobId의 기존 topic을 새 entry로 교체한다(없으면 추가). 순수 함수 - DB 접근 없음. */
+/**
+ * 수집 기록은 **빈 값으로 덮어쓰지 않는다**(2026-11-25).
+ *
+ * 왜: `prepareManuscript`가 manifest에 쓰는 `imageNotes`는 **그 실행에서 쌓인 `imageFailures`**다.
+ * 그런데 수집·캡처·생성은 멱등 게이트로 묶여 있어(`!job.metadata?.webImagesReadyAt` 등) 두 번째
+ * 실행에서는 아예 돌지 않고, 기획도 캐시된 `imagePlan`을 써서 기획 노트조차 생기지 않는다. 그래서
+ * 준비가 한 번 더 돌면 기록이 **빈 배열로 지워졌다** - 10/20 이후 0줄 24건 중 18건이 그것이다
+ * (`webImagesReadyAt`은 있으니 수집은 돌았다는 뜻이다). 뷰어에서 "왜 이 자리가 비었나"를 볼 수
+ * 없고, 스틸 삽입률을 이 기록으로 재기 때문에 측정까지 흔들린다.
+ *
+ * **누적이 아니라 보존이다.** 새 실행이 기록을 남겼으면 그것으로 바꾸고, 아무것도 남기지 않았으면
+ * 앞 기록을 그대로 둔다. 이미지를 다시 수집하지 않은 실행의 기록은 앞 실행 것이 맞다. 여러 실행의
+ * 기록을 모으는 안(`metadata.imageNotes`에 append)은 범위 밖이다 - 그때는 자리 번호가 바뀐 재작성에서
+ * 옛 기록이 섞이는 문제를 따로 다뤄야 한다.
+ */
+function keepImageNotes(previous: string[] | undefined, next: string[] | undefined): string[] | undefined {
+  if (next && next.length > 0) return next;
+  return previous && previous.length > 0 ? previous : next;
+}
+
 export function upsertTopicEntry(manifest: ManuscriptManifest, entry: ManuscriptTopicEntry): ManuscriptManifest {
-  return { topics: [...manifest.topics.filter((t) => t.jobId !== entry.jobId), entry] };
+  const previous = manifest.topics.find((t) => t.jobId === entry.jobId);
+  const merged: ManuscriptTopicEntry = previous
+    ? {
+        ...entry,
+        manuscript: {
+          ...entry.manuscript,
+          imageNotes: keepImageNotes(previous.manuscript.imageNotes, entry.manuscript.imageNotes),
+        },
+      }
+    : entry;
+  return { topics: [...manifest.topics.filter((t) => t.jobId !== entry.jobId), merged] };
 }
 
 /**

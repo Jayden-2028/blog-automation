@@ -56,11 +56,16 @@
   없어 0장으로 확정했지만, 일반 이미지 검색도 키노라이츠 호스팅 사진을 물어 올 수 있어
   `imageCandidates`만으로는 수집기 성패를 가릴 수 없다(`혼: 삼각의 시간`이 그 경우다 - 수집기 줄은
   없는데 후보에는 키노라이츠가 있다).
-- **제안(실행하지 않았다, 승인 몫)**: 노트를 manifest가 아니라 **job metadata에 누적**해
-  (`metadata.imageNotes`, 실행마다 append) manifest는 그것을 읽게 한다. 지금도
-  `metadata.imageFailures` 필드가 있으나 전 구간 0이라 쓰이지 않는다. 최소 수정은 "재실행에서
-  `imageFailures`가 비면 manifest의 기존 `imageNotes`를 유지한다" 한 줄이다 - 덮어쓰기만 막고
-  누적은 포기하는 안이다.
+- **수정(팀장 발주 - 최소 수정만)**: `upsertTopicEntry`가 **빈 기록으로 덮어쓰지 않는다**
+  (`keepImageNotes`). 새 실행이 기록을 남겼으면 그것으로 바꾸고, 아무것도 남기지 않았으면 앞 기록을
+  그대로 둔다. 한 곳에서 막으므로 `prepareApprovedManuscripts`·`buildManuscriptPageCli`·
+  `clearAiSubstitutesCli` 세 경로가 함께 지켜진다. **누적이 아니라 보존이다** - 이미지를 다시 수집하지
+  않은 실행의 기록은 앞 실행 것이 맞다. 검증은 `npm run test:prepare-manuscripts`
+  (첫 준비 -> 재실행 보존 -> 재수집은 최신으로 교체 -> 다른 job 불간섭).
+- **안 한 것(범위 밖)**: 노트를 manifest가 아니라 **job metadata에 누적**하는 안
+  (`metadata.imageNotes`, 실행마다 append). 지금도 `metadata.imageFailures` 필드가 있으나 전 구간
+  0이라 쓰이지 않는다. 자리 번호가 바뀐 재작성에서 옛 기록이 섞이는 문제를 함께 다뤄야 해서 미뤘다.
+- **소급하지 않는다**: 이미 지워진 18건은 되살릴 수 없다 - 그 실행의 산출물이 어디에도 남아 있지 않다.
 
 ## 2026-11-09 — 키노라이츠 작품명 추출·검증·재시도
 

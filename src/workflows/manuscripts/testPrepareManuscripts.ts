@@ -8,7 +8,7 @@
 import { prepareManuscript } from "./prepareManuscript.js";
 import { prepareApprovedManuscripts } from "./prepareApprovedManuscripts.js";
 import type { ArticleJobRow, ArticleRow } from "../../types/database.js";
-import type { ManuscriptImage, ManuscriptManifest } from "./manuscriptManifest.js";
+import type { ManuscriptImage, ManuscriptManifest, ManuscriptTopicEntry } from "./manuscriptManifest.js";
 import { buildCostSummary } from "../reports/buildCostSummary.js";
 import type { WriteCostSnapshotResult } from "../reports/writeCostSnapshot.js";
 
@@ -867,6 +867,67 @@ async function main(): Promise<void> {
     assert(ent.seen[0].category === "entertainment", "다른 트랙은 자기 카테고리가 그대로 넘어간다");
     assert(ent.genCalls.some((c) => c.fallbackSlots?.some((s) => s.acquisition === "infographic")), "다른 트랙은 기획 인포그래픽을 예전처럼 만든다");
     console.log("✅ koreaplain 배선 - 폴백에 트랙 전달, 기획 인포그래픽 차단 / 다른 트랙은 그대로");
+  }
+
+  // 준비가 한 번 더 돌아도 수집 기록은 지워지지 않는다(2026-11-25).
+  //
+  // 두 번째 실행에서는 수집·캡처·생성이 멱등 게이트에 막혀 돌지 않으므로 그 실행의 imageFailures는
+  // 비어 있다. 전에는 그 빈 배열이 manifest의 imageNotes를 덮어써, 수집이 실제로 돌았는데도 기록이
+  // 사라졌다(10/20 이후 18건). 뷰어의 "왜 비었나"가 사라지고 스틸 삽입률 측정도 흔들린다.
+  {
+    const { upsertTopicEntry } = await import("./manuscriptManifest.js");
+    const topic = (notes: string[] | undefined): ManuscriptTopicEntry => ({
+      jobId: "job-notes",
+      keyword: "이번엔 보컬 계급장 뗀다 넷플릭스 흑백 가수 2027년",
+      category: "ott",
+      date: "2026-11-12",
+      readyAt: "2026-11-12T11:30:00.000Z",
+      manuscript: {
+        title: "t",
+        searchDescription: "d",
+        slug: "s",
+        shortName: "n",
+        tags: [],
+        body: "b",
+        imagePrompts: [],
+        images: [],
+        imageCandidates: {},
+        filePath: "p",
+        naver: null,
+        sourceTag: null,
+        sourceUrl: null,
+        ...(notes === undefined ? {} : { imageNotes: notes }),
+      },
+    });
+    const first = ["ℹ️ 키노라이츠 공식 스틸 9장을 후보에 넣었습니다.", "[자리 1] ℹ️ 후보 4장 중 1번 채택"];
+
+    // 1) 첫 준비 - 기록이 그대로 들어간다.
+    const after1 = upsertTopicEntry({ topics: [] }, topic(first));
+    assert(after1.topics.length === 1, "첫 준비는 행을 만든다");
+    assert(after1.topics[0]!.manuscript.imageNotes?.length === 2, "첫 준비의 기록이 들어가야 한다");
+
+    // 2) 재실행(기록 없음) - 앞 기록을 유지한다. **이게 고친 것이다.**
+    const after2 = upsertTopicEntry(after1, topic([]));
+    assert(after2.topics.length === 1, "재실행이 행을 늘리면 안 된다");
+    assert(
+      after2.topics[0]!.manuscript.imageNotes?.join("|") === first.join("|"),
+      `재실행이 기록을 지우면 안 된다 (받은 값: ${JSON.stringify(after2.topics[0]!.manuscript.imageNotes)})`
+    );
+    // 필드 자체가 없는 경우도 같다(옛 행·다른 호출부).
+    const after2b = upsertTopicEntry(after1, topic(undefined));
+    assert(after2b.topics[0]!.manuscript.imageNotes?.length === 2, "imageNotes가 없는 실행도 앞 기록을 지우지 않는다");
+
+    // 3) 재수집이 새 기록을 남기면 **그것으로 바뀐다**(보존이 아니라 최신이 이긴다).
+    const after3 = upsertTopicEntry(after2, topic(["ℹ️ 다시 수집했습니다."]));
+    assert(
+      after3.topics[0]!.manuscript.imageNotes?.join("|") === "ℹ️ 다시 수집했습니다.",
+      "새 기록이 있으면 그것으로 바꿔야 한다"
+    );
+    // 4) 다른 job은 서로 영향이 없다.
+    const other = upsertTopicEntry(after3, { ...topic(["x"]), jobId: "job-other" });
+    assert(other.topics.length === 2, "다른 job은 자기 행으로 들어간다");
+    assert(other.topics.find((t) => t.jobId === "job-notes")!.manuscript.imageNotes?.length === 1, "다른 job 추가가 앞 job 기록을 건드리면 안 된다");
+    console.log("✅ 수집 기록 - 준비 재실행이 덮어쓰지 않고, 재수집은 최신으로 바꾼다");
   }
 
   console.log("\n✅ 전체 통과");
