@@ -1,6 +1,11 @@
 import { NaverBlogKeywordProvider } from "../../services/search/providers/NaverBlogKeywordProvider.js";
 import { NaverNewsKeywordProvider } from "../../services/search/providers/NaverNewsKeywordProvider.js";
 import { NaverWebKeywordProvider } from "../../services/search/providers/NaverWebKeywordProvider.js";
+import {
+  NaverCallBudget,
+  type DailyWindowQueryStat,
+  type DailyWindowStopReason,
+} from "../../services/search/naver/naverDailyWindow.js";
 import type {
   KeywordCandidate,
   NormalizedKeyword,
@@ -109,7 +114,64 @@ export type CollectNaverCandidatesOptions = {
   maxAgeDays?: number;
   /** 날짜 컷 기준 시각. 테스트에서만 고정한다. */
   now?: Date;
+  /**
+   * 뉴스·블로그를 "최근 N시간 창"이 찰 때까지 페이지네이션한다(2026-11-25, **엔터 키워드 수집 전용** -
+   * config/entertainmentDailyWindow.ts). 생략하면 기존대로 검색어당 displayPerQuery 1장이다.
+   * 웹문서는 날짜가 없어 이 옵션과 무관하게 displayPerQuery 1장이다.
+   *
+   * 7일 날짜 컷(maxAgeDays)과의 관계: 창은 "어디까지 페이지를 넘길지"를 정하고, 창 밖 문서는 검색어당
+   * 최신 10건(기존 수집분)만 남긴다. 그 10건에 대한 바깥 한도가 7일 컷이다 - 둘 다 그대로 돈다.
+   */
+  dailyWindow?: CollectDailyWindowOptions;
 };
+
+export type CollectDailyWindowOptions = {
+  windowHours: number;
+  maxNewsPerQuery: number;
+  maxBlogPerQuery: number;
+  /** 뉴스+블로그 검색 호출 상한. 첫 페이지(검색어×2)는 항상 보장한다. */
+  maxCalls: number;
+};
+
+export type DailyWindowSourceSummary = {
+  queries: number;
+  calls: number;
+  fetched: number;
+  kept: number;
+  droppedOutOfWindow: number;
+  /** 페이지네이션이 멈춘 이유별 검색어 수. */
+  stopReasons: Partial<Record<DailyWindowStopReason, number>>;
+  /** 상한(cap)에서 멈춘 검색어 - 창을 다 못 채운 넓은 시드. */
+  cappedQueries: string[];
+};
+
+export type DailyWindowCollectionSummary = {
+  windowHours: number;
+  maxNewsPerQuery: number;
+  maxBlogPerQuery: number;
+  maxCalls: number;
+  /** 뉴스+블로그 검색 호출 수(웹문서 제외). */
+  callsUsed: number;
+  /** 예산 때문에 거절된 추가 페이지 수. 0이 아니면 maxCalls를 올릴지 볼 것. */
+  budgetDeniedPages: number;
+  news: DailyWindowSourceSummary;
+  blog: DailyWindowSourceSummary;
+};
+
+/** provider의 검색어별 통계를 소스 요약으로 접는다. 순수 함수. */
+export function summarizeDailyWindowStats(stats: readonly DailyWindowQueryStat[]): DailyWindowSourceSummary {
+  const stopReasons: Partial<Record<DailyWindowStopReason, number>> = {};
+  for (const stat of stats) stopReasons[stat.stopReason] = (stopReasons[stat.stopReason] ?? 0) + 1;
+  return {
+    queries: stats.length,
+    calls: stats.reduce((sum, stat) => sum + stat.pages, 0),
+    fetched: stats.reduce((sum, stat) => sum + stat.fetched, 0),
+    kept: stats.reduce((sum, stat) => sum + stat.kept, 0),
+    droppedOutOfWindow: stats.reduce((sum, stat) => sum + stat.droppedOutOfWindow, 0),
+    stopReasons,
+    cappedQueries: stats.filter((stat) => stat.stopReason === "cap").map((stat) => stat.query),
+  };
+}
 
 export type CollectNaverCandidatesResult = {
   rawKeywords: RawKeyword[];
@@ -125,6 +187,8 @@ export type CollectNaverCandidatesResult = {
    * 컷은 relevance·clustering 이전에 일어나므로 랭킹 로그만 봐서는 얼마나 걸렀는지 셀 수 없다.
    */
   ageCut: CandidateAgeCut;
+  /** 하루 창 수집 요약. options.dailyWindow가 없으면 null. */
+  dailyWindow: DailyWindowCollectionSummary | null;
 };
 
 async function safeFetchKeywords(
@@ -157,16 +221,40 @@ export async function collectNaverCandidates(
     categoryByQuery: options.categoryByQuery,
   };
 
-  const newsKeywords = await safeFetchKeywords(
-    "naver_news",
-    () => new NaverNewsKeywordProvider(providerOptions).fetchKeywords(),
-    sourceErrors
-  );
-  const blogKeywords = await safeFetchKeywords(
-    "naver_blog",
-    () => new NaverBlogKeywordProvider(providerOptions).fetchKeywords(),
-    sourceErrors
-  );
+  // 하루 창: 뉴스·블로그가 한 예산을 나눠 쓴다. 첫 페이지(검색어 x 2)는 미리 예약해 항상 보장한다.
+  const windowOptions = options.dailyWindow;
+  const budget = windowOptions ? new NaverCallBudget(windowOptions.maxCalls, queries.length * 2) : undefined;
+  // 창 기준 시각은 실행당 한 번 정한다 - 검색어마다 new Date()를 쓰면 수집이 몇 분 걸리는 동안 창이 밀린다.
+  const windowNow = options.now ?? new Date();
+  const newsProvider = new NaverNewsKeywordProvider({
+    ...providerOptions,
+    ...(windowOptions && budget
+      ? {
+          dailyWindow: {
+            windowHours: windowOptions.windowHours,
+            maxDocsPerQuery: windowOptions.maxNewsPerQuery,
+            budget,
+            now: windowNow,
+          },
+        }
+      : {}),
+  });
+  const blogProvider = new NaverBlogKeywordProvider({
+    ...providerOptions,
+    ...(windowOptions && budget
+      ? {
+          dailyWindow: {
+            windowHours: windowOptions.windowHours,
+            maxDocsPerQuery: windowOptions.maxBlogPerQuery,
+            budget,
+            now: windowNow,
+          },
+        }
+      : {}),
+  });
+
+  const newsKeywords = await safeFetchKeywords("naver_news", () => newsProvider.fetchKeywords(), sourceErrors);
+  const blogKeywords = await safeFetchKeywords("naver_blog", () => blogProvider.fetchKeywords(), sourceErrors);
   const webKeywords = await safeFetchKeywords(
     "naver_web",
     () => new NaverWebKeywordProvider(providerOptions).fetchKeywords(),
@@ -209,6 +297,31 @@ export async function collectNaverCandidates(
     );
   }
 
+  let dailyWindow: DailyWindowCollectionSummary | null = null;
+  if (windowOptions && budget) {
+    dailyWindow = {
+      windowHours: windowOptions.windowHours,
+      maxNewsPerQuery: windowOptions.maxNewsPerQuery,
+      maxBlogPerQuery: windowOptions.maxBlogPerQuery,
+      maxCalls: windowOptions.maxCalls,
+      callsUsed: budget.used,
+      budgetDeniedPages: budget.denied,
+      news: summarizeDailyWindowStats(newsProvider.getWindowStats()),
+      blog: summarizeDailyWindowStats(blogProvider.getWindowStats()),
+    };
+    const describe = (label: string, summary: DailyWindowSourceSummary) =>
+      `${label} ${summary.kept}건(호출 ${summary.calls}, 상한 도달 ${summary.cappedQueries.length}개 검색어)`;
+    console.log(
+      `ℹ️ [collectNaverCandidates] 하루 창 ${windowOptions.windowHours}h: ` +
+        `${describe("뉴스", dailyWindow.news)} · ${describe("블로그", dailyWindow.blog)} · ` +
+        `호출 ${budget.used}/${windowOptions.maxCalls}` +
+        (budget.denied > 0 ? ` · ⚠️ 예산으로 거절된 추가 페이지 ${budget.denied}건` : "")
+    );
+    if (dailyWindow.news.cappedQueries.length > 0) {
+      console.log(`   뉴스 상한(${windowOptions.maxNewsPerQuery}) 도달: ${dailyWindow.news.cappedQueries.join(", ")}`);
+    }
+  }
+
   const normalizedKeywords = normalizeKeywords(rawKeywords);
   const { candidates, duplicateCount } = deduplicateKeywords(normalizedKeywords);
 
@@ -220,5 +333,6 @@ export async function collectNaverCandidates(
     countsByQuery,
     sourceErrors,
     ageCut,
+    dailyWindow,
   };
 }

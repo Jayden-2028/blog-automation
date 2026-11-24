@@ -15,7 +15,14 @@
 // 이후 embedding 기반 구현으로 손쉽게 교체할 수 있다.
 
 import { CLUSTERING_CONFIG } from "../../../config/keywordScoring.js";
-import { charNgramSimilarity, intersectionSize, jaccardSimilarity } from "./similarity.js";
+import {
+  buildCharNgramProfile,
+  charNgramSimilarity,
+  charNgramSimilarityFromProfiles,
+  intersectionSize,
+  jaccardSimilarity,
+  type CharNgramProfile,
+} from "./similarity.js";
 import { extractCoreNouns, normalizedFullText, stripClusteringBoilerplate, tokenize } from "./textNormalize.js";
 import type { KeywordCluster, KeywordClusterer } from "./KeywordClusterer.js";
 
@@ -25,12 +32,15 @@ type PreparedItem<T> = {
   tokens: Set<string>;
   coreNouns: Set<string>;
   fullText: string;
+  /** fullText의 char n-gram profile. 비교마다 다시 만들지 않도록 prepare 때 한 번 만든다. */
+  ngramProfile: CharNgramProfile;
 };
 
 type MutableCluster<T> = {
   tokens: Set<string>;
   coreNouns: Set<string>;
-  fullTexts: string[];
+  /** 멤버 fullText들의 char n-gram profile(멤버 순서). */
+  ngramProfiles: CharNgramProfile[];
   items: T[];
   seedQueries: Set<string>;
 };
@@ -43,13 +53,15 @@ function prepare<T extends { keyword: string; metadata?: Record<string, unknown>
   // site/source boilerplate를 제거한다.
   const clusteringText = stripClusteringBoilerplate(item.keyword);
   const tokens = tokenize(clusteringText, { seedQuery });
+  const fullText = normalizedFullText(clusteringText);
 
   return {
     item,
     seedQuery,
     tokens: new Set(tokens),
     coreNouns: new Set(extractCoreNouns(tokens)),
-    fullText: normalizedFullText(clusteringText),
+    fullText,
+    ngramProfile: buildCharNgramProfile(fullText, CLUSTERING_CONFIG.charNgramSize),
   };
 }
 
@@ -94,10 +106,15 @@ function compositeSimilarity<T>(prepared: PreparedItem<T>, cluster: MutableClust
 
   // cluster 안에서 가장 가까운 fullText 하나를 기준으로 계산해, 서로 다른 항목들이 섞여 평균이
   // 흐려지는 것을 방지한다(대표 유사도 과소평가 방지).
+  //
+  // char n-gram을 신뢰하지 않는 쌍(isCharNgramTrusted=false)은 combineSimilarity가 어차피 그 값을
+  // 0으로 버리므로 계산을 건너뛴다(2026-11-25 - 결과는 같고, 후보 수천 건에서 대부분의 쌍이 여기 해당한다).
   let charNgramScore = 0;
-  for (const fullText of cluster.fullTexts) {
-    const score = charNgramSimilarity(prepared.fullText, fullText, CLUSTERING_CONFIG.charNgramSize);
-    if (score > charNgramScore) charNgramScore = score;
+  if (isCharNgramTrusted(tokenScore, coreNounIntersection)) {
+    for (const profile of cluster.ngramProfiles) {
+      const score = charNgramSimilarityFromProfiles(prepared.ngramProfile, profile);
+      if (score > charNgramScore) charNgramScore = score;
+    }
   }
 
   const combined = combineSimilarity(tokenScore, coreNounScore, coreNounIntersection, charNgramScore);
@@ -196,13 +213,13 @@ export class CompositeSimilarityClusterer implements KeywordClusterer {
         bestCluster.items.push(prepared.item);
         for (const token of prepared.tokens) bestCluster.tokens.add(token);
         for (const noun of prepared.coreNouns) bestCluster.coreNouns.add(noun);
-        bestCluster.fullTexts.push(prepared.fullText);
+        bestCluster.ngramProfiles.push(prepared.ngramProfile);
         if (prepared.seedQuery) bestCluster.seedQueries.add(prepared.seedQuery);
       } else {
         clusters.push({
           tokens: new Set(prepared.tokens),
           coreNouns: new Set(prepared.coreNouns),
-          fullTexts: [prepared.fullText],
+          ngramProfiles: [prepared.ngramProfile],
           items: [prepared.item],
           seedQueries: new Set(prepared.seedQuery ? [prepared.seedQuery] : []),
         });

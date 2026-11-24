@@ -193,6 +193,7 @@
     "test:daily-query-pool": "tsx src/workflows/keyword-discovery/testBuildDailyQueryPool.ts",
     "test:keyword-exclusion": "tsx src/config/testKeywordExclusionRules.ts",
     "test:candidate-age-cut": "tsx src/workflows/keyword-discovery/testCandidateAgeCut.ts",
+    "test:ent-daily-window": "tsx src/workflows/keyword-discovery/testEntDailyWindow.ts",
     "test:cluster-attribution": "tsx src/workflows/keyword-ranking/testClusterAttribution.ts",
     "test:ent-trend-gate": "tsx src/workflows/keyword-discovery/testEntertainmentTrendGate.ts",
     "test:topic-conflict": "tsx src/workflows/keyword-discovery/testEntertainmentTopicConflict.ts",

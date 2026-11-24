@@ -8,6 +8,12 @@ import {
   sleep,
   stripNaverMarkup,
 } from "../naver/naverClient.js";
+import {
+  newsWindowVerdict,
+  paginateUntilWindow,
+  type DailyWindowQueryStat,
+  type NaverDailyWindowProviderOptions,
+} from "../naver/naverDailyWindow.js";
 
 const NAVER_NEWS_SEARCH_URL = `${NAVER_API_HUB_BASE_URL}/search/v1/news`;
 
@@ -37,6 +43,12 @@ export type NaverNewsKeywordProviderOptions = {
   sort?: "sim" | "date";
   /** query 간 순차 호출 사이에 둘 지연 시간(ms). rate limit 보호용. 기본 150ms. */
   requestDelayMs?: number;
+  /**
+   * 지정하면 검색어마다 "최근 N시간 창"이 찰 때까지 페이지네이션한다(2026-11-25, 엔터 키워드 수집 전용 -
+   * naverDailyWindow.ts). 이때 displayPerQuery·sort는 무시하고 sort=date, display=100을 쓴다.
+   * 생략하면 기존 동작(display 1장) 그대로다 - 자료조사 수집 등 다른 경로는 넘기지 않는다.
+   */
+  dailyWindow?: NaverDailyWindowProviderOptions;
 };
 
 export class NaverNewsKeywordProvider implements KeywordProvider {
@@ -45,6 +57,8 @@ export class NaverNewsKeywordProvider implements KeywordProvider {
   private readonly displayPerQuery: number;
   private readonly sort: "sim" | "date";
   private readonly requestDelayMs: number;
+  private readonly dailyWindow: NaverDailyWindowProviderOptions | undefined;
+  private readonly windowStats: DailyWindowQueryStat[] = [];
 
   constructor(options: NaverNewsKeywordProviderOptions) {
     this.queries = options.queries;
@@ -55,6 +69,12 @@ export class NaverNewsKeywordProvider implements KeywordProvider {
     this.displayPerQuery = options.displayPerQuery ?? 10;
     this.sort = options.sort ?? "date";
     this.requestDelayMs = options.requestDelayMs ?? 150;
+    this.dailyWindow = options.dailyWindow;
+  }
+
+  /** dailyWindow 모드에서 검색어별 페이지네이션 결과. 모드가 아니면 빈 배열. */
+  getWindowStats(): readonly DailyWindowQueryStat[] {
+    return this.windowStats;
   }
 
   async fetchKeywords(): Promise<RawKeyword[]> {
@@ -89,14 +109,56 @@ export class NaverNewsKeywordProvider implements KeywordProvider {
   }
 
   private async searchNews(query: string): Promise<NaverNewsSearchItem[]> {
+    if (this.dailyWindow) return this.searchNewsDailyWindow(query, this.dailyWindow);
+    return this.fetchPage(query, 1, this.displayPerQuery, this.sort);
+  }
+
+  private async fetchPage(
+    query: string,
+    start: number,
+    display: number,
+    sort: "sim" | "date"
+  ): Promise<NaverNewsSearchItem[]> {
     const body = await naverGetJson<NaverNewsSearchResponse>(NAVER_NEWS_SEARCH_URL, {
       params: {
         query,
-        display: this.displayPerQuery,
-        sort: this.sort,
+        display,
+        // start=1은 기본값이라 보내지 않는다 - 창 모드가 아닌 기존 요청과 파라미터를 똑같이 유지한다.
+        start: start > 1 ? start : undefined,
+        sort,
       },
     });
     return body.items ?? [];
+  }
+
+  private async searchNewsDailyWindow(
+    query: string,
+    window: NaverDailyWindowProviderOptions
+  ): Promise<NaverNewsSearchItem[]> {
+    const now = window.now ?? new Date();
+    const result = await paginateUntilWindow<NaverNewsSearchItem>({
+      fetchPage: (start, display) => this.fetchPage(query, start, display, "date"),
+      verdict: (item) => newsWindowVerdict(item.pubDate, now, window.windowHours),
+      maxDocs: window.maxDocsPerQuery,
+      legacyKeepCount: window.legacyKeepCount,
+      budget: window.budget,
+      requestDelayMs: this.requestDelayMs,
+    });
+    if (result.pageError) {
+      console.error(
+        `⚠️ NaverNewsKeywordProvider: "${query}" ${result.pages + 1}쪽 실패 - 앞 ${result.pages}쪽(${result.items.length}건)으로 진행 -`,
+        result.pageError
+      );
+    }
+    this.windowStats.push({
+      query,
+      pages: result.pages,
+      fetched: result.fetched,
+      kept: result.items.length,
+      droppedOutOfWindow: result.droppedOutOfWindow,
+      stopReason: result.stopReason,
+    });
+    return result.items;
   }
 
   private toRawKeywords(

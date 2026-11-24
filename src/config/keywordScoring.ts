@@ -97,6 +97,73 @@ export const FRESHNESS_CONFIG = {
   neutralScoreRatio: 0.2,
 } as const;
 
+// ---------- 하루 창 점수 프로필 (2026-11-25, 엔터 트랙 전용) ----------
+//
+// 왜: 엔터 수집이 "18시 직전 최신 10건"에서 "최근 24시간 전체"로 바뀌었다(config/entertainmentDailyWindow.ts,
+// 사용자 지시 2026-11-25 "그날 하루 종일 가장 이슈가 되었던 뉴스를 찾자. 블로그 포스팅은 22시~새벽 1시라
+// 그 시간대 최신성은 의미가 없다"). 위 FRESHNESS_CONFIG(반감기 12시간)와 NEWS_VELOCITY_CONFIG(15건 만점)는
+// "18시 기준 몇 시간 전에 송고됐나"를 1순위로 만들었다 - 18시 run이 16:02·16:46·18:01 기사를 집고
+// 아침에 터져 하루 종일 다뤄진 큰 사건이 freshness에서 졌다(KEYWORD-ENT-REDESIGN-2026-11.md §2-⑥).
+//
+// 바꾸는 것은 freshness·newsVelocity 두 항목의 **곡선**뿐이다. 가중치(KEYWORD_SCORE_WEIGHTS 합 100)와
+// trendMomentum·contentDemand·crossSource·clickPotential은 그대로다. 이 프로필은 scoreKeyword의
+// options.profile로 **엔터 경로에서만** 넘어간다(dailyKeywordWorkflow의 entertainmentDailyWindow) -
+// 생략하면 위 기본 곡선이 그대로 돌아 사회·사용설명서·runKeywordRanking 등 다른 경로는 바뀌지 않는다.
+//
+// 바뀐 값(기본 -> 하루 창):
+// - freshness: 반감기 12h 지수감쇠(0h부터) -> **창(24h) 안은 만점(15)**, 창 밖부터 반감기 12h 감쇠,
+//   창 끝 + 48h(=72h)에서 0. 그래서 18시 run에서 오전 9시 기사(9h 전)와 17시 기사(1h 전)가 같은 15점이다
+//   (기본 곡선이면 9h 전 = 9점, 1h 전 = 14점). neutralScoreRatio(날짜 없음 0.2 = 3점)는 그대로 두고,
+//   "날짜 없음 < 창 안"과 "날짜 없음 <= 창 끝+1h"를 testScoreKeyword가 불변식으로 고정한다.
+// - newsVelocity: countNormalizationCap 15 -> **30**. 묶음 안 하루 기사 수가 이슈 크기를 대표하게 한다.
+//   근거: 기존 cap 15는 "검색어당 10건" 수집에서 묶음이 가질 수 있는 최대치 근처였다. 하루 창에서는
+//   같은 사안 기사가 하루 수십 건까지 들어오는데 cap 15면 중간 크기 사안부터 전부 만점이 되어
+//   "큰 사안 > 중간 사안" 변별이 사라진다. 다만 clustering이 같은 사안을 잘게 쪼개는 경향이 실측돼 있다
+//   (Top 10 related_count 30일 평균 1.1~2.0, 같은 문서 §2-⑦) - 묶음이 수백 건까지 커지지는 않는다고 보고
+//   cap을 2배로만 올렸다. **하루 창 묶음 크기 실측은 아직 없다(키 없는 오프라인 작업).** 운영 첫 주
+//   실행 로그의 "[점수진단]"(상위 50개 항목별 점수 + 묶음 기사 수)로 다시 맞춘다.
+// - newsVelocity 속보 가점(recentWindowHours 24h 안 = x1, 밖 = x0.6): 하루 창에서는 거의 모든 묶음이
+//   24시간 안이라 "속보" 구분이 무의미하다. 기준 시각을 **수집 창과 같게** 묶어 "창 안 x1 / 창 밖 x0.6"
+//   (= 창 밖 감점)으로만 남긴다. 창 밖 문서는 검색어당 최신 10건 보존분에서만 들어온다
+//   (naverDailyWindow.ts legacyKeepCount).
+export type KeywordScoringProfile = {
+  name: string;
+  freshness: {
+    /** 이 시간(창) 이내는 만점. */
+    fullScoreWithinHours: number;
+    /** 창 밖으로 이 시간이 지날 때마다 절반. */
+    halfLifeHoursAfterWindow: number;
+    /** 창 밖으로 이 시간 이상이면 0점. */
+    maxHoursAfterWindow: number;
+  };
+  newsVelocity: {
+    countNormalizationCap: number;
+    /** 최신 문서가 이 시간 안이면 recentBoostRatio, 밖이면 staleBoostRatio(NEWS_VELOCITY_CONFIG 값). */
+    recentWindowHours: number;
+  };
+};
+
+export const DAILY_WINDOW_SCORING_CONFIG = {
+  freshnessHalfLifeHoursAfterWindow: 12,
+  freshnessMaxHoursAfterWindow: 48,
+  newsVelocityCountNormalizationCap: 30,
+} as const;
+
+export function buildDailyWindowScoringProfile(windowHours: number): KeywordScoringProfile {
+  return {
+    name: `daily-window-${windowHours}h`,
+    freshness: {
+      fullScoreWithinHours: windowHours,
+      halfLifeHoursAfterWindow: DAILY_WINDOW_SCORING_CONFIG.freshnessHalfLifeHoursAfterWindow,
+      maxHoursAfterWindow: DAILY_WINDOW_SCORING_CONFIG.freshnessMaxHoursAfterWindow,
+    },
+    newsVelocity: {
+      countNormalizationCap: DAILY_WINDOW_SCORING_CONFIG.newsVelocityCountNormalizationCap,
+      recentWindowHours: windowHours,
+    },
+  };
+}
+
 // E. Cross Source Signal: 서로 다른 source(news/blog/web)에 동시에 등장할수록 가점.
 export const CROSS_SOURCE_CONFIG = {
   scoreRatioByUniqueSourceCount: {

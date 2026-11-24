@@ -66,4 +66,10 @@ jobs:
           DIVERSITY_TOPIC_QUERY_ENABLED: ${{ vars.DIVERSITY_TOPIC_QUERY_ENABLED }}
           # 알림 제목·run metadata의 회차. 비어 있으면 job이 실행 시각으로 추정한다.
           KEYWORD_ROUND: ${{ inputs.round }}
+          # 하루 창(2026-11-25, config/entertainmentDailyWindow.ts). 미설정이면 기본값(24h · 뉴스 300 ·
+          # 블로그 100 · 호출 500). ENT_NAVER_WINDOW_HOURS=0이면 하루 창 전체가 꺼져 옛 동작으로 돌아간다.
+          ENT_NAVER_WINDOW_HOURS: ${{ vars.ENT_NAVER_WINDOW_HOURS }}
+          ENT_NAVER_MAX_NEWS_PER_QUERY: ${{ vars.ENT_NAVER_MAX_NEWS_PER_QUERY }}
+          ENT_NAVER_MAX_BLOG_PER_QUERY: ${{ vars.ENT_NAVER_MAX_BLOG_PER_QUERY }}
+          ENT_NAVER_MAX_CALLS: ${{ vars.ENT_NAVER_MAX_CALLS }}
         run: npm run job:entertainment-keyword

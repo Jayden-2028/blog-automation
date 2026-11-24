@@ -78,6 +78,8 @@ import type { FilterCandidatesByRelevanceResult } from "./keyword-discovery/seed
 import type { MergeSameTopicClustersResult } from "./keyword-ranking/mergeSameTopicClusters.js";
 import type { KeywordCandidate } from "../types/keywordDiscovery.js";
 import type { RankedKeyword } from "../types/keywordScoring.js";
+import type { KeywordScoringProfile } from "../config/keywordScoring.js";
+import type { EntDailyWindowConfig } from "../config/entertainmentDailyWindow.js";
 import type {
   SendKeywordNotificationOptions,
   SendKeywordNotificationResult,
@@ -155,6 +157,16 @@ export type RankKeywordsOptions = {
    */
   categoryTerms?: readonly string[];
   /**
+   * freshness·newsVelocity 곡선 프로필(2026-11-25 하루 창, 엔터 전용 - config/keywordScoring.ts).
+   * 생략하면 기본 곡선. 경쟁도 재채점(scoreKeyword 두 번째 호출)에도 같은 프로필을 넘긴다.
+   */
+  scoringProfile?: KeywordScoringProfile;
+  /**
+   * 진단용으로 점수 상위 몇 개의 항목별 점수·묶음 문서 수를 결과(diagnostics)에 남길지. 0/생략이면 남기지 않는다.
+   * 경쟁도 재채점 뒤·다양성 선정 전 순서다(= Top N 후보의 순수 점수 순위).
+   */
+  diagnosticTopN?: number;
+  /**
    * 경쟁도 측정기. 생략하면 측정 자체를 하지 않는다(순수 채점만 - 기존 테스트가 이 경로를 쓴다).
    * 주입식으로 둔 이유: 실제 구현은 헤드리스 LLM + NAVER API를 타므로, 테스트에서 fake로 바꿔
    * 외부 호출 없이 재정렬 로직만 검증할 수 있어야 한다.
@@ -194,6 +206,20 @@ export type RankCompetitionInfo = {
   fallbackSkippedCount: number;
 };
 
+/** 점수 진단 1행(DB 저장 없음, 실행 로그용). */
+export type RankDiagnosticEntry = {
+  rank: number;
+  keyword: string;
+  seedQuery: string | null;
+  totalScore: number;
+  scoreBreakdown: RankedKeyword["scoreBreakdown"];
+  newsCount: number;
+  blogCount: number;
+  webCount: number;
+  latestPublishedAt: string | null;
+  earliestPublishedAt: string | null;
+};
+
 export type RankKeywordsResult = {
   /** diversity 정책(selectDiverseTopN)까지 적용한 최종 Top N. */
   rankings: RankedKeyword[];
@@ -205,6 +231,8 @@ export type RankKeywordsResult = {
   trendError?: string;
   /** 경쟁도 측정 결과. options.competition을 넘기지 않았으면 null. */
   competition: RankCompetitionInfo | null;
+  /** options.diagnosticTopN개의 점수 진단(경쟁도 반영 후·다양성 선정 전). 생략이면 빈 배열. */
+  diagnostics: RankDiagnosticEntry[];
   /**
    * LLM 주제어를 주제 동일성 판정에 쓰면 Top N이 어떻게 달라지는지. preview가 꺼져 있거나
    * 주제어가 없으면 null. applied=true면 rankings가 이미 그 결과다.
@@ -235,9 +263,12 @@ export async function rankKeywords(
   );
   const inputsWithPercentiles = computeBatchPercentiles(rawInputs);
 
+  const scoringProfile = options.scoringProfile;
+
   const scored = inputsWithPercentiles.map((input) => {
-    const scoreBreakdown = scoreKeyword(input);
+    const scoreBreakdown = scoreKeyword(input, scoringProfile ? { profile: scoringProfile } : undefined);
     return {
+      input,
       totalScore: scoreBreakdown.total,
       ranked: {
         keyword: input.keyword,
@@ -296,7 +327,10 @@ export async function rankKeywords(
       // 실제 채택 여부는 아래 applyToScore가 정한다.
       const rescored =
         input && found
-          ? scoreKeyword({ ...input, blogDocumentTotal: found.total }, { useContentOpportunity: true })
+          ? scoreKeyword(
+              { ...input, blogDocumentTotal: found.total },
+              { useContentOpportunity: true, ...(scoringProfile ? { profile: scoringProfile } : {}) }
+            )
           : null;
 
       // 폴백 주제어는 "주제어"가 아니라 제목 앞 두 어절이다(2026-11-10 사고 - config/
@@ -338,6 +372,21 @@ export async function rankKeywords(
       scoredSortedDesc = scoredSortedDesc.slice().sort((a, b) => b.totalScore - a.totalScore);
     }
   }
+
+  const diagnostics: RankDiagnosticEntry[] = scoredSortedDesc
+    .slice(0, Math.max(0, options.diagnosticTopN ?? 0))
+    .map((item, index) => ({
+      rank: index + 1,
+      keyword: item.ranked.keyword,
+      seedQuery: item.ranked.seedQuery,
+      totalScore: item.totalScore,
+      scoreBreakdown: item.ranked.scoreBreakdown,
+      newsCount: item.input.newsCount,
+      blogCount: item.input.blogCount,
+      webCount: item.input.webCount,
+      latestPublishedAt: item.input.latestPublishedAt,
+      earliestPublishedAt: item.input.earliestPublishedAt,
+    }));
 
   const preDiversityRankings: RankedKeyword[] = scoredSortedDesc
     .slice(0, topN)
@@ -394,6 +443,7 @@ export async function rankKeywords(
     mergedClusterCount,
     trendError,
     competition,
+    diagnostics,
     diversityTopicQuery,
   };
 }
@@ -411,6 +461,40 @@ export async function sendTelegramNotification(
   options: Omit<SendKeywordNotificationOptions, "runId"> = {}
 ): Promise<SendKeywordNotificationResult> {
   return sendKeywordNotification({ ...options, runId });
+}
+
+// ---------- 점수 진단 로그 (2026-11-25) ----------
+// 점수 상위 N개의 6개 항목 점수와 묶음 문서 수를 한 줄씩 남긴다. **DB에는 저장하지 않는다** - 다음
+// 점검에서 발표형 소식(공개일 확정·캐스팅 확정·예고편 공개 등)이 몇 위였고 어느 항목에서 졌는지를
+// Actions 로그만으로 바로 보기 위함이다. 순서는 경쟁도 재채점 뒤·다양성 선정 전(= 순수 점수 순위)이다.
+
+function formatKstMonthDayTime(iso: string | null): string {
+  if (!iso) return "--";
+  const time = new Date(iso).getTime();
+  if (Number.isNaN(time)) return "--";
+  const kst = new Date(time + 9 * 60 * 60 * 1000);
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(kst.getUTCDate()).padStart(2, "0");
+  const hh = String(kst.getUTCHours()).padStart(2, "0");
+  const mi = String(kst.getUTCMinutes()).padStart(2, "0");
+  return `${mm}/${dd} ${hh}:${mi}`;
+}
+
+export function formatRankDiagnosticLine(entry: RankDiagnosticEntry): string {
+  const b = entry.scoreBreakdown;
+  return (
+    `#${String(entry.rank).padStart(2, " ")} ${String(entry.totalScore).padStart(3, " ")}점 ` +
+    `[추세 ${b.trendMomentum} 뉴스 ${b.newsVelocity} 수요 ${b.contentDemand} 신선 ${b.freshness} ` +
+    `교차 ${b.crossSourceSignal} 클릭 ${b.clickPotential}] ` +
+    `기사 ${entry.newsCount}·블로그 ${entry.blogCount}·웹 ${entry.webCount} ` +
+    `(${formatKstMonthDayTime(entry.earliestPublishedAt)} ~ ${formatKstMonthDayTime(entry.latestPublishedAt)}) ` +
+    `${entry.keyword}  <- 시드: ${entry.seedQuery ?? "?"}`
+  );
+}
+
+function logRankDiagnostics(entries: readonly RankDiagnosticEntry[], profileName: string): void {
+  console.log(`ℹ️ [점수진단] 상위 ${entries.length}개 (프로필 ${profileName}, 경쟁도 반영 후·다양성 선정 전)`);
+  for (const entry of entries) console.log(`   ${formatRankDiagnosticLine(entry)}`);
 }
 
 // ---------- 전체 orchestration ----------
@@ -487,6 +571,12 @@ export type DailyKeywordWorkflowOptions = {
    * (`excludeCandidateInserts`), 트랙별 판정은 읽는 이 자리에서 한다.
    */
   allowPolitics?: boolean;
+  /**
+   * 하루 창(2026-11-25, **엔터 트랙만** - config/entertainmentDailyWindow.ts). 넘기면 ① NAVER 뉴스·블로그를
+   * 최근 N시간 창이 찰 때까지 페이지네이션하고 ② freshness·newsVelocity를 하루 창 프로필로 채점하고
+   * ③ 점수 상위 diagnosticTopN개의 항목별 점수를 실행 로그에 남긴다. 생략·null이면 기존 동작.
+   */
+  entertainmentDailyWindow?: EntDailyWindowConfig | null;
   collectOptions?: CollectCandidatesOptions;
   clusterer?: KeywordClusterer;
   rankOptions?: RankKeywordsOptions;
@@ -818,7 +908,18 @@ export async function runDailyKeywordWorkflow(
       .map((entry) => entry.keyword);
   }
 
+  const dailyWindowConfig = options.entertainmentDailyWindow ?? null;
   const collectOptions: CollectCandidatesOptions = {
+    ...(dailyWindowConfig
+      ? {
+          dailyWindow: {
+            windowHours: dailyWindowConfig.windowHours,
+            maxNewsPerQuery: dailyWindowConfig.maxNewsPerQuery,
+            maxBlogPerQuery: dailyWindowConfig.maxBlogPerQuery,
+            maxCalls: dailyWindowConfig.maxCalls,
+          },
+        }
+      : {}),
     ...options.collectOptions,
     categoryByQuery: { ...seedCategoryByQuery, ...options.collectOptions?.categoryByQuery },
   };
@@ -951,6 +1052,9 @@ export async function runDailyKeywordWorkflow(
   };
 
   const rankOptions: RankKeywordsOptions = {
+    ...(dailyWindowConfig
+      ? { scoringProfile: dailyWindowConfig.scoringProfile, diagnosticTopN: dailyWindowConfig.diagnosticTopN }
+      : {}),
     ...options.rankOptions,
     priorityByQuery: {
       ...seedPriorityByQuery,
@@ -967,6 +1071,10 @@ export async function runDailyKeywordWorkflow(
     return result;
   }
   result.ranked = ranked;
+
+  if (ranked.diagnostics.length > 0) {
+    logRankDiagnostics(ranked.diagnostics, rankOptions.scoringProfile?.name ?? "default");
+  }
 
   // ---------- competition 로그 ----------
   // 실제 측정은 rankKeywords 안에서 끝났다(다양성 선정 전이어야 순위에 반영될 수 있으므로).
@@ -1120,6 +1228,8 @@ export async function runDailyKeywordWorkflow(
         // 수집 입구 날짜 컷(2026-10-21). 컷이 켜져 있으면 0건이어도 남긴다 - 상한이 몇 일로
         // 돌았는지가 기록돼야 "안 걸러졌다"와 "컷이 꺼져 있었다"를 구분할 수 있다.
         ...(collected.ageCut.maxAgeDays > 0 ? { candidateAgeCut: collected.ageCut } : {}),
+        ...(collected.dailyWindow ? { naverDailyWindow: collected.dailyWindow } : {}),
+        ...(rankOptions.scoringProfile ? { scoringProfile: rankOptions.scoringProfile.name } : {}),
         ...options.metadata,
       },
       candidatesCount: collected.candidates.length,

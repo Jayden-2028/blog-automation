@@ -15,6 +15,7 @@
 // 설계서 §2.3 참고.
 import "dotenv/config";
 
+import { resolveEntDailyWindowConfig } from "../config/entertainmentDailyWindow.js";
 import { formatEntertainmentHeader, resolveKeywordRound } from "../config/keywordRound.js";
 import { notifyPipelineFailure } from "../notifications/notifyPipelineFailure.js";
 import { LocalScheduler } from "../scheduler/LocalScheduler.js";
@@ -28,6 +29,15 @@ const job: SchedulerJob = {
   execute: async () => {
     const round = resolveKeywordRound();
     console.log(`▶ 엔터 키워드 수집 - ${round.label}`);
+
+    // 하루 창(2026-11-25 사용자 지시): 18시 직전 최신 10건 대신 최근 24시간 뉴스·블로그를 모으고,
+    // freshness·newsVelocity를 "하루 이슈량" 기준으로 채점한다. ENT_NAVER_WINDOW_HOURS=0이면 꺼진다.
+    const dailyWindow = resolveEntDailyWindowConfig();
+    console.log(
+      dailyWindow
+        ? `   하루 창 ${dailyWindow.windowHours}h · 검색어당 뉴스 ${dailyWindow.maxNewsPerQuery}/블로그 ${dailyWindow.maxBlogPerQuery}건 · 호출 상한 ${dailyWindow.maxCalls}`
+        : "   하루 창 꺼짐(ENT_NAVER_WINDOW_HOURS<=0) - 검색어당 최신 10건·기본 점수 곡선"
+    );
 
     const result = await runDailyKeywordWorkflow({
       // 커뮤니티(더쿠·루리웹·에펨코리아)도 이 회차에 함께 수집한다(§2.4 - 독립 커뮤니티 알림 폐지).
@@ -47,6 +57,7 @@ const job: SchedulerJob = {
       // 올라왔으면 엔터 사안이 아니라고 본다. 기본은 preview - 무엇이 빠질지 run metadata에만
       // 남긴다(ENT_TOPIC_CONFLICT_DROP로 켠다). 사회 트랙은 켜지 않는다.
       entertainmentTopicConflict: true,
+      entertainmentDailyWindow: dailyWindow,
       metadata: { kind: "entertainment", round: round.round },
       notifyOptions: { headerTitle: formatEntertainmentHeader(round) },
     });

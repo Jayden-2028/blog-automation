@@ -9,6 +9,7 @@ import {
   KEYWORD_SCORE_WEIGHTS,
   NEWS_VELOCITY_CONFIG,
   TREND_MOMENTUM_CONFIG,
+  type KeywordScoringProfile,
 } from "../../config/keywordScoring.js";
 import { BLOG_COMPETITION_CONFIG } from "../../config/keywordCompetition.js";
 import { computeOpportunityRatio } from "./computeCompetitionScore.js";
@@ -69,11 +70,17 @@ function scoreTrendMomentum(input: KeywordScoreInput): number {
 // B. News Velocity (기본 20점): 뉴스 건수의 절대 신호(cap 대비 비율) + batch 내 percentile을 합산하고,
 // 가장 최근 뉴스가 recentWindowHours 이내면 가점. 절대 건수만 쓰면 소량 배치에서 1건 vs 0건처럼
 // 극단적으로 낮은 값끼리도 사실상 변별력이 없어지므로 상대 순위를 함께 반영한다.
-function scoreNewsVelocity(input: KeywordScoreInput, now: Date): number {
+//
+// profile(하루 창, 엔터 전용)이 있으면 정규화 상한과 "최근" 기준 시각만 프로필 값을 쓴다
+// (config/keywordScoring.ts KeywordScoringProfile 주석).
+function scoreNewsVelocity(input: KeywordScoreInput, now: Date, profile?: KeywordScoringProfile): number {
   const weight = KEYWORD_SCORE_WEIGHTS.newsVelocity;
   if (input.newsCount === 0) return 0;
 
-  const absoluteRatio = clamp(input.newsCount / NEWS_VELOCITY_CONFIG.countNormalizationCap, 0, 1);
+  const countCap = profile?.newsVelocity.countNormalizationCap ?? NEWS_VELOCITY_CONFIG.countNormalizationCap;
+  const recentWindowHours = profile?.newsVelocity.recentWindowHours ?? NEWS_VELOCITY_CONFIG.recentWindowHours;
+
+  const absoluteRatio = clamp(input.newsCount / countCap, 0, 1);
   const combinedRatio = clamp(
     absoluteRatio * NEWS_VELOCITY_CONFIG.absoluteWeight +
       input.newsCountPercentile * NEWS_VELOCITY_CONFIG.percentileWeight,
@@ -82,7 +89,7 @@ function scoreNewsVelocity(input: KeywordScoreInput, now: Date): number {
   );
 
   const hoursAgo = hoursSince(input.latestPublishedAt, now);
-  const isRecent = hoursAgo !== null && hoursAgo <= NEWS_VELOCITY_CONFIG.recentWindowHours;
+  const isRecent = hoursAgo !== null && hoursAgo <= recentWindowHours;
   const boostRatio = isRecent
     ? NEWS_VELOCITY_CONFIG.recentBoostRatio
     : NEWS_VELOCITY_CONFIG.staleBoostRatio;
@@ -138,7 +145,9 @@ function scoreContentOpportunity(input: KeywordScoreInput): number {
 // D. Freshness (기본 15점): 최근 발행 시각 기준 지수 감쇠(halfLifeHours마다 절반).
 // cluster 안에 publishedAt을 제공하는 source가 하나도 없으면(예: web문서만으로 구성) "정보 없음"으로 보고
 // neutralScoreRatio를 적용한다 — 0점 처리하면 timestamp가 없다는 이유만으로 부당하게 불리해지기 때문.
-function scoreFreshness(input: KeywordScoreInput, now: Date): number {
+//
+// profile(하루 창, 엔터 전용)이 있으면 창 안은 만점이고 창 밖부터 감쇠한다. 날짜 없음 중립값은 같다.
+function scoreFreshness(input: KeywordScoreInput, now: Date, profile?: KeywordScoringProfile): number {
   const weight = KEYWORD_SCORE_WEIGHTS.freshness;
 
   if (!input.hasTimestampData) {
@@ -146,7 +155,18 @@ function scoreFreshness(input: KeywordScoreInput, now: Date): number {
   }
 
   const hoursAgo = hoursSince(input.latestPublishedAt, now);
-  if (hoursAgo === null || hoursAgo >= FRESHNESS_CONFIG.maxAgeHours) return 0;
+  if (hoursAgo === null) return 0;
+
+  if (profile) {
+    const { fullScoreWithinHours, halfLifeHoursAfterWindow, maxHoursAfterWindow } = profile.freshness;
+    if (hoursAgo <= fullScoreWithinHours) return weight;
+    const hoursAfterWindow = hoursAgo - fullScoreWithinHours;
+    if (hoursAfterWindow >= maxHoursAfterWindow) return 0;
+    const decayAfterWindow = Math.pow(0.5, hoursAfterWindow / halfLifeHoursAfterWindow);
+    return Math.round(clamp(weight * decayAfterWindow, 0, weight));
+  }
+
+  if (hoursAgo >= FRESHNESS_CONFIG.maxAgeHours) return 0;
 
   const decay = Math.pow(0.5, hoursAgo / FRESHNESS_CONFIG.halfLifeHours);
   return Math.round(clamp(weight * decay, 0, weight));
@@ -182,6 +202,11 @@ export type ScoreKeywordOptions = {
    * 같아져서 승인 판단에 쓸 수 없다(테스트 작성 중 실제로 이 결함이 잡혔다).
    */
   useContentOpportunity?: boolean;
+  /**
+   * freshness·newsVelocity 곡선을 바꾸는 프로필(2026-11-25 하루 창, 엔터 전용). 생략하면 기본 곡선이다.
+   * 가중치와 나머지 네 항목은 프로필과 무관하다.
+   */
+  profile?: KeywordScoringProfile;
 };
 
 export function scoreKeyword(
@@ -191,7 +216,7 @@ export function scoreKeyword(
   const now = input.now ?? new Date();
 
   const trendMomentum = scoreTrendMomentum(input);
-  const newsVelocity = scoreNewsVelocity(input, now);
+  const newsVelocity = scoreNewsVelocity(input, now, options?.profile);
   // contentDemand 자리는 설정에 따라 의미가 바뀐다. 경쟁도를 측정하지 못한 항목(undefined)은
   // 플래그가 켜져 있어도 기존 로직을 쓴다 - 측정된 것과 안 된 것을 같은 잣대로 비교하면
   // 프로브 범위 밖 후보가 일괄로 유리/불리해지기 때문이다.
@@ -201,7 +226,7 @@ export function scoreKeyword(
   const contentDemand = useOpportunity
     ? scoreContentOpportunity(input)
     : scoreContentDemand(input, now);
-  const freshness = scoreFreshness(input, now);
+  const freshness = scoreFreshness(input, now, options?.profile);
   const crossSourceSignal = scoreCrossSourceSignal(input);
   const clickPotential = scoreClickPotential(input);
 
