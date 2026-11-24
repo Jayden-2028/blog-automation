@@ -448,10 +448,12 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
     장치는 남아 있다: `TISTORY_PUBLISH_DAILY_LIMIT=1`이면 되살아난다(KST 자정 기준, 기본값 0=상한 없음).
     대신 **하루 1회 발행본을 읽어 DB에 적립한다**(`npm run tistory:inventory`, analytics-search.yml 동승) -
     무엇이 언제 올라갔는지는 거기서 본다. **최소 발행 간격 5분 가드는 그대로다**(캡차·저품질 패턴 방어).
-- **사용설명서(koreaplain) 주제 선정은 체류 실용 정보를 문화 소개와 동등하게 우선한다**(§C). 시드는 241개
-  (기획⑤ 확정본 100 + 실용 17 + 로컬 우위 47 + 운영 정보 77)이고, 선정에 라벨 상한과 짝이 되는
-  **실용 하한**(`practicalFloor`)이 있다. 실용 후보가 적은 날은 있는 만큼만 뽑는다. 이 트랙의 주제 선정에는
-  LLM 프롬프트가 없다 - 기준은 `koreaplainTopics.ts`의 규칙이다.
+- **사용설명서(koreaplain) 새 주제는 한국 음식 소개로 좁혔다**(2026-11-25, 애드센스 "가치 없는 콘텐츠" 반려 대응,
+  `docs/ai-handoff/KOREAPLAIN-FOOD-PIVOT-2026-11.md`). 시드는 음식 171개(Korean Dishes 75 · Regional Food 57 ·
+  Street Food & Desserts 39, `KOREAPLAIN_FOOD_SEEDS`)이고 지방 향토 음식은 가점이다. 혐오 식품·식재료·레시피 의도는
+  제외한다(`config/koreaplainFoodTerms.ts` - 목록은 이 파일 한 곳). 새 글 라벨은 Food & Dining + 하위 라벨 하나.
+  옛 생활정보 시드 241개·실용 하한은 `KOREAPLAIN_LEGACY_SEEDS`로 보관되고, repo 변수 `KSCENE_TOPIC_MODE=legacy`
+  하나로 되돌린다. 이 트랙의 주제 선정에는 LLM 프롬프트가 없다 - 기준은 `koreaplainTopics.ts`의 규칙이다.
   - **제안은 하루 5건이다**(2026-11-14 사용자 요청, 전 8건). 하한·상한 공식은 topN 비례라 그대로 두었다 -
     5건이면 실용 하한 2 · 로컬 우위 하한 1 · 라벨 상한 2다(상한 2라 5건이 최소 3개 라벨에 걸친다).
   - **중복은 두 축으로 막는다**(2026-11-14). ① **무엇이 중복인가**: 토큰 자카드 0.6 이상 **또는**
