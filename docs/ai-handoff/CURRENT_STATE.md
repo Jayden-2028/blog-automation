@@ -37,6 +37,31 @@
   자리별 경로(`kinolightsPersonStills`)를 쓰므로 이 수정의 영향은 작품명 없는 자리의 폴백뿐이다.
 
 
+## 2026-11-25 — 수집 기록(imageNotes)이 준비 재실행에 지워진다 (원인만 확인, 수정은 제안)
+
+`흑백 가수` 원고의 `imageNotes`가 0줄이어서 "이미지 단계가 안 돌았다"고 읽었는데 **틀렸다.** 그 job에는
+이미지 6장과 `imageCandidates`·`webImagesReadyAt`이 다 있다 - **수집은 돌았고 기록만 사라졌다.**
+
+- **원인**: `prepareManuscript`가 manifest에 쓰는 `imageNotes`는 **그 실행에서 쌓인 `imageFailures`**다
+  (`imageNotes: imageFailures`). 그런데 수집·캡처·생성은 멱등 게이트로 묶여 있어
+  (`!job.metadata?.webImagesReadyAt` 등) **두 번째 실행에서는 아예 돌지 않는다.** 기획도 캐시된
+  `imagePlan`을 쓰므로 `planImageSlots`의 기획 노트도 생기지 않는다. 결과적으로 재실행은 manifest의
+  `imageNotes`를 **빈 배열로 덮어쓴다.**
+- **재발 규모**: 10/20 이후 manifest 행 중 `imageNotes`가 0줄인 것이 24건이고, 그중 18건은
+  `webImagesReadyAt`이 있다(= 수집은 돌았다). created->updated 간격이 80~881분으로, 준비가 한참 뒤
+  한 번 더 돈 흔적과 맞는다. 나머지 6건은 scenepick·kscene 경로라 원래 비어 있는 것이 정상이다.
+- **영향**: ① 뷰어에서 "왜 이 자리가 비었나"를 볼 수 없다 - 이 블록을 2026-10-01에 만든 이유가
+  바로 그것이었다. ② **측정이 흔들린다.** 스틸 삽입률을 `imageNotes`의 수집기 줄로 재는데, 그 줄이
+  사라진 행은 성패를 알 수 없다. 이번 재측정에서 `흑백 가수`는 `imageCandidates`에 키노라이츠가 아예
+  없어 0장으로 확정했지만, 일반 이미지 검색도 키노라이츠 호스팅 사진을 물어 올 수 있어
+  `imageCandidates`만으로는 수집기 성패를 가릴 수 없다(`혼: 삼각의 시간`이 그 경우다 - 수집기 줄은
+  없는데 후보에는 키노라이츠가 있다).
+- **제안(실행하지 않았다, 승인 몫)**: 노트를 manifest가 아니라 **job metadata에 누적**해
+  (`metadata.imageNotes`, 실행마다 append) manifest는 그것을 읽게 한다. 지금도
+  `metadata.imageFailures` 필드가 있으나 전 구간 0이라 쓰이지 않는다. 최소 수정은 "재실행에서
+  `imageFailures`가 비면 manifest의 기존 `imageNotes`를 유지한다" 한 줄이다 - 덮어쓰기만 막고
+  누적은 포기하는 안이다.
+
 ## 2026-11-09 — 키노라이츠 작품명 추출·검증·재시도
 
 - **문제**: 10/20 이후 작품(ott) 원고 11건 중 키노라이츠 원본 스틸(3000x2000)이 들어간 건 4건(36%)이고, 그 4건은 전부
