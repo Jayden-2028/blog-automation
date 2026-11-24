@@ -718,3 +718,190 @@ console.log("\n🎉 키노라이츠 스틸 테스트 통과");
   assert(liar.includes("라이어"), `세로줄 구분자를 쪼개 작품명에 닿아야 한다: ${liar.join(" / ")}`);
   console.log("✅ 단어 문장부호·세로줄 - 후보와 검증이 모두 작품명에 닿는다");
 }
+
+// 기획이 알아낸 작품명을 받아 쓴다(2026-11-25). 11/10~11/25 실측에서 0장이던 5건을 여기 고정한다.
+// 기획 값(protagonist·summary)은 **DB에 실제로 남아 있던 그대로**다 - 가공하지 않았다.
+{
+  const { plannedWorkTitlesFrom, MAX_PLANNED_TITLES } = await import("./plannedWorkTitles.js");
+  const { titleMatchesPlanOrKeyword } = await import("./searchKinolightsStills.js");
+
+  /** 2026-11-10~17 작품 원고. `want`는 키노라이츠에서 찾아야 하는 작품명이다. */
+  const CASES = [
+    {
+      what: "유스(작품명 중간 + 단어가 `<유스>.`)",
+      keyword: "중년 여성이라면 극공감 쿠팡플레이 미드 <유스>. 기본 정보",
+      protagonist: "HBO 〈Youth(유스)〉 — 알렉스 역 샤론 호건",
+      summary: "HBO 코미디 〈유스〉의 중년 여성 주인공 알렉스(샤론 호건)와 주변 인물, 쿠팡플레이 시청 정보를 정리한 글",
+      want: "유스",
+      wasAttached: false,
+    },
+    {
+      what: "너의 그라운드(작품명 중간)",
+      keyword: "한효주·공명 너의 그라운드 서 첫사랑 재회 대본 리딩",
+      protagonist: "너의 그라운드 (한효주·공명)",
+      summary: "MBC 새 금토드라마 '너의 그라운드' 첫 대본 리딩 현장 공개 (한효주·공명·성준·김신록)",
+      want: "너의 그라운드",
+      wasAttached: false,
+    },
+    {
+      what: "하트비트(protagonist가 사람이다)",
+      keyword: "남주혁 한소희 드라마 하트비트 이시은 작가",
+      protagonist: "남주혁(그리고 한소희)",
+      summary: "남주혁·한소희 주연 판타지 로맨스 드라마 <하트비트> 캐스팅 소식(극본 이시은 작가)",
+      want: "하트비트",
+      wasAttached: false,
+    },
+    {
+      what: "완벽한 타인2(인물 글, protagonist가 사람이다)",
+      keyword: "전지현 완벽한 타인2 주연",
+      protagonist: "전지현",
+      summary: "전지현이 '완벽한 타인2' 주연을 제안받아 검토 중이며, 대표작과 CF퀸 이력을 정리한 글",
+      want: "완벽한 타인2",
+      wasAttached: false,
+    },
+    // 이미 붙던 3건. 기획 값을 받아도 **그대로 붙어야** 한다(회귀 방어).
+    {
+      what: "문무(작품명 맨 앞)",
+      keyword: "문무 기본정보 출연진 몇부작 방송시간 OTT",
+      protagonist: "문무(KBS2 대하드라마)",
+      summary: "KBS2 대하드라마 '문무' 1회 방영 후 기본정보·출연진·시청률·방송 안내",
+      want: "문무",
+      wasAttached: true,
+    },
+    {
+      what: "재혼 황후(작품명 맨 앞, summary가 『』)",
+      keyword: "재혼 황후 의상 논란 디즈니 결국 직접 입",
+      protagonist: "재혼 황후 (신민아·주지훈)",
+      summary: "디즈니+ 『재혼 황후』 의상 논란에 디즈니·제작사가 입장을 밝힌 소식",
+      want: "재혼 황후",
+      wasAttached: true,
+    },
+    {
+      what: "흑백 가수(부제가 붙은 작품명)",
+      keyword: "이번엔 보컬 계급장 뗀다 넷플릭스 흑백 가수 2027년",
+      protagonist: "흑백 가수: 보컬 계급 전쟁",
+      summary: "넷플릭스가 음악 서바이벌 '흑백 가수: 보컬 계급 전쟁' 제작을 확정하고 2027년 공개를 예고했다",
+      want: "흑백 가수",
+      wasAttached: false,
+    },
+    // 11/18~11/25 추가 관측. `굿데이`는 **둘째 단어**라 추측으로도 닿지만(붙었다), 3단어 작품명
+    // `혼: 삼각의 시간`은 추측 후보에 3·4단어 구간이 아예 없어 0장이었다.
+    {
+      what: "혼: 삼각의 시간(3단어 작품명, 11/19 0장)",
+      keyword: "강동원 김고은 넷플릭스 혼: 삼각의 시간 혐관 사극",
+      protagonist: "강동원·김고은 (혼: 삼각의 시간)",
+      summary: "넷플릭스 사극 '혼: 삼각의 시간' 강동원·김고은 캐스팅 소식",
+      want: "혼: 삼각의 시간",
+      wasAttached: false,
+    },
+    {
+      what: "굿데이(둘째 단어 - 추측으로도 닿던 자리)",
+      keyword: "지드래곤 굿데이 시즌2 가요제 라인업",
+      protagonist: "지드래곤(굿데이 프로듀서)",
+      summary: "지드래곤 프로듀서 MBC 예능 '굿데이' 시즌2 가요제 라인업 공개",
+      want: "굿데이",
+      wasAttached: true,
+    },
+    {
+      what: "폭설(기획이 `영화 폭설`로 적었다)",
+      keyword: "영화 폭설 후기 결말 해석 그는 왜 그를",
+      protagonist: "영화 폭설 (갑수 김윤석, 현택 구교환)",
+      summary: "영화 폭설(김윤석·구교환) 개봉 후기와 결말 해석",
+      want: "폭설",
+      wasAttached: true,
+    },
+  ] as const;
+
+  const page = (title: string) => HTML.replace("연애박사 · 미디어", `${title} · 미디어`);
+
+  for (const c of CASES) {
+    const planned = plannedWorkTitlesFrom({ protagonist: c.protagonist, summary: c.summary }, c.keyword);
+    assert(planned.length > 0 && planned.length <= MAX_PLANNED_TITLES, `${c.what}: 작품명을 1~${MAX_PLANNED_TITLES}개 뽑아야 한다`);
+    // 뽑은 작품명이 실제 작품을 가리켜야 한다 - 부제가 더 붙어 있어도(`흑백 가수: 보컬 계급 전쟁`) 통과다.
+    assert(
+      planned.some((t) => titleMatchesPlanOrKeyword(c.want, c.keyword, [t])),
+      `${c.what}: 뽑은 작품명이 \`${c.want}\`를 가리켜야 한다 (받은 값: ${planned.join(" / ")})`
+    );
+
+    // 후보 상한은 기획 값을 받아도 그대로다 - Serper 호출이 늘지 않는다.
+    const withPlan = workTitleCandidates(c.keyword, planned);
+    assert(withPlan.length <= 6, `${c.what}: 후보 상한 6을 넘으면 안 된다 (${withPlan.length}개)`);
+    assert(withPlan[0] === planned[0], `${c.what}: 기획 작품명이 맨 앞에 서야 한다`);
+
+    // 작품 페이지는 **정확한 작품명으로만** 찾아진다 - 추측 후보로는 못 찾는다는 뜻이다.
+    let fetches = 0;
+    const run = (titles: readonly string[]) =>
+      searchKinolightsStills(c.keyword, {
+        plannedWorkTitles: titles,
+        findWorkUrl: async (q) => (q.trim() === c.want ? "https://m.kinolights.com/season/152343" : null),
+        fetchPage: async (url) => {
+          fetches += 1;
+          return url.includes("152343") ? page(c.want) : null;
+        },
+      });
+
+    const got = await run(planned);
+    assert(got.length === 2, `${c.what}: 기획 작품명을 받으면 스틸이 붙어야 한다 (받은 값: ${got.length}장)`);
+    assert(fetches <= 5, `${c.what}: 페이지 받기 상한(5)을 지켜야 한다 (${fetches}회)`);
+
+    // 기획 값이 없을 때(= 고치기 전 동작)는 2026-11-17 실측과 같아야 한다.
+    const guessOnly = await run([]);
+    if (c.wasAttached) {
+      assert(guessOnly.length === 2, `${c.what}: 추측만으로도 붙던 글은 계속 붙어야 한다`);
+    } else {
+      assert(guessOnly.length === 0, `${c.what}: 추측만으로는 못 찾던 글이다(실측 0장) - 이게 고친 이유다`);
+    }
+  }
+
+  // 사람 이름을 작품명으로 넘기지 않는다 - 「수지」 사고(인물명과 같은 제목의 작품) 계열이다.
+  const heart = plannedWorkTitlesFrom(
+    { protagonist: "남주혁(그리고 한소희)", summary: "남주혁·한소희 주연 판타지 로맨스 드라마 <하트비트> 캐스팅 소식(극본 이시은 작가)" },
+    "남주혁 한소희 드라마 하트비트 이시은 작가"
+  );
+  assert(!heart.some((t) => t === "남주혁"), `protagonist가 사람이면 작품명으로 쓰지 않는다 (받은 값: ${heart.join(" / ")})`);
+  assert(plannedWorkTitlesFrom(null, "아무거나").length === 0, "기획이 없으면 빈 배열");
+  assert(plannedWorkTitlesFrom({ protagonist: "전지현", summary: "전지현 근황" }, "전지현").length === 0, "작품명이 없으면 빈 배열 - 추측 폴백에 맡긴다");
+  // 가운뎃점으로 이어 둔 사람 여럿도 작품명이 아니다(`강동원·김고은`).
+  const soul = plannedWorkTitlesFrom(
+    { protagonist: "강동원·김고은 (혼: 삼각의 시간)", summary: "넷플릭스 사극 '혼: 삼각의 시간' 강동원·김고은 캐스팅 소식" },
+    "강동원 김고은 넷플릭스 혼: 삼각의 시간 혐관 사극"
+  );
+  assert(!soul.some((t) => t.includes("강동원")), `사람을 가운뎃점으로 이어 둔 것도 버린다 (받은 값: ${soul.join(" / ")})`);
+
+  console.log("✅ 기획 작품명 전달 - 0장 5건(11/17 4건 + 11/19 1건) 해소, 붙던 5건 불변, 상한·인물명 가드 유지");
+}
+
+// 배선: collectWebImages가 기획 작품명을 수집기까지 넘긴다(2026-11-25).
+{
+  const dir = await mkdtemp(resolve(tmpdir(), "kino-planned-"));
+  try {
+    const seen: (readonly string[] | undefined)[] = [];
+    const slots: WebImageSlot[] = [
+      { index: 1, description: "작품 공식 스틸 — 웹 검색", query: "하트비트 스틸컷", context: "문단1" },
+    ];
+    const call = async (plannedWorkTitles?: readonly string[]) => {
+      await collectWebImages(
+        { keyword: "남주혁 한소희 드라마 하트비트 이시은 작가", dir, slots },
+        {
+          category: "entertainment",
+          ...(plannedWorkTitles ? { plannedWorkTitles } : {}),
+          searchImages: async () => [],
+          cropTall: false,
+          searchKinolights: async (_keyword, opts) => {
+            seen.push(opts?.plannedWorkTitles);
+            return [];
+          },
+          runCodex: async () => ({ ok: true as const, durationMs: 1, data: { slots: [] } }),
+        }
+      );
+    };
+
+    await call(["하트비트"]);
+    assert(seen[0]?.[0] === "하트비트", `기획 작품명이 수집기까지 가야 한다 (받은 값: ${JSON.stringify(seen[0])})`);
+    await call();
+    assert(seen[1] === undefined, "기획 작품명이 없으면 넘기지 않는다(예전 동작 그대로)");
+    console.log("✅ 배선 - collectWebImages가 기획 작품명을 수집기로 넘긴다");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}

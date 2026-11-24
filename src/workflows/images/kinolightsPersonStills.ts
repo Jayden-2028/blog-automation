@@ -31,6 +31,8 @@ import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import { personNameCandidates } from "../research/personNameFromKeyword.js";
 import type { recordApiUsage } from "../../services/usage/recordApiUsage.js";
 import { loadKinolightsMediaStills } from "./loadKinolightsMediaStills.js";
+// 인용부호 추출은 한 벌만 둔다(2026-11-25) - 기획 작품명 전달과 같은 규칙이어야 한다(`〈〉`·`『』` 포함).
+import { quotedTitles } from "./plannedWorkTitles.js";
 import {
   defaultFetchPage,
   extractStills,
@@ -87,18 +89,6 @@ export type PersonSlot = {
 };
 
 // ─── 작품명·인물명 추출 ──────────────────────────────────────────────────────────
-
-/** 인용부호로 감싼 말. `'…'` `‘…’` `「…」` `<…>` `《…》` `“…”` `"…"`. */
-const QUOTED = /'([^']{2,40})'|‘([^’]{2,40})’|「([^」]{2,40})」|<([^<>]{2,40})>|《([^》]{2,40})》|“([^”]{2,40})”|"([^"]{2,40})"/g;
-
-function quotedTitles(text: string): string[] {
-  const out: string[] = [];
-  for (const m of text.matchAll(QUOTED)) {
-    const value = m.slice(1).find(Boolean)?.trim();
-    if (value) out.push(value);
-  }
-  return out;
-}
 
 /** 키워드에서 기사 주인공의 이름을 뽑는다. 못 뽑으면 키워드 전체. */
 export function personNameOf(keyword: string): string {

@@ -126,6 +126,32 @@
 | 기안장2 3번 | `덱스 기안84` → 빈 자리 | `덱스 프로필` (R3·R4) |
 | 닥터X 1번 | `닥터X 하얀 마피아의 시대 스틸컷` | `닥터X 김지원` — 회차 빼고 인물 중심 (R5) |
 
+## 기획 -> 수집 계약: 작품명 전달 (2026-11-25 추가)
+
+기획의 `protagonist`·`summary`는 사람이 읽는 값만이 아니다. **키노라이츠 공식 스틸 수집기가 작품명을
+여기서 받는다.**
+
+- 추출: `images/plannedWorkTitles.ts`의 `plannedWorkTitlesFrom(plan, keyword)` -> 작품명 최대 3개
+  (`MAX_PLANNED_TITLES`). 순서가 수집기의 시도 순서다.
+- 배선: `prepareManuscript` -> `collectWebImagesForJob({ plannedWorkTitles })` ->
+  `collectWebImages({ plannedWorkTitles })` -> `searchKinolightsStills(keyword, { plannedWorkTitles })`.
+- 수집기는 받은 작품명을 **후보 맨 앞**에 놓고, 제목 검증(og:title)도 그 작품명으로 인정한다
+  (`titleMatchesPlanOrKeyword`). 비어 있으면 예전 동작(키워드에서 추측) 그대로다.
+- **후보 상한(6)은 그대로다** - 받은 만큼 추측 후보가 줄어들어 Serper 호출이 늘지 않는다.
+
+왜 이 계약을 만들었나: 수집기가 키워드에서 작품명을 추측하면 **작품명이 키워드 가운데 있을 때 닿지
+못한다**(2026-11-17 실측, 작품 원고 7건 중 맨 앞 3건은 전부 성공·맨 앞 아님 4건은 전부 0장). 기획은
+원고를 읽고 작품명을 이미 알고 있으므로 추측할 이유가 없다.
+
+주의 두 가지:
+
+1. **`protagonist`는 사람일 수 있다**(`남주혁(그리고 한소희)`). 인용부호로 표시되지 않은 protagonist가
+   키워드의 인물명 후보와 겹치면 작품명으로 쓰지 않는다 - 인물과 같은 제목의 작품이 검증을 통과해
+   다른 배우의 스틸이 발행된 「수지」 사고(2026-11-19) 계열이다.
+2. 그래서 **인용부호가 작품명 표시로 쓰인다**. 기획이 `'…'` `〈…〉` `『…』` `<…>` 등으로 감싼 말을 먼저
+   본다. 이 괄호 목록은 인물 트랙의 자리별 작품명 추출(`kinolightsPersonStills`)과 **같은 한 벌**이다
+   (`plannedWorkTitles.ts`의 `QUOTED`).
+
 ## 파이프라인 배치
 
 ```

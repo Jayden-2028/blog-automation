@@ -96,6 +96,12 @@ export type SearchKinolightsOptions = {
    * (`수지` -> 「수지」, season/81768)이 og:title 검증을 통과해 엉뚱한 배우의 스틸이 발행됐다.
    */
   excludeWorkTitles?: readonly string[];
+  /**
+   * 기획 단계가 이미 알아낸 작품명(2026-11-25, `plannedWorkTitles.ts`). 있으면 **추측보다 먼저** 쓰고
+   * 제목 검증 기준으로도 인정한다. 추측 후보는 상한(MAX_CANDIDATES) 안에서 그만큼 줄어드므로
+   * Serper 호출 수는 늘지 않는다.
+   */
+  plannedWorkTitles?: readonly string[];
 };
 
 /** `https://m.kinolights.com/season/152343/media`처럼 미디어 탭 주소로 정규화한다. */
@@ -118,9 +124,16 @@ export function cleanKeyword(keyword: string): string {
   return text.replace(/^(오리지널|드라마|영화|시리즈)\s+/i, "").trim();
 }
 
-/** 비교용 정규화 - 공백·문장부호를 없애고 소문자로. */
+/**
+ * 비교용 정규화 - 글자·숫자만 남기고(그리고 `디즈니+`의 `+`) 소문자로.
+ *
+ * 2026-11-25에 "열거한 괄호·인용부호만 지우기"에서 바꿨다. 열거 방식은 `bareWord`(단어 끝 문장부호
+ * 제거)와 **기준이 갈라져** 같은 제목이 서로 다르게 정규화됐다: `혼: 삼각의 시간`은 단어로 쪼개면
+ * 콜론이 떨어져 `혼삼각의시간`인데 제목 쪽은 `혼:삼각의시간`이라 구간 일치가 성립하지 않았다.
+ * 둘이 같은 문자 집합을 쓰면 그런 틈이 생기지 않는다.
+ */
 export function normalize(text: string): string {
-  return text.replace(/[\s'"“”‘’<>《》「」()[\]]/g, "").toLowerCase();
+  return text.replace(/[^\p{L}\p{N}+]/gu, "").toLowerCase();
 }
 
 /**
@@ -253,7 +266,7 @@ type Span = { text: string; start: number; size: number };
  * 한 단어 후보 몫(SINGLE_WORD_SLOTS)을 따로 두고, 각 길이 안에서는 양 끝부터 안쪽으로 고른다 -
  * 작품명이 머리(`연애박사 안판석…`)나 꼬리(`…그린 연애박사`)에 오는 경우가 많다.
  */
-export function workTitleCandidates(keyword: string): string[] {
+export function workTitleCandidates(keyword: string, planned: readonly string[] = []): string[] {
   const whole = keyword.trim();
   const words = keywordWords(cleanKeyword(keyword));
   if (!whole) return [];
@@ -281,9 +294,38 @@ export function workTitleCandidates(keyword: string): string[] {
 
   // 시도 순서: 긴 것 먼저, 같은 길이면 왼쪽 먼저. 같은 글자 구간은 하나만.
   picked.sort((a, b) => b.size - a.size || a.start - b.start);
-  const candidates = [whole];
-  for (const span of picked) if (!candidates.includes(span.text)) candidates.push(span.text);
-  return candidates;
+  // 기획이 넘긴 작품명이 맨 앞에 선다 - 추측은 그 뒤 남은 칸만 쓴다(상한은 그대로라 호출이 늘지 않는다).
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const push = (text: string): void => {
+    const key = normalize(text);
+    if (key.length < 1 || seen.has(key)) return;
+    seen.add(key);
+    candidates.push(text);
+  };
+  for (const title of planned) push(title);
+  push(whole);
+  for (const span of picked) push(span.text);
+  // 상한은 기획 작품명을 받아도 그대로다 - 호출 수가 늘지 않는다는 약속이 이 한 줄이다.
+  // (넘어오는 작품명은 `MAX_PLANNED_TITLES`(3)로 이미 묶여 있어 키워드 전체 후보가 밀려나지 않는다.)
+  return candidates.slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * 찾아낸 작품이 **이 원고의 작품이 맞는지** 본다. 키워드 구간과 맞거나, 기획이 넘긴 작품명과 맞으면 통과다.
+ *
+ * 기획 작품명을 검증 기준으로 **인정하는** 이유: 기획은 원고 본문을 읽고 작품명을 적었으므로 키워드보다
+ * 근거가 약하지 않다. 오히려 키워드에는 작품명이 안 적힌 경우도 있다(`남주혁 한소희 드라마 하트비트…`의
+ * 작품명은 키워드에 있지만, 인물 글은 키워드가 사람 이름뿐이다). 양방향으로 보는 이유는 한쪽이 부제를 더
+ * 달고 있을 수 있기 때문이다(`흑백 가수: 보컬 계급 전쟁` vs og:title `흑백 가수`).
+ */
+export function titleMatchesPlanOrKeyword(
+  workTitle: string,
+  keyword: string,
+  planned: readonly string[] = []
+): boolean {
+  if (titleMatchesKeyword(workTitle, keyword)) return true;
+  return planned.some((title) => titleMatchesKeyword(workTitle, title) || titleMatchesKeyword(title, workTitle));
 }
 
 /**
@@ -489,7 +531,8 @@ export async function searchKinolightsStills(
   const excluded = new Set((options.excludeWorkTitles ?? []).map(normalize));
   const triedPages = new Set<string>();
   let fetched = 0;
-  for (const candidate of workTitleCandidates(trimmed)) {
+  const planned = (options.plannedWorkTitles ?? []).filter((t) => t.trim().length >= 2);
+  for (const candidate of workTitleCandidates(trimmed, planned)) {
     if (fetched >= MAX_PAGE_FETCHES) break;
 
     const workUrl = await findWorkUrl(candidate).catch(() => null);
@@ -506,7 +549,7 @@ export async function searchKinolightsStills(
 
     // **이 작품이 맞는지 확인하고 쓴다.** 아니면 다음 후보로 - 틀린 작품의 스틸은 빈 자리보다 나쁘다.
     const workTitle = readWorkTitle(html);
-    if (!workTitle || !titleMatchesKeyword(workTitle, trimmed)) continue;
+    if (!workTitle || !titleMatchesPlanOrKeyword(workTitle, trimmed, planned)) continue;
     if (excluded.has(normalize(workTitle))) continue;
 
     return extractStills(html, mediaUrl);

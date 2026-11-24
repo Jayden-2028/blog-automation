@@ -37,6 +37,7 @@ import { buildWebImageSlots } from "../images/collectWebImages.js";
 import { inferAcquisition } from "../images/imageEditRequest.js";
 import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
+import { plannedWorkTitlesFrom } from "../images/plannedWorkTitles.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
 import { usesKoreaplainImagePolicy } from "../images/koreaplainImageSources.js";
 import { DEFAULT_TRACK, trackOfJob } from "../../notifications/telegramTracks.js";
@@ -422,6 +423,9 @@ export async function prepareManuscript(
   if (route) imageFailures.push(...route.notes);
   const planSearchIndexes = route?.searchIndexes;
   const planQueries = route?.queries;
+  // 기획이 알아낸 작품명(2026-11-25). 키노라이츠 수집기가 키워드에서 작품명을 추측하다 가운데에 있는
+  // 작품명을 놓치던 문제를 없앤다 - 추측은 이것이 비었을 때의 폴백으로 남는다.
+  const plannedWorkTitles = plannedWorkTitlesFrom(plan, job.keyword);
   const planSubjects = route?.subjects;
   const planCaptureUrls = route?.captureUrls;
 
@@ -544,6 +548,7 @@ export async function prepareManuscript(
       planSearchIndexes,
       planQueries,
       planSubjects,
+      plannedWorkTitles,
       // 이미 쓰고 있는 컷을 중복 검사기에 등록시킨다(2026-09-24) - 일부 자리만 재수집할 때
       // 같은 사진이 다시 들어오는 것을 막는다.
       existingImageUrls: Object.fromEntries(

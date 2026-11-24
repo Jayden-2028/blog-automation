@@ -315,6 +315,12 @@ export type CollectWebImagesOptions = {
    * 올라온다(R8).
    */
   planQueries?: Record<number, string[]>;
+  /**
+   * 기획이 알아낸 작품명(2026-11-25, `plannedWorkTitles.ts`). 키노라이츠 수집기에 그대로 넘긴다 -
+   * 수집기가 키워드에서 작품명을 추측하다 **가운데에 있는 작품명을 놓치던** 문제를 없앤다.
+   * 없으면 예전 동작(추측)뿐이다.
+   */
+  plannedWorkTitles?: readonly string[];
   /** 테스트 주입 지점. 기본은 실제 HEAD 요청. */
   fetchTrailerFrames?: typeof fetchTrailerFrameCandidates;
   /**
@@ -1044,6 +1050,8 @@ export async function collectWebImages(
   if (kinolights && needJobLevel) {
     const stills = await kinolights(input.keyword, {
       jobId: options.jobId,
+      // 기획이 이미 작품명을 알고 있으면 추측하지 않는다(2026-11-25).
+      ...(options.plannedWorkTitles?.length ? { plannedWorkTitles: options.plannedWorkTitles } : {}),
       ...(options.category === "person" ? { excludeWorkTitles: [personNameOf(input.keyword)] } : {}),
     }).catch(() => []);
     officialStills = stills.map((still) => ({

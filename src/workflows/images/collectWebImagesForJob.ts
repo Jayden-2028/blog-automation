@@ -39,6 +39,8 @@ export type CollectWebImagesForJobInput = {
   planSearchIndexes?: number[];
   /** 기획이 자리마다 정한 검색어. 주면 서치풀 확장 없이 그대로 쓴다. */
   planQueries?: Record<number, string[]>;
+  /** 기획이 알아낸 작품명(2026-11-25). 키노라이츠 공식 스틸 수집에만 쓴다. */
+  plannedWorkTitles?: readonly string[];
   /**
    * 기획이 자리마다 정한 **대상**(2026-10-02). 주면 마커 설명 대신 이것이 판정 기준이 된다.
    *
@@ -295,6 +297,7 @@ export async function collectWebImagesForJob(
         captionLanguage: input.captionLanguage,
         researchText: input.researchText ?? null,
         planQueries: effectivePlanQueries,
+        plannedWorkTitles: input.plannedWorkTitles,
         planRecency: input.planSubjects
           ? Object.fromEntries(
               Object.entries(input.planSubjects)
