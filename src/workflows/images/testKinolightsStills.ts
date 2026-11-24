@@ -703,3 +703,18 @@ console.log("\n🎉 키노라이츠 스틸 테스트 통과");
   if (sampleEvenly([1, 2, 3], 30).length !== 3) throw new Error("❌ sampleEvenly가 짧은 목록을 그대로 두지 않는다");
   console.log("✅ 비전 표본이 스틸 목록 전체에 고르게 퍼진다");
 }
+
+// 단어에 붙은 문장부호가 후보·검증을 막지 않는다(2026-11-25, 「유스」 0장 실측).
+{
+  const { bareWord, keywordWords } = await import("./searchKinolightsStills.js");
+  const kw = "중년 여성이라면 극공감 쿠팡플레이 미드 <유스>. 기본 정보";
+  assert(bareWord("<유스>.") === "유스", "양 끝 문장부호를 뗀다");
+  assert(bareWord("디즈니+") === "디즈니+", "`디즈니+`의 +는 남긴다");
+  assert(keywordWords(kw).includes("유스"), "키워드 단어에 `유스`가 있어야 한다");
+  // 고치기 전: og:title `유스` vs 단어 `<유스>.` -> false. 작품 페이지를 찾아도 검증에서 떨어졌다.
+  assert(titleMatchesKeyword("유스", kw), "작품 페이지를 찾았으면 검증을 통과해야 한다");
+  // `총정리｜서현진`처럼 세로줄로 붙은 말도 쪼갠다 - 전에는 `라이어`가 후보에 없었다(11/01 실측 0장).
+  const liar = workTitleCandidates("드라마 라이어 몇부작 원작 결말 총정리｜서현진 유연석");
+  assert(liar.includes("라이어"), `세로줄 구분자를 쪼개 작품명에 닿아야 한다: ${liar.join(" / ")}`);
+  console.log("✅ 단어 문장부호·세로줄 - 후보와 검증이 모두 작품명에 닿는다");
+}

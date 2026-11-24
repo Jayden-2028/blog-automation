@@ -155,8 +155,7 @@ function matchesAnySpan(title: string, words: readonly string[]): boolean {
 export function titleMatchesKeyword(workTitle: string, keyword: string): boolean {
   const title = normalize(workTitle);
   if (title.length < 2) return false;
-  const words = keyword.trim().split(/\s+/).filter(Boolean);
-  return matchesAnySpan(title, words);
+  return matchesAnySpan(title, keywordWords(keyword));
 }
 
 /**
@@ -186,10 +185,30 @@ const BOUNDARY_NOISE = new Set(
   ).split(" ")
 );
 
+/**
+ * 단어 양 끝의 문장부호를 떼어 낸다(2026-11-25). `디즈니+`의 `+`는 남긴다.
+ *
+ * 왜 필요한가: 키워드가 `… 쿠팡플레이 미드 <유스>. 기본 정보`로 오면 단어가 `<유스>.`다. 이 꼴은
+ * **어느 후보와도, 어느 검증과도 일치할 수 없다** - 후보 `<유스>.`로는 작품을 못 찾고, 작품 페이지를
+ * 찾아 와도 og:title `유스`가 `유스.`와 달라 검증에서 떨어진다(2026-11-17 실측, 0장).
+ * `normalize`가 `<>`는 지우지만 마침표는 남기기 때문이다.
+ */
+export function bareWord(word: string): string {
+  return word.replace(/^[^\p{L}\p{N}+]+|[^\p{L}\p{N}+]+$/gu, "");
+}
+
+/** 키워드를 단어로 쪼갠다. `｜`·`|`는 헤드라인에서 구분자라 공백과 같이 본다(`총정리｜서현진`). */
+export function keywordWords(keyword: string): string[] {
+  return keyword
+    .trim()
+    .split(/[\s｜|／]+/)
+    .map(bareWord)
+    .filter(Boolean);
+}
+
 function isNoiseWord(word: string): boolean {
-  // `첫방,`처럼 문장부호가 붙어 와도 걸러진다. `디즈니+`의 +는 남긴다.
-  const bare = word.replace(/^[^\p{L}\p{N}+]+|[^\p{L}\p{N}+]+$/gu, "");
-  return BOUNDARY_NOISE.has(bare);
+  // `첫방,`처럼 문장부호가 붙어 와도 걸러진다.
+  return BOUNDARY_NOISE.has(bareWord(word));
 }
 
 /** 양 끝에서 안쪽으로 번갈아 나열한다(왼쪽, 오른쪽, 왼쪽+1, 오른쪽-1…). */
@@ -236,7 +255,7 @@ type Span = { text: string; start: number; size: number };
  */
 export function workTitleCandidates(keyword: string): string[] {
   const whole = keyword.trim();
-  const words = cleanKeyword(keyword).split(/\s+/).filter(Boolean);
+  const words = keywordWords(cleanKeyword(keyword));
   if (!whole) return [];
 
   const spans: Span[] = [];
