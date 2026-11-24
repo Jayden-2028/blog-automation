@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 
 import { readImageSize } from "../../images/imageDimensions.js";
 import { MAX_SIDE_PX, isAvif, isOversizeBuffer, optimizeImage } from "../../images/optimizeImage.js";
+import { describeGradeParams } from "../../images/photoGrade.js";
+import type { PhotoGrade } from "../../images/photoGrade.js";
 import { MIME_BY_FORMAT, sniffImageFormat } from "../../images/sniffImageFormat.js";
 import { supabase } from "../client.js";
 
@@ -27,8 +29,9 @@ export type UploadArticleImageInput = {
    * 글자가 읽혀야 하는 캡처·표는 변환하면 뭉개질 수 있어 호출하는 쪽이 골라서 켠다.
    * 객체를 주면 화질(`quality`, 0~1)·최대 변(`maxSide`)을 정한다. 변환은 best-effort라
    * 실패하거나 더 커지면 원본으로 올린다.
+   * `grade`를 주면 톤 보정(16:9 크롭·밝기·대비·색온도)까지 한다(2026-11-25, koreaplain 실제 사진 - photoGrade.ts).
    */
-  optimize?: boolean | { quality?: number; maxSide?: number };
+  optimize?: boolean | { quality?: number; maxSide?: number; grade?: PhotoGrade };
 };
 
 /**
@@ -115,12 +118,16 @@ export async function prepareUploadImage(
       console.log(
         `ℹ️ [images] ${label} ${normalizeAvif || isAvif(input.mimeType) ? "AVIF → " : ""}WebP 변환 ` +
           `${Math.round(optimized.originalBytes / 1024)}KB → ${Math.round(optimized.buffer.length / 1024)}KB` +
-          (optimized.width && optimized.height ? ` (${optimized.width}×${optimized.height})` : "")
+          (optimized.width && optimized.height ? ` (${optimized.width}×${optimized.height})` : "") +
+          (optimized.graded ? ` · 톤 보정 ${describeGradeParams(optimized.graded)}` : "")
       );
       imageBuffer = optimized.buffer;
       mimeType = optimized.mimeType;
     } else {
       skippedReason = optimized.skippedReason;
+      if (typeof input.optimize === "object" && input.optimize.grade) {
+        console.warn(`⚠️ [images] ${label} 톤 보정을 하지 못해 원본으로 올립니다: ${optimized.skippedReason ?? "사유 미상"}`);
+      }
       if (isAvif(mimeType)) {
         console.warn(`⚠️ [images] ${label} AVIF를 WebP로 바꾸지 못해 .avif 그대로 올립니다: ${optimized.skippedReason ?? ""}`);
       }

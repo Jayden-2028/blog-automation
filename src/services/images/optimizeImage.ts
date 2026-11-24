@@ -16,6 +16,8 @@ import { chromium } from "playwright";
 
 import { isOversize, readImageSize } from "./imageDimensions.js";
 import type { ImageSize } from "./imageDimensions.js";
+import { PHOTO_GRADE_JS } from "./photoGrade.js";
+import type { GradeParams, PhotoGrade } from "./photoGrade.js";
 
 /** 긴 변이 이보다 크면 줄인다. 본문 표시 폭의 2배쯤 - 고해상도 화면에서도 선명하다. */
 export const MAX_SIDE_PX = 1600;
@@ -55,6 +57,12 @@ export type OptimizeImageInput = {
   /** 0~1. 기본 0.82. 글자가 든 이미지는 0.9 이상을 쓴다. */
   quality?: number;
   maxSide?: number;
+  /**
+   * 톤 보정(2026-11-25, koreaplain 실제 사진 - photoGrade.ts). 주면 **용량 규칙과 무관하게** 변환한다 - 목적이
+   * 용량이 아니라 한 글 안의 사진 톤·비율을 맞추는 것이다. 16:9 중앙 크롭 → 최대 grade.width×grade.height → 밝기·대비·색온도.
+   * `quality`·`maxSide`보다 grade의 값이 이긴다.
+   */
+  grade?: PhotoGrade;
 };
 
 export type OptimizeImageResult = {
@@ -73,6 +81,8 @@ export type OptimizeImageResult = {
    * - 호출부가 그 사실을 기록에 남긴다(조용히 삼키지 않는다).
    */
   oversize?: boolean;
+  /** 톤 보정을 했으면 적용한 값(로그용). */
+  graded?: GradeParams;
 };
 
 /**
@@ -120,10 +130,16 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
     ...(oversize ? { oversize: true } : {}),
   });
 
-  const skip = shouldOptimize(input.mimeType, originalBytes, originalSize, maxSide);
+  const grade = input.grade;
+  // 톤 보정은 용량 규칙을 보지 않는다 - 형식만 본다(gif 등은 그대로 둔다).
+  const skip = grade
+    ? OPTIMIZABLE.has(input.mimeType.toLowerCase())
+      ? null
+      : `대상 형식이 아님(${input.mimeType})`
+    : shouldOptimize(input.mimeType, originalBytes, originalSize, maxSide);
   if (skip) return keep(skip);
 
-  const quality = Math.min(1, Math.max(0.1, input.quality ?? DEFAULT_QUALITY));
+  const quality = Math.min(1, Math.max(0.1, grade?.quality ?? input.quality ?? DEFAULT_QUALITY));
 
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null;
   try {
@@ -136,13 +152,26 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
     const dataUrl = `data:${input.mimeType};base64,${input.buffer.toString("base64")}`;
 
     // 브라우저 안에서 도는 코드라 문자열로 넘긴다(이 파일은 DOM 타입을 쓰지 않는 Node 모듈이다).
-    await page.setContent(
-      `<!doctype html><meta charset="utf-8"><script>
-        (async () => {
-          try {
-            const image = new Image();
-            image.src = ${JSON.stringify(dataUrl)};
-            await image.decode();
+    // 톤 보정이 있으면 같은 캔버스 단계에서 크롭·보정까지 한다(photoGrade.ts의 PHOTO_GRADE_JS 한 벌).
+    const gradeScript = grade
+      ? `
+            ${PHOTO_GRADE_JS}
+            const grade = ${JSON.stringify(grade)};
+            const crop = __pgCropRect(image.naturalWidth, image.naturalHeight, grade.aspect);
+            const size = __pgOutputSize(crop.sw, crop.sh, grade.width, grade.height);
+            const canvas = document.createElement("canvas");
+            canvas.width = size.width;
+            canvas.height = size.height;
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            context.imageSmoothingQuality = "high";
+            context.drawImage(image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, size.width, size.height);
+            const pixels = context.getImageData(0, 0, size.width, size.height);
+            const stats = __pgLumaStats(pixels.data, Math.max(1, Math.floor((size.width * size.height) / 200000)));
+            const params = __pgParams(stats, grade);
+            __pgApply(pixels.data, params);
+            context.putImageData(pixels, 0, 0);
+            window.__optimized = { data: canvas.toDataURL("image/webp", ${quality}), width: size.width, height: size.height, params };`
+      : `
             const longSide = Math.max(image.naturalWidth, image.naturalHeight);
             const scale = longSide > ${maxSide} ? ${maxSide} / longSide : 1;
             const width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -153,7 +182,14 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
             const context = canvas.getContext("2d");
             context.imageSmoothingQuality = "high";
             context.drawImage(image, 0, 0, width, height);
-            window.__optimized = { data: canvas.toDataURL("image/webp", ${quality}), width, height };
+            window.__optimized = { data: canvas.toDataURL("image/webp", ${quality}), width, height };`;
+    await page.setContent(
+      `<!doctype html><meta charset="utf-8"><script>
+        (async () => {
+          try {
+            const image = new Image();
+            image.src = ${JSON.stringify(dataUrl)};
+            await image.decode();${gradeScript}
           } catch (error) {
             window.__optimized = { data: "", width: 0, height: 0 };
           }
@@ -162,14 +198,14 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
       { waitUntil: "load" }
     );
     await page.waitForFunction("window.__optimized !== undefined", null, { timeout: 60_000 });
-    const out = (await page.evaluate("window.__optimized")) as { data: string; width: number; height: number };
+    const out = (await page.evaluate("window.__optimized")) as { data: string; width: number; height: number; params?: GradeParams };
 
     if (!out.data.startsWith("data:image/webp")) return keep("canvas가 WebP를 만들지 못함");
     const buffer = Buffer.from(out.data.slice(out.data.indexOf(",") + 1), "base64");
     // AVIF는 더 커져도 바꾼다 - 목적이 형식 정규화다(위 isAvif 주석).
     // 치수 상한을 넘은 것도 더 커져도 바꾼다 - 목적이 **치수 줄이기**라 용량 비교가 기준이 아니다(2026-11-08).
-    // 그 외는 예전처럼 충분히 줄 때만.
-    if (!isAvif(input.mimeType) && !oversize && buffer.length > originalBytes * MAX_RESULT_RATIO) {
+    // 그 외는 예전처럼 충분히 줄 때만. 톤 보정은 용량과 무관하게 바꾼다(목적이 톤·비율이다).
+    if (!grade && !isAvif(input.mimeType) && !oversize && buffer.length > originalBytes * MAX_RESULT_RATIO) {
       return keep(`줄어든 폭이 작음(${Math.round(originalBytes / 1024)}KB → ${Math.round(buffer.length / 1024)}KB)`);
     }
     return {
@@ -180,6 +216,7 @@ export async function optimizeImage(input: OptimizeImageInput): Promise<Optimize
       width: out.width,
       height: out.height,
       ...(oversize ? { oversize: true } : {}),
+      ...(grade && out.params ? { graded: out.params } : {}),
     };
   } catch (error) {
     return keep(`변환 실패: ${error instanceof Error ? error.message : String(error)}`);

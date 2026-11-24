@@ -323,6 +323,7 @@
     "test:image-plan": "tsx src/workflows/images/testPlanImageSlots.ts",
     "test:caption-wiring": "tsx src/workflows/images/testCaptionWiring.ts",
     "test:koreaplain-image-sources": "tsx src/workflows/images/testKoreaplainImageSources.ts",
+    "test:kto-photos": "tsx src/workflows/images/testKtoPhotos.ts",
     "test:reimage-koreaplain": "tsx src/workflows/images/testReimageKoreaplainCli.ts",
     "test:plan-subject": "tsx src/workflows/images/testPlanSubjectWiring.ts",
     "test:route-plan": "tsx src/workflows/images/testRouteImagePlan.ts",

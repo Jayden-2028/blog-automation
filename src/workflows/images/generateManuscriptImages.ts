@@ -21,7 +21,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
-import { toIllustrationCaption } from "./koreaplainImageSources.js";
+import { toIllustrationCaption, toIllustrationPrompt } from "./koreaplainImageSources.js";
 
 /** 동시에 생성할 자리 수(2026-09-21). 유료 API라 상한을 둔다. */
 const IMAGE_CONCURRENCY = 3;
@@ -204,7 +204,10 @@ export async function generateManuscriptImages(
         : block.acquisition === "infographic"
           ? config.infographicQuality
           : undefined;
-      const result: GenerateImageResult = await generate({ prompt: block.prompt, quality }, provider);
+      // koreaplain(2026-11-25): AI 이미지는 실사 음식 사진 대체가 아니라 설명 그림이다 - 고정 일러스트 스타일 한 줄을 앞에 붙이고
+      // 실사 지시어를 지운다(KOREAPLAIN_ILLUSTRATION_STYLE). 기록(prompt)은 실제로 보낸 문장을 남긴다.
+      const sentPrompt = options.aiIllustrations ? toIllustrationPrompt(block.prompt) : block.prompt;
+      const result: GenerateImageResult = await generate({ prompt: sentPrompt, quality }, provider);
       const variant = providers.length > 1 ? provider : undefined;
       const stem = fileStem(index, block.description);
 
@@ -226,7 +229,7 @@ export async function generateManuscriptImages(
         slotImages.push({
           index,
           description: captionOf(block.description),
-          prompt: block.prompt,
+          prompt: sentPrompt,
           url: null,
           provider,
           fileName: `${stem}${variant ? `-${variant}` : ""}.png`,
@@ -255,7 +258,7 @@ export async function generateManuscriptImages(
         slotImages.push({
           index,
           description: captionOf(block.description),
-          prompt: block.prompt,
+          prompt: sentPrompt,
           url: null,
           provider,
           fileName,
@@ -267,7 +270,7 @@ export async function generateManuscriptImages(
       slotImages.push({
         index,
         description: captionOf(block.description),
-        prompt: block.prompt,
+        prompt: sentPrompt,
         url: uploaded.url,
         provider,
         fileName,

@@ -25,8 +25,10 @@ import { extractYoutubeVideoIds, fetchTrailerFrameCandidates } from "./youtubeTr
 import {
   describeDroppedCandidates,
   isAllowedKoreaplainCandidate,
+  isNoDerivativesLicense,
   usesKoreaplainImagePolicy,
 } from "./koreaplainImageSources.js";
+import type { KtoSearch } from "../../services/images/ktoPhotoGallery.js";
 import { extractTrailingJson } from "../../services/llm/runHeadlessCodex.js";
 import type { WebSearchAgent } from "../../services/llm/runHeadlessCodex.js";
 import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
@@ -324,6 +326,11 @@ export type CollectWebImagesOptions = {
   /** 테스트 주입 지점. 기본은 실제 HEAD 요청. */
   fetchTrailerFrames?: typeof fetchTrailerFrameCandidates;
   /**
+   * 한국관광공사 관광사진 검색(2026-11-25, koreaplain 1순위 출처 - collectKtoPhotos.ts). collectWebImagesForJob만 쓴다.
+   * 미지정이면 `KTO_SERVICE_KEY`가 있을 때 실제 API, 없으면 조용히 건너뛴다. false면 끈다(테스트 - 외부 HTTP 금지).
+   */
+  ktoSearch?: false | KtoSearch;
+  /**
    * 작품 공식 스틸 직접 수집(2026-09-24). 작품·연예 카테고리에서만 부른다.
    * false면 건너뛴다(테스트 - 외부 HTTP를 타면 안 된다).
    */
@@ -619,6 +626,11 @@ export function buildPrompt(
   );
 
   return lines.join("\n");
+}
+
+/** content-type → 저장 확장자. 이미지가 아니면 null. collectKtoPhotos.ts도 같은 규칙을 쓴다. */
+export function imageExtensionFor(rawContentType: string): string | null {
+  return extensionFor(rawContentType);
 }
 
 function extensionFor(rawContentType: string): string | null {
@@ -1260,7 +1272,19 @@ export async function collectWebImages(
     // koreaplain: 이미지 주소와 출처 페이지가 둘 다 허용 목록 안인 후보만 쓴다. 에이전트가 직접 찾은
     // 후보(웹 검색)는 위 검색창 필터를 거치지 않았으므로 여기서 거른다. 사용자가 주소를 찍어 준 자리
     // (userChosen)도 예외가 아니다 - "어느 경로로도 들어오지 못하게"가 목적이다.
-    const rawCandidates = dropDisallowed(unfilteredCandidates, (c) => c);
+    const allowedCandidates = dropDisallowed(unfilteredCandidates, (c) => c);
+    // koreaplain 실제 사진은 톤 보정(크롭·색 보정)을 거친다(2026-11-25, photoGrade.ts). **변경 금지 라이선스(CC BY-ND·공공누리
+    // 제3·4유형)는 보정 대신 제외한다** - 고친 사진을 싣는 것 자체가 위반이다. 1순위의 분류(`cc_nd`)와 후보별 라이선스 문구로 본다.
+    const rawCandidates = enforceSources
+      ? allowedCandidates.filter(
+          (c) => !isNoDerivativesLicense(c.license, c.imageUrl === result.imageUrl ? result.reusePermission : undefined)
+        )
+      : allowedCandidates;
+    if (rawCandidates.length < allowedCandidates.length) {
+      failures.push(
+        `[자리 ${slot.index}] ℹ️ 변경 금지(ND) 라이선스 후보 ${allowedCandidates.length - rawCandidates.length}장을 뺐습니다(톤 보정을 할 수 없는 사진).`
+      );
+    }
     if (enforceSources && rawCandidates.length === 0) {
       // 후보가 전부 허용 밖이었다. 아래의 "후보 N장을 모두 써봤지만" 문구는 내려받기를 시도한 경우의
       // 말이라 여기서는 맞지 않는다 - 이 자리는 호출부가 AI 생성으로 넘긴다.

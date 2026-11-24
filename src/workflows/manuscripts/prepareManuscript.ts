@@ -40,6 +40,8 @@ import { planImageSlots } from "../images/planImageSlots.js";
 import { plannedWorkTitlesFrom } from "../images/plannedWorkTitles.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
 import { usesKoreaplainImagePolicy } from "../images/koreaplainImageSources.js";
+import { buildKoreaplainKtoHints } from "../images/koreanFoodNames.js";
+import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import { DEFAULT_TRACK, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { ImagePlan } from "../images/planImageSlots.js";
 import { routeImagePlan } from "../images/routeImagePlan.js";
@@ -562,6 +564,20 @@ export async function prepareManuscript(
       ],
       // "🖼 이미지 수정"에서 사람이 적어 보낸 자리별 요구(2026-09-22). 없으면 빈 객체다.
       requirements: readImageRequirements(job.metadata as Record<string, unknown> | null),
+      // koreaplain 1순위 출처 = 한국관광공사 관광사진(2026-11-25). 한글 키워드 검색이라 기획 검색어·한글 초안(기준 원고)·
+      // job 키워드에서 자리별 한글 음식명을 뽑아 넘긴다(koreanFoodNames.ts). 다른 트랙은 넘기지 않는다.
+      ...(koreaplainImages
+        ? {
+            ktoHints: buildKoreaplainKtoHints({
+              keyword: job.keyword,
+              koreanTitle: baseArticle.title ?? null,
+              koreanBody: baseArticle.content ?? null,
+              imagePrompts: slotPrompts,
+              planQueries,
+              slotCount: parseManuscriptBlocks(content, slotPrompts).filter((block) => block.type === "image").length,
+            }),
+          }
+        : {}),
       // 사용자가 주소를 찍어준 자리는 검색하지 않고 그대로 쓴다(2026-09-22).
       directUrls: readImageDirectUrls(job.metadata as Record<string, unknown> | null),
     });

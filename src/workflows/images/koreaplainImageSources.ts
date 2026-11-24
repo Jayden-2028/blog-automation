@@ -5,10 +5,19 @@
 // 복사돼 서비스된다. 구글 퍼블리셔 정책은 저작권 침해를 금지하고, 연합뉴스·뉴스1 같은 곳은 실제로
 // 라이선스를 추심한다. 애드센스 수익화를 앞둔 사이트라 그대로 둘 수 없었다.
 //
-// 그래서 이 트랙의 이미지 자리는 셋 중 하나로만 채운다.
-//   1. 공공·공식 자료(웹 검색) - **이 파일의 목록 안에 있는 호스트만**
-//   2. 공식 페이지 캡처(capturePagesForJob) - 화면 자체가 정보인 자리(요금표·운영시간·기관 안내)
-//   3. AI 생성(generateManuscriptImages, quality low 고정) - 나머지 전부
+// 그래서 이 트랙의 이미지 자리는 아래 순서로만 채운다(2026-11-25 음식 전환에서 ①을 맨 앞에 넣었다 - 실제 사진 우선).
+//   ① 한국관광공사 관광사진 API(collectKtoPhotos.ts) - 공공누리 제1유형, 한글 음식명으로 찾는다. 이미지는
+//      tong.visitkorea.or.kr(아래 visitkorea.or.kr 하위)이라 이 목록 안이다. 키 `KTO_SERVICE_KEY`가 없으면 건너뛴다.
+//   ② 공공·공식 자료(웹 검색) - **이 파일의 목록 안에 있는 호스트만**
+//   ③ 공식 페이지 캡처(capturePagesForJob) - 화면 자체가 정보인 자리(요금표·운영시간·기관 안내)
+//   ④ AI 생성(generateManuscriptImages, quality low 고정) - **설명 그림**(지도·상차림 도식·주문 순서)만.
+//      실사 음식 사진을 대신하지 않는다 - 프롬프트 앞에 고정 일러스트 스타일(KOREAPLAIN_ILLUSTRATION_STYLE)이 붙는다.
+// **한식진흥원(hansik.or.kr) 사진은 쓰지 않는다**(2026-11-25 사용자 결정 - 목록에 넣지 않는다). 일반 웹 검색 사진(언론·블로그·
+// 상업 사이트)은 그대로 금지다.
+//
+// ①·②로 받은 실제 사진은 올릴 때 **톤을 맞춘다**(services/images/photoGrade.ts - 16:9 중앙 크롭 1600×900, 밝기·대비 정규화,
+// 약간 따뜻한 색온도, 강도 상수 한 곳). 그래서 **변경 금지 라이선스(CC BY-ND, 공공누리 제3·4유형)는 보정 대신 제외**한다
+// (isNoDerivativesLicense). 관광사진 출처 표기는 `Photo: Korea Tourism Organization (촬영자), KOGL Type 1`이다(toKtoPhotoCaption).
 //
 // **화이트리스트 방식이다 - 목록에 없으면 거부한다.** 언론사 목록을 늘려 막는 방식(블랙리스트,
 // `pressDomains.ts`)은 택하지 않았다. 이유 셋:
@@ -132,4 +141,130 @@ export function toIllustrationCaption(description: string): string {
   intro = intro.replace(/[.。\s]+$/, "");
   if (!intro) return AI_ILLUSTRATION_CREDIT;
   return `${intro}. ${AI_ILLUSTRATION_CREDIT}`;
+}
+
+// ---------- 한국관광공사 관광사진(공공누리 제1유형) 출처 표기(2026-11-25) ----------
+
+/**
+ * 관광사진 API 사진의 출처 표기. 공공누리 제1유형은 **출처 표시**가 이용 조건이다. 기존 캡션 규격("소개. 출처")의
+ * 영문 출처 자리(`Photo: <기관>`)에 촬영자와 유형을 붙인다:
+ *   `Photo: Korea Tourism Organization (Kim Jiho), KOGL Type 1`
+ * 촬영자를 로마자로 옮길 수 없으면(한글 단체명 등) 괄호를 뺀다 - 영문 발행본에 한글을 새게 하지 않는다.
+ */
+export const KTO_PHOTO_ORG = "Korea Tourism Organization";
+export const KOGL_TYPE1_LABEL = "KOGL Type 1";
+/** manifest·뷰어에 남기는 재사용 근거(사람이 읽는 값). */
+export const KTO_PHOTO_LICENSE = "공공누리 제1유형(KOGL Type 1) - 한국관광공사 관광사진";
+
+export function ktoPhotoCredit(photographer: string | null | undefined): string {
+  const name = romanizePhotographer(photographer ?? "");
+  return `Photo: ${KTO_PHOTO_ORG}${name ? ` (${name})` : ""}, ${KOGL_TYPE1_LABEL}`;
+}
+
+/** 캡션 = 소개 한 문장 + 관광사진 출처 표기. 소개에 붙어 온 다른 출처 표기(`Photo: …`)·획득 방식 꼬리는 뗀다. */
+export function toKtoPhotoCaption(intro: string, photographer: string | null | undefined): string {
+  const cleaned = (intro ?? "")
+    .replace(/\s*—\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\s*$/, "")
+    .replace(/\s*\([^()]*[가-힣][^()]*\)\s*$/, "")
+    .replace(/[.\s]*(Photo|Source|Image|사진|출처)\s*[:=]\s*[^.]*$/i, "")
+    .trim()
+    .replace(/[.。\s]+$/, "");
+  const credit = ktoPhotoCredit(photographer);
+  // 한글이 남은 소개는 영문 발행본에 쓸 수 없다 - 출처 표기만 남긴다(뷰어에서 사람이 고친다).
+  if (!cleaned || /[가-힣]/.test(cleaned)) return credit;
+  return `${cleaned}. ${credit}`;
+}
+
+const INITIALS = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"];
+const MEDIALS = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"];
+const FINALS = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l", "l", "p", "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t"];
+
+/** 성씨 관용 표기(여권·언론 관행). 표에 없는 성은 국어의 로마자 표기법 그대로 옮긴다. */
+const SURNAMES: Record<string, string> = {
+  김: "Kim", 이: "Lee", 박: "Park", 최: "Choi", 정: "Jung", 강: "Kang", 조: "Cho", 윤: "Yoon", 장: "Jang", 임: "Lim",
+  한: "Han", 오: "Oh", 서: "Seo", 신: "Shin", 권: "Kwon", 황: "Hwang", 안: "Ahn", 송: "Song", 류: "Ryu", 유: "Yoo",
+  홍: "Hong", 전: "Jeon", 고: "Ko", 문: "Moon", 양: "Yang", 손: "Son", 배: "Bae", 백: "Baek", 허: "Heo", 노: "Noh",
+  남: "Nam", 심: "Shim", 하: "Ha", 곽: "Kwak", 성: "Sung", 차: "Cha", 주: "Joo", 우: "Woo", 구: "Koo", 민: "Min",
+  진: "Jin", 나: "Na", 엄: "Eom", 채: "Chae", 원: "Won", 천: "Cheon", 방: "Bang", 공: "Kong", 현: "Hyun", 함: "Ham",
+  변: "Byun", 염: "Yeom", 여: "Yeo", 추: "Choo", 도: "Do", 석: "Seok", 선: "Sun", 설: "Seol", 마: "Ma", 길: "Gil",
+  연: "Yeon", 표: "Pyo", 명: "Myung", 기: "Ki", 반: "Ban", 왕: "Wang", 금: "Keum", 옥: "Ok", 육: "Yuk", 인: "In",
+  맹: "Maeng", 제: "Je", 모: "Mo", 탁: "Tak", 국: "Kook", 어: "Eo", 은: "Eun", 편: "Pyeon", 용: "Yong", 예: "Ye",
+};
+
+/** 한글 음절열을 국어의 로마자 표기법(음운 변화 없이, 이름 표기 관행)으로 옮긴다. 한글이 아닌 글자가 있으면 null. */
+function romanizeSyllables(hangul: string): string | null {
+  let out = "";
+  for (const char of hangul) {
+    const code = char.charCodeAt(0) - 0xac00;
+    if (code < 0 || code > 11171) return null;
+    out += INITIALS[Math.floor(code / 588)] + MEDIALS[Math.floor((code % 588) / 28)] + FINALS[code % 28];
+  }
+  return out;
+}
+
+/**
+ * 관광사진 촬영자 표기를 영문 크레딧용으로 옮긴다. 옮길 수 없으면 빈 문자열(크레딧에서 괄호가 빠진다).
+ *  - "한국관광공사 김지호" → "Kim Jiho"(기관 접두는 뗀다 - 기관은 크레딧 본문에 이미 있다)
+ *  - "IR 스튜디오 이창용" → "Lee Changyong"(마지막 토큰이 2~4자 한글 이름이면 그것만)
+ *  - 로마자 이름은 그대로, 한글 단체명("라이브스튜디오")은 빈 문자열.
+ */
+export function romanizePhotographer(raw: string): string {
+  const cleaned = (raw ?? "")
+    .replace(/한국관광공사|관광공사|Korea Tourism Organization|KTO/gi, " ")
+    .replace(/[()[\]·,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  if (!/[가-힣]/.test(cleaned)) return /^[A-Za-z][A-Za-z .'-]{1,40}$/.test(cleaned) ? cleaned : "";
+  const last = cleaned.split(" ").pop() ?? "";
+  if (!/^[가-힣]{2,4}$/.test(last)) return "";
+  const surname = SURNAMES[last[0]];
+  if (!surname) return "";
+  const given = romanizeSyllables(last.slice(1));
+  if (!given) return "";
+  return `${surname} ${given.charAt(0).toUpperCase()}${given.slice(1)}`;
+}
+
+/**
+ * 변경 금지 라이선스인가(2026-11-25). koreaplain 실제 사진은 톤 보정(크롭·색 보정)을 거치는데, 변경 금지(CC BY-ND,
+ * 공공누리 제3·4유형)는 그 자체가 위반이다. 그런 후보는 보정 대신 **제외**한다. 분류(`cc_nd`)나 라이선스 문구로 본다.
+ */
+export function isNoDerivativesLicense(license: string | null | undefined, reusePermission?: string | null): boolean {
+  if (reusePermission === "cc_nd") return true;
+  const value = (license ?? "").toLowerCase();
+  if (!value) return false;
+  return (
+    /\bnd\b|-nd\b|by-nd|nc-nd|noderiv|no deriv|no-deriv/.test(value) ||
+    /변경\s*금지|변경금지/.test(value) ||
+    /(공공누리|kogl)\s*(제\s*)?[34]\s*유형|kogl\s*type\s*[34]/.test(value)
+  );
+}
+
+// ---------- AI 생성 = 설명 그림(2026-11-25) ----------
+
+/**
+ * koreaplain의 AI 이미지는 **실사 음식 사진을 대신하지 않는다** - 지도·상차림 도식·주문 순서 같은 설명 그림이다. 실사처럼 만든
+ * 음식 사진은 독자가 실물로 오해하고(평양냉면 모양을 틀리게 그린 위험 - KOREAPLAIN-FOOD-PIVOT-2026-11.md), 실사 사진(관광사진)과
+ * 톤도 섞이지 않는다. 그래서 생성 프롬프트 앞에 **이 한 줄 스타일**을 고정으로 붙인다(generateManuscriptImages의 aiIllustrations).
+ * 스타일을 바꾸려면 이 문자열 하나만 고친다.
+ */
+export const KOREAPLAIN_ILLUSTRATION_STYLE =
+  "Flat vector editorial illustration, clean outlines, soft warm palette of cream, terracotta, mustard and sage green, simple shapes, subtle paper texture, not photorealistic";
+
+/**
+ * 생성 프롬프트를 설명 그림 스타일로 고정한다. 실사 지시어(`photorealistic photograph of` 등)는 지우고 스타일 한 줄을 앞에 붙인다.
+ * `no text`·비율 표기는 원래 프롬프트에 있으면 그대로 남고, 없으면 붙인다(validateAiPrompt 규칙).
+ */
+export function toIllustrationPrompt(prompt: string): string {
+  if ((prompt ?? "").startsWith(KOREAPLAIN_ILLUSTRATION_STYLE)) return prompt;
+  let body = (prompt ?? "")
+    .replace(/\b(ultra[- ]?)?photo[- ]?realistic(\s+(photograph|photo|image|shot))?(\s+of)?\s*,?\s*/gi, "")
+    .replace(/\b(realistic|dslr|stock)\s+(photograph|photo)(\s+of)?\s*,?\s*/gi, "")
+    .replace(/^\s*(a\s+)?(photograph|photo)\s+of\s+/i, "")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/^[,.\s]+/, "");
+  if (!/no\s+text/i.test(body)) body = `${body.replace(/[.\s]+$/, "")}, no text, no letters`;
+  if (!/\d+\s*:\s*\d+/.test(body)) body = `${body.replace(/[.\s]+$/, "")}, 16:9`;
+  return `${KOREAPLAIN_ILLUSTRATION_STYLE}. ${body}`;
 }

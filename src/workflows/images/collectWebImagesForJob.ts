@@ -14,7 +14,12 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { uploadArticleImage } from "../../services/supabase/storage/uploadArticleImage.js";
+import { createKtoSearch } from "../../services/images/ktoPhotoGallery.js";
+import { KOREAPLAIN_PHOTO_GRADE } from "../../services/images/photoGrade.js";
 import { buildWebImageSlots, collectWebImages, defaultAskSameCut } from "./collectWebImages.js";
+import { collectKtoPhotos } from "./collectKtoPhotos.js";
+import { usesKoreaplainImagePolicy } from "./koreaplainImageSources.js";
+import type { KtoSlotHint } from "./koreanFoodNames.js";
 import { ImageDeduper } from "./imageFingerprint.js";
 import { splitSearchInstruction } from "./imageEditRequest.js";
 import type { CollectWebImagesOptions, UnfilledSlot } from "./collectWebImages.js";
@@ -77,6 +82,11 @@ export type CollectWebImagesForJobInput = {
    * 검증자가 다시 쓰는 캡션이 발행본에 그대로 나간다. 기본(미지정)은 한국어.
    */
   captionLanguage?: "ko" | "en";
+  /**
+   * 자리별 한국관광공사 관광사진 검색 힌트(2026-11-25, koreaplain만 - koreanFoodNames.ts buildKtoSlotHints). 있으면 웹 검색보다
+   * **먼저** 관광사진 API로 채운다(collectKtoPhotos.ts). 다른 트랙은 넘겨도 쓰지 않는다.
+   */
+  ktoHints?: Record<number, KtoSlotHint>;
 };
 
 export type CollectWebImagesForJobResult = {
@@ -184,7 +194,9 @@ export async function collectWebImagesForJob(
   // 넣어 주면, 내려받기·크기 검사·업로드는 기존 경로를 그대로 탄다(2026-09-22).
   const directUrls = input.directUrls ?? {};
   const directSlots = slots.filter((slot) => directUrls[String(slot.index)]);
-  const searchSlots = slots.filter((slot) => !directUrls[String(slot.index)]);
+  let searchSlots = slots.filter((slot) => !directUrls[String(slot.index)]);
+  // koreaplain 실제 사진은 톤을 맞춰 올린다(2026-11-25, photoGrade.ts - 16:9 중앙 크롭·밝기·대비·색온도). 다른 트랙은 예전 그대로다.
+  const koreaplain = usesKoreaplainImagePolicy(input.category);
 
   // 검증자(Claude)가 파일을 열어 봐야 하므로 러너 안에 잠깐 내려받았다가 업로드 후 버린다.
   const dir = await mkdtemp(resolve(tmpdir(), "web-images-"));
@@ -203,7 +215,8 @@ export async function collectWebImagesForJob(
           imageBuffer: buffer,
           mimeType,
           // 웹에서 받은 원본은 13MB짜리도 있었다(2026-10-04). 본문 폭에 맞게 줄여 올린다.
-          optimize: true,
+          // koreaplain은 같은 변환 단계에서 톤 보정까지 한다(KOREAPLAIN_PHOTO_GRADE가 강도의 유일한 자리다).
+          optimize: koreaplain ? { grade: KOREAPLAIN_PHOTO_GRADE } : true,
         });
         return uploaded.ok
           ? { ok: true as const, url: uploaded.url, extension: uploaded.extension, width: uploaded.width, height: uploaded.height }
@@ -283,6 +296,34 @@ export async function collectWebImagesForJob(
             }
           );
 
+    // ① 한국관광공사 관광사진(koreaplain만, 2026-11-25). 음식명 힌트가 있는 검색 자리를 먼저 채우고, 남은 자리만 ② 웹 검색으로 간다.
+    // 사람이 요구를 적어 보낸 자리는 건너뛴다 - 그 자리는 사용자 기준으로 찾는다(위 requirements).
+    // 키(KTO_SERVICE_KEY)가 없으면 조용히 건너뛴다 - 기존 경로가 그대로 돈다.
+    let kto: Awaited<ReturnType<typeof collectKtoPhotos>> | null = null;
+    if (koreaplain && input.ktoHints && options.ktoSearch !== false) {
+      const ktoSlots = searchSlots.filter((slot) => input.ktoHints?.[slot.index] && !requirements[String(slot.index)]);
+      const search = options.ktoSearch ?? createKtoSearch();
+      if (!search) {
+        if (ktoSlots.length > 0) console.log("ℹ️ [images] KTO_SERVICE_KEY가 없어 한국관광공사 관광사진을 건너뜁니다.");
+      } else if (ktoSlots.length > 0) {
+        kto = await collectKtoPhotos(
+          { keyword: input.keyword, dir, slots: ktoSlots, hints: input.ktoHints },
+          {
+            search,
+            fetchImage: options.fetchImage,
+            chooseImage: options.chooseImage,
+            verify: options.verify,
+            readSize: options.readSize,
+            upload: uploader,
+            deduper,
+            captionLanguage: input.captionLanguage,
+          }
+        );
+        const filledByKto = new Set(kto.found.map((record) => record.index));
+        searchSlots = searchSlots.filter((slot) => !filledByKto.has(slot.index));
+      }
+    }
+
     const result = searchSlots.length === 0
       ? { found: [], failures: [], unfilled: [] }
       : await collectWebImages(
@@ -309,8 +350,8 @@ export async function collectWebImagesForJob(
     );
 
     // 사용자가 지정한 자리와 검색으로 채운 자리를 합친다.
-    const found = [...direct.found, ...result.found];
-    const failures = [...direct.failures, ...result.failures];
+    const found = [...direct.found, ...(kto?.found ?? []), ...result.found];
+    const failures = [...direct.failures, ...(kto?.failures ?? []), ...result.failures];
     // 사용자가 고른 이미지를 못 받은 자리는 **AI 대체로 넘기지 않는다**(2026-10-04). 사람이 특정 사진을
     // 골랐는데 엉뚱한 생성 이미지로 채우면 안 된다 - 겨울왕국3 실측에서 그 자리가 AI 대체 단계로 넘어가
     // "실존 대상이라 비운다"는 엉뚱한 사유가 붙었다. 받지 못한 이유를 남기고 비워 둔다.
@@ -342,7 +383,7 @@ export async function collectWebImagesForJob(
       }));
 
     // 판정자가 열어 본 후보(2026-10-02). 사용자가 직접 찍어 준 자리는 후보가 없다(검색을 안 한다).
-    const candidates = { ...(direct.candidates ?? {}), ...(result.candidates ?? {}) };
+    const candidates = { ...(direct.candidates ?? {}), ...(kto?.candidates ?? {}), ...(result.candidates ?? {}) };
 
     return { images, failures, unfilled, candidates };
   } finally {
