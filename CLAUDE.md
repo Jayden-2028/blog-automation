@@ -457,6 +457,10 @@ Worker cron 하나(`0 9,10,11,12 * * *`)가 발화 UTC 시로 워크플로를 �
   제외한다(`config/koreaplainFoodTerms.ts` - 목록은 이 파일 한 곳). 새 글 라벨은 Food & Dining + 하위 라벨 하나.
   옛 생활정보 시드 241개·실용 하한은 `KOREAPLAIN_LEGACY_SEEDS`로 보관되고, repo 변수 `KSCENE_TOPIC_MODE=legacy`
   하나로 되돌린다. 이 트랙의 주제 선정에는 LLM 프롬프트가 없다 - 기준은 `koreaplainTopics.ts`의 규칙이다.
+  - **이미지는 실제 사진 우선, 빈 자리는 웹 검색, AI는 실사다**(2026-11-25 사용자 지시 - "엔터 원고와 같은 프로세스"). 순서는
+    한국관광공사 관광사진(공공누리 1유형) → 웹 검색(엔터와 같은 풀, **언론사만 제외**) → 페이지 캡처 → 실사 AI(캡션 `Image: AI-generated`).
+    실제 사진은 톤 보정(`photoGrade.ts`)을 거친다. repo variable `KOREAPLAIN_IMAGE_SOURCES=whitelist`면 2026-11-10의 공공·공식 출처
+    화이트리스트로 돌아간다(`koreaplainImageSources.ts`).
   - **제안은 하루 5건이다**(2026-11-14 사용자 요청, 전 8건). 하한·상한 공식은 topN 비례라 그대로 두었다 -
     5건이면 실용 하한 2 · 로컬 우위 하한 1 · 라벨 상한 2다(상한 2라 5건이 최소 3개 라벨에 걸친다).
   - **중복은 두 축으로 막는다**(2026-11-14). ① **무엇이 중복인가**: 토큰 자카드 0.6 이상 **또는**

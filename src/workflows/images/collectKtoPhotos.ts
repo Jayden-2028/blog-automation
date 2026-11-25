@@ -1,9 +1,9 @@
 // Korea Plain(koreaplain) 이미지 자리의 **1순위 출처: 한국관광공사 관광사진 API**(2026-11-25 사용자 결정).
 //
 // 수집 순서(koreaplain만, collectWebImagesForJob.ts가 배선):
-//   ① 관광사진 API(이 파일) → ② 허용 출처 웹 검색(collectWebImages.ts, koreaplainImageSources.ts 화이트리스트)
-//   → ③ 공식 페이지 캡처(정보 화면 자리, capturePagesForJob.ts) → ④ AI 생성(설명 그림, generateManuscriptImages.ts)
-// 한식진흥원 사진은 쓰지 않는다(사용자 결정). 일반 웹 검색 사진은 화이트리스트 정책 그대로 금지다.
+//   ① 관광사진 API(이 파일) → ② 웹 검색(collectWebImages.ts - 언론사 제외, `KOREAPLAIN_IMAGE_SOURCES=whitelist`면 화이트리스트)
+//   → ③ 공식 페이지 캡처(정보 화면 자리, capturePagesForJob.ts) → ④ AI 생성(실사, generateManuscriptImages.ts)
+// 한식진흥원 사진은 쓰지 않는다(사용자 결정). 웹 검색은 2026-11-25부터 엔터와 같은 후보 풀에서 언론사만 뺀다.
 //
 // 이 단계가 하는 일
 //   1. 자리마다 한글 음식명(koreanFoodNames.ts)으로 API를 부른다 - **자리당 최대 2 키워드, 원고당 최대 8호출**(개발계정 하루 1,000건).

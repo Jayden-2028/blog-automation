@@ -234,8 +234,8 @@ export async function prepareManuscript(
   });
   const baseGenerateImages =
     options.generateImages === undefined ? generateManuscriptImages : options.generateImages;
-  // koreaplain은 AI로 만든 그림을 일러스트로 표기하고 화질을 low로 고정한다(2026-11-10, generateManuscriptImages의
-  // aiIllustrations). 다른 트랙은 false라 옵션이 실리지 않는다.
+  // koreaplain은 AI 이미지를 실사 스타일로 만들고 AI 생성 표기를 달며 화질을 low로 고정한다(2026-11-10·11-25,
+  // generateManuscriptImages의 aiIllustrations). 다른 트랙은 false라 옵션이 실리지 않는다.
   const koreaplainImages = usesKoreaplainImagePolicy(job.category);
   const generateImages =
     (imagePolicy || koreaplainImages) && options.generateImages === undefined

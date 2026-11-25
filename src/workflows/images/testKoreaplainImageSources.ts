@@ -8,11 +8,13 @@ import { buildFallbackImagePrompts, buildFallbackPrompt } from "./buildFallbackI
 import { collectWebImagesForJob } from "./collectWebImagesForJob.js";
 import { generateManuscriptImages } from "./generateManuscriptImages.js";
 import {
-  AI_ILLUSTRATION_CREDIT,
+  AI_IMAGE_CREDIT,
   filterKoreaplainCandidates,
+  isUsableKoreaplainCandidate,
+  koreaplainSourceMode,
   isAllowedKoreaplainCandidate,
   isAllowedKoreaplainImageSource,
-  toIllustrationCaption,
+  toAiImageCaption,
   usesKoreaplainImagePolicy,
 } from "./koreaplainImageSources.js";
 import { validateAiPrompt } from "./refixImageMarkers.js";
@@ -20,6 +22,7 @@ import { routeImagePlan } from "./routeImagePlan.js";
 import type { ChooseImageInput } from "./collectWebImages.js";
 import type { ImageCandidate } from "./searchNaverImages.js";
 import type { ImagePlan } from "./planImageSlots.js";
+import { buildPlanPrompt } from "./planImageSlots.js";
 import type { ManuscriptImageConfig } from "../../config/manuscriptImages.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -83,14 +86,16 @@ async function main(): Promise<void> {
 
   // --- 2. 일러스트 캡션 -------------------------------------------------------------------
   {
-    assert(toIllustrationCaption("Two neighbors greeting in an elevator — AI 생성") === `Two neighbors greeting in an elevator. ${AI_ILLUSTRATION_CREDIT}`, "획득 방식 꼬리를 떼고 일러스트 표기를 붙인다");
-    assert(toIllustrationCaption("Subway platform (웹 검색 실패 - AI 대체 장면)") === `Subway platform. ${AI_ILLUSTRATION_CREDIT}`, "폴백이 붙인 한글 꼬리를 뗀다");
-    assert(toIllustrationCaption("Subway platform. Photo: Naver News") === `Subway platform. ${AI_ILLUSTRATION_CREDIT}`, "Photo: 크레디트를 남기지 않는다");
-    assert(toIllustrationCaption("Subway platform.") === `Subway platform. ${AI_ILLUSTRATION_CREDIT}`, "끝 마침표를 겹치지 않는다");
-    assert(!/Photo:/i.test(toIllustrationCaption("Photo: Yonhap")), "Photo: 표기는 결과에 없다");
-    assert(toIllustrationCaption("") === AI_ILLUSTRATION_CREDIT, "빈 설명이면 표기만");
-    assert(AI_ILLUSTRATION_CREDIT.startsWith("Illustration"), "표기는 Illustration 계열");
-    console.log(`✅ 캡션: "…. ${AI_ILLUSTRATION_CREDIT}" - Photo: 없음, 한글 꼬리 없음`);
+    assert(toAiImageCaption("Two neighbors greeting in an elevator — AI 생성") === `Two neighbors greeting in an elevator. ${AI_IMAGE_CREDIT}`, "획득 방식 꼬리를 떼고 일러스트 표기를 붙인다");
+    assert(toAiImageCaption("Subway platform (웹 검색 실패 - AI 대체 장면)") === `Subway platform. ${AI_IMAGE_CREDIT}`, "폴백이 붙인 한글 꼬리를 뗀다");
+    assert(toAiImageCaption("Subway platform. Photo: Naver News") === `Subway platform. ${AI_IMAGE_CREDIT}`, "Photo: 크레디트를 남기지 않는다");
+    assert(toAiImageCaption("Subway platform.") === `Subway platform. ${AI_IMAGE_CREDIT}`, "끝 마침표를 겹치지 않는다");
+    assert(!/Photo:/i.test(toAiImageCaption("Photo: Yonhap")), "Photo: 표기는 결과에 없다");
+    assert(toAiImageCaption("") === AI_IMAGE_CREDIT, "빈 설명이면 표기만");
+    assert(AI_IMAGE_CREDIT === "Image: AI-generated", "표기는 Image: AI-generated(2026-11-25 실사 전환)");
+    assert(toAiImageCaption("Old caption. Illustration: AI-generated") === `Old caption. ${AI_IMAGE_CREDIT}`, "옛 일러스트 표기를 새 표기로 바꾼다");
+    assert(toAiImageCaption(toAiImageCaption("Gift desk")) === `Gift desk. ${AI_IMAGE_CREDIT}`, "두 번 붙이지 않는다");
+    console.log(`✅ 캡션: "…. ${AI_IMAGE_CREDIT}" - Photo: 없음, 한글 꼬리 없음`);
   }
 
   // --- 3. 수집 경로: koreaplain은 거르고 다른 트랙은 그대로 --------------------------------------
@@ -169,6 +174,27 @@ async function main(): Promise<void> {
     return { fetched, result };
   };
 
+  // 2026-11-25부터 기본(open)은 엔터와 같은 웹 검색에서 언론사만 뺀다. 기본 모드를 먼저 본다.
+  delete process.env.KOREAPLAIN_IMAGE_SOURCES;
+  {
+    assert(koreaplainSourceMode({}) === "open" && koreaplainSourceMode({ KOREAPLAIN_IMAGE_SOURCES: " Whitelist " }) === "whitelist", "모드: 비면 open, whitelist면 화이트리스트");
+    assert(isUsableKoreaplainCandidate({ imageUrl: "https://blog.naver.com/img/b.jpg", sourcePage: "https://blog.naver.com/x/1" }, "open"), "open: 블로그 사진은 쓴다");
+    assert(isUsableKoreaplainCandidate({ imageUrl: "https://ruliweb.com/img/r.jpg", sourcePage: "" }, "open"), "open: 출처 페이지 없는 일반 사이트 사진은 쓴다");
+    assert(!isUsableKoreaplainCandidate({ imageUrl: "https://www.news1.kr/photos/a.jpg", sourcePage: "" }, "open"), "open: 언론사 이미지는 버린다");
+    assert(!isUsableKoreaplainCandidate({ imageUrl: "https://cdn.example.com/a.jpg", sourcePage: "https://www.yna.co.kr/view/2" }, "open"), "open: 언론사 기사에 실린 사진은 버린다");
+    assert(!isUsableKoreaplainCandidate({ imageUrl: "https://blog.naver.com/img/b.jpg", sourcePage: "" }, "whitelist"), "whitelist: 블로그는 버린다");
+    const open = await run(KOREAPLAIN_TRACK);
+    const pressTouched = open.fetched.filter((u) => /news1|yna|pstatic|news\.naver/.test(u));
+    assert(pressTouched.length === 0, `open: 언론사 주소를 내려받으면 안 된다 (${pressTouched.join(", ")})`);
+    assert(open.result.images.length === 2, `open: 두 자리 모두 채워야 한다 (${open.result.images.length}, ${open.result.failures.join(" / ")})`);
+    assert(!open.result.images.some((i) => /news1|yna|pstatic/.test(`${i.sourcePage} ${i.license}`)), "open: 언론사 출처가 남으면 안 된다");
+    const note = open.result.failures.find((f) => f.startsWith("ℹ️ 언론사 사진 후보"));
+    assert(note !== undefined && note.includes("3장"), `open: 버린 언론사 후보(news1·pstatic·yna)는 3장 (${note})`);
+    console.log(`✅ 수집(koreaplain open): 블로그·일반 사이트 사진은 쓰고 언론사만 버린다 - "${note}"`);
+  }
+
+  // 아래는 되돌리기 스위치(KOREAPLAIN_IMAGE_SOURCES=whitelist) - 2026-11-10 화이트리스트 동작이 그대로인지 본다.
+  process.env.KOREAPLAIN_IMAGE_SOURCES = "whitelist";
   const kp = await run(KOREAPLAIN_TRACK);
   {
     // 언론사·커뮤니티 주소는 내려받기조차 시도하지 않는다.
@@ -215,6 +241,7 @@ async function main(): Promise<void> {
     assert(result.failures.some((f) => f.includes("[자리 1] 허용 출처의 후보가 없어")), "자리별 사유가 남아야 한다");
     assert(result.failures.some((f) => f.startsWith("ℹ️ 허용 출처가 아닌 후보")), "버린 건수 한 줄도 남아야 한다");
     console.log("✅ 수집(koreaplain): 허용 후보 0장 -> 자리가 비고 unfilled로 넘어간다(AI 폴백 입구)");
+    delete process.env.KOREAPLAIN_IMAGE_SOURCES;
 
     // 이 unfilled를 기존 폴백 경로에 그대로 태운다(새 루프 없음): 프롬프트 -> 생성.
     const prompts = await buildFallbackImagePrompts(
@@ -264,10 +291,10 @@ async function main(): Promise<void> {
     );
     assert(calls.length === 2, `인포그래픽은 만들지 않아 2장만 생성해야 한다 (${calls.length})`);
     assert(calls.every((c) => c.quality === "low"), `화질은 low 고정이어야 한다 (${calls.map((c) => c.quality).join(",")})`);
-    assert(made.images.length === 2 && made.images.every((i) => i.description.endsWith(`. ${AI_ILLUSTRATION_CREDIT}`)), `캡션이 일러스트 표기여야 한다: ${made.images.map((i) => i.description).join(" | ")}`);
+    assert(made.images.length === 2 && made.images.every((i) => i.description.endsWith(`. ${AI_IMAGE_CREDIT}`)), `캡션이 일러스트 표기여야 한다: ${made.images.map((i) => i.description).join(" | ")}`);
     assert(!made.images.some((i) => /Photo:|사진=|웹 검색 실패/.test(i.description)), "생성 이미지 캡션에 Photo:·사진=·한글 꼬리가 없어야 한다");
     assert(made.failures.some((f) => f.includes("[이미지 3]") && f.includes("AI로 그리지 않아")), "인포그래픽 제외 사유가 기록돼야 한다");
-    console.log("✅ 생성(koreaplain): quality=low 고정, 캡션 `Illustration: AI-generated`, 인포그래픽 제외");
+    console.log("✅ 생성(koreaplain): quality=low 고정, 캡션 `Image: AI-generated`, 인포그래픽 제외");
 
     // 대조군: 옵션이 없으면(다른 트랙) 캡션을 건드리지 않고, 인포그래픽도 그대로 만든다.
     const plainCalls: { quality?: string }[] = [];
@@ -341,7 +368,16 @@ async function main(): Promise<void> {
     assert(blocked.generate.length === 0 && blocked.notes.some((n) => n.includes("인포그래픽을 만들지 않습니다")), "koreaplain은 기획 인포그래픽을 만들지 않는다");
     assert(open.generate.length === 1 || open.notes.length > 0, "옵션이 없으면 예전 경로(생성 또는 프롬프트 규격 메모)");
     assert(!open.notes.some((n) => n.includes("인포그래픽을 만들지 않습니다")), "다른 트랙에는 차단 메모가 없다");
-    console.log("✅ 기획 라우팅: koreaplain만 인포그래픽 차단");
+    // 기획 프롬프트(2026-11-25): 기본(open)은 search가 기본이고 AI는 실사, whitelist면 옛 "기본은 ai".
+    const planInput = { keyword: "naengmyeon", category: KOREAPLAIN_TRACK, body, imagePrompts: ["평양냉면"], today: "2026-11-25" };
+    delete process.env.KOREAPLAIN_IMAGE_SOURCES;
+    const openPrompt = buildPlanPrompt(planInput, "");
+    assert(openPrompt.includes("`search`가 기본") && !openPrompt.includes("**기본은 `ai`다.**") && !openPrompt.includes("일관된 일러스트 스타일"), "open 기획: search가 기본, 일러스트 지시 없음");
+    process.env.KOREAPLAIN_IMAGE_SOURCES = "whitelist";
+    assert(buildPlanPrompt(planInput, "").includes("**기본은 `ai`다.**"), "whitelist 기획: 옛 규칙 그대로");
+    delete process.env.KOREAPLAIN_IMAGE_SOURCES;
+    assert(!buildPlanPrompt({ ...planInput, category: "entertainment" }, "").includes("Korea Plain"), "다른 트랙 기획 프롬프트에는 블록이 없다");
+    console.log("✅ 기획 라우팅: koreaplain만 인포그래픽 차단, 기획 기본값 search(open)·ai(whitelist)");
   }
 
   console.log("\n✅ 전체 통과");

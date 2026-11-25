@@ -21,7 +21,7 @@ import { parseManuscriptBlocks } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptBlock } from "../manuscripts/parseManuscriptBlocks.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { mapWithConcurrency } from "../../services/mapWithConcurrency.js";
-import { toIllustrationCaption, toIllustrationPrompt } from "./koreaplainImageSources.js";
+import { toAiImageCaption, toKoreaplainAiPrompt } from "./koreaplainImageSources.js";
 
 /** 동시에 생성할 자리 수(2026-09-21). 유료 API라 상한을 둔다. */
 const IMAGE_CONCURRENCY = 3;
@@ -60,11 +60,12 @@ export type GenerateManuscriptImagesOptions = {
    */
   fallbackSlots?: { index: number; description: string; prompt: string; acquisition?: "ai" | "infographic" }[];
   /**
-   * koreaplain 트랙(2026-11-10): 만든 그림은 사진이 아니라 **일러스트로 표기**하고, 화질은 `low`로 고정하며,
-   * `infographic` 자리는 만들지 않는다.
+   * koreaplain 트랙(2026-11-10, 2026-11-25 실사 전환): 만든 이미지는 **실사 스타일 한 줄을 붙여**(KOREAPLAIN_AI_PHOTO_STYLE)
+   * 생성하고, 캡션은 **AI 생성 표기**를 달고, 화질은 `low`로 고정하며, `infographic` 자리는 만들지 않는다.
+   * (옵션 이름 `aiIllustrations`는 2026-11-10 일러스트 시절 이름이다 - 호출부가 여럿이라 그대로 둔다.)
    *
-   *  - 캡션: `Photo: …`를 붙이지 않고 `Illustration: AI-generated`로 끝낸다(사진이 아닌 것을 사진처럼
-   *    표기하면 독자를 오인시킨다).
+   *  - 캡션: `Photo: …`를 붙이지 않고 `Image: AI-generated`로 끝낸다(AI가 만든 것을 촬영한 사진처럼
+   *    표기하면 독자를 오인시킨다 - 실사라 더더욱).
    *  - 화질: 중화질($0.0323)은 9배 비싼데 정확도가 오르지 않았다(팀장 세션 실측 - 층수 버튼이 `low`에서는
    *    5가 두 번 나왔고 `medium`에서는 숫자가 아예 사라졌다). 그래서 위로 열어 두지 않는다.
    *  - 인포그래픽 제외: 글자·숫자가 정보인 자리를 AI가 틀리게 그리기 때문이다. 그런 자리는 페이지 캡처나
@@ -167,9 +168,9 @@ export async function generateManuscriptImages(
   }
   aiSlots.sort((a, b) => a.index - b.index);
 
-  /** 발행 캡션이 되는 글. koreaplain이면 사진 표기 대신 일러스트 표기로 바꾼다. */
+  /** 발행 캡션이 되는 글. koreaplain이면 사진 표기 대신 AI 생성 표기(`Image: AI-generated`)로 바꾼다. */
   const captionOf = (description: string): string =>
-    options.aiIllustrations ? toIllustrationCaption(description) : description;
+    options.aiIllustrations ? toAiImageCaption(description) : description;
 
   const targets = aiSlots.slice(0, config.maxPerArticle);
   if (aiSlots.length > targets.length) {
@@ -204,9 +205,9 @@ export async function generateManuscriptImages(
         : block.acquisition === "infographic"
           ? config.infographicQuality
           : undefined;
-      // koreaplain(2026-11-25): AI 이미지는 실사 음식 사진 대체가 아니라 설명 그림이다 - 고정 일러스트 스타일 한 줄을 앞에 붙이고
-      // 실사 지시어를 지운다(KOREAPLAIN_ILLUSTRATION_STYLE). 기록(prompt)은 실제로 보낸 문장을 남긴다.
-      const sentPrompt = options.aiIllustrations ? toIllustrationPrompt(block.prompt) : block.prompt;
+      // koreaplain(2026-11-25 사용자 지시): AI 이미지는 실사 사진이다 - 실사 스타일 한 줄(KOREAPLAIN_AI_PHOTO_STYLE)을 앞에 붙여
+      // 관광사진·웹 사진과 톤을 맞춘다. 일러스트 지시어는 지운다. 기록(prompt)은 실제로 보낸 문장을 남긴다.
+      const sentPrompt = options.aiIllustrations ? toKoreaplainAiPrompt(block.prompt) : block.prompt;
       const result: GenerateImageResult = await generate({ prompt: sentPrompt, quality }, provider);
       const variant = providers.length > 1 ? provider : undefined;
       const stem = fileStem(index, block.description);

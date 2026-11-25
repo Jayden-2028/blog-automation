@@ -24,12 +24,12 @@ import { collectWebImages } from "./collectWebImages.js";
 import type { ChooseImageInput, WebImageSlot } from "./collectWebImages.js";
 import { generateManuscriptImages } from "./generateManuscriptImages.js";
 import {
-  KOREAPLAIN_ILLUSTRATION_STYLE,
+  KOREAPLAIN_AI_PHOTO_STYLE,
   isAllowedKoreaplainImageSource,
   isNoDerivativesLicense,
   ktoPhotoCredit,
   romanizePhotographer,
-  toIllustrationPrompt,
+  toKoreaplainAiPrompt,
   toKtoPhotoCaption,
 } from "./koreaplainImageSources.js";
 import { buildKoreaplainKtoHints, buildKtoSlotHints, hangulDishesIn, koreanSlotTexts, romanizedDishesIn } from "./koreanFoodNames.js";
@@ -364,13 +364,16 @@ async function main(): Promise<void> {
     console.log("✅ ND: koreaplain은 변경 금지 후보를 보정 대신 제외, 다른 트랙은 그대로");
   }
 
-  // --- 9. AI 생성 = 설명 그림 스타일 고정 -----------------------------------------------------------
+  // --- 9. AI 생성 = 실사 사진 스타일 고정(2026-11-25 실사 전환) -----------------------------------------------------------
   {
-    const p = toIllustrationPrompt("A photorealistic photograph of a Korean table with dakgalbi, natural light, no text, no letters. 16:9");
-    assert(p.startsWith(`${KOREAPLAIN_ILLUSTRATION_STYLE}. `) && !/photorealistic photograph/i.test(p), `스타일 고정·실사 지시어 제거 (${p})`);
+    const p = toKoreaplainAiPrompt("A photorealistic photograph of a Korean table with dakgalbi, natural light, no text, no letters. 16:9");
+    assert(p.startsWith(`${KOREAPLAIN_AI_PHOTO_STYLE}. `) && !/photorealistic photograph/i.test(p), `스타일 고정·실사 지시어 제거 (${p})`);
     assert(validateAiPrompt(p) === null, `validateAiPrompt 통과 (${validateAiPrompt(p)})`);
-    assert(toIllustrationPrompt(p) === p, "두 번 붙이지 않는다");
-    assert(validateAiPrompt(toIllustrationPrompt("Map of Chuncheon")) === null, "no text·비율이 없으면 붙인다");
+    assert(toKoreaplainAiPrompt(p) === p, "두 번 붙이지 않는다");
+    assert(/^Photorealistic/.test(KOREAPLAIN_AI_PHOTO_STYLE) && /not an illustration/.test(KOREAPLAIN_AI_PHOTO_STYLE), "스타일은 실사 사진이고 일러스트를 막는다");
+    const fromFlat = toKoreaplainAiPrompt("A warm flat illustration of a Korean table with naengmyeon, soft beige palette, no text, no letters. 16:9");
+    assert(!/illustration of/i.test(fromFlat.slice(KOREAPLAIN_AI_PHOTO_STYLE.length)) && /Korean table with naengmyeon/.test(fromFlat), `옛 일러스트 프롬프트도 실사로 바뀐다 (${fromFlat})`);
+    assert(validateAiPrompt(toKoreaplainAiPrompt("Map of Chuncheon")) === null, "no text·비율이 없으면 붙인다");
 
     const body = "Intro.\n\n[IMAGE: Table setting — AI 생성]\n[IMAGE PROMPT: A photorealistic photograph of a dakgalbi table, no text, no letters. 16:9]";
     const cfg: ManuscriptImageConfig = { enabled: true, abCompare: false, maxPerArticle: 8, infographicQuality: "high" };
@@ -386,10 +389,10 @@ async function main(): Promise<void> {
       record: async () => {},
     };
     const kp = await generateManuscriptImages({ jobId: "j", keyword: "k", date: "2026-11-25", body, imagePrompts: ["A photorealistic photograph of a dakgalbi table, no text, no letters. 16:9"] }, { ...common, aiIllustrations: true });
-    assert(sent[0].startsWith(KOREAPLAIN_ILLUSTRATION_STYLE) && kp.images[0].prompt === sent[0], "koreaplain 생성 프롬프트에 스타일이 붙고 기록도 같다");
+    assert(sent[0].startsWith(KOREAPLAIN_AI_PHOTO_STYLE) && kp.images[0].prompt === sent[0], "koreaplain 생성 프롬프트에 스타일이 붙고 기록도 같다");
     await generateManuscriptImages({ jobId: "j", keyword: "k", date: "2026-11-25", body, imagePrompts: ["A photorealistic photograph of a dakgalbi table, no text, no letters. 16:9"] }, common);
     assert(sent[1] === "A photorealistic photograph of a dakgalbi table, no text, no letters. 16:9", "다른 트랙은 프롬프트를 바꾸지 않는다");
-    console.log("✅ AI: koreaplain은 설명 그림 스타일 한 줄 고정, 다른 트랙 무영향");
+    console.log("✅ AI: koreaplain은 실사 사진 스타일 한 줄 고정(일러스트 지시어 제거), 다른 트랙 무영향");
   }
 
   // --- 10. 톤 보정(순수 계산 + 실제 Chromium) -------------------------------------------------------

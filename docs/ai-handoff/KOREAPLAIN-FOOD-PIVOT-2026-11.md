@@ -90,12 +90,18 @@
 
 ### 수집 순서 (koreaplain만)
 
+> **2026-11-25 개정(같은 날, 사용자 지시)**: 첫 음식 원고(ea83b215, 함흥·평양냉면)에서 5자리 중 2자리가 플랫 일러스트로 나왔다 -
+> 기획이 "먹는 방법" 자리를 처음부터 `ai`로 정해 웹 검색을 타지 않았다. 지시: **AI 이미지는 실사로, 빈 자리는 웹 검색으로(엔터와 같은
+> 프로세스)**. 그래서 ② 웹 검색은 엔터와 같은 후보 풀에서 **언론사만** 빼고(`isUsableKoreaplainCandidate`), 기획 기본값은 `search`,
+> ④ AI는 실사 스타일(`KOREAPLAIN_AI_PHOTO_STYLE`)·캡션 `Image: AI-generated`다. 되돌리기: repo variable
+> `KOREAPLAIN_IMAGE_SOURCES=whitelist`(②가 아래 옛 화이트리스트로, 기획이 "기본은 ai"로 돌아간다. AI 실사 스타일은 그대로).
+
 | 순서 | 출처 | 파일 | 비고 |
 |---|---|---|---|
 | ① | 한국관광공사 관광사진 API(data.go.kr 15101914, 공공누리 제1유형) | `collectKtoPhotos.ts`, `services/images/ktoPhotoGallery.ts` | 한글 키워드 검색. 키 `KTO_SERVICE_KEY` 없으면 조용히 건너뜀 |
-| ② | 허용 출처 웹 검색(정부·지자체·공공기관·visitkorea·위키미디어 등) | `collectWebImages.ts` | ①이 못 채운 자리만 |
+| ② | 웹 검색(네이버 + 구글, **언론사만 제외** - 11-25 개정. `whitelist`면 정부·지자체·공공기관·visitkorea·위키미디어만) | `collectWebImages.ts` | ①이 못 채운 자리만 |
 | ③ | 공식 페이지 캡처 | `capturePagesForJob.ts` | 정보 화면 자리(요금표·운영시간) |
-| ④ | AI 생성 = **설명 그림** | `generateManuscriptImages.ts` | 지도·상차림 도식·주문 순서. 고정 스타일 `KOREAPLAIN_ILLUSTRATION_STYLE` 한 줄이 프롬프트 앞에 붙고 실사 지시어는 지워진다 |
+| ④ | AI 생성 = **실사 사진**(11-25 개정, 전에는 설명 그림) | `generateManuscriptImages.ts` | 고정 스타일 `KOREAPLAIN_AI_PHOTO_STYLE`(자연광·따뜻한 중성 톤 다큐 사진) 한 줄이 앞에 붙고 일러스트 지시어는 지워진다. 캡션 `Image: AI-generated` |
 
 ### 한글 음식명 (관광사진 검색어)
 

@@ -1,23 +1,24 @@
-// koreaplain(Korea Plain) 트랙이 이미지를 가져와도 되는 출처 목록(2026-11-10 사용자 결정).
+// koreaplain(Korea Plain) 트랙이 이미지를 가져와도 되는 출처(2026-11-10 사용자 결정 → 2026-11-25 개정).
 //
-// 왜 만들었나(팀장 세션 실측): 발행본 71건 중 61건(86%)이 언론사·상업 사이트 사진을 싣고 있었다.
-// 출처 표기(`Photo: Naver News`)만 있고 라이선스는 없으며, 파일은 우리 Cloudflare Pages 도메인에
-// 복사돼 서비스된다. 구글 퍼블리셔 정책은 저작권 침해를 금지하고, 연합뉴스·뉴스1 같은 곳은 실제로
-// 라이선스를 추심한다. 애드센스 수익화를 앞둔 사이트라 그대로 둘 수 없었다.
-//
-// 그래서 이 트랙의 이미지 자리는 아래 순서로만 채운다(2026-11-25 음식 전환에서 ①을 맨 앞에 넣었다 - 실제 사진 우선).
-//   ① 한국관광공사 관광사진 API(collectKtoPhotos.ts) - 공공누리 제1유형, 한글 음식명으로 찾는다. 이미지는
-//      tong.visitkorea.or.kr(아래 visitkorea.or.kr 하위)이라 이 목록 안이다. 키 `KTO_SERVICE_KEY`가 없으면 건너뛴다.
-//   ② 공공·공식 자료(웹 검색) - **이 파일의 목록 안에 있는 호스트만**
+// **2026-11-25 개정(사용자 지시): AI 이미지는 실사로, 빈 자리는 웹 검색으로 - 엔터 원고와 같은 프로세스.**
+// 계기는 음식 전환 첫 원고(hamheung vs pyongyang naengmyeon, ea83b215)다. 5자리 중 2자리가 플랫 일러스트로 나왔고,
+// 기획이 "먹는 방법" 자리를 처음부터 `ai`로 정해 웹 검색을 한 번도 타지 않았다. 지금 순서는 이렇다.
+//   ① 한국관광공사 관광사진 API(collectKtoPhotos.ts) - 공공누리 제1유형, 한글 음식명으로 찾는다. 키 `KTO_SERVICE_KEY`가 없으면 건너뛴다.
+//   ② 웹 검색(네이버 + 구글) - **엔터와 같은 후보 풀**이다. 단 **언론사 사진(isPressUrl)은 계속 뺀다**: 연합뉴스·뉴스1 같은 곳은
+//      실제로 라이선스를 추심하고, 애드센스 재신청을 앞둔 사이트다(아래 2026-11-10 기록). 블로그·식당·관광·지자체 사진은 쓴다.
 //   ③ 공식 페이지 캡처(capturePagesForJob) - 화면 자체가 정보인 자리(요금표·운영시간·기관 안내)
-//   ④ AI 생성(generateManuscriptImages, quality low 고정) - **설명 그림**(지도·상차림 도식·주문 순서)만.
-//      실사 음식 사진을 대신하지 않는다 - 프롬프트 앞에 고정 일러스트 스타일(KOREAPLAIN_ILLUSTRATION_STYLE)이 붙는다.
-// **한식진흥원(hansik.or.kr) 사진은 쓰지 않는다**(2026-11-25 사용자 결정 - 목록에 넣지 않는다). 일반 웹 검색 사진(언론·블로그·
-// 상업 사이트)은 그대로 금지다.
+//   ④ AI 생성(generateManuscriptImages, quality low 고정) - **실사 사진**으로 만든다(KOREAPLAIN_AI_PHOTO_STYLE). 캡션은 `Image: AI-generated`.
+// 되돌리기: repo variable `KOREAPLAIN_IMAGE_SOURCES=whitelist`면 ②가 아래 2026-11-10 화이트리스트로 돌아간다(koreaplainSourceMode).
+// **한식진흥원(hansik.or.kr) 사진은 쓰지 않는다**(2026-11-25 사용자 결정).
 //
 // ①·②로 받은 실제 사진은 올릴 때 **톤을 맞춘다**(services/images/photoGrade.ts - 16:9 중앙 크롭 1600×900, 밝기·대비 정규화,
 // 약간 따뜻한 색온도, 강도 상수 한 곳). 그래서 **변경 금지 라이선스(CC BY-ND, 공공누리 제3·4유형)는 보정 대신 제외**한다
 // (isNoDerivativesLicense). 관광사진 출처 표기는 `Photo: Korea Tourism Organization (촬영자), KOGL Type 1`이다(toKtoPhotoCaption).
+//
+// ---- 2026-11-10 기록(화이트리스트 모드의 근거 - `KOREAPLAIN_IMAGE_SOURCES=whitelist`일 때 그대로 쓰인다) ----
+// 팀장 세션 실측: 발행본 71건 중 61건(86%)이 언론사·상업 사이트 사진을 싣고 있었다. 출처 표기(`Photo: Naver News`)만 있고
+// 라이선스는 없으며, 파일은 우리 Cloudflare Pages 도메인에 복사돼 서비스된다. 구글 퍼블리셔 정책은 저작권 침해를 금지하고,
+// 연합뉴스·뉴스1 같은 곳은 실제로 라이선스를 추심한다.
 //
 // **화이트리스트 방식이다 - 목록에 없으면 거부한다.** 언론사 목록을 늘려 막는 방식(블랙리스트,
 // `pressDomains.ts`)은 택하지 않았다. 이유 셋:
@@ -32,6 +33,7 @@
 // 이 파일은 그것을 건드리지 않고 **koreaplain 수집 경로에서만** 쓴다(collectWebImages.ts).
 
 import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
+import { isPressUrl } from "./pressDomains.js";
 
 /**
  * 허용 호스트. 하위 도메인까지 받는다(`www.seoul.go.kr` → `seoul.go.kr`, `ko.wikipedia.org` → `wikipedia.org`).
@@ -101,6 +103,30 @@ export function usesKoreaplainImagePolicy(category: string | null | undefined): 
   return category === KOREAPLAIN_TRACK;
 }
 
+/**
+ * koreaplain 웹 검색 출처 범위(2026-11-25). `open`(기본) = 엔터와 같은 웹 검색 후보에서 언론사만 뺀다.
+ * `whitelist` = 2026-11-10의 공공·공식 출처 화이트리스트(repo variable `KOREAPLAIN_IMAGE_SOURCES=whitelist` - 되돌리는 스위치).
+ */
+export type KoreaplainSourceMode = "open" | "whitelist";
+
+export function koreaplainSourceMode(env: NodeJS.ProcessEnv = process.env): KoreaplainSourceMode {
+  return (env.KOREAPLAIN_IMAGE_SOURCES ?? "").trim().toLowerCase() === "whitelist" ? "whitelist" : "open";
+}
+
+/**
+ * 이 후보를 koreaplain 원고에 쓸 수 있는가. `open`이면 이미지 주소·출처 페이지 둘 다 언론사가 아니어야 하고,
+ * `whitelist`면 둘 다 허용 목록 안이어야 한다(isAllowedKoreaplainCandidate).
+ */
+export function isUsableKoreaplainCandidate(
+  candidate: { imageUrl: string; sourcePage?: string | null },
+  mode: KoreaplainSourceMode = koreaplainSourceMode()
+): boolean {
+  if (mode === "whitelist") return isAllowedKoreaplainCandidate(candidate);
+  if (isPressUrl(candidate.imageUrl)) return false;
+  const sourcePage = (candidate.sourcePage ?? "").trim();
+  return sourcePage === "" || !isPressUrl(sourcePage);
+}
+
 /** 허용 후보만 남기고 버린 것을 센다. 순서는 유지한다. */
 export function filterKoreaplainCandidates<T extends { imageUrl: string; sourcePage?: string | null }>(
   candidates: T[]
@@ -114,33 +140,38 @@ export function filterKoreaplainCandidates<T extends { imageUrl: string; sourceP
 }
 
 /** 수집 기록(failures)에 남기는 한 줄. 사람이 "왜 자리가 비었는지" 알 수 있어야 한다. */
-export function describeDroppedCandidates(count: number): string {
-  return `ℹ️ 허용 출처가 아닌 후보 ${count}장을 버렸습니다(언론사·상업 사이트).`;
+export function describeDroppedCandidates(count: number, mode: KoreaplainSourceMode = koreaplainSourceMode()): string {
+  return mode === "whitelist"
+    ? `ℹ️ 허용 출처가 아닌 후보 ${count}장을 버렸습니다(언론사·상업 사이트).`
+    : `ℹ️ 언론사 사진 후보 ${count}장을 버렸습니다(koreaplain은 언론사 사진을 쓰지 않는다).`;
 }
 
 /**
- * AI로 만든 이미지의 캡션(2026-11-10).
+ * AI로 만든 이미지의 캡션(2026-11-10, 2026-11-25 표기 개정).
  *
- * `Photo: …` 표기를 붙이지 않는다 - 사진이 아닌 것을 사진처럼 표기하면 독자를 오인시킨다. 기존 캡션
- * 규격(prompts/images/image-maker.md §7)이 "간단한 소개. 출처 표기" 두 요소이고 영문 출처 표기가
- * `Photo: <매체>`이므로, 같은 자리에 **`Illustration: AI-generated`** 를 둔다.
+ * `Photo: …` 표기를 붙이지 않는다 - AI가 만든 것을 촬영한 사진처럼 표기하면 독자를 오인시킨다. 특히 2026-11-25부터는 AI
+ * 이미지가 **실사**라 표기가 유일한 구분선이다. 기존 캡션 규격(prompts/images/image-maker.md §7)이 "간단한 소개. 출처 표기"
+ * 두 요소이므로 출처 자리에 **`Image: AI-generated`** 를 둔다(전에는 일러스트라 `Illustration: AI-generated`였다 - 이미
+ * 발행된 글의 표기는 소급하지 않는다. 읽을 때는 두 표기 모두 알아본다 - LEGACY_AI_CREDIT).
  *
- * 지우는 것: 획득 방식 꼬리(`— AI 생성`), 앞뒤의 `Photo:` 크레디트(웹 검색 캡션이 섞여 들어온 경우),
+ * 지우는 것: 획득 방식 꼬리(`— AI 생성`), 앞뒤의 `Photo:`·옛 `Illustration:` 크레디트(웹 검색 캡션이 섞여 들어온 경우),
  * 폴백이 붙이는 한글 꼬리(`(웹 검색 실패 - AI 대체 장면)`) - 영문 발행본에 한글이 새면 안 된다.
  */
-export const AI_ILLUSTRATION_CREDIT = "Illustration: AI-generated";
+export const AI_IMAGE_CREDIT = "Image: AI-generated";
+/** 2026-11-25 이전 표기. 발행본·reimage 검증이 옛 캡션을 읽을 때 쓴다. */
+export const LEGACY_AI_CREDIT = "Illustration: AI-generated";
 
-export function toIllustrationCaption(description: string): string {
+export function toAiImageCaption(description: string): string {
   let intro = (description ?? "")
     .replace(/\s*—\s*(웹 검색|AI 생성|표 생성|인포그래픽 생성|페이지 캡처)\s*$/, "")
     // 한글이 든 괄호 꼬리는 파이프라인이 붙인 메모다(독자용 글이 아니다).
     .replace(/\s*\([^()]*[가-힣][^()]*\)\s*$/, "")
-    .replace(/[.\s]*(Photo|Source|Image)\s*:\s*[^.]*$/i, "")
-    .replace(/^\s*(Illustration|AI[- ]generated illustration)\s*:\s*/i, "")
+    .replace(/[.\s]*(Photo|Source|Image|Illustration)\s*:\s*[^.]*$/i, "")
+    .replace(/^\s*(Illustration|AI[- ]generated illustration|Image)\s*:\s*/i, "")
     .trim();
   intro = intro.replace(/[.。\s]+$/, "");
-  if (!intro) return AI_ILLUSTRATION_CREDIT;
-  return `${intro}. ${AI_ILLUSTRATION_CREDIT}`;
+  if (!intro) return AI_IMAGE_CREDIT;
+  return `${intro}. ${AI_IMAGE_CREDIT}`;
 }
 
 // ---------- 한국관광공사 관광사진(공공누리 제1유형) 출처 표기(2026-11-25) ----------
@@ -240,31 +271,35 @@ export function isNoDerivativesLicense(license: string | null | undefined, reuse
   );
 }
 
-// ---------- AI 생성 = 설명 그림(2026-11-25) ----------
+// ---------- AI 생성 = 실사 사진(2026-11-25 개정) ----------
 
 /**
- * koreaplain의 AI 이미지는 **실사 음식 사진을 대신하지 않는다** - 지도·상차림 도식·주문 순서 같은 설명 그림이다. 실사처럼 만든
- * 음식 사진은 독자가 실물로 오해하고(평양냉면 모양을 틀리게 그린 위험 - KOREAPLAIN-FOOD-PIVOT-2026-11.md), 실사 사진(관광사진)과
- * 톤도 섞이지 않는다. 그래서 생성 프롬프트 앞에 **이 한 줄 스타일**을 고정으로 붙인다(generateManuscriptImages의 aiIllustrations).
- * 스타일을 바꾸려면 이 문자열 하나만 고친다.
+ * koreaplain의 AI 이미지는 **실사 사진**으로 만든다(2026-11-25 사용자 지시 - "애니메이션이나 일러스트가 아닌 실사로").
+ * 같은 날 처음 넣었던 플랫 일러스트 스타일은 음식 전환 첫 원고(ea83b215)에서 관광사진·웹 사진 사이에 끼어 톤이 갈렸다.
+ * 실사 사진(관광사진, 톤 보정 1600×900 따뜻한 색온도)과 어울리도록 **자연광·따뜻한 중성 톤의 다큐멘터리 사진** 한 줄을
+ * 프롬프트 앞에 고정으로 붙인다(generateManuscriptImages의 aiIllustrations). 스타일을 바꾸려면 이 문자열 하나만 고친다.
+ * 실사라 독자가 실물로 오해할 수 있으므로 캡션 표기(`Image: AI-generated`)를 빼지 않는다(toAiImageCaption).
  */
-export const KOREAPLAIN_ILLUSTRATION_STYLE =
-  "Flat vector editorial illustration, clean outlines, soft warm palette of cream, terracotta, mustard and sage green, simple shapes, subtle paper texture, not photorealistic";
+export const KOREAPLAIN_AI_PHOTO_STYLE =
+  "Photorealistic documentary photograph taken in Korea, natural soft daylight, warm neutral color tones, realistic textures and imperfections, shallow depth of field, 35mm lens, not an illustration, not a cartoon, not 3D render";
 
 /**
- * 생성 프롬프트를 설명 그림 스타일로 고정한다. 실사 지시어(`photorealistic photograph of` 등)는 지우고 스타일 한 줄을 앞에 붙인다.
+ * 생성 프롬프트를 실사 사진 스타일로 고정한다. 본문의 실사·일러스트 지시어(`photorealistic photograph of`, `flat illustration of`
+ * 등)는 지우고 스타일 한 줄을 앞에 붙인다 - 옛 규격으로 쓴 일러스트 프롬프트가 와도 실사로 나온다.
  * `no text`·비율 표기는 원래 프롬프트에 있으면 그대로 남고, 없으면 붙인다(validateAiPrompt 규칙).
  */
-export function toIllustrationPrompt(prompt: string): string {
-  if ((prompt ?? "").startsWith(KOREAPLAIN_ILLUSTRATION_STYLE)) return prompt;
+export function toKoreaplainAiPrompt(prompt: string): string {
+  if ((prompt ?? "").startsWith(KOREAPLAIN_AI_PHOTO_STYLE)) return prompt;
   let body = (prompt ?? "")
     .replace(/\b(ultra[- ]?)?photo[- ]?realistic(\s+(photograph|photo|image|shot))?(\s+of)?\s*,?\s*/gi, "")
     .replace(/\b(realistic|dslr|stock)\s+(photograph|photo)(\s+of)?\s*,?\s*/gi, "")
-    .replace(/^\s*(a\s+)?(photograph|photo)\s+of\s+/i, "")
+    .replace(/^\s*(an?\s+)?((warm|minimal|simple|clean|soft|flat|vector|editorial|cartoon|cute|hand[- ]drawn)[\s,]+)*(illustration|drawing|cartoon|diagram|infographic)(\s+of)?\s*,?\s*/i, "")
+    .replace(/\b(flat\s+)?(vector|cartoon|anime|watercolor)\s+(style|illustration)\s*,?\s*/gi, "")
+    .replace(/^\s*(an?\s+)?(photograph|photo)\s+of\s+/i, "")
     .replace(/\s{2,}/g, " ")
     .trim()
     .replace(/^[,.\s]+/, "");
   if (!/no\s+text/i.test(body)) body = `${body.replace(/[.\s]+$/, "")}, no text, no letters`;
   if (!/\d+\s*:\s*\d+/.test(body)) body = `${body.replace(/[.\s]+$/, "")}, 16:9`;
-  return `${KOREAPLAIN_ILLUSTRATION_STYLE}. ${body}`;
+  return `${KOREAPLAIN_AI_PHOTO_STYLE}. ${body}`;
 }

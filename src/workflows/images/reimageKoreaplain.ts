@@ -38,7 +38,7 @@ import type { RehostResult } from "../../services/images/rehostImagesToPages.js"
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
 import { generateManuscriptImages } from "./generateManuscriptImages.js";
 import type { GenerateManuscriptImagesOptions } from "./generateManuscriptImages.js";
-import { AI_ILLUSTRATION_CREDIT, isAllowedKoreaplainImageSource } from "./koreaplainImageSources.js";
+import { AI_IMAGE_CREDIT, LEGACY_AI_CREDIT, isAllowedKoreaplainImageSource } from "./koreaplainImageSources.js";
 import { validateAiPrompt } from "./refixImageMarkers.js";
 
 // ---------- 타입 ----------
@@ -281,8 +281,9 @@ export function swapFigureImages(html: string, swaps: FigureSwap[]): FigureSwapR
       next = next.replace(/<\/figure>$/i, () => `<figcaption>${captionText}</figcaption></figure>`);
     }
     replaced.push(swap.oldSrc);
-    // 캡션 밖(출처 링크 등)에 크레디트가 따로 있었는지 본다. 일러스트 표기(`Illustration: AI-generated`)는 걸리지 않는다.
-    if (/\b(Photo|Source|Image)\s*:/i.test(next.replace(/<[^>]+>/g, " "))) creditLeft.push(swap.oldSrc);
+    // 캡션 밖(출처 링크 등)에 크레디트가 따로 있었는지 본다. 우리 AI 표기(`Image: AI-generated`, 옛 `Illustration: AI-generated`)는 빼고 본다.
+    const visible = next.replace(/<[^>]+>/g, " ").split(AI_IMAGE_CREDIT).join(" ").split(LEGACY_AI_CREDIT).join(" ");
+    if (/\b(Photo|Source|Image)\s*:/i.test(visible)) creditLeft.push(swap.oldSrc);
     return next;
   });
 
@@ -325,7 +326,7 @@ export async function generateReplacementImages(
 
 // ---------- 4b. 내용 검증 ----------
 
-const ILLUSTRATION_TAIL = new RegExp(`[.\\s]*${AI_ILLUSTRATION_CREDIT}\\s*$`, "i");
+const ILLUSTRATION_TAIL = new RegExp(`[.\\s]*(${AI_IMAGE_CREDIT}|${LEGACY_AI_CREDIT})\\s*$`, "i");
 
 /** 검증에 넘기는 캡션: 일러스트 표기를 뗀 독자용 문장. */
 export function captionForVerify(description: string): string {

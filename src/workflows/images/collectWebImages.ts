@@ -24,7 +24,8 @@ import { imageMakerSpecLines } from "./imageMakerSpec.js";
 import { extractYoutubeVideoIds, fetchTrailerFrameCandidates } from "./youtubeTrailerFrames.js";
 import {
   describeDroppedCandidates,
-  isAllowedKoreaplainCandidate,
+  isUsableKoreaplainCandidate,
+  koreaplainSourceMode,
   isNoDerivativesLicense,
   usesKoreaplainImagePolicy,
 } from "./koreaplainImageSources.js";
@@ -563,17 +564,28 @@ export function buildPrompt(
         ]),
     ...describeSearchPools(keyword, category, briefType),
     ...(usesKoreaplainImagePolicy(category)
-      ? [
-          "",
-          "## ⚠️ 이 원고는 사용할 수 있는 출처가 정해져 있다(2026-11-10 사용자 결정) - 위 4번의 \"전부 쓸 수 있다\"를 덮어쓴다",
-          "**언론사·상업 사이트·블로그·커뮤니티의 사진은 고르지 않는다.** 코드가 아래 목록 밖의 후보를 전부 버린다.",
-          "- 허용: 정부·지자체·공공기관(`*.go.kr`, `korea.kr`), 서울관광재단(`visitseoul.net`), 한국관광공사",
-          "  (`visitkorea.or.kr`), 인천국제공항공사(`airport.kr`), 위키미디어(`wikimedia.org`)·위키백과(`wikipedia.org`)",
-          "- `imageUrl`과 `sourcePage`가 **둘 다** 위 호스트여야 한다. 목록 밖에서만 찾아지면 `skipped: true`로 두고",
-          "  `skipReason`에 \"공공·공식 출처에서 찾지 못함\"과 함께 **대신 그릴 일반 장면을 한 줄로 제안**한다",
-          "  (그 자리는 AI 생성으로 넘어간다). 억지로 목록 밖 사진을 고르지 않는다.",
-          "- `license`의 영문 출처 표기는 기관명으로 쓴다: \"Photo: Seoul Metropolitan Government\".",
-        ]
+      ? koreaplainSourceMode() === "whitelist"
+        ? [
+            "",
+            "## ⚠️ 이 원고는 사용할 수 있는 출처가 정해져 있다(2026-11-10 사용자 결정) - 위 4번의 \"전부 쓸 수 있다\"를 덮어쓴다",
+            "**언론사·상업 사이트·블로그·커뮤니티의 사진은 고르지 않는다.** 코드가 아래 목록 밖의 후보를 전부 버린다.",
+            "- 허용: 정부·지자체·공공기관(`*.go.kr`, `korea.kr`), 서울관광재단(`visitseoul.net`), 한국관광공사",
+            "  (`visitkorea.or.kr`), 인천국제공항공사(`airport.kr`), 위키미디어(`wikimedia.org`)·위키백과(`wikipedia.org`)",
+            "- `imageUrl`과 `sourcePage`가 **둘 다** 위 호스트여야 한다. 목록 밖에서만 찾아지면 `skipped: true`로 두고",
+            "  `skipReason`에 \"공공·공식 출처에서 찾지 못함\"과 함께 **대신 그릴 일반 장면을 한 줄로 제안**한다",
+            "  (그 자리는 AI 생성으로 넘어간다). 억지로 목록 밖 사진을 고르지 않는다.",
+            "- `license`의 영문 출처 표기는 기관명으로 쓴다: \"Photo: Seoul Metropolitan Government\".",
+          ]
+        : [
+            "",
+            "## ⚠️ 이 원고는 영문 블로그(Korea Plain)의 음식·생활 글이다(2026-11-25 사용자 결정)",
+            "- 엔터 원고와 같이 **웹에서 찾은 실제 사진을 쓴다** - 식당·여행·관광·지자체·위키미디어·블로그 사진 모두 된다.",
+            "  음식 자리는 **그 음식이 실제로 담긴 사진**(그릇·상차림 클로즈업)이 1순위다. 사람이 먹는 장면 자리도 실제 사진을 먼저 찾는다.",
+            "- **언론사 사진은 고르지 않는다**(코드가 언론사 주소의 후보를 버린다 - 통신사가 라이선스를 추심한다).",
+            "- **유료 스톡(워터마크 포함)은 고르지 않는다.** 사진 위에 큰 글자·로고·워터마크가 박힌 것도 피한다.",
+            "- `license`의 영문 출처 표기는 사이트·기관명으로 쓴다: \"Photo: Visit Seoul\", \"Photo: Wikimedia Commons\".",
+            "- 정말 없으면 `skipped: true` - 그 자리는 **실사 AI 이미지**로 넘어간다.",
+          ]
       : []),
     "",
     "## 자리별 지시",
@@ -979,17 +991,18 @@ export async function collectWebImages(
   const verify = options.verify ?? true;
   const failures: string[] = [];
 
-  // koreaplain 트랙은 화이트리스트 밖 출처의 후보를 버린다(2026-11-10, koreaplainImageSources.ts).
-  // 다른 트랙은 이 값이 false라 아래 분기가 한 줄도 실행되지 않는다 - 엔터·사회·인물은 지금 그대로
-  // 언론사 사진을 쓴다(사용자 결정: 이 변경은 koreaplain 신규 원고에만 적용).
+  // koreaplain 트랙은 쓸 수 없는 출처의 후보를 버린다(koreaplainImageSources.ts). 2026-11-25부터 기본(`open`)은 **언론사만**
+  // 버리고(엔터와 같은 웹 검색), `KOREAPLAIN_IMAGE_SOURCES=whitelist`면 2026-11-10의 공공·공식 화이트리스트 밖을 전부 버린다.
+  // 다른 트랙은 이 값이 false라 아래 분기가 한 줄도 실행되지 않는다 - 엔터·사회·인물은 지금 그대로 언론사 사진을 쓴다.
   const enforceSources = usesKoreaplainImagePolicy(options.category);
+  const sourceMode = koreaplainSourceMode();
   // 같은 사진이 검색 후보와 에이전트 선택에 둘 다 있을 수 있어 URL로 센다(두 번 세지 않는다).
   const droppedUrls = new Set<string>();
   const dropDisallowed = <T>(items: T[], toCandidate: (item: T) => { imageUrl: string; sourcePage?: string | null }): T[] => {
     if (!enforceSources) return items;
     return items.filter((item) => {
       const candidate = toCandidate(item);
-      if (isAllowedKoreaplainCandidate(candidate)) return true;
+      if (isUsableKoreaplainCandidate(candidate, sourceMode)) return true;
       droppedUrls.add(candidate.imageUrl);
       return false;
     });
@@ -997,7 +1010,7 @@ export async function collectWebImages(
   /** 버린 건수를 수집 기록에 **한 줄로** 남긴다 - 사람이 왜 자리가 비었는지 알아야 한다. */
   const noteDroppedCandidates = (): void => {
     if (droppedUrls.size === 0) return;
-    failures.push(describeDroppedCandidates(droppedUrls.size));
+    failures.push(describeDroppedCandidates(droppedUrls.size, sourceMode));
     droppedUrls.clear();
   };
 
@@ -1269,7 +1282,7 @@ export async function collectWebImages(
     }));
     const seenUrls = new Set(agentPicks.map((c) => c.imageUrl));
     const unfilteredCandidates = [...agentPicks, ...searchFallback.filter((c) => !seenUrls.has(c.imageUrl))];
-    // koreaplain: 이미지 주소와 출처 페이지가 둘 다 허용 목록 안인 후보만 쓴다. 에이전트가 직접 찾은
+    // koreaplain: 이미지 주소와 출처 페이지가 둘 다 쓸 수 있는 출처인 후보만 쓴다(open = 언론사 아님, whitelist = 허용 목록). 에이전트가 직접 찾은
     // 후보(웹 검색)는 위 검색창 필터를 거치지 않았으므로 여기서 거른다. 사용자가 주소를 찍어 준 자리
     // (userChosen)도 예외가 아니다 - "어느 경로로도 들어오지 못하게"가 목적이다.
     const allowedCandidates = dropDisallowed(unfilteredCandidates, (c) => c);
@@ -1288,7 +1301,11 @@ export async function collectWebImages(
     if (enforceSources && rawCandidates.length === 0) {
       // 후보가 전부 허용 밖이었다. 아래의 "후보 N장을 모두 써봤지만" 문구는 내려받기를 시도한 경우의
       // 말이라 여기서는 맞지 않는다 - 이 자리는 호출부가 AI 생성으로 넘긴다.
-      failures.push(`[자리 ${slot.index}] 허용 출처의 후보가 없어 비웠습니다(후보 ${unfilteredCandidates.length}장 모두 언론사·상업 사이트 등 허용 밖).`);
+      failures.push(
+        sourceMode === "whitelist"
+          ? `[자리 ${slot.index}] 허용 출처의 후보가 없어 비웠습니다(후보 ${unfilteredCandidates.length}장 모두 언론사·상업 사이트 등 허용 밖).`
+          : `[자리 ${slot.index}] 쓸 수 있는 후보가 없어 비웠습니다(후보 ${unfilteredCandidates.length}장 모두 언론사 사진이거나 변경 금지 라이선스).`
+      );
       return null;
     }
 

@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { KOREAPLAIN_TRACK } from "../../config/koreaplainTrack.js";
 import type { RehostResult } from "../../services/images/rehostImagesToPages.js";
 import type { ManuscriptImage } from "../manuscripts/manuscriptManifest.js";
-import { AI_ILLUSTRATION_CREDIT, toIllustrationCaption } from "./koreaplainImageSources.js";
+import { AI_IMAGE_CREDIT, toAiImageCaption } from "./koreaplainImageSources.js";
 import {
   buildReimagePrompt,
   buildRetryPrompt,
@@ -149,7 +149,7 @@ function makeEnv(
       return {
         images: slots.map((slot) => ({
           index: slot.index,
-          description: toIllustrationCaption(slot.description),
+          description: toAiImageCaption(slot.description),
           prompt: slot.prompt,
           url: `https://sb.test/${job.id}/${slot.index}.webp?v=${generateCalls.length > 1 ? "retry" : "new"}`,
           provider: "openai",
@@ -278,14 +278,14 @@ async function main(): Promise<void> {
     for (const fig of replacedFigures) {
       assert(fig !== "", "교체된 <figure>를 찾아야 한다");
       assert(!/Photo:/i.test(fig), `교체된 figure에 Photo: 가 남았다: ${fig}`);
-      assert(fig.includes(`. ${AI_ILLUSTRATION_CREDIT}</figcaption>`), "교체된 figcaption이 Illustration: AI-generated로 끝나야 한다");
-      assert(fig.includes(`alt="Scene number`) && fig.includes(AI_ILLUSTRATION_CREDIT) && /alt="[^"]*Illustration: AI-generated"/.test(fig), "alt도 일러스트 캡션이어야 한다");
+      assert(fig.includes(`. ${AI_IMAGE_CREDIT}</figcaption>`), "교체된 figcaption이 Image: AI-generated로 끝나야 한다");
+      assert(fig.includes(`alt="Scene number`) && fig.includes(AI_IMAGE_CREDIT) && new RegExp(`alt="[^"]*${AI_IMAGE_CREDIT}"`).test(fig), "alt도 일러스트 캡션이어야 한다");
       assert(fig.includes('width="1536"') && fig.includes('height="864"') && !fig.includes('width="800"'), "치수는 새 이미지 기준으로 바뀌어야 한다");
       assert(fig.includes('loading="lazy"') && fig.includes('style="font-size:16px"'), "치수·캡션 외 속성과 스타일은 보존돼야 한다");
     }
     assert(!html.includes(pagesOld(job.id, 1)) && !html.includes(pagesOld(job.id, 3)), "교체된 자리의 옛 Pages URL이 본문에 남으면 안 된다");
     assert(html.startsWith("<p>intro</p>") && html.endsWith("<p>end</p>") && html.includes("<p>text</p>"), "figure 밖 본문은 한 글자도 바뀌면 안 된다");
-    console.log("✅ 캡션: Photo: 제거 + Illustration: AI-generated, src·alt·치수 갱신, figure 밖 본문 불변");
+    console.log("✅ 캡션: Photo: 제거 + Image: AI-generated, src·alt·치수 갱신, figure 밖 본문 불변");
 
     // 메타
     const replaced1 = meta.images.find((img) => img.index === 1) as ManuscriptImage;
@@ -293,7 +293,7 @@ async function main(): Promise<void> {
     assert(replaced1.sourcePage === null && replaced1.license === null, "sourcePage·license는 null이어야 한다");
     assert(replaced1.provider === "openai" && replaced1.prompt === GOOD_PROMPT, "provider·prompt가 새 값이어야 한다");
     assert(replaced1.width === 1536 && replaced1.height === 864, "치수가 새 값이어야 한다");
-    assert(replaced1.description.endsWith(AI_ILLUSTRATION_CREDIT) && !/Photo:/.test(replaced1.description), "description도 일러스트 캡션이어야 한다(재발행 때 Photo:가 되살아나면 안 된다)");
+    assert(replaced1.description.endsWith(AI_IMAGE_CREDIT) && !/Photo:/.test(replaced1.description), "description도 일러스트 캡션이어야 한다(재발행 때 Photo:가 되살아나면 안 된다)");
     assert(meta.rehostedBySource[replaced1.url as string] === pagesNew(job.id, 1), "rehostedBySource에 새 대응이 있어야 한다");
     assert(!(sbOld(job.id, 1) in meta.rehostedBySource), "교체된 자리의 옛 대응은 빠져야 한다");
     assert(meta.rehostedBySource[sbOld(job.id, 2)] === pagesOld(job.id, 2), "skip 자리의 대응은 그대로여야 한다");
@@ -373,7 +373,7 @@ async function main(): Promise<void> {
       }
     );
     assert(result.images.length === 1 && result.images[0].index === 4, "본문 없이도 자리 번호(index)를 그대로 지켜 생성해야 한다");
-    assert(result.images[0].description === `Crowd at the airport. ${AI_ILLUSTRATION_CREDIT}`, `캡션이 일러스트 표기여야 한다(실제: ${result.images[0].description})`);
+    assert(result.images[0].description === `Crowd at the airport. ${AI_IMAGE_CREDIT}`, `캡션이 일러스트 표기여야 한다(실제: ${result.images[0].description})`);
     assert(qualities.length === 1 && qualities[0] === "low", `화질은 low로 고정이어야 한다(실제: ${qualities[0]})`);
     assert(result.images[0].url === "https://sb.test/job-gen00001/4.webp", "업로드 경로(jobId/index)를 그대로 쓴다 - 원본 `-web` 파일을 덮지 않는다");
     console.log("✅ 생성 어댑터: generateManuscriptImages 재사용, index 보존, low 화질, 일러스트 캡션");
