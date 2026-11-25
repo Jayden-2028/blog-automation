@@ -180,7 +180,13 @@ export function buildKtoSlotHints(input: BuildKtoSlotHintsInput): Record<number,
 
   const hints: Record<number, KtoSlotHint> = {};
   for (const slot of input.slots) {
-    const planText = (slot.planQueries ?? []).filter((q) => HANGUL.test(q ?? "")).join(" ");
+    const hangulQueries = (slot.planQueries ?? []).filter((q) => HANGUL.test(q ?? ""));
+    // 관광사진은 **음식 그 자체** 자리에만 쓴다(2026-11-25 사용자 지적 - 냉면 원고 3번과 5번이 같은 함흥냉면 관광사진 풀에서
+    // 나왔다. 5번은 "양념에 비비는 장면"인데 음식명만 보고 관광사진을 붙였다). 기획은 음식 자리의 `queries[0]`을 **한글 음식명
+    // 한 단어**로 쓴다(planImageSlots.ts) - 첫 검색어에 띄어쓰기가 있으면(`함흥냉면 비빔`, `평양냉면 식초 겨자`) 장면·내용이 있는
+    // 자리이므로 관광사진을 건너뛰고 웹 검색이 내용에 맞는 사진을 찾게 한다. 기획 검색어가 없는 자리만 아래 옛 경로(한글 초안·job)를 탄다.
+    if (hangulQueries.length > 0 && /\s/.test(hangulQueries[0].trim())) continue;
+    const planText = hangulQueries.join(" ");
     const koreanText = slot.koreanText ?? "";
 
     let source: KtoSlotHint["source"] = "plan";
@@ -249,4 +255,29 @@ export function buildKoreaplainKtoHints(input: {
     koreanText: texts[index] ?? "",
   }));
   return buildKtoSlotHints({ keyword: input.keyword, koreanTitle: input.koreanTitle ?? null, slots });
+}
+
+/**
+ * `페이지 캡처`가 실패한 자리를 웹 검색으로 넘길 때 쓸 한국어 검색어(2026-11-25 사용자 지시 - "공식 사진, 언론사 사진 외에
+ * 블로거 후기 등에서도 긁어다 쓸 수 있지 않나요?"). 냉면 원고 6번(영등포 함흥냉면 가게의 관광공사 영문 안내 페이지 캡처)이
+ * 캡처 판정에서 떨어져 두 번 연속 비었다.
+ *
+ * 한글 초안의 마커 설명에서 **가게·식당까지의 앞부분**("영등포 함흥냉면 가게의 메뉴…" → "영등포 함흥냉면")을 뽑아
+ * `맛집`·`후기`를 붙인다. 가게 말이 없으면 음식명으로 `<음식> 맛집 후기`. 아무것도 못 구하면 빈 배열(그 자리는 그대로 빈다).
+ */
+export function captureFallbackQueries(koreanText: string | null | undefined, dishes: readonly string[] = []): string[] {
+  const text = (koreanText ?? "")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\s*—\s*(페이지 캡처|웹 검색|AI 생성|표 생성|인포그래픽 생성)[\s\S]*$/, "")
+    .replace(/[,·]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = text.split(" ").filter(Boolean);
+  const placeAt = tokens.findIndex((t) => /(가게|식당|음식점|맛집|본점|집의|집$)/.test(t));
+  let prefix = placeAt > 0 ? tokens.slice(0, placeAt).join(" ") : "";
+  if (!HANGUL.test(prefix)) prefix = "";
+  const dish = dishes.find((d) => HANGUL.test(d)) ?? hangulDishesIn(text)[0]?.hangul ?? "";
+  if (!prefix && !dish) return [];
+  const base = prefix || dish;
+  return [`${base} 맛집`, `${base} 후기`];
 }

@@ -39,8 +39,8 @@ import { capturePagesForJob } from "../images/capturePagesForJob.js";
 import { planImageSlots } from "../images/planImageSlots.js";
 import { plannedWorkTitlesFrom } from "../images/plannedWorkTitles.js";
 import { IMAGE_PLANNING_CONFIG } from "../../config/imagePlanning.js";
-import { usesKoreaplainImagePolicy } from "../images/koreaplainImageSources.js";
-import { buildKoreaplainKtoHints } from "../images/koreanFoodNames.js";
+import { koreaplainSourceMode, usesKoreaplainImagePolicy } from "../images/koreaplainImageSources.js";
+import { buildKoreaplainKtoHints, captureFallbackQueries, hangulDishesIn, koreanSlotTexts } from "../images/koreanFoodNames.js";
 import { parseManuscriptBlocks } from "./parseManuscriptBlocks.js";
 import { DEFAULT_TRACK, trackOfJob } from "../../notifications/telegramTracks.js";
 import type { ImagePlan } from "../images/planImageSlots.js";
@@ -423,8 +423,9 @@ export async function prepareManuscript(
     job.metadata as Record<string, unknown> | null
   );
   if (route) imageFailures.push(...route.notes);
-  const planSearchIndexes = route?.searchIndexes;
-  const planQueries = route?.queries;
+  // 캡처가 실패한 koreaplain 자리를 웹 검색으로 넘길 수 있게 복사본을 쓴다(아래 캡처 단계 뒤, 2026-11-25).
+  let planSearchIndexes = route?.searchIndexes ? [...route.searchIndexes] : undefined;
+  let planQueries = route?.queries ? { ...route.queries } : undefined;
   // 기획이 알아낸 작품명(2026-11-25). 키노라이츠 수집기가 키워드에서 작품명을 추측하다 가운데에 있는
   // 작품명을 놓치던 문제를 없앤다 - 추측은 이것이 비었을 때의 폴백으로 남는다.
   const plannedWorkTitles = plannedWorkTitlesFrom(plan, job.keyword);
@@ -526,6 +527,22 @@ export async function prepareManuscript(
         (a, b) => a.index - b.index
       );
       await mergeJobMetadata(job.id, { pageCapturesReadyAt: now().toISOString(), images });
+    }
+  }
+
+  // koreaplain: 캡처가 실패한 자리는 비워 두지 않고 웹 검색(블로그 후기 포함)으로 넘긴다(2026-11-25 사용자 지시 - 냉면 원고 6번이
+  // 관광공사 안내 페이지 캡처 판정에서 떨어져 두 번 연속 비었다). 검색어는 한글 초안의 그 자리 설명에서 뽑는다(captureFallbackQueries).
+  // 기획 단계의 `search` 기본(엔터와 같은 프로세스)과 같은 줄기다 - whitelist 모드(되돌리기)에서는 옛 동작 그대로 빈다.
+  if (koreaplainImages && koreaplainSourceMode() === "open" && planCaptureUrls && planSearchIndexes) {
+    const koreanTexts = baseArticle.content ? koreanSlotTexts(baseArticle.content, slotPrompts) : {};
+    for (const key of Object.keys(planCaptureUrls)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || images.some((i) => i.index === index && i.url) || planSearchIndexes.includes(index)) continue;
+      const queries = captureFallbackQueries(koreanTexts[index] ?? "", hangulDishesIn(baseArticle.title ?? "").map((d) => d.hangul));
+      if (queries.length === 0) continue;
+      planSearchIndexes = [...planSearchIndexes, index].sort((a, b) => a - b);
+      planQueries = { ...(planQueries ?? {}), [index]: queries };
+      imageFailures.push(`[자리 ${index}] ℹ️ 페이지 캡처를 못 써서 웹 검색으로 찾습니다(검색어: ${queries.join(", ")}).`);
     }
   }
 

@@ -95,6 +95,11 @@
 > 프로세스)**. 그래서 ② 웹 검색은 엔터와 같은 후보 풀에서 **언론사만** 빼고(`isUsableKoreaplainCandidate`), 기획 기본값은 `search`,
 > ④ AI는 실사 스타일(`KOREAPLAIN_AI_PHOTO_STYLE`)·캡션 `Image: AI-generated`다. 되돌리기: repo variable
 > `KOREAPLAIN_IMAGE_SOURCES=whitelist`(②가 아래 옛 화이트리스트로, 기획이 "기본은 ai"로 돌아간다. AI 실사 스타일은 그대로).
+>
+> **같은 날 2차 개정(재수집 결과를 본 사용자 지적)**: 재수집에서 5번(양념에 비비는 장면)이 3번과 같은 함흥냉면 관광사진 풀에서 나왔고,
+> 6번(가게 안내 페이지 캡처)은 캡처 판정에서 떨어져 또 비었다. ① 관광사진은 **기획 첫 검색어가 음식명 한 단어인 자리(음식 그 자체)**에만
+> 쓴다 - 장면이 있는 자리는 웹 검색이 내용에 맞는 사진을 찾는다(`buildKtoSlotHints`). ② 캡처가 실패한 자리는 한글 초안 설명에서 뽑은
+> `<가게 앞부분> 맛집`·`후기` 검색어로 **웹 검색(블로그 후기 포함)**에 넘긴다(`captureFallbackQueries`, prepareManuscript). whitelist 모드는 옛 동작.
 
 | 순서 | 출처 | 파일 | 비고 |
 |---|---|---|---|

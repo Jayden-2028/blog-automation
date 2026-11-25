@@ -32,7 +32,7 @@ import {
   toKoreaplainAiPrompt,
   toKtoPhotoCaption,
 } from "./koreaplainImageSources.js";
-import { buildKoreaplainKtoHints, buildKtoSlotHints, hangulDishesIn, koreanSlotTexts, romanizedDishesIn } from "./koreanFoodNames.js";
+import { buildKoreaplainKtoHints, buildKtoSlotHints, captureFallbackQueries, hangulDishesIn, koreanSlotTexts, romanizedDishesIn } from "./koreanFoodNames.js";
 import { validateAiPrompt } from "./refixImageMarkers.js";
 import type { ManuscriptImageConfig } from "../../config/manuscriptImages.js";
 
@@ -136,12 +136,16 @@ async function main(): Promise<void> {
         { index: 2, planQueries: [], koreanText: "철판 위 막국수 한 그릇 — 웹 검색 춘천 막국수" },
         { index: 3, planQueries: ["올챙이국수"], koreanText: "" },
         { index: 4, planQueries: ["춘천 명동 거리 풍경"], koreanText: "골목 풍경" },
+        { index: 5, planQueries: [], koreanText: "골목 풍경" },
+        { index: 6, planQueries: ["함흥냉면 비빔", "함흥냉면 먹는법"], koreanText: "함흥냉면 양념에 면을 비비는 손님" },
       ],
     });
     assert(hints[1]?.source === "plan" && hints[1].dishes.join() === "닭갈비" && hints[1].regions.includes("춘천"), `자리 1: 기획 검색어 (${JSON.stringify(hints[1])})`);
     assert(hints[2]?.source === "korean-draft" && hints[2].dishes[0] === "춘천막국수" && hints[2].dishes[1] === "막국수", `자리 2: 한글 초안 마커 (${JSON.stringify(hints[2])})`);
     assert(hints[3]?.source === "plan-literal" && hints[3].dishes.join() === "올챙이국수", `자리 3: 사전에 없는 음식은 기획 검색어 그대로 (${JSON.stringify(hints[3])})`);
-    assert(hints[4]?.source === "job" && hints[4].dishes.join() === "닭갈비", `자리 4: 음식명이 없으면 원고 단위(제목·키워드) (${JSON.stringify(hints[4])})`);
+    assert(hints[4] === undefined, `자리 4: 기획 첫 검색어가 장면(띄어쓰기)이면 관광사진을 건너뛴다 (${JSON.stringify(hints[4])})`);
+    assert(hints[5]?.source === "job" && hints[5].dishes.join() === "닭갈비", `자리 5: 기획 검색어도 음식명도 없으면 원고 단위(제목·키워드) (${JSON.stringify(hints[5])})`);
+    assert(hints[6] === undefined, `자리 6: "함흥냉면 비빔"처럼 내용이 있는 자리는 관광사진이 아니라 웹 검색 (2026-11-25 냉면 3·5번 같은 풀 사고) (${JSON.stringify(hints[6])})`);
     assert(Object.values(hints).every((h) => h.dishes.length <= 2), "자리당 키워드 2개 이하");
 
     const none = buildKtoSlotHints({ keyword: "korea subway fare", slots: [{ index: 1, planQueries: ["지하철 개찰구"] }] });
@@ -152,7 +156,12 @@ async function main(): Promise<void> {
     assert(texts[1]?.includes("나주곰탕") && texts[2]?.includes("상차림"), `한글 초안 자리 텍스트 (${JSON.stringify(texts)})`);
     const viaEntry = buildKoreaplainKtoHints({ keyword: "naju gomtang", koreanTitle: "나주곰탕", koreanBody: ko, imagePrompts: ["나주곰탕", "table setting"], slotCount: 2 });
     assert(viaEntry[1]?.dishes.join() === "나주곰탕,곰탕" && viaEntry[1].regions.includes("나주"), `진입점 (${JSON.stringify(viaEntry)})`);
-    console.log("✅ 한글 음식명: 기획 → 한글 초안 → 기획 그대로 → 원고 단위, 자리당 2개, 음식 아니면 건너뜀");
+    // 캡처 실패 자리의 웹 검색어(2026-11-25 냉면 6번).
+    const cap = captureFallbackQueries("영등포 함흥냉면 가게의 메뉴, 주소, 영업시간이 나온 한국관광공사 영문 안내 페이지 — 페이지 캡처", ["함흥냉면"]);
+    assert(cap.join("|") === "영등포 함흥냉면 맛집|영등포 함흥냉면 후기", `캡처 실패 검색어: 가게 앞부분 + 맛집·후기 (${cap.join("|")})`);
+    assert(captureFallbackQueries("요금표 안내 페이지 https://x.go.kr/a — 페이지 캡처", ["닭갈비"]).join("|") === "닭갈비 맛집|닭갈비 후기", "가게 말이 없으면 음식명");
+    assert(captureFallbackQueries("요금표 안내 페이지", []).length === 0, "아무것도 못 구하면 빈 배열");
+    console.log("✅ 한글 음식명: 음식 자리만 관광사진(장면 자리는 웹 검색), 한글 초안 → 기획 그대로 → 원고 단위, 자리당 2개, 캡처 실패 검색어");
   }
 
   // --- 4. 후보 고르기(메타데이터) ----------------------------------------------------------------
