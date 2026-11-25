@@ -12,6 +12,11 @@
 //      > 최근 촬영 가점. 한 원고 안에서 같은 사진(contentId)을 두 자리에 주지 않는다.
 //   3. 자리당 상위 3장을 내려받아 해상도를 보고(긴 변 600px 미만 탈락), 비전 판정(collectWebImages의 chooseImage)으로 하나를 고른다.
 //      판정이 "맞는 것이 없다"고 하면 그 자리는 다음 단계(웹 검색)로 넘어간다.
+//      **관광사진은 취사선택이다**(2026-11-25 사용자 지시 - "문단 내용에 맞지 않는 사진을 반드시 쓸 필요는 없다"). 관광사진은 음식명
+//      검색이라 음식 종류만 같고 문단이 보여주려는 장면(비비는 손, 두 그릇 비교, 특정 고명)과 다른 경우가 많다 - 냉면 원고에서
+//      "양념에 비비는 장면" 자리에 함흥냉면 그릇 사진이 들어갔다. 그래서 판정자에게 **문단 내용이 사진에 실제로 보일 때만** 고르라고
+//      못 박고(KTO_FIT_CAUTION), 판정을 못 받은 경우(호출 실패·결과 해석 실패)는 1순위를 쓰지 않고 웹 검색으로 넘긴다. 같은 촬영 묶음
+//      (촬영자·촬영지·제목이 같은 사진)은 한 원고에 한 장만 쓴다 - 바이트가 달라 중복 검사기를 통과해도 독자에겐 같은 사진이다.
 //   4. 캡션은 사진 소개 + `Photo: Korea Tourism Organization (촬영자), KOGL Type 1`(공공누리 제1유형 출처 표시).
 // 실패는 전부 비치명이다 - 못 채운 자리는 기존 경로가 받는다.
 
@@ -46,6 +51,20 @@ const PEOPLE_TERMS = ["관광객", "여행객", "사람들", "사람", "인물",
 const TEXT_TERMS = ["간판", "메뉴판", "메뉴", "안내판", "안내", "포스터", "표지판", "현수막", "지도"];
 /** 음식이 아니라 장소가 주인공인 사진. */
 const SCENERY_TERMS = ["전경", "외관", "야경", "입구", "골목"];
+
+/**
+ * 관광사진 판정 기준(2026-11-25). 판정자는 후보가 관광사진뿐이어도 "그중 제일 나은 것"을 고르는 경향이 있어, 맞지 않으면 비우라고
+ * 분명히 적는다 - 비운 자리는 웹 검색(블로그·식당 사진 포함)이 문단에 맞는 사진을 따로 찾는다.
+ */
+export const KTO_FIT_CAUTION =
+  "이 후보들은 한국관광공사 관광사진으로, 음식 이름으로만 검색한 것이다. 음식 종류가 같다는 이유로 고르지 않는다. " +
+  "자리 설명과 문단이 보여주려는 것(먹는 동작·비교·특정 고명·상차림·가게 등)이 사진에 실제로 보일 때만 고른다. " +
+  "조금이라도 어긋나면 picked: null - 이 자리는 웹 검색이 따로 찾는다. 사람·간판·메뉴판이 주인공인 사진은 고르지 않는다.";
+
+/** 같은 촬영 묶음의 열쇠. 촬영자·촬영지·제목이 같으면 한 장면을 여러 번 찍은 사진이다. */
+export function ktoShootKey(photo: Pick<KtoPhoto, "photographer" | "location" | "title">): string {
+  return [photo.photographer, photo.location, photo.title].map((v) => compact(v ?? "")).join("|");
+}
 
 export type KtoScoredPhoto = { photo: KtoPhoto; score: number; matched: string; reasons: string[] };
 
@@ -228,6 +247,8 @@ export async function collectKtoPhotos(input: CollectKtoPhotosInput, options: Co
     return photos;
   };
 
+  /** 이 원고에서 이미 쓴 촬영 묶음 → 쓴 자리. */
+  const usedShoots = new Map<string, number>();
   const ranked = new Map<number, KtoScoredPhoto[]>();
   for (const slot of slots) {
     const hint = input.hints[slot.index];
@@ -325,13 +346,20 @@ export async function collectKtoPhotos(input: CollectKtoPhotosInput, options: Co
         })),
         markerDescription: slot.description,
         context: slot.context,
-        caution: [slot.caution, "음식이 주인공인 사진을 고른다. 사람·간판·메뉴판이 주인공인 사진은 고르지 않는다."].filter(Boolean).join(" "),
+        caution: [slot.caution, KTO_FIT_CAUTION].filter(Boolean).join(" "),
         keyword: input.keyword,
         captionLanguage: options.captionLanguage,
       }).catch((error: unknown) => ({ picked: null, reason: `판정 실패: ${error instanceof Error ? error.message : String(error)}` }) as ChooseImageResult);
-      if (verdict.picked === null) {
+      // 판정을 못 받았으면(호출 실패·결과 해석 실패 - defaultChooseImage는 이때 1순위를 돌려준다) 관광사진을 쓰지 않는다.
+      // 웹 수집에서는 1순위라도 쓰는 게 낫지만, 관광사진은 내용이 맞는지 모르는 채로 넣을 이유가 없다(웹 검색이 뒤에 있다).
+      const unjudged = /^(검증 건너뜀|검증 결과를 읽지 못해|판정 실패)/.test(verdict.reason ?? "");
+      if (verdict.picked === null || unjudged) {
         for (const d of downloaded) await rm(d.filePath, { force: true });
-        failures.push(`[자리 ${slot.index}] 관광사진 후보 ${openable.length}장이 자리와 맞지 않아 다음 단계로 넘깁니다: ${verdict.reason}`);
+        failures.push(
+          unjudged
+            ? `[자리 ${slot.index}] 관광사진 판정을 받지 못해 쓰지 않고 웹 검색으로 넘깁니다: ${verdict.reason}`
+            : `[자리 ${slot.index}] 관광사진 후보 ${openable.length}장이 문단 내용과 맞지 않아 웹 검색으로 넘깁니다: ${verdict.reason}`
+        );
         delete candidateLog[slot.index];
         return null;
       }
@@ -339,30 +367,41 @@ export async function collectKtoPhotos(input: CollectKtoPhotosInput, options: Co
       if (verdict.caption) rewrittenCaption = verdict.caption;
     }
 
-    // 한 원고 안에서 같은 컷을 두 번 쓰지 않는다(images.md §8-8). 중복이면 다음 후보로.
-    if (options.deduper) {
-      const ordered = [chosen, ...byMeta.filter((d) => d !== chosen)];
-      let accepted: Downloaded | null = null;
-      for (const candidate of ordered) {
+    // 한 원고 안에서 같은 컷·같은 촬영 묶음을 두 번 쓰지 않는다(images.md §8-8). **판정을 받았으면 판정자가 고른 한 장만** 본다 -
+    // 그 사진이 중복이라고 판정 안 받은 다른 관광사진으로 바꿔 끼우면 "문단에 맞을 때만 쓴다"가 깨진다(2026-11-25). 웹 검색이 뒤에 있다.
+    const judged = verify && openable.length > 0;
+    const ordered = judged ? [chosen] : [chosen, ...byMeta.filter((d) => d !== chosen)];
+    let accepted: Downloaded | null = null;
+    for (const candidate of ordered) {
+      // 중복 검사기는 자리 순서대로 차례를 준다(planOrder) - 촬영 묶음 확인을 그 **뒤에** 해야 앞 자리가 고른 묶음을 본다.
+      if (options.deduper) {
         const check = await options.deduper.claim(`자리 ${slot.index}`, candidate.buffer, candidate.contentType, {
           index: slot.index,
           filePath: candidate.filePath,
         });
-        if (!check.duplicate) {
-          accepted = candidate;
-          break;
+        if (check.duplicate) {
+          failures.push(`[자리 ${slot.index}] ⚠️ 관광사진 ${candidate.number}번이 ${check.against}와 같은 컷이라 건너뜁니다.`);
+          continue;
         }
-        failures.push(`[자리 ${slot.index}] ⚠️ 관광사진 ${candidate.number}번이 ${check.against}와 같은 컷이라 건너뜁니다.`);
       }
-      if (!accepted) {
-        for (const d of downloaded) await rm(d.filePath, { force: true });
-        delete candidateLog[slot.index];
-        failures.push(`[자리 ${slot.index}] 관광사진 후보가 전부 다른 자리와 같은 컷이라 다음 단계로 넘깁니다.`);
-        return null;
+      const shoot = ktoShootKey(candidate.scored.photo);
+      const shootOwner = usedShoots.get(shoot);
+      if (shootOwner !== undefined && shootOwner !== slot.index) {
+        failures.push(`[자리 ${slot.index}] ⚠️ 관광사진 ${candidate.number}번이 자리 ${shootOwner}와 같은 촬영 묶음이라 건너뜁니다.`);
+        continue;
       }
-      if (accepted !== chosen) rewrittenCaption = ""; // 판정자가 본 사진이 아니다 - 캡션은 자리 설명으로.
-      chosen = accepted;
+      accepted = candidate;
+      usedShoots.set(shoot, slot.index);
+      break;
     }
+    if (!accepted) {
+      for (const d of downloaded) await rm(d.filePath, { force: true });
+      delete candidateLog[slot.index];
+      failures.push(`[자리 ${slot.index}] 관광사진이 다른 자리와 겹쳐(같은 컷·같은 촬영 묶음) 웹 검색으로 넘깁니다.`);
+      return null;
+    }
+    if (accepted !== chosen) rewrittenCaption = ""; // 판정자가 본 사진이 아니다 - 캡션은 자리 설명으로.
+    chosen = accepted;
     for (const d of downloaded) if (d !== chosen) await rm(d.filePath, { force: true });
     for (const logged of candidateLog[slot.index] ?? []) logged.picked = logged.number === chosen.number;
 

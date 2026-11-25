@@ -18,7 +18,7 @@ import type { KtoPhoto, KtoSearch, KtoSearchResult } from "../../services/images
 import { optimizeImage } from "../../services/images/optimizeImage.js";
 import { KOREAPLAIN_PHOTO_GRADE, photoGradeLib } from "../../services/images/photoGrade.js";
 import { readImageSize } from "../../services/images/imageDimensions.js";
-import { collectKtoPhotos, KTO_MAX_CALLS_PER_MANUSCRIPT, assignKtoCandidates, rankKtoPhotos, scoreKtoPhoto } from "./collectKtoPhotos.js";
+import { collectKtoPhotos, KTO_FIT_CAUTION, KTO_MAX_CALLS_PER_MANUSCRIPT, assignKtoCandidates, ktoShootKey, rankKtoPhotos, scoreKtoPhoto } from "./collectKtoPhotos.js";
 import { collectWebImagesForJob } from "./collectWebImagesForJob.js";
 import { collectWebImages } from "./collectWebImages.js";
 import type { ChooseImageInput, WebImageSlot } from "./collectWebImages.js";
@@ -269,9 +269,35 @@ async function main(): Promise<void> {
     assert(record.storageUrl === "https://storage/1.webp" && record.storedSize?.width === 1600, "업로드 결과가 기록된다");
     assert(result.candidates[1]?.length === 2 && result.candidates[1].some((c) => c.picked), "뷰어 후보 기록");
     assert(!result.candidates[2], "판정이 비운 자리는 후보 기록을 남기지 않는다");
-    assert(result.failures.some((f) => f.startsWith("[자리 2]") && f.includes("다음 단계로")), "자리 2는 다음 단계로 넘긴다는 기록");
-    assert(chooserSeen.every((c) => /음식이 주인공/.test(c.caution ?? "")), "판정자에게 사람·글자 회피를 알린다");
+    assert(result.failures.some((f) => f.startsWith("[자리 2]") && f.includes("웹 검색으로 넘깁니다")), "자리 2는 웹 검색으로 넘긴다는 기록");
+    assert(chooserSeen.every((c) => (c.caution ?? "").includes(KTO_FIT_CAUTION)), "판정자에게 문단 내용이 보일 때만 고르라고 알린다");
     console.log("✅ collectKtoPhotos: 원고당 8호출 상한·키워드 캐시·판정·KOGL 캡션·후보 기록·실패 시 다음 단계");
+
+    // 2026-11-25 취사선택: 판정을 못 받으면 1순위를 쓰지 않는다 / 같은 촬영 묶음은 한 장만 / 판정 안 받은 대체 후보로 바꿔 끼우지 않는다.
+    const common = {
+      fetchImage: async ({ url }: { url: string }) => ({ ok: true, buffer: Buffer.concat([PNG_1200, Buffer.from(url)]), contentType: "image/jpeg" }),
+      readSize: () => ({ width: 1200, height: 800 }),
+      upload: async (i: { index: number }) => ({ ok: true as const, url: `https://storage/${i.index}.webp`, extension: "webp", width: 1600, height: 900 }),
+      captionLanguage: "en" as const,
+    };
+    const unjudged = await collectKtoPhotos(
+      { keyword: "kw", dir, slots: slotsOf(1), hints: { 1: { dishes: ["함흥냉면"], regions: [], source: "plan" } } },
+      { ...common, search: async () => ({ ok: true, photos: [photo("h1", "함흥냉면")], totalCount: 1 }), chooseImage: async () => ({ picked: 1, reason: "검증 건너뜀(timeout)" }) }
+    );
+    assert(unjudged.found.length === 0 && unjudged.failures.some((f) => f.includes("판정을 받지 못해")), "판정 실패면 관광사진을 쓰지 않고 웹 검색으로");
+
+    const sameShoot = (id: string) => photo(id, "함흥냉면", { location: "강원특별자치도 속초시", photographer: "한국관광공사 황성훈" });
+    const { ImageDeduper } = await import("./imageFingerprint.js");
+    const deduper = new ImageDeduper({ askSameCut: async () => null });
+    const shoots = await collectKtoPhotos(
+      { keyword: "kw", dir, slots: slotsOf(2), hints: { 1: { dishes: ["함흥냉면"], regions: [], source: "plan" }, 2: { dishes: ["함흥냉면"], regions: [], source: "plan" } } },
+      { ...common, deduper, search: async () => ({ ok: true, photos: [sameShoot("s1"), sameShoot("s2"), sameShoot("s3")], totalCount: 3 }), chooseImage: async (i: ChooseImageInput) => ({ picked: i.candidates[0].number, reason: "ok" }) }
+    );
+    await deduper.close();
+    assert(shoots.found.map((f) => f.index).join() === "1", `같은 촬영 묶음은 한 원고에 한 장 (${shoots.found.map((f) => f.index).join()})`);
+    assert(shoots.failures.some((f) => f.startsWith("[자리 2]") && f.includes("같은 촬영 묶음")), "자리 2는 촬영 묶음 때문에 웹 검색으로");
+    assert(ktoShootKey(sameShoot("x")) !== ktoShootKey(photo("y", "함흥냉면")), "촬영자·촬영지가 다르면 다른 묶음");
+    console.log("✅ 관광사진 취사선택: 판정 실패 미사용·문단 맞춤 판정 기준·같은 촬영 묶음 한 장·대체 후보로 바꿔 끼우지 않음");
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
